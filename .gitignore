@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!website/.env.vercel.template
 website/.env.local
 
 ### Node / Next.js
