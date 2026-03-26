@@ -1,0 +1,37 @@
+name = "promptly-proxy"
+main = "src/index.js"
+compatibility_date = "2026-03-04"
+
+[[kv_namespaces]]
+binding = "USER_KEYS"
+id = "1eb5b130ae0443c49773307e1acdbdc6"
+preview_id = "66b4ae08b2cd411e9a72571025869e26"
+
+[[kv_namespaces]]
+binding = "USAGE_KV"
+id = "6affda5e767d4c85938bd574efc439c3"
+preview_id = "33e19693215042ad91d8755e0e12de6e"
+
+[[durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "RateLimiterDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RateLimiterDO"]
+
+[vars]
+PROVIDER = "openai"
+# Default when no per-path override (keep aligned with OPENAI_REWRITE_MODEL).
+OPENAI_MODEL = "gpt-5-nano"
+# All Promptly optimize paths (rewrite, create/compose) use this OpenAI model.
+OPENAI_REWRITE_MODEL = "gpt-5-nano"
+OPENAI_REWRITE_TIMEOUT_MS = "15000"
+DEEPSEEK_MODEL = "deepseek-chat"
+MISTRAL_MODEL = "mistral-small-latest"
+DEBUG_LOGS = "false"
+# Daily token budget: set in src/index.js (DAILY_TOKEN_LIMIT_DEFAULT / resolveDailyTokenLimit)—not a Worker var.
+ALLOW_LEGACY_EMAIL_IDENTITY = "false"
+# Must match manifest oauth2.client_id used by chrome.identity.getAuthToken.
+GOOGLE_OAUTH_WEB_CLIENT_ID = "575107146310-715uuvv59lrde0k340jm0btufebokk2g.apps.googleusercontent.com"
+ALLOWED_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173,chrome-extension://cljggdddakpcdflbnkmpebldloekcbff"

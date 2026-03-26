@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Promptly Settings</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <h1>Promptly Settings</h1>
+      <label>Promptly app / API base URL</label>
+      <input id="proxyBaseUrl" type="url" placeholder="http://localhost:3000" />
+      <label>Firebase Web API key</label>
+      <input id="firebaseWebApiKey" type="password" placeholder="AIza..." />
+      <label>Firebase auth domain</label>
+      <input id="firebaseAuthDomain" type="text" placeholder="your-project.firebaseapp.com" />
+      <label>Firebase Web OAuth client ID (optional)</label>
+      <input
+        id="firebaseOAuthWebClientId"
+        type="text"
+        placeholder="123456789-abc.apps.googleusercontent.com"
+      />
+      <button id="saveBtn">Save</button>
+      <button id="manageAccountBtn">Sign in / manage account</button>
+      <p id="oauthRedirectHint" class="redirect-hint"></p>
+      <p>
+        <strong>Google sign-in:</strong> The gray box above lists the exact redirect URIs to register. They must go on
+        the <strong>same</strong> “Web application” OAuth client as your Client ID field (not a “Chrome Extension”
+        client). Save in Google Cloud, wait ~1 minute, then reload Promptly on <code>chrome://extensions</code>.
+      </p>
+      <p id="status"></p>
+    </main>
+    <script src="options.js"></script>
+  </body>
+  </html>

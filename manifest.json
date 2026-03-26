@@ -1,0 +1,87 @@
+{
+  "manifest_version": 3,
+  "name": "Promptly",
+  "version": "1.0.0",
+  "description": "Prompt assistance tab anchored to AI prompt inputs on ChatGPT, Claude, and Gemini.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "identity",
+    "identity.email"
+  ],
+  "host_permissions": [
+    "https://chat.openai.com/*",
+    "https://chatgpt.com/*",
+    "https://claude.ai/*",
+    "https://gemini.google.com/*",
+    "https://*/*",
+    "http://127.0.0.1:8787/*",
+    "http://localhost:8787/*",
+    "http://127.0.0.1:3000/*",
+    "http://localhost:3000/*",
+    "https://identitytoolkit.googleapis.com/*",
+    "https://securetoken.googleapis.com/*",
+    "https://accounts.google.com/*",
+    "https://www.googleapis.com/*"
+  ],
+  "oauth2": {
+    "client_id": "575107146310-715uuvv59lrde0k340jm0btufebokk2g.apps.googleusercontent.com",
+    "scopes": [
+      "openid",
+      "email",
+      "profile"
+    ]
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chat.openai.com/*",
+        "https://chatgpt.com/*",
+        "https://claude.ai/*",
+        "https://gemini.google.com/*"
+      ],
+      "js": [
+        "content/siteAdapters.js",
+        "content/positionManager.js",
+        "content/observers.js",
+        "content/ui/popup.js",
+        "content/ui/tab.js",
+        "content/index.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "content/ui/styles.css"
+      ],
+      "matches": [
+        "https://chat.openai.com/*",
+        "https://chatgpt.com/*",
+        "https://claude.ai/*",
+        "https://gemini.google.com/*"
+      ]
+    }
+  ],
+  "icons": {
+    "16": "extension/icons/promptly-logo.png",
+    "32": "extension/icons/promptly-logo.png",
+    "48": "extension/icons/promptly-logo.png",
+    "128": "extension/icons/promptly-logo.png"
+  },
+  "action": {
+    "default_title": "Promptly",
+    "default_popup": "extension/popup.html",
+    "default_icon": {
+      "16": "extension/icons/promptly-logo.png",
+      "32": "extension/icons/promptly-logo.png"
+    }
+  },
+  "options_page": "extension/options.html",
+  "background": {
+    "service_worker": "extension/background.js"
+  }
+}

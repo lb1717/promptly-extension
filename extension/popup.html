@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Promptly Auto Adjust</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <h1>Promptly</h1>
+      <textarea id="promptInput" placeholder="Paste or write your prompt"></textarea>
+      <div class="actions">
+        <button id="autoAdjustBtn">Auto adjust</button>
+        <button id="undoBtn" disabled>Undo</button>
+      </div>
+      <p id="statusText" class="status"></p>
+      <button id="manageAccountBtn" class="linklike">Sign in / manage Promptly account</button>
+      <button id="openOptionsBtn" class="linklike">Configure proxy + key</button>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+  </html>
