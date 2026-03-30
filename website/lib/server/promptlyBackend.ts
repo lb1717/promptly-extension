@@ -211,7 +211,7 @@ function getMaxCompletionTokens(prompt: string, requestMode: string, rewriteMode
 }
 
 function getExtensionBaseUrl() {
-  return String(process.env.NEXT_PUBLIC_APP_URL || process.env.APP_BASE_URL || "http://localhost:3000").replace(
+  return String(process.env.NEXT_PUBLIC_APP_URL || process.env.APP_BASE_URL || "https://promptly-labs.com").replace(
     /\/$/,
     ""
   );

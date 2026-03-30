@@ -190,8 +190,10 @@
     },
     onSuggestionClick: () => {},
     onSignIn: async () => {
+      ui.showErrorToast("Starting sign-in…");
       try {
         const result = await ensureChromeSignedIn();
+        ui.showErrorToast(`Signed in as ${String(result?.chromeEmail || "").trim() || "your account"}.`);
         ui.setSignedOut(false);
         if (result?.chromeEmail) {
           refreshCreditsFromServer();
@@ -199,6 +201,7 @@
       } catch (error) {
         ui.showErrorToast(mapPromptlyErrorToToast(String(error?.message || error)));
         ui.setSignedOut(true);
+        throw error;
       }
     },
     onAutoAdjust: async (payload = {}) => {
@@ -286,6 +289,7 @@
         // so observers/sync don't treat it as a user edit mid-animation.
         markPromptlyRewrite(optimizedPrompt);
         replaceTargetText(currentTarget, optimizedPrompt);
+        playPromptImproveBoxFlash(currentTarget);
         didApplyOptimizedPrompt = true;
         if (isComposeMode) {
           // Order guarantee: deliver generated prompt first, then switch button to
@@ -304,6 +308,9 @@
         }
       } catch (_error) {
         hadError = true;
+        if (_error?.promptlyNeedsSignIn) {
+          ui.setSignedOut(true);
+        }
         const rawReason = String(_error?.message || _error || "failed");
         ui.showErrorToast(mapPromptlyErrorToToast(rawReason));
         if (_error?.promptlyCredits) {
@@ -481,6 +488,7 @@
     if (lowered.includes("daily api token limit reached")) return "Daily token limit reached. Try again tomorrow.";
     if (lowered.includes("not enough api tokens")) return "Not enough tokens left for this prompt.";
     if (lowered.includes("timeout")) return "Request timed out. Try again.";
+    if (lowered.includes("sign in with promptly first")) return "Sign in with the tab Sign in button, then try again.";
     return msg.length > 140 ? `${msg.slice(0, 140)}…` : msg;
   }
 
@@ -502,7 +510,12 @@
 
   async function ensureChromeSignedIn() {
     return new Promise((resolve, reject) => {
+      // Web auth flow can stay open while the user picks an account — allow enough time.
+      const timer = window.setTimeout(() => {
+        reject(new Error("Sign-in timed out. Finish the Google window or try again."));
+      }, 120000);
       chrome.runtime.sendMessage({ type: "PROMPTLY_ENSURE_CHROME_SIGNIN" }, (response) => {
+        window.clearTimeout(timer);
         if (chrome.runtime.lastError) {
           reject(new Error(chrome.runtime.lastError.message));
           return;
@@ -542,6 +555,9 @@
           }
           if (!response || !response.ok) {
             const err = new Error(response?.error || "Auto adjust failed");
+            if (response?.needsSignIn) {
+              err.promptlyNeedsSignIn = true;
+            }
             if (response?.credits) {
               err.promptlyCredits = response.credits;
             }
@@ -593,7 +609,11 @@
             return;
           }
           if (!response || !response.ok) {
-            reject(new Error(response?.error || "Unable to load credits"));
+            const err = new Error(response?.error || "Unable to load credits");
+            if (response?.needsSignIn) {
+              err.promptlyNeedsSignIn = true;
+            }
+            reject(err);
             return;
           }
           resolve(response.data?.credits || null);
@@ -607,9 +627,12 @@
       const credits = await fetchCreditUsageViaProxy(estimate);
       if (credits) {
         ui.setCreditUsage(credits);
+        ui.setSignedOut(false);
       }
-    } catch (_e) {
-      // Keep existing meter; server still enforces limits on optimize.
+    } catch (e) {
+      if (e?.promptlyNeedsSignIn) {
+        ui.setSignedOut(true);
+      }
     }
   }
 
@@ -662,6 +685,69 @@
       target.textContent = text;
     }
     dispatchInputEvents(target, text);
+  }
+
+  /**
+   * Brief green wash over the host prompt “shell” (same outer bounds Promptly uses via getAnchorElement).
+   */
+  function playPromptImproveBoxFlash(target) {
+    if (destroyed || !target || !target.isConnected) {
+      return;
+    }
+    const run = () => {
+      if (destroyed || !target.isConnected) {
+        return;
+      }
+      let boxEl = adapters.getAnchorElement ? adapters.getAnchorElement(target) : target;
+      if (!boxEl || !boxEl.isConnected) {
+        boxEl = target;
+      }
+      let r = boxEl.getBoundingClientRect();
+      let cornerEl = boxEl;
+      if (r.width < 40 || r.height < 16) {
+        r = target.getBoundingClientRect();
+        cornerEl = target;
+      }
+      if (r.width < 40 || r.height < 16) {
+        return;
+      }
+      if (r.height > window.innerHeight * 0.88) {
+        const tr = target.getBoundingClientRect();
+        if (tr.height > 16 && tr.height < r.height) {
+          r = tr;
+          cornerEl = target;
+        }
+      }
+      const borderRadius = window.getComputedStyle(cornerEl).borderRadius || "10px";
+      const overlay = document.createElement("div");
+      overlay.setAttribute("data-promptly-improve-flash", "true");
+      overlay.style.cssText = [
+        "position:fixed",
+        `left:${r.left}px`,
+        `top:${r.top}px`,
+        `width:${r.width}px`,
+        `height:${r.height}px`,
+        "pointer-events:none",
+        "z-index:2147482000",
+        "box-sizing:border-box",
+        `border-radius:${borderRadius}`,
+        "will-change:background-color"
+      ].join(";");
+      document.body.appendChild(overlay);
+      const peak = "rgba(34, 197, 94, 0.1)";
+      const anim = overlay.animate(
+        [
+          { backgroundColor: "rgba(34, 197, 94, 0)" },
+          { backgroundColor: peak },
+          { backgroundColor: "rgba(34, 197, 94, 0)" }
+        ],
+        { duration: 1360, easing: "cubic-bezier(0.45, 0, 0.55, 1)", fill: "forwards" }
+      );
+      anim.onfinish = () => {
+        overlay.remove();
+      };
+    };
+    window.requestAnimationFrame(() => window.requestAnimationFrame(run));
   }
 
   function resetPromptLifecycleState(nextText = "") {
@@ -1577,6 +1663,9 @@
         ui.setTabStatus("improved");
       }
     } catch (_error) {
+      if (_error?.promptlyNeedsSignIn) {
+        ui.setSignedOut(true);
+      }
       ui.showErrorToast(mapPromptlyErrorToToast(String(_error?.message || _error || "")));
       if (_error?.promptlyCredits) {
         ui.setCreditUsage(_error.promptlyCredits);
@@ -1615,6 +1704,7 @@
 
   function destroy() {
     destroyed = true;
+    document.querySelectorAll("[data-promptly-improve-flash='true']").forEach((node) => node.remove());
     window.clearTimeout(visibilityCreditsRefreshTimer);
     visibilityCreditsRefreshTimer = null;
     window.clearTimeout(unlockDisplayTimer);

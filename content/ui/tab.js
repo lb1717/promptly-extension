@@ -45,9 +45,12 @@
       this.root.className = "promptly-root";
       this.root.dataset.theme = "light";
 
-      this.tabButton = document.createElement("button");
-      this.tabButton.type = "button";
+      // Use a non-button container to avoid nested interactive elements inside a <button>,
+      // which can cause click/gesture events (like Sign in) to be dropped in some browsers.
+      this.tabButton = document.createElement("div");
       this.tabButton.className = "promptly-tab";
+      this.tabButton.setAttribute("role", "button");
+      this.tabButton.setAttribute("tabindex", "0");
       this.tabButton.setAttribute("aria-label", "Toggle Promptly");
       this.tabButton.innerHTML =
         "<span class='promptly-tab-text-window'><span class='promptly-tab-text-track'>" +
@@ -57,7 +60,7 @@
         "<span class='promptly-tab-text-line'>Prompt Already Strong ✓</span>" +
         "<span class='promptly-tab-text-line'>Promptly</span>" +
         "</span></span><span class='promptly-tab-controls'>" +
-        "<button class='promptly-tab-signin' type='button' aria-label='Sign in to Promptly'>Sign in</button>" +
+        "<span class='promptly-tab-signin' role='button' tabindex='0' aria-label='Sign in to Promptly'>Sign in</span>" +
         "<span class='promptly-tab-auto-label'>Auto</span>" +
         "<span class='promptly-tab-auto-switch' role='switch' aria-checked='false' title='Auto-adjust on send'>A</span>" +
         "<span class='promptly-tab-credit-wrap'><span class='promptly-tab-credit-meter' aria-hidden='true'></span><span class='promptly-tab-credit-tooltip' role='tooltip'>Loading API token usage…</span></span>" +
@@ -81,21 +84,66 @@
           this.onToggleAutoSend();
         }
       });
-      this.signInButton.addEventListener("click", (event) => {
+      const runSignIn = (event) => {
         event.preventDefault();
         event.stopPropagation();
+        try {
+          if (this.signInButton) {
+            this.signInButton.textContent = "Signing in…";
+            window.setTimeout(() => {
+              if (this.root.classList.contains("is-signed-out")) {
+                this.signInButton.textContent = "Sign in";
+              }
+            }, 2500);
+          }
+        } catch (_err) {}
+        this.showErrorToast("Opening sign-in…");
         if (typeof this.onSignIn === "function") {
-          this.onSignIn();
+          Promise.resolve(this.onSignIn()).catch((error) => {
+            this.showErrorToast(String(error?.message || error || "Sign-in failed"));
+          });
         }
+      };
+      this.signInButton.addEventListener("click", runSignIn);
+      this.signInButton.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") {
+          return;
+        }
+        runSignIn(event);
       });
+
+      // Signed-out fallback: capture-phase click handler to ensure sign-in triggers even if
+      // pointer capture / drag logic or nested targets swallow bubbling events.
+      this.shadowRoot.addEventListener(
+        "click",
+        (event) => {
+          if (!this.root.classList.contains("is-signed-out")) {
+            return;
+          }
+          if (event.target instanceof Element && event.target.closest(".promptly-tab-auto-switch")) {
+            return;
+          }
+          runSignIn(event);
+        },
+        true
+      );
       this.tabButton.addEventListener("pointerdown", (event) => {
         if (event.button !== 0) {
           return;
         }
-        if (
-          event.target instanceof Element &&
-          (event.target.closest(".promptly-tab-auto-switch") || event.target.closest(".promptly-tab-signin"))
-        ) {
+        // Signed out: disable dragging entirely (clicks should trigger sign-in).
+        if (this.root.classList.contains("is-signed-out")) {
+          return;
+        }
+        // If the pointerdown originates from an interactive control inside the tab,
+        // do not start a drag or capture the pointer (otherwise the click can be swallowed).
+        const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+        const hitControl = path.some(
+          (node) =>
+            node instanceof Element &&
+            (node.closest(".promptly-tab-auto-switch") || node.closest(".promptly-tab-signin"))
+        );
+        if (hitControl) {
           return;
         }
         this.dragState = {
@@ -148,11 +196,30 @@
       this.tabButton.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
+        if (
+          event.target instanceof Element &&
+          (event.target.closest(".promptly-tab-auto-switch") || event.target.closest(".promptly-tab-signin"))
+        ) {
+          return;
+        }
         if (this.root.classList.contains("is-signed-out")) {
+          runSignIn(event);
           return;
         }
         if (this.suppressNextClick) {
           this.suppressNextClick = false;
+          return;
+        }
+        this.onToggle();
+      });
+      this.tabButton.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        if (this.root.classList.contains("is-signed-out")) {
+          runSignIn(event);
           return;
         }
         this.onToggle();
@@ -181,7 +248,9 @@
       this.errorToast.textContent = "";
       this.errorToastTimer = null;
 
-      this.root.append(this.errorToast, this.popupMask, this.tabButton);
+      // Attach toast to the tab itself so it follows the tab's translate3d placement.
+      this.tabButton.append(this.errorToast);
+      this.root.append(this.popupMask, this.tabButton);
       this.setTabStatus("idle");
       this.shadowRoot.append(styleLink, this.root);
       (document.body || document.documentElement).appendChild(this.host);
@@ -212,6 +281,7 @@
       this.isVisible = visible;
       if (visible) {
         this.host.style.display = "block";
+        this.host.style.pointerEvents = "auto";
         window.requestAnimationFrame(() => {
           if (this.isVisible) {
             this.root.classList.add("is-host-visible");
@@ -221,6 +291,7 @@
       }
       this.root.classList.remove("is-host-visible");
       this.host.style.display = "none";
+      this.host.style.pointerEvents = "none";
     }
 
     setOpen(isOpen) {
@@ -270,8 +341,13 @@
       }
       this.errorToast.textContent = msg;
       this.errorToast.classList.add("is-visible");
+      // Force visibility even if some page CSS ends up interfering.
+      this.errorToast.style.opacity = "1";
+      this.errorToast.style.transform = "translate3d(0, -110%, 0)";
       this.errorToastTimer = window.setTimeout(() => {
         this.errorToast.classList.remove("is-visible");
+        this.errorToast.style.opacity = "";
+        this.errorToast.style.transform = "";
         this.errorToastTimer = null;
       }, 7000);
     }

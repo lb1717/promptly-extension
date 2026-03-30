@@ -5,7 +5,7 @@ const statusText = document.getElementById("statusText");
 const openOptionsBtn = document.getElementById("openOptionsBtn");
 const manageAccountBtn = document.getElementById("manageAccountBtn");
 
-const DEFAULT_APP_BASE_URL = "http://localhost:3000";
+const DEFAULT_APP_BASE_URL = "https://promptly-labs.com";
 
 async function getExtensionAccountUrl() {
   const values = await chrome.storage.sync.get(["proxyBaseUrl"]);

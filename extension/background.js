@@ -1,9 +1,56 @@
-const DEFAULT_PROXY_BASE_URL = "http://localhost:3000";
+const DEFAULT_PROXY_BASE_URL = "https://promptly-labs.com";
 const GOOGLE_ACCESS_TOKEN_BUFFER_SEC = 60;
 const FIREBASE_ID_TOKEN_BUFFER_SEC = 60;
 const DEFAULT_FIREBASE_WEB_API_KEY = "AIzaSyChQ2kiTwunWs9ElDYkU7Cz-i8I9dw29NI";
 const DEFAULT_FIREBASE_AUTH_DOMAIN = "promptly-prod-976ef.firebaseapp.com";
-const DEFAULT_FIREBASE_WEB_OAUTH_CLIENT_ID = "575107146310-715uuvv59lrde0k340jm0btufebokk2g.apps.googleusercontent.com";
+const DEFAULT_FIREBASE_WEB_OAUTH_CLIENT_ID = "913040005574-npbiuat4hl1d3icqoe5lmtuh34qqd8d6.apps.googleusercontent.com";
+
+/** Web-auth flow does not always populate chrome.identity.getAuthToken cache — persist token for this session. */
+const SESSION_WEB_AUTH_TOKEN = "promptlyWebAuthAccessToken";
+const SESSION_WEB_AUTH_EXPIRES_AT = "promptlyWebAuthExpiresAt";
+const SESSION_WEB_AUTH_EMAIL = "promptlyWebAuthEmail";
+const WEB_AUTH_TTL_MS = 50 * 60 * 1000;
+
+async function clearWebAuthSessionCache() {
+  const keys = [SESSION_WEB_AUTH_TOKEN, SESSION_WEB_AUTH_EXPIRES_AT, SESSION_WEB_AUTH_EMAIL];
+  await Promise.all([
+    chrome.storage.session.remove(keys).catch(() => {}),
+    chrome.storage.local.remove(keys).catch(() => {})
+  ]);
+}
+
+async function saveWebAuthSession(accessToken, chromeEmail) {
+  const exp = Date.now() + WEB_AUTH_TTL_MS;
+  const payload = {
+    [SESSION_WEB_AUTH_TOKEN]: String(accessToken || "").trim(),
+    [SESSION_WEB_AUTH_EXPIRES_AT]: exp,
+    [SESSION_WEB_AUTH_EMAIL]: String(chromeEmail || "").trim().toLowerCase()
+  };
+  await Promise.all([
+    chrome.storage.session.set(payload).catch(() => {}),
+    chrome.storage.local.set(payload)
+  ]);
+}
+
+async function readWebAuthSessionTokenIfValid() {
+  let data = {};
+  try {
+    data = await chrome.storage.session.get([SESSION_WEB_AUTH_TOKEN, SESSION_WEB_AUTH_EXPIRES_AT]);
+  } catch (_e) {
+    data = {};
+  }
+  let token = String(data[SESSION_WEB_AUTH_TOKEN] || "").trim();
+  let exp = Number(data[SESSION_WEB_AUTH_EXPIRES_AT] || 0);
+  if (!token || exp <= Date.now() + 15_000) {
+    const local = await chrome.storage.local.get([SESSION_WEB_AUTH_TOKEN, SESSION_WEB_AUTH_EXPIRES_AT]);
+    token = String(local[SESSION_WEB_AUTH_TOKEN] || "").trim();
+    exp = Number(local[SESSION_WEB_AUTH_EXPIRES_AT] || 0);
+  }
+  if (!token || exp <= Date.now() + 15_000) {
+    return null;
+  }
+  return token;
+}
 
 function getSignedInChromeEmail() {
   return new Promise((resolve, reject) => {
@@ -30,6 +77,46 @@ function getSignedInChromeEmail() {
   });
 }
 
+async function getEmailFromGoogleAccessToken(accessToken) {
+  const token = String(accessToken || "").trim();
+  if (!token) {
+    throw new Error("Google OAuth token was empty");
+  }
+  const response = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401) {
+      await clearWebAuthSessionCache();
+    }
+    throw new Error(String(body?.error_description || body?.error?.message || "Failed to read Google userinfo"));
+  }
+  const email = String(body?.email || "").trim().toLowerCase();
+  if (!email) {
+    throw new Error("Google sign-in did not return an email");
+  }
+  if (!email.endsWith("@gmail.com") && !email.endsWith("@googlemail.com")) {
+    throw new Error("Only Gmail accounts are allowed");
+  }
+  return email;
+}
+
+async function getEffectiveSignedInEmail({ interactive = false } = {}) {
+  try {
+    return await getSignedInChromeEmail();
+  } catch (_err) {
+    // Continue: profile may be empty even after Google web sign-in.
+  }
+  if (interactive) {
+    const token = await getChromeGoogleAccessToken(true);
+    return await getEmailFromGoogleAccessToken(token);
+  }
+  const token = await getGoogleAccessTokenForApi();
+  return await getEmailFromGoogleAccessToken(token);
+}
+
 function getChromeGoogleAccessToken(interactive = true) {
   return new Promise((resolve, reject) => {
     if (!chrome.identity || typeof chrome.identity.getAuthToken !== "function") {
@@ -51,13 +138,66 @@ function getChromeGoogleAccessToken(interactive = true) {
   });
 }
 
+/** One Google web-auth window at a time (Sign in + any Firebase refresh fallback). */
+let launchWebAuthFlowInFlight = null;
+
+async function launchGoogleWebAuthFlowOnce(clientId) {
+  if (launchWebAuthFlowInFlight) {
+    return launchWebAuthFlowInFlight;
+  }
+  launchWebAuthFlowInFlight = (async () => {
+    try {
+      return await launchGoogleWebAuthFlow(clientId);
+    } finally {
+      launchWebAuthFlowInFlight = null;
+    }
+  })();
+  return launchWebAuthFlowInFlight;
+}
+
+async function getGoogleAccessTokenViaWebAuthFlowOnly() {
+  const settings = await chrome.storage.sync.get(["firebaseOAuthWebClientId"]);
+  const clientId =
+    String(settings.firebaseOAuthWebClientId || "").trim() || DEFAULT_FIREBASE_WEB_OAUTH_CLIENT_ID;
+  const result = await launchGoogleWebAuthFlowOnce(clientId);
+  const accessToken = String(result?.accessToken || "").trim();
+  if (!accessToken) {
+    throw new Error("Google sign-in returned no access token");
+  }
+  return accessToken;
+}
+
+/**
+ * Access token for API calls — never opens a browser window.
+ * 1) chrome.identity silent cache (if Chrome synced after sign-in)
+ * 2) token from last PROMPTLY_ENSURE_CHROME_SIGNIN (web flow often doesn't populate (1))
+ */
+async function getGoogleAccessTokenForApi() {
+  try {
+    return await getChromeGoogleAccessToken(false);
+  } catch (_ignored) {
+    // fall through
+  }
+  const cached = await readWebAuthSessionTokenIfValid();
+  if (cached) {
+    return cached;
+  }
+  throw new Error("Not signed in");
+}
+
 function randomString(byteLength = 16) {
   const bytes = crypto.getRandomValues(new Uint8Array(byteLength));
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function parseRedirectFragment(url) {
-  const fragment = String(url || "").split("#")[1] || "";
+function parseOAuthCallbackParams(search, hash) {
+  const q = new URLSearchParams(String(search || "").replace(/^\?/, ""));
+  const qerr = String(q.get("error") || "").trim();
+  if (qerr) {
+    const description = String(q.get("error_description") || "").trim();
+    throw new Error(description ? `${qerr}: ${description}` : qerr);
+  }
+  const fragment = String(hash || "").replace(/^#/, "");
   const params = new URLSearchParams(fragment);
   const error = String(params.get("error") || "").trim();
   if (error) {
@@ -71,44 +211,204 @@ function parseRedirectFragment(url) {
   };
 }
 
-function launchGoogleWebAuthFlow(clientId) {
+function appBaseUrlForWebRedirects(rawValue) {
+  let b = normalizeBaseUrl(rawValue);
+  if (b.endsWith("/api")) {
+    b = b.slice(0, -4);
+  }
+  return b.replace(/\/$/, "");
+}
+
+function oauthBridgePageMatchesSender(senderUrl, redirectUri) {
+  try {
+    const pageRaw = String(senderUrl || "").split("#")[0];
+    const wantRaw = String(redirectUri || "").split("#")[0];
+    const page = new URL(pageRaw);
+    const want = new URL(wantRaw);
+    const sameOrigin = page.origin === want.origin;
+    const pn = page.pathname.replace(/\/$/, "") || "/";
+    const wn = want.pathname.replace(/\/$/, "") || "/";
+    return sameOrigin && pn === wn;
+  } catch (_e) {
+    const page = String(senderUrl || "").split("#")[0];
+    const want = String(redirectUri || "").split("#")[0];
+    return page === want || page.startsWith(`${want}?`);
+  }
+}
+
+/** Set while a Google sign-in popup is open; HTTPS app page sends hash/search via onMessageExternal. */
+let pendingGoogleOAuth = null;
+
+chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
+  if (message?.type !== "PROMPTLY_OAUTH_BRIDGE" || !pendingGoogleOAuth) {
+    return false;
+  }
+  if (!oauthBridgePageMatchesSender(sender.url, pendingGoogleOAuth.redirectUri)) {
+    sendResponse({ ok: false });
+    return false;
+  }
+  pendingGoogleOAuth.deliver(String(message.search || ""), String(message.hash || ""));
+  sendResponse({ ok: true });
+  return false;
+});
+
+/**
+ * Google rejects chrome-extension:// redirect URIs. We redirect to your Promptly app base URL
+ * (HTTPS / localhost) and forward tokens from that page to the service worker. The sign-in UI
+ * uses a small popup aligned to the top-right of the focused window.
+ */
+async function launchGoogleWebAuthFlow(clientId) {
+  const settings = await chrome.storage.sync.get(["proxyBaseUrl"]);
+  const redirectUri = `${appBaseUrlForWebRedirects(settings.proxyBaseUrl)}/auth/extension-google-oauth`;
+
   return new Promise((resolve, reject) => {
-    if (!chrome.identity?.launchWebAuthFlow) {
-      reject(new Error("Chrome web auth flow unavailable"));
+    if (!chrome.windows?.create) {
+      reject(new Error("Chrome windows API unavailable for sign-in"));
       return;
     }
-    const redirectUri = chrome.identity.getRedirectURL();
-    const state = randomString(12);
-    const nonce = randomString(12);
-    const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-    authUrl.searchParams.set("client_id", clientId);
-    authUrl.searchParams.set("redirect_uri", redirectUri);
-    authUrl.searchParams.set("response_type", "token id_token");
-    authUrl.searchParams.set("scope", "openid email profile");
-    authUrl.searchParams.set("prompt", "select_account");
-    authUrl.searchParams.set("include_granted_scopes", "true");
-    authUrl.searchParams.set("state", state);
-    authUrl.searchParams.set("nonce", nonce);
+    if (pendingGoogleOAuth) {
+      reject(new Error("Another sign-in is already in progress."));
+      return;
+    }
 
-    chrome.identity.launchWebAuthFlow({ url: authUrl.toString(), interactive: true }, (responseUrl) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
+    const csrf = randomString(12);
+    const state = `${csrf}|${chrome.runtime.id}`;
+    const nonce = randomString(12);
+    const signInPageUrl = new URL(
+      `${appBaseUrlForWebRedirects(settings.proxyBaseUrl)}/auth/extension-sign-in`
+    );
+    signInPageUrl.searchParams.set("client_id", clientId);
+    signInPageUrl.searchParams.set("redirect_uri", redirectUri);
+    signInPageUrl.searchParams.set("state", state);
+    signInPageUrl.searchParams.set("nonce", nonce);
+
+    const PANEL_W = 380;
+    const PANEL_H = 580;
+    const MARGIN = 12;
+
+    let createdWindowId = null;
+    let done = false;
+    let timeoutId = null;
+    let removedListener = null;
+
+    function teardown() {
+      pendingGoogleOAuth = null;
+      if (timeoutId) {
+        globalThis.clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      if (removedListener) {
+        try {
+          chrome.windows.onRemoved.removeListener(removedListener);
+        } catch (_e) {
+          /* ignore */
+        }
+        removedListener = null;
+      }
+    }
+
+    function closePanel() {
+      if (createdWindowId == null) {
         return;
       }
-      try {
-        const parsed = parseRedirectFragment(responseUrl || "");
-        if (parsed.state !== state) {
-          reject(new Error("OAuth state mismatch"));
-          return;
-        }
-        if (!parsed.accessToken && !parsed.idToken) {
-          reject(new Error("Google OAuth returned no token"));
-          return;
-        }
-        resolve(parsed);
-      } catch (error) {
-        reject(error);
+      const id = createdWindowId;
+      createdWindowId = null;
+      chrome.windows.remove(id).catch(() => {});
+    }
+
+    function fail(err) {
+      if (done) {
+        return;
       }
+      done = true;
+      teardown();
+      closePanel();
+      reject(err instanceof Error ? err : new Error(String(err)));
+    }
+
+    function succeed(parsed) {
+      if (done) {
+        return;
+      }
+      done = true;
+      teardown();
+      closePanel();
+      resolve(parsed);
+    }
+
+    pendingGoogleOAuth = {
+      redirectUri,
+      deliver(search, hash) {
+        if (done) {
+          return;
+        }
+        try {
+          const parsed = parseOAuthCallbackParams(search, hash);
+          const rawState = parsed.state;
+          const pipe = rawState.lastIndexOf("|");
+          if (pipe < 0) {
+            fail(new Error("OAuth state mismatch"));
+            return;
+          }
+          const stateCsrf = rawState.slice(0, pipe);
+          const stateExt = rawState.slice(pipe + 1);
+          if (stateExt !== chrome.runtime.id || stateCsrf !== csrf) {
+            fail(new Error("OAuth state mismatch"));
+            return;
+          }
+          if (!parsed.accessToken && !parsed.idToken) {
+            fail(new Error("Google OAuth returned no token"));
+            return;
+          }
+          succeed(parsed);
+        } catch (error) {
+          fail(error instanceof Error ? error : new Error(String(error)));
+        }
+      }
+    };
+
+    timeoutId = globalThis.setTimeout(() => fail(new Error("Sign-in timed out")), 120000);
+
+    removedListener = (windowId) => {
+      if (windowId === createdWindowId && !done) {
+        fail(new Error("Sign-in cancelled"));
+      }
+    };
+    chrome.windows.onRemoved.addListener(removedListener);
+
+    const openPanel = (left, top) => {
+      const createOpts = {
+        url: signInPageUrl.toString(),
+        type: "popup",
+        width: PANEL_W,
+        height: PANEL_H,
+        focused: true
+      };
+      if (typeof left === "number" && typeof top === "number") {
+        createOpts.left = left;
+        createOpts.top = top;
+      }
+      chrome.windows.create(createOpts, (win) => {
+        if (chrome.runtime.lastError) {
+          fail(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        if (!win?.id) {
+          fail(new Error("Failed to open sign-in window"));
+          return;
+        }
+        createdWindowId = win.id;
+      });
+    };
+
+    chrome.windows.getLastFocused({ windowTypes: ["normal"] }, (w) => {
+      if (chrome.runtime.lastError || !w) {
+        openPanel();
+        return;
+      }
+      const left = Math.max(0, (w.left || 0) + (w.width || 1280) - PANEL_W - MARGIN);
+      const top = Math.max(0, (w.top || 0) + MARGIN);
+      openPanel(left, top);
     });
   });
 }
@@ -118,12 +418,28 @@ function normalizeBaseUrl(rawValue) {
   return trimmed.replace(/\/$/, "");
 }
 
+/**
+ * Cloudflare worker (and similar) serves POST /optimize and GET /credits — not Next’s /api/… prefix.
+ * When the proxy base points at that host, map /api/optimize → /optimize so requests succeed.
+ */
+function usesDirectApiPaths(normalizedBase) {
+  const b = String(normalizedBase || "").toLowerCase();
+  if (b.endsWith("/api")) {
+    return false;
+  }
+  return /:(8787)(\/|$)/.test(b) || /\.workers\.dev(\/|$)/.test(b);
+}
+
 function buildApiUrl(baseUrl, path) {
   const normalizedBase = normalizeBaseUrl(baseUrl);
+  let p = path.startsWith("/") ? path : `/${path}`;
   if (normalizedBase.endsWith("/api")) {
-    return `${normalizedBase}${path.replace(/^\/api/, "")}`;
+    return `${normalizedBase}${p.replace(/^\/api/, "")}`;
   }
-  return `${normalizedBase}${path.startsWith("/") ? path : `/${path}`}`;
+  if (usesDirectApiPaths(normalizedBase) && p.startsWith("/api/")) {
+    p = `/${p.slice(5)}`;
+  }
+  return `${normalizedBase}${p}`;
 }
 
 function buildFirebaseRequestUri(authDomain) {
@@ -238,7 +554,7 @@ async function getFirebaseIdentityForApi(forceRefresh = false) {
     }
   }
 
-  const googleSession = await launchGoogleWebAuthFlow(firebaseOAuthWebClientId);
+  const googleSession = await launchGoogleWebAuthFlowOnce(firebaseOAuthWebClientId);
   const firebaseSession = await signInToFirebaseWithGoogle({
     firebaseWebApiKey,
     firebaseAuthDomain,
@@ -291,7 +607,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     try {
       if (message.type === "PROMPTLY_CHECK_CHROME_SIGNIN") {
         try {
-          const chromeEmail = await getSignedInChromeEmail();
+          const chromeEmail = await getEffectiveSignedInEmail({ interactive: false });
           sendResponse({ ok: true, data: { chromeEmail } });
         } catch (error) {
           sendResponse({ ok: false, error: String(error?.message || error) });
@@ -300,24 +616,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
 
       if (message.type === "PROMPTLY_ENSURE_CHROME_SIGNIN") {
-        // Attempt a non-interactive check first (fast path).
-        try {
-          const chromeEmail = await getSignedInChromeEmail();
-          sendResponse({ ok: true, data: { chromeEmail } });
-          return;
-        } catch (_err) {
-          // Fall through to an interactive token request which will trigger
-          // the Google sign-in pop-up if needed.
-        }
-
-        await getChromeGoogleAccessToken(true);
-        const chromeEmail = await getSignedInChromeEmail();
+        // Always use web auth flow for explicit sign-in — avoids hanging getAuthToken from SW.
+        const token = await getGoogleAccessTokenViaWebAuthFlowOnly();
+        const chromeEmail = await getEmailFromGoogleAccessToken(token);
+        await saveWebAuthSession(token, chromeEmail);
         sendResponse({ ok: true, data: { chromeEmail } });
         return;
       }
 
       if (message.type === "PROMPTLY_VERIFY_USER_SESSION") {
-        const chromeEmail = await getSignedInChromeEmail();
+        const chromeEmail = await getEffectiveSignedInEmail({ interactive: false });
         const pageEmailHint = String(message.pageEmailHint || "").trim().toLowerCase();
         const hasAuthenticatedUi = !!message.hasAuthenticatedUi;
         if (!hasAuthenticatedUi) {
@@ -335,17 +643,21 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         return;
       }
 
-      const [chromeEmail, googleAccessToken, settings] = await Promise.all([
-        getSignedInChromeEmail(),
-        (async () => {
-          try {
-            return await getChromeGoogleAccessToken(false);
-          } catch (_err) {
-            return getChromeGoogleAccessToken(true);
-          }
-        })(),
-        chrome.storage.sync.get(["proxyBaseUrl"])
-      ]);
+      let googleAccessToken;
+      try {
+        googleAccessToken = await getGoogleAccessTokenForApi();
+      } catch (error) {
+        sendResponse({
+          ok: false,
+          error:
+            "Sign in with Promptly first — use the Sign in button on the tab, then try again.",
+          needsSignIn: true,
+          details: String(error?.message || error)
+        });
+        return;
+      }
+      const settings = await chrome.storage.sync.get(["proxyBaseUrl"]);
+      const chromeEmail = await getEmailFromGoogleAccessToken(googleAccessToken);
       const { proxyBaseUrl } = settings || {};
       const baseUrl = normalizeBaseUrl(proxyBaseUrl);
       const prompt = String(message.prompt || "").trim();
