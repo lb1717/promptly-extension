@@ -5,10 +5,10 @@
   "scripts": {
     "clean:next": "node ./scripts/clean-next.mjs",
     "predev": "npm run clean:next",
-    "prebuild": "NEXT_DIST_DIR=.next-build npm run clean:next",
+    "prebuild": "npm run clean:next",
     "dev": "next dev",
-    "build": "NEXT_DIST_DIR=.next-build next build",
-    "start": "NEXT_DIST_DIR=.next-build next start",
+    "build": "next build",
+    "start": "next start",
     "lint": "next lint"
   },
   "dependencies": {
