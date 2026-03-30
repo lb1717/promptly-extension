@@ -13,7 +13,7 @@ export function Footer() {
           </p>
         </div>
         <div className="flex items-center gap-5 text-sm text-violet-200/80">
-          <a href="#" className="hover:text-white">
+          <a href="/privacy" className="hover:text-white">
             Privacy
           </a>
           <a href="#" className="hover:text-white">
