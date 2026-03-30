@@ -336,6 +336,65 @@
     return null;
   }
 
+  function pageEmailHintForSessionVerify(site) {
+    const raw = getPageEmailHint();
+    if (!raw) {
+      return null;
+    }
+    // Avoid matching support/legal copy on Google surfaces; extension only allows Gmail anyway.
+    if (
+      (site === "gemini" || site === "chatgpt") &&
+      !raw.endsWith("@gmail.com") &&
+      !raw.endsWith("@googlemail.com")
+    ) {
+      return null;
+    }
+    return raw;
+  }
+
+  /**
+   * Gemini always includes generic accounts.google.com links (account menu, etc.). Only treat the page
+   * as logged-out when a visible auth-wall / ServiceLogin style control is present.
+   */
+  function geminiShowsSignInWall() {
+    const anchors = document.querySelectorAll('a[href*="accounts.google.com"]');
+    for (const el of anchors) {
+      if (!isVisible(el)) {
+        continue;
+      }
+      const href = String(el.getAttribute("href") || "").toLowerCase();
+      if (!href) {
+        continue;
+      }
+      if (
+        href.includes("signout") ||
+        href.includes("logout") ||
+        href.includes("myaccount.google.com") ||
+        href.includes("myaccount")
+      ) {
+        continue;
+      }
+      if (
+        href.includes("servicelogin") ||
+        href.includes("accountchooser") ||
+        href.includes("/signin/identifier") ||
+        (href.includes("oauth2") && href.includes("authorize")) ||
+        href.includes("interactive/login") ||
+        href.includes("interactive%2flogin")
+      ) {
+        return true;
+      }
+    }
+    const exactSignInLabels = ["Sign in", "Sign in with Google"];
+    for (const label of exactSignInLabels) {
+      const el = document.querySelector(`button[aria-label="${label}"], a[aria-label="${label}"]`);
+      if (el && isVisible(el)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   function hasServiceAuthUi(target) {
     const site = getSite();
     const hasPromptInput = !!target && isEditable(target);
@@ -343,8 +402,7 @@
       return false;
     }
     if (site === "gemini") {
-      const signInButton = document.querySelector("a[href*='accounts.google.com'], button[aria-label*='sign in' i]");
-      return !signInButton;
+      return !geminiShowsSignInWall();
     }
     if (site === "chatgpt") {
       const loginCta = document.querySelector("a[href*='/auth/login'], button[data-testid*='login' i]");
@@ -358,10 +416,11 @@
   }
 
   function getSessionVerificationHints(target) {
+    const site = getSite();
     return {
-      site: getSite(),
+      site,
       hasAuthenticatedUi: hasServiceAuthUi(target),
-      pageEmailHint: getPageEmailHint()
+      pageEmailHint: pageEmailHintForSessionVerify(site)
     };
   }
 

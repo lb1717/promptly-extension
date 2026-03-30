@@ -22,6 +22,9 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+### Chrome Web Store build artifact (regenerate with scripts/package-extension-for-store.sh)
+promptly-extension-store.zip
+
 ### OS / editor
 .DS_Store
 .idea/
