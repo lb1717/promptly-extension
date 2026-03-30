@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const root = process.cwd();
-const distDirName = process.env.NEXT_DIST_DIR || ".next";
+const distDirName = process.env.NEXT_DIST_DIR || ".next-build";
 const nextDir = path.join(root, distDirName);
 
 try {
