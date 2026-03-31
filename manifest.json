@@ -1,11 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Promptly",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Prompt assistance tab anchored to AI prompt inputs on ChatGPT, Claude, and Gemini.",
   "permissions": [
-    "activeTab",
-    "scripting",
     "storage",
     "identity",
     "identity.email",
@@ -32,9 +30,7 @@
     "http://localhost:3000/*",
     "https://identitytoolkit.googleapis.com/*",
     "https://securetoken.googleapis.com/*",
-    "https://accounts.google.com/*",
-    "https://www.googleapis.com/*",
-    "https://*.chromiumapp.org/*"
+    "https://www.googleapis.com/*"
   ],
   "oauth2": {
     "client_id": "913040005574-npbiuat4hl1d3icqoe5lmtuh34qqd8d6.apps.googleusercontent.com",
