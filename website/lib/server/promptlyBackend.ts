@@ -192,7 +192,7 @@ function getRewriteTimeoutMs() {
 }
 
 function getGenerateTimeoutMs() {
-  return Math.max(5000, Math.min(120000, Number(process.env.OPENAI_CREATE_TIMEOUT_MS || 60000)));
+  return Math.max(5000, Math.min(180000, Number(process.env.OPENAI_CREATE_TIMEOUT_MS || 90000)));
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -202,8 +202,8 @@ function clamp(value: number, min: number, max: number) {
 function getMaxCompletionTokens(prompt: string, requestMode: string, rewriteMode: "AUTO" | "MANUAL") {
   const estimatedPromptTokens = estimateTokensFromChars(String(prompt || "").length);
   if (requestMode === "create") {
-    // Headroom for long structured prompts; the old 1800 cap often stopped the model mid-sentence.
-    return clamp(estimatedPromptTokens * 3.5, 900, 8192);
+    // Long generated prompts: high ceiling (16k) + scale with user text; floor avoids tiny budgets.
+    return clamp(estimatedPromptTokens * 4, 1500, 16384);
   }
   if (rewriteMode === "MANUAL") {
     return clamp(estimatedPromptTokens * 2, 280, 1200);
@@ -419,7 +419,7 @@ function normalizePlainRewriteOutput(rawText: string, fallbackPrompt: string) {
   if (fence) {
     t = fence[1].trim();
   }
-  return { optimized_prompt: t.slice(0, 12000) };
+  return { optimized_prompt: t.slice(0, 100_000) };
 }
 
 export type PromptEngineeringTemplates = {
@@ -557,6 +557,10 @@ function usesResponsesApi(model: string) {
 }
 
 function extractResponsesApiText(body: Record<string, unknown>) {
+  const direct = body.output_text;
+  if (typeof direct === "string" && direct.trim()) {
+    return direct.trim();
+  }
   const output = Array.isArray(body.output) ? body.output : [];
   const textParts: string[] = [];
   for (const item of output) {
@@ -570,8 +574,14 @@ function extractResponsesApiText(body: Record<string, unknown>) {
     };
     if (typedItem.type === "message" && Array.isArray(typedItem.content)) {
       for (const part of typedItem.content) {
-        if (part && part.type === "output_text" && typeof part.text === "string") {
-          textParts.push(part.text);
+        if (!part || typeof part !== "object") {
+          continue;
+        }
+        const p = part as { type?: string; text?: string };
+        if (typeof p.text === "string" && p.text.length > 0) {
+          if (p.type === "output_text" || p.type === "text") {
+            textParts.push(p.text);
+          }
         }
       }
     }
@@ -590,6 +600,7 @@ async function callOpenAi(options: {
   const timeout = setTimeout(() => controller.abort("timeout"), options.timeoutMs);
   try {
     const useResponsesApi = usesResponsesApi(options.model);
+    const isCreate = options.requestMode === "create";
     const requestBody: Record<string, unknown> = useResponsesApi
       ? {
           model: options.model,
@@ -601,8 +612,9 @@ async function callOpenAi(options: {
           reasoning: {
             effort: "minimal"
           },
+          // "low" makes GPT-5 answers terse and often feels "cut off" before max_output_tokens.
           text: {
-            verbosity: "low"
+            verbosity: isCreate ? "high" : "low"
           },
           store: false
         }
@@ -693,10 +705,13 @@ export async function optimizePrompt(prompt: string, userInstruction: string, re
     throw new Error("Bundled prompt exceeds safe size; shorten the template or user content.");
   }
   const model = getOpenAiModelForRequest(requestMode, mode);
+  const completionEstimateSource = isCreate
+    ? `${trimmedPrompt}\n${trimmedInstruction}`.trim()
+    : trimmedPrompt || userSlot;
   const requestOptions = {
     model,
     timeoutMs: isCreate ? getGenerateTimeoutMs() : getRewriteTimeoutMs(),
-    maxCompletionTokens: getMaxCompletionTokens(trimmedPrompt || userSlot, requestMode, mode)
+    maxCompletionTokens: getMaxCompletionTokens(completionEstimateSource, requestMode, mode)
   };
   const firstResult = await callOpenAi({
     messages: [{ role: "user", content: bundledUserMessage }],
