@@ -192,7 +192,7 @@ function getRewriteTimeoutMs() {
 }
 
 function getGenerateTimeoutMs() {
-  return Math.max(5000, Math.min(45000, Number(process.env.OPENAI_CREATE_TIMEOUT_MS || 30000)));
+  return Math.max(5000, Math.min(120000, Number(process.env.OPENAI_CREATE_TIMEOUT_MS || 60000)));
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -202,7 +202,8 @@ function clamp(value: number, min: number, max: number) {
 function getMaxCompletionTokens(prompt: string, requestMode: string, rewriteMode: "AUTO" | "MANUAL") {
   const estimatedPromptTokens = estimateTokensFromChars(String(prompt || "").length);
   if (requestMode === "create") {
-    return clamp(estimatedPromptTokens * 2.4, 400, 1800);
+    // Headroom for long structured prompts; the old 1800 cap often stopped the model mid-sentence.
+    return clamp(estimatedPromptTokens * 3.5, 900, 8192);
   }
   if (rewriteMode === "MANUAL") {
     return clamp(estimatedPromptTokens * 2, 280, 1200);
