@@ -4,6 +4,9 @@ const config: Config = {
   content: ["./app/**/*.{js,ts,jsx,tsx}", "./components/**/*.{js,ts,jsx,tsx}", "./lib/**/*.{js,ts,jsx,tsx}"],
   theme: {
     extend: {
+      fontFamily: {
+        mono: ["var(--font-noto-sans-mono)", "ui-monospace", "monospace"]
+      },
       colors: {
         ink: "#F5F3FF",
         violetDark: "#0D081B"

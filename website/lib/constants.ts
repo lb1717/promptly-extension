@@ -1,12 +1,12 @@
 export const SITE = {
   name: "Promptly",
+  navBrand: "Promptly Labs",
   chromeStoreUrl: "https://chromewebstore.google.com/detail/promptly/cljggdddakpcdflbnkmpebldloekcbff"
 };
 
 export const NAV_LINKS = [
-  { label: "How it Works", href: "#how-it-works" },
-  { label: "Compare", href: "#compare" },
-  { label: "Download", href: SITE.chromeStoreUrl }
+  { label: "Product", href: "/product" },
+  { label: "Research", href: "/research" }
 ];
 
 export const DEMO_TIMING = {

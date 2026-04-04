@@ -4,9 +4,12 @@
 
 html {
   scroll-behavior: smooth;
+  background-color: #0d081b;
 }
 
 body {
   margin: 0;
-  background: #0d081b;
+  min-height: 100dvh;
+  background-color: #0d081b;
+  color: #f5f3ff;
 }
