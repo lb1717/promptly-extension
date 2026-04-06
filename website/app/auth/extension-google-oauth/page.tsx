@@ -51,7 +51,7 @@ export default function ExtensionGoogleOAuthPage() {
   }, []);
 
   return (
-    <main className="min-h-screen bg-violetDark text-ink flex items-center justify-center p-6">
+    <main className="min-h-screen bg-transparent text-ink flex items-center justify-center p-6">
       <p className="text-center text-sm opacity-90 max-w-sm">{note}</p>
     </main>
   );

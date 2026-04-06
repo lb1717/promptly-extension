@@ -72,7 +72,7 @@ function ExtensionSignInContent() {
   }, [clientId, redirectUri, state, nonce]);
 
   return (
-    <main className="min-h-screen bg-violetDark text-ink flex flex-col items-center justify-center p-6 bg-hero-radial">
+    <main className="flex min-h-screen flex-col items-center justify-center bg-hero-radial p-6 text-ink">
       <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-white/[0.06] p-8 shadow-glow backdrop-blur-sm">
         <h1 className="text-xl font-semibold tracking-tight text-center mb-1">Promptly</h1>
         <p className="text-sm text-ink/70 text-center mb-8">Sign in to continue with the extension</p>
@@ -125,7 +125,7 @@ export default function ExtensionSignInPage() {
   return (
     <Suspense
       fallback={
-        <main className="min-h-screen bg-violetDark text-ink flex items-center justify-center p-6">
+        <main className="flex min-h-screen items-center justify-center bg-transparent p-6 text-ink">
           <p className="text-sm opacity-70">Loading…</p>
         </main>
       }

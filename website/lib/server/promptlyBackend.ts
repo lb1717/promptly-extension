@@ -202,8 +202,8 @@ function clamp(value: number, min: number, max: number) {
 function getMaxCompletionTokens(prompt: string, requestMode: string, rewriteMode: "AUTO" | "MANUAL") {
   const estimatedPromptTokens = estimateTokensFromChars(String(prompt || "").length);
   if (requestMode === "create") {
-    // Long generated prompts: high ceiling (16k) + scale with user text; floor avoids tiny budgets.
-    return clamp(estimatedPromptTokens * 4, 1500, 16384);
+    // Large ceiling per segment; create may chain continuations when the API hits max_output_tokens.
+    return clamp(estimatedPromptTokens * 4, 2000, 16384);
   }
   if (rewriteMode === "MANUAL") {
     return clamp(estimatedPromptTokens * 2, 280, 1200);
@@ -556,6 +556,51 @@ function usesResponsesApi(model: string) {
   return /^gpt-5(\b|-)/.test(normalized);
 }
 
+const CREATE_TRUNCATION_CONTINUE_MSG =
+  "Your previous output hit the length limit mid-stream. Continue from the very next character. Do not repeat anything you already wrote. No preamble or labels—only the rest of the prompt text.";
+
+const CREATE_CONTINUATION_MAX_ROUNDS = 4;
+
+function isResponsesApiTruncated(body: Record<string, unknown>): boolean {
+  if (body.status === "incomplete") {
+    return true;
+  }
+  const reason = (body.incomplete_details as { reason?: string } | undefined)?.reason;
+  return reason === "max_output_tokens";
+}
+
+function mergeTokenUsage(
+  a: { total_tokens: number; prompt_tokens: number; completion_tokens: number } | null,
+  b: { total_tokens: number; prompt_tokens: number; completion_tokens: number } | null
+): { total_tokens: number; prompt_tokens: number; completion_tokens: number } | null {
+  if (!a && !b) {
+    return null;
+  }
+  if (!a) {
+    return b;
+  }
+  if (!b) {
+    return a;
+  }
+  return {
+    total_tokens: a.total_tokens + b.total_tokens,
+    prompt_tokens: a.prompt_tokens + b.prompt_tokens,
+    completion_tokens: a.completion_tokens + b.completion_tokens
+  };
+}
+
+function usageFromResponsesBody(body: Record<string, unknown>): OptimizerResult["usage"] {
+  const u = body.usage as Record<string, unknown> | undefined;
+  if (!u) {
+    return null;
+  }
+  return {
+    total_tokens: toNumber(u.total_tokens, 0),
+    prompt_tokens: toNumber(u.input_tokens ?? u.prompt_tokens, 0),
+    completion_tokens: toNumber(u.output_tokens ?? u.completion_tokens, 0)
+  };
+}
+
 function extractResponsesApiText(body: Record<string, unknown>) {
   const direct = body.output_text;
   if (typeof direct === "string" && direct.trim()) {
@@ -589,6 +634,28 @@ function extractResponsesApiText(body: Record<string, unknown>) {
   return textParts.join("").trim();
 }
 
+function extractChatCompletionMessageText(message: unknown): string {
+  if (!message || typeof message !== "object") {
+    return "";
+  }
+  const m = message as { refusal?: unknown; content?: unknown };
+  if (m.refusal) {
+    const refusal = String(m.refusal).trim();
+    throw new Error(refusal ? `Model declined: ${refusal.slice(0, 400)}` : "Model declined the request");
+  }
+  const c = m.content;
+  if (typeof c === "string") {
+    return c;
+  }
+  if (Array.isArray(c)) {
+    return c
+      .filter((part: { type?: string; text?: string } | null) => part && part.type === "text")
+      .map((part: { text?: string }) => String(part.text || ""))
+      .join("");
+  }
+  return "";
+}
+
 async function callOpenAi(options: {
   messages: Array<{ role: string; content: string }>;
   model: string;
@@ -598,85 +665,175 @@ async function callOpenAi(options: {
 }) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort("timeout"), options.timeoutMs);
+  const useResponsesApi = usesResponsesApi(options.model);
+  const isCreate = options.requestMode === "create";
+  const url = useResponsesApi ? "https://api.openai.com/v1/responses" : "https://api.openai.com/v1/chat/completions";
+
   try {
-    const useResponsesApi = usesResponsesApi(options.model);
-    const isCreate = options.requestMode === "create";
-    const requestBody: Record<string, unknown> = useResponsesApi
-      ? {
-          model: options.model,
-          input: options.messages.map((message) => ({
-            role: message.role,
-            content: [{ type: "input_text", text: message.content }]
-          })),
-          max_output_tokens: options.maxCompletionTokens,
-          reasoning: {
-            effort: "minimal"
-          },
-          // "low" makes GPT-5 answers terse and often feels "cut off" before max_output_tokens.
-          text: {
-            verbosity: isCreate ? "high" : "low"
-          },
-          store: false
+    if (useResponsesApi) {
+      // max_output_tokens counts reasoning + visible text. Omit reasoning on create so the budget goes to the prompt.
+      // store:true for create enables previous_response_id continuation when output hits max_output_tokens.
+      const initialInput = options.messages.map((message) => ({
+        role: message.role,
+        content: [{ type: "input_text", text: message.content }]
+      }));
+      const baseResponsesFields: Record<string, unknown> = {
+        model: options.model,
+        max_output_tokens: options.maxCompletionTokens,
+        text: {
+          verbosity: isCreate ? "high" : "low"
         }
-      : {
-          model: options.model,
-          messages: options.messages,
-          max_tokens: options.maxCompletionTokens,
-          store: false
-        };
-    const response = await fetch(useResponsesApi ? "https://api.openai.com/v1/responses" : "https://api.openai.com/v1/chat/completions", {
+      };
+      if (!isCreate) {
+        baseResponsesFields.reasoning = { effort: "minimal" };
+        baseResponsesFields.store = false;
+      } else {
+        baseResponsesFields.store = true;
+      }
+
+      let aggregated = "";
+      let usage: OptimizerResult["usage"] = null;
+      let previousId: string | null = null;
+
+      for (let round = 0; round < CREATE_CONTINUATION_MAX_ROUNDS; round++) {
+        const requestBody: Record<string, unknown> =
+          round === 0
+            ? { ...baseResponsesFields, input: initialInput }
+            : {
+                model: options.model,
+                previous_response_id: previousId,
+                input: [
+                  {
+                    role: "user",
+                    content: [{ type: "input_text", text: CREATE_TRUNCATION_CONTINUE_MSG }]
+                  }
+                ],
+                max_output_tokens: options.maxCompletionTokens,
+                text: { verbosity: "high" },
+                store: true
+              };
+
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${getOpenAiApiKey()}`
+          },
+          body: JSON.stringify(requestBody),
+          signal: controller.signal
+        });
+        const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+        if (!response.ok) {
+          const errObj = body.error as { message?: string } | undefined;
+          throw new Error(String(errObj?.message || `Provider error (${response.status})`));
+        }
+
+        const piece = extractResponsesApiText(body);
+        const roundUsage = usageFromResponsesBody(body);
+        usage = mergeTokenUsage(usage, roundUsage);
+
+        if (piece) {
+          aggregated += piece;
+        }
+
+        const id = typeof body.id === "string" ? body.id : "";
+        previousId = id || previousId;
+
+        const truncated = isCreate && isResponsesApiTruncated(body);
+        if (!truncated || !isCreate) {
+          break;
+        }
+        if (!previousId) {
+          break;
+        }
+      }
+
+      if (!aggregated.trim()) {
+        throw new Error("Provider returned no content");
+      }
+      return { rawText: aggregated, usage };
+    }
+
+    if (isCreate) {
+      let chatMessages: Array<{ role: string; content: string }> = [...options.messages];
+      let aggregated = "";
+      let usage: OptimizerResult["usage"] = null;
+
+      for (let round = 0; round < CREATE_CONTINUATION_MAX_ROUNDS; round++) {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${getOpenAiApiKey()}`
+          },
+          body: JSON.stringify({
+            model: options.model,
+            messages: chatMessages,
+            max_tokens: options.maxCompletionTokens
+          }),
+          signal: controller.signal
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(String(body?.error?.message || `Provider error (${response.status})`));
+        }
+        const choice = body?.choices?.[0];
+        const piece = extractChatCompletionMessageText(choice?.message);
+        const u = body?.usage
+          ? {
+              total_tokens: toNumber(body.usage.total_tokens, 0),
+              prompt_tokens: toNumber(body.usage.prompt_tokens, 0),
+              completion_tokens: toNumber(body.usage.completion_tokens, 0)
+            }
+          : null;
+        usage = mergeTokenUsage(usage, u);
+        aggregated += piece;
+        const finishReason = String(choice?.finish_reason || "");
+        if (finishReason !== "length") {
+          break;
+        }
+        chatMessages = [
+          ...chatMessages,
+          { role: "assistant", content: piece },
+          { role: "user", content: CREATE_TRUNCATION_CONTINUE_MSG }
+        ];
+      }
+
+      if (!aggregated.trim()) {
+        throw new Error("Provider returned no content");
+      }
+      return { rawText: aggregated, usage };
+    }
+
+    const response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${getOpenAiApiKey()}`
       },
-      body: JSON.stringify(requestBody),
+      body: JSON.stringify({
+        model: options.model,
+        messages: options.messages,
+        max_tokens: options.maxCompletionTokens
+      }),
       signal: controller.signal
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
       throw new Error(String(body?.error?.message || `Provider error (${response.status})`));
     }
-    let content = "";
-    let usage = null;
-    if (useResponsesApi) {
-      content = extractResponsesApiText(body as Record<string, unknown>);
-      usage = body?.usage
-        ? {
-            total_tokens: toNumber((body.usage as { total_tokens?: unknown }).total_tokens, 0),
-            prompt_tokens: toNumber((body.usage as { input_tokens?: unknown }).input_tokens, 0),
-            completion_tokens: toNumber((body.usage as { output_tokens?: unknown }).output_tokens, 0)
-          }
-        : null;
-    } else {
-      const message = body?.choices?.[0]?.message;
-      if (message?.refusal) {
-        const refusal = String(message.refusal).trim();
-        throw new Error(refusal ? `Model declined: ${refusal.slice(0, 400)}` : "Model declined the request");
-      }
-      if (typeof message?.content === "string") {
-        content = message.content;
-      } else if (Array.isArray(message?.content)) {
-        content = message.content
-          .filter((part: { type?: string; text?: string } | null) => part && part.type === "text")
-          .map((part: { text?: string }) => String(part.text || ""))
-          .join("");
-      }
-      usage = body?.usage
-        ? {
-            total_tokens: toNumber(body.usage.total_tokens, 0),
-            prompt_tokens: toNumber(body.usage.prompt_tokens, 0),
-            completion_tokens: toNumber(body.usage.completion_tokens, 0)
-          }
-        : null;
-    }
+    const content = extractChatCompletionMessageText(body?.choices?.[0]?.message);
+    const usage = body?.usage
+      ? {
+          total_tokens: toNumber(body.usage.total_tokens, 0),
+          prompt_tokens: toNumber(body.usage.prompt_tokens, 0),
+          completion_tokens: toNumber(body.usage.completion_tokens, 0)
+        }
+      : null;
     if (!content.trim()) {
       throw new Error("Provider returned no content");
     }
-    return {
-      rawText: content,
-      usage
-    };
+    return { rawText: content, usage };
   } catch (error) {
     if ((error as Error)?.name === "AbortError") {
       throw new Error(`Provider request timed out after ${Math.round(options.timeoutMs / 1000)}s`);

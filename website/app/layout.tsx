@@ -28,7 +28,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className={notoSansMono.variable}>
-      <body className="font-mono antialiased">{children}</body>
+      <body className="min-h-screen bg-black font-mono antialiased">{children}</body>
     </html>
   );
 }

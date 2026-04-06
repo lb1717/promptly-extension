@@ -6,7 +6,7 @@ export const SITE = {
 
 export const NAV_LINKS = [
   { label: "Product", href: "/product" },
-  { label: "Research", href: "/research" }
+  { label: "Labs", href: "/labs" }
 ];
 
 export const DEMO_TIMING = {
@@ -52,3 +52,5 @@ export const COMPARISON_ROWS = [
   { feature: "Cross-tool consistency", withPromptly: "yes", withoutPromptly: "partial" },
   { feature: "Works in ChatGPT / Claude / Gemini", withPromptly: "yes", withoutPromptly: "yes" }
 ] as const;
+
+export type ComparisonMark = "yes" | "partial" | "no";

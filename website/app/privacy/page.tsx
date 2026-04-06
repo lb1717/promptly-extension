@@ -17,12 +17,12 @@ export default function PrivacyPage() {
   const privacyEmail = process.env.NEXT_PUBLIC_PRIVACY_EMAIL?.trim() || null;
 
   return (
-    <main className="min-h-screen bg-violetDark text-ink">
+    <main className="min-h-screen bg-transparent text-ink">
       <Navbar />
       <article className="mx-auto w-full max-w-3xl px-4 pb-20 pt-10 sm:pt-14">
         <p className="text-sm font-medium text-violet-200/70">
-          <Link href="/" className="text-violet-200 hover:text-white">
-            Home
+          <Link href="/product" className="text-violet-200 hover:text-white">
+            Product
           </Link>
           <span className="mx-2 opacity-60">/</span>
           Privacy

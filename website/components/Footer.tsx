@@ -2,7 +2,7 @@ import { SITE } from "@/lib/constants";
 
 export function Footer() {
   return (
-    <footer className="border-t border-violet-300/15 px-4 py-8">
+    <footer className="border-t border-white/10 bg-black/35 px-4 py-8 backdrop-blur-md">
       <div className="mx-auto flex w-full max-w-6xl flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
         <div className="flex items-center gap-2">
           <div className="grid h-8 w-8 place-items-center rounded-lg bg-white/85 p-0.5 shadow-[0_6px_16px_rgba(2,6,23,0.25)]">

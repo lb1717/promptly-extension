@@ -3,7 +3,7 @@ import { SITE } from "@/lib/constants";
 
 export function Hero() {
   return (
-    <section className="relative overflow-hidden bg-hero-radial px-4 pb-20 pt-16 sm:pt-24">
+    <section className="relative overflow-hidden bg-transparent px-4 pb-20 pt-8 sm:pt-12">
       <div className="mx-auto max-w-6xl">
         <div className="mx-auto max-w-3xl text-center">
           <div className="mb-5 flex justify-center">
@@ -15,7 +15,7 @@ export function Hero() {
             Promptly Chrome Extension
           </p>
           <h1 className="mb-5 text-4xl font-semibold leading-tight text-white sm:text-6xl">
-            Upgrade every AI prompt from vague to high-performing
+            Improve every prompt.
           </h1>
           <p className="mx-auto mb-8 max-w-2xl text-violet-100/80">
             Promptly improves your prompt in one click directly inside ChatGPT, Claude, and Gemini, so you get
@@ -26,6 +26,38 @@ export function Hero() {
             <Button href="#how-it-works" variant="ghost">
               See how it works
             </Button>
+          </div>
+
+          <div className="mx-auto mt-14 max-w-4xl border-t border-white/10 pt-10 text-center">
+            <div className="grid gap-8 sm:grid-cols-3 sm:gap-6">
+              <div className="flex flex-col items-center text-center">
+                <p className="mb-3 min-h-[2.75rem] text-xs font-semibold uppercase tracking-wide text-violet-200/90 sm:min-h-0 sm:text-[0.7rem]">
+                  Better Performing Prompts
+                </p>
+                <p className="mb-2 text-4xl font-semibold tabular-nums text-white sm:text-5xl">2.1×</p>
+                <p className="max-w-[220px] text-xs leading-relaxed text-violet-200/75 sm:text-sm">
+                  Task performance relative to human prompting
+                </p>
+              </div>
+              <div className="flex flex-col items-center text-center">
+                <p className="mb-3 min-h-[2.75rem] text-xs font-semibold uppercase tracking-wide text-violet-200/90 sm:min-h-0 sm:text-[0.7rem]">
+                  Faster LLM Response Time
+                </p>
+                <p className="mb-2 text-4xl font-semibold tabular-nums text-white sm:text-5xl">20%</p>
+                <p className="max-w-[220px] text-xs leading-relaxed text-violet-200/75 sm:text-sm">
+                  Faster response time given more accurate scope
+                </p>
+              </div>
+              <div className="flex flex-col items-center text-center">
+                <p className="mb-3 min-h-[2.75rem] text-xs font-semibold uppercase tracking-wide text-violet-200/90 sm:min-h-0 sm:text-[0.7rem]">
+                  Reduced Hallucinations
+                </p>
+                <p className="mb-2 text-4xl font-semibold tabular-nums text-white sm:text-5xl">61%</p>
+                <p className="max-w-[220px] text-xs leading-relaxed text-violet-200/75 sm:text-sm">
+                  Less likely to hallucinate
+                </p>
+              </div>
+            </div>
           </div>
         </div>
       </div>

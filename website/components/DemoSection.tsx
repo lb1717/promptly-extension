@@ -1,6 +1,5 @@
 "use client";
 
-import { SectionHeader } from "@/components/ui/SectionHeader";
 import { DEMO_TIMING } from "@/lib/constants";
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
@@ -8,6 +7,22 @@ import { useEffect, useRef, useState } from "react";
 const ORIGINAL_PROMPT = "read this pdf and explain the arguments with evidence";
 const IMPROVED_PROMPT =
   "Read the attached PDF and summarize the main arguments with supporting evidence. Use explicit quotes from the text and do not include any information not found in the document.";
+
+const VIEWPORT_PAD = 2;
+
+function isPromptBoxFullyVisible(el: HTMLElement | null): boolean {
+  if (!el) return false;
+  const r = el.getBoundingClientRect();
+  if (r.width < 4 || r.height < 4) return false;
+  const vh = window.innerHeight;
+  const vw = window.innerWidth;
+  return (
+    r.top >= -VIEWPORT_PAD &&
+    r.left >= -VIEWPORT_PAD &&
+    r.bottom <= vh + VIEWPORT_PAD &&
+    r.right <= vw + VIEWPORT_PAD
+  );
+}
 
 export function DemoSection() {
   const [promptText, setPromptText] = useState("");
@@ -21,8 +36,14 @@ export function DemoSection() {
   const timersRef = useRef<number[]>([]);
   const promptBoxRef = useRef<HTMLDivElement | null>(null);
   const pauseButtonRef = useRef<HTMLButtonElement | null>(null);
+  const cyclesPlayedRef = useRef(0);
+  const sessionCompleteRef = useRef(false);
+  /** True after user has left the demo (debounced); first paint treats as "enter" so autoplay can run. */
+  const reallyLeftRef = useRef(true);
 
   useEffect(() => {
+    let leaveDebounceTimer: number | undefined;
+
     const updateCursorTip = () => {
       const promptBox = promptBoxRef.current;
       const pauseButton = pauseButtonRef.current;
@@ -44,7 +65,62 @@ export function DemoSection() {
       timersRef.current = [];
     };
 
+    const resetToOpeningScene = () => {
+      clearTimers();
+      setIsAnimating(false);
+      setPromptText("");
+      setTabText("Promptly");
+      setPausePulsing(false);
+      setShowClickCursor(false);
+      setTabShineActive(false);
+      updateCursorTip();
+    };
+
+    const syncVisibility = () => {
+      const el = promptBoxRef.current;
+      const visible = isPromptBoxFullyVisible(el);
+
+      if (visible) {
+        window.clearTimeout(leaveDebounceTimer);
+        if (reallyLeftRef.current && !sessionCompleteRef.current) {
+          reallyLeftRef.current = false;
+          cyclesPlayedRef.current = 0;
+          clearTimers();
+          runCycle();
+        }
+        return;
+      }
+
+      window.clearTimeout(leaveDebounceTimer);
+      leaveDebounceTimer = window.setTimeout(() => {
+        reallyLeftRef.current = true;
+        sessionCompleteRef.current = false;
+      }, 280);
+    };
+
+    const handleCycleComplete = () => {
+      if (!isPromptBoxFullyVisible(promptBoxRef.current)) {
+        resetToOpeningScene();
+        return;
+      }
+
+      cyclesPlayedRef.current += 1;
+      if (cyclesPlayedRef.current >= 4) {
+        resetToOpeningScene();
+        sessionCompleteRef.current = true;
+        return;
+      }
+
+      runCycle();
+    };
+
     const runCycle = () => {
+      const el = promptBoxRef.current;
+      if (!isPromptBoxFullyVisible(el)) {
+        resetToOpeningScene();
+        return;
+      }
+
       clearTimers();
       setIsAnimating(true);
       setImprovedRevealKey((prev) => prev + 1);
@@ -105,17 +181,38 @@ export function DemoSection() {
         window.setTimeout(() => setTabShineActive(false), shineEndMs),
         window.setTimeout(() => setPromptText(IMPROVED_PROMPT), improveAtMs),
         window.setTimeout(() => setTabText("Prompt Improved"), promptImprovedLabelAtMs),
-        window.setTimeout(runCycle, cycleEndMs)
+        window.setTimeout(handleCycleComplete, cycleEndMs)
       );
     };
 
+    const onScrollOrResize = () => {
+      updateCursorTip();
+      syncVisibility();
+    };
+
     updateCursorTip();
-    window.addEventListener("resize", updateCursorTip);
-    window.addEventListener("scroll", updateCursorTip, { passive: true });
-    runCycle();
+    window.addEventListener("resize", onScrollOrResize);
+    window.addEventListener("scroll", onScrollOrResize, { passive: true });
+
+    const el = promptBoxRef.current;
+    const io =
+      el &&
+      new IntersectionObserver(
+        () => {
+          syncVisibility();
+        },
+        { root: null, threshold: [0, 0.05, 0.25, 0.5, 0.75, 0.95, 1] }
+      );
+    if (el && io) io.observe(el);
+
+    syncVisibility();
+
     return () => {
-      window.removeEventListener("resize", updateCursorTip);
-      window.removeEventListener("scroll", updateCursorTip);
+      window.clearTimeout(leaveDebounceTimer);
+      window.removeEventListener("resize", onScrollOrResize);
+      window.removeEventListener("scroll", onScrollOrResize);
+      if (io && el) io.unobserve(el);
+      io?.disconnect();
       clearTimers();
     };
   }, []);
@@ -124,15 +221,9 @@ export function DemoSection() {
   const displayPromptText = promptText || (!isAnimating ? ORIGINAL_PROMPT : "");
 
   return (
-    <section id="how-it-works" className="px-4 py-20">
+    <section id="how-it-works" className="px-4 py-12 sm:py-16">
       <div className="mx-auto max-w-6xl">
-        <SectionHeader
-          eyebrow="How It Works"
-          title="One click to improve your prompt"
-          subtitle="Promptly enhances your prompt instantly where you already write it."
-        />
-
-        <div className="relative mx-auto max-w-5xl rounded-3xl border border-violet-300/20 bg-white/[0.04] px-8 pb-8 pt-20 shadow-glow">
+        <div className="relative mx-auto max-w-5xl rounded-3xl border border-white/10 bg-white/[0.04] px-8 pb-8 pt-20 shadow-glow backdrop-blur-md">
           <div
             ref={promptBoxRef}
             className="relative mx-auto max-w-[980px] rounded-[26px] border border-slate-300/70 bg-white pl-5 pr-5 py-4 shadow-[0_12px_30px_rgba(2,6,23,0.12)]"
