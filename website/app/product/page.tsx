@@ -8,6 +8,7 @@ import { Footer } from "@/components/Footer";
 import { Hero } from "@/components/Hero";
 import { IntegratedWith } from "@/components/IntegratedWith";
 import { Navbar } from "@/components/Navbar";
+import { PricingSection } from "@/components/PricingSection";
 
 export const metadata: Metadata = {
   title: "Promptly | Better prompts, better results",
@@ -23,6 +24,7 @@ export default function ProductPage() {
         <Hero />
         <DemoSection />
         <IntegratedWith />
+        <PricingSection />
         <ComparisonTable />
         <Benefits />
         <FinalCTA />

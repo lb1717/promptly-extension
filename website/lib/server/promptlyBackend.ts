@@ -394,6 +394,23 @@ export async function requirePromptlyUser(request: Request): Promise<{
   throw new Error("Missing Firebase auth token");
 }
 
+/** Website-only routes (/account, billing): Firebase ID token in Authorization or x-promptly-firebase-token. */
+export async function requireWebFirebaseUser(request: Request): Promise<{
+  ok: true;
+  user: PromptlyUser;
+}> {
+  const rawToken = readFirebaseToken(request);
+  if (!rawToken) {
+    throw new Error("Missing Firebase auth token");
+  }
+  const decoded = await getFirebaseAdminAuth().verifyIdToken(rawToken);
+  const email = String(decoded.email || "").trim().toLowerCase() || null;
+  const promptlyUser = await upsertPromptlyUser(decoded.uid, email, {
+    provider: "firebase"
+  });
+  return { ok: true, user: promptlyUser };
+}
+
 async function getDailyUsage(uid: string, day: string, limit: number): Promise<DailyUsage> {
   const snap = await getFirebaseAdminDb().collection(DAILY_USAGE_COLLECTION).doc(`${uid}_${day}`).get();
   const raw = (snap.data() || {}) as Record<string, unknown>;
