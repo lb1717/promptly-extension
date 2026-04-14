@@ -168,32 +168,26 @@
           this.onToggleAutoSend();
         }
       });
-      const runSignIn = (event) => {
+      const runSignInFlow = (event) => {
         event.preventDefault();
         event.stopPropagation();
-        try {
-          if (this.signInButton) {
-            this.signInButton.textContent = "Signing in…";
-            window.setTimeout(() => {
-              if (this.root.classList.contains("is-signed-out")) {
-                this.signInButton.textContent = "Sign in";
-              }
-            }, 2500);
-          }
-        } catch (_err) {}
-        this.showErrorToast("Opening sign-in…");
+        this.showErrorToast("Opening Google sign-in…");
         if (typeof this.onSignIn === "function") {
-          Promise.resolve(this.onSignIn()).catch((error) => {
-            this.showErrorToast(String(error?.message || error || "Sign-in failed"));
-          });
+          Promise.resolve(this.onSignIn())
+            .then(() => {
+              this.setSettingsOpen(false);
+            })
+            .catch((error) => {
+              this.showErrorToast(String(error?.message || error || "Sign-in failed"));
+            });
         }
       };
-      this.signInButton.addEventListener("click", runSignIn);
+      this.signInButton.addEventListener("click", runSignInFlow);
       this.signInButton.addEventListener("keydown", (event) => {
         if (event.key !== "Enter" && event.key !== " ") {
           return;
         }
-        runSignIn(event);
+        runSignInFlow(event);
       });
       const runToggleSettings = (event) => {
         event.preventDefault();
@@ -224,7 +218,7 @@
           ) {
             return;
           }
-          runSignIn(event);
+          runSignInFlow(event);
         },
         true
       );
@@ -308,7 +302,7 @@
           return;
         }
         if (this.root.classList.contains("is-signed-out")) {
-          runSignIn(event);
+          runSignInFlow(event);
           return;
         }
         if (this.suppressNextClick) {
@@ -324,7 +318,7 @@
         event.preventDefault();
         event.stopPropagation();
         if (this.root.classList.contains("is-signed-out")) {
-          runSignIn(event);
+          runSignInFlow(event);
           return;
         }
         this.onToggle();
@@ -432,7 +426,6 @@
       this.settingsPanel.addEventListener("click", (event) => {
         event.stopPropagation();
       });
-
       // Attach toast to the tab itself so it follows the tab's translate3d placement.
       this.tabButton.append(this.errorToast);
       this.root.append(this.popupMask, this.tabButton, this.settingsPanel);

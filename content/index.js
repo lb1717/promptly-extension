@@ -1658,6 +1658,23 @@
     }
   }
 
+  function isSignInRequiredError(error) {
+    if (!error) {
+      return false;
+    }
+    if (error.promptlyNeedsSignIn) {
+      return true;
+    }
+    const msg = String(error?.message || error || "").toLowerCase();
+    return (
+      msg.includes("sign in") ||
+      msg.includes("not signed in") ||
+      msg.includes("missing firebase auth token") ||
+      msg.includes("user verification failed") ||
+      msg.includes("account mismatch")
+    );
+  }
+
   function isLikelySendButton(target) {
     if (!(target instanceof Element)) {
       return false;
@@ -1669,13 +1686,20 @@
     const signals = [
       button.getAttribute("aria-label"),
       button.getAttribute("data-testid"),
+      button.getAttribute("data-test"),
+      button.getAttribute("name"),
+      button.getAttribute("type"),
       button.getAttribute("id"),
-      button.className
+      button.className,
+      button.textContent
     ]
       .filter(Boolean)
       .join(" ")
       .toLowerCase();
-    return /\b(send|submit|composer-submit)\b/.test(signals);
+    if (/\b(send|submit|composer-submit|send-button|send-message|submit-button)\b/.test(signals)) {
+      return true;
+    }
+    return button.getAttribute("type") === "submit";
   }
 
   function triggerSendAfterAdjust(trigger) {
@@ -1727,6 +1751,7 @@
 
     autoAdjustInFlight = true;
     let didApplyOptimizedPrompt = false;
+    let blockSend = false;
     try {
       ui.setAutoAdjustLoading(true, "reading prompt");
       ui.setAutoAdjustLoading(true, "analyzing");
@@ -1756,11 +1781,14 @@
       if (_error?.promptlyNeedsSignIn) {
         ui.setSignedOut(true);
       }
+      if (isSignInRequiredError(_error)) {
+        blockSend = true;
+      }
       ui.showErrorToast(mapPromptlyErrorToToast(String(_error?.message || _error || "")));
       if (_error?.promptlyCredits) {
         ui.setCreditUsage(_error.promptlyCredits);
       }
-      // Fall through and send original prompt if optimization fails.
+      // Block send when unauthenticated; otherwise fail open and send original prompt.
       if (!isOpen) {
         ui.setTabStatus("idle");
       }
@@ -1769,7 +1797,11 @@
       const finalize = () => {
         ui.setAutoAdjustLoading(false);
         observers.scheduleUpdate();
-        window.requestAnimationFrame(() => triggerSendAfterAdjust(trigger));
+        if (!blockSend) {
+          window.requestAnimationFrame(() => triggerSendAfterAdjust(trigger));
+          return;
+        }
+        ui.setAutoAdjustLoading(false, "Sign in first", true, "improve");
       };
       if (didApplyOptimizedPrompt) {
         window.requestAnimationFrame(finalize);
@@ -1792,6 +1824,25 @@
     }
   }
 
+  function handleDocumentSubmit(event) {
+    if (!autoAdjustOnSend || bypassNextAutoSendInterception) {
+      return;
+    }
+    if (!(event.target instanceof HTMLFormElement)) {
+      return;
+    }
+    if (!currentTarget || !event.target.contains(currentTarget)) {
+      return;
+    }
+    const submitter = event.submitter instanceof Element ? event.submitter : null;
+    if (submitter && !isLikelySendButton(submitter)) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    runAutoAdjustThenSend({ type: "submit", button: submitter });
+  }
+
   function destroy() {
     destroyed = true;
     document.querySelectorAll("[data-promptly-improve-flash='true']").forEach((node) => node.remove());
@@ -1801,6 +1852,7 @@
     observers.stop();
     document.removeEventListener("pointerdown", handlePointerDown, true);
     document.removeEventListener("click", handleDocumentClick, true);
+    document.removeEventListener("submit", handleDocumentSubmit, true);
     window.removeEventListener("keydown", handleKeyDown, true);
     document.removeEventListener("visibilitychange", scheduleCreditsRefreshWhenVisible);
     window.removeEventListener("pagehide", destroy, true);
@@ -1819,6 +1871,7 @@
     });
   document.addEventListener("pointerdown", handlePointerDown, true);
   document.addEventListener("click", handleDocumentClick, true);
+  document.addEventListener("submit", handleDocumentSubmit, true);
   window.addEventListener("keydown", handleKeyDown, true);
   document.addEventListener("visibilitychange", scheduleCreditsRefreshWhenVisible);
   window.addEventListener("pagehide", destroy, true);

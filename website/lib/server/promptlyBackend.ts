@@ -9,6 +9,7 @@ export const PROMPTLY_USER_CONTENT_TOKEN = "<<PROMPTLY_USER_CONTENT>>";
 const PROMPT_SETTINGS_COLLECTION = "promptly_settings";
 const PROMPT_ENGINEERING_DOC_ID = "prompt_engineering";
 const TIER_LIMITS_DOC_ID = "tier_limits";
+const USER_EMAIL_INDEX_COLLECTION = "user_email_index";
 const TIER_LIMITS_CACHE_MS = 30_000;
 /** Default Pro daily cap (tokens / UTC day) when admin doc not set — editable in Admin → Plan limits. */
 export const DEFAULT_PRO_DAILY_TOKEN_LIMIT = 12_000_000;
@@ -164,7 +165,7 @@ function getRecentDays(days: number) {
   return Array.from({ length: count }, (_, idx) => getDateDaysAgo(count - idx - 1));
 }
 
-export type TierTokenLimits = { free: number; pro: number };
+export type TierTokenLimits = { free: number; pro: number; globalCap: number | null };
 
 let tierLimitsCache: { at: number; limits: TierTokenLimits } | null = null;
 
@@ -193,7 +194,12 @@ export async function loadTierTokenLimits(): Promise<TierTokenLimits> {
     1,
     Math.floor(Number(raw.proDailyTokenLimit ?? raw.pro_daily_token_limit ?? DEFAULT_PRO_DAILY_TOKEN_LIMIT) || DEFAULT_PRO_DAILY_TOKEN_LIMIT)
   );
-  const limits = { free, pro };
+  const globalRaw = raw.globalDailyTokenLimit ?? raw.global_daily_token_limit;
+  const globalCap =
+    typeof globalRaw === "number" && Number.isFinite(globalRaw) && globalRaw >= 1
+      ? Math.max(1, Math.min(Math.floor(globalRaw), ADMIN_DAILY_TOKEN_LIMIT_MAX))
+      : null;
+  const limits = { free, pro, globalCap };
   tierLimitsCache = { at: now, limits };
   return limits;
 }
@@ -207,11 +213,13 @@ export function billingTierFromUserDoc(raw: Record<string, unknown>): "free" | "
 export function effectiveDailyTokenLimitFromUserData(raw: Record<string, unknown>, limits: TierTokenLimits): number {
   const o = raw.dailyTokenLimitOverride;
   if (typeof o === "number" && Number.isFinite(o) && o >= 1) {
-    return Math.min(Math.max(1, Math.floor(o)), ADMIN_DAILY_TOKEN_LIMIT_MAX);
+    const overrideCapped = Math.min(Math.max(1, Math.floor(o)), ADMIN_DAILY_TOKEN_LIMIT_MAX);
+    return limits.globalCap != null ? Math.min(overrideCapped, limits.globalCap) : overrideCapped;
   }
   const tier = billingTierFromUserDoc(raw);
   const v = tier === "pro" ? limits.pro : limits.free;
-  return Math.max(1, Math.floor(v));
+  const tierCap = Math.max(1, Math.floor(v));
+  return limits.globalCap != null ? Math.min(tierCap, limits.globalCap) : tierCap;
 }
 
 /** After Stripe updates `subscriptionTier`, refresh `dailyTokenLimit` on the user doc. */
@@ -348,7 +356,7 @@ function readGoogleAccessToken(request: Request) {
 }
 
 function readUserEmailHeader(request: Request) {
-  return String(request.headers.get("x-promptly-user-email") || "").trim().toLowerCase();
+  return normalizeUserEmail(request.headers.get("x-promptly-user-email")) || "";
 }
 
 export function buildPromptlyCorsHeaders(origin?: string | null) {
@@ -375,7 +383,200 @@ export function handlePromptlyPreflight(request: Request) {
   });
 }
 
+function normalizeUserEmail(value: unknown): string | null {
+  const email = String(value || "").trim().toLowerCase();
+  return email || null;
+}
+
+function firestoreMillis(value: unknown): number {
+  if (!value) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+  if (value instanceof Timestamp) {
+    return value.toMillis();
+  }
+  const maybe = value as { toDate?: () => Date };
+  if (typeof maybe.toDate === "function") {
+    try {
+      return maybe.toDate().getTime();
+    } catch {
+      return Number.MAX_SAFE_INTEGER;
+    }
+  }
+  return Number.MAX_SAFE_INTEGER;
+}
+
+function pickCanonicalUserIdForEmail(
+  docs: Array<{ id: string; data: Record<string, unknown> }>,
+  preferredUid: string | null,
+  indexedUid: string | null
+): string | null {
+  if (preferredUid && docs.some((doc) => doc.id === preferredUid)) {
+    return preferredUid;
+  }
+  if (indexedUid && docs.some((doc) => doc.id === indexedUid)) {
+    return indexedUid;
+  }
+  if (!docs.length) {
+    return preferredUid || indexedUid || null;
+  }
+  const withOrder = [...docs].sort((a, b) => {
+    const byCreated = firestoreMillis(a.data.createdAt) - firestoreMillis(b.data.createdAt);
+    if (byCreated !== 0) {
+      return byCreated;
+    }
+    return a.id.localeCompare(b.id);
+  });
+  return withOrder[0]?.id || null;
+}
+
+async function mergeDuplicateUsageIntoCanonical(canonicalUid: string, duplicateUid: string) {
+  const db = getFirebaseAdminDb();
+  const duplicateUsageSnap = await db.collection(DAILY_USAGE_COLLECTION).where("uid", "==", duplicateUid).get();
+  for (const usageDoc of duplicateUsageSnap.docs) {
+    const raw = (usageDoc.data() || {}) as Record<string, unknown>;
+    const day = String(raw.day || "").trim() || String(usageDoc.id.split("_").slice(1).join("_") || "").trim();
+    if (!day) {
+      continue;
+    }
+    const canonicalUsageRef = db.collection(DAILY_USAGE_COLLECTION).doc(`${canonicalUid}_${day}`);
+    await db.runTransaction(async (tx) => {
+      const canonicalSnap = await tx.get(canonicalUsageRef);
+      const existing = (canonicalSnap.data() || {}) as Record<string, unknown>;
+      const merged = {
+        uid: canonicalUid,
+        day,
+        email: normalizeUserEmail(existing.email) || normalizeUserEmail(raw.email),
+        used: Math.max(0, Math.floor(Number(existing.used || 0) || 0)) + Math.max(0, Math.floor(Number(raw.used || 0) || 0)),
+        promptsImproved:
+          Math.max(0, Math.floor(Number(existing.promptsImproved || 0) || 0)) +
+          Math.max(0, Math.floor(Number(raw.promptsImproved || 0) || 0)),
+        auto: Math.max(0, Math.floor(Number(existing.auto || 0) || 0)) + Math.max(0, Math.floor(Number(raw.auto || 0) || 0)),
+        manual:
+          Math.max(0, Math.floor(Number(existing.manual || 0) || 0)) +
+          Math.max(0, Math.floor(Number(raw.manual || 0) || 0)),
+        generated:
+          Math.max(0, Math.floor(Number(existing.generated || 0) || 0)) +
+          Math.max(0, Math.floor(Number(raw.generated || 0) || 0)),
+        limit: Math.max(1, Math.floor(Number(existing.limit || 0) || 0), Math.floor(Number(raw.limit || 0) || 0)),
+        updatedAt: FieldValue.serverTimestamp(),
+        createdAt: canonicalSnap.exists ? existing.createdAt || FieldValue.serverTimestamp() : FieldValue.serverTimestamp()
+      };
+      tx.set(canonicalUsageRef, merged, { merge: true });
+      tx.delete(usageDoc.ref);
+    });
+  }
+}
+
+async function consolidateUsersByEmail(email: string, canonicalUid: string) {
+  const db = getFirebaseAdminDb();
+  const usersSnap = await db.collection(USER_COLLECTION).where("email", "==", email).get();
+  const docs = usersSnap.docs.map((doc) => ({ id: doc.id, data: (doc.data() || {}) as Record<string, unknown> }));
+  const canonical = docs.find((doc) => doc.id === canonicalUid);
+  if (!canonical) {
+    return;
+  }
+  const duplicates = docs.filter((doc) => doc.id !== canonicalUid);
+  if (!duplicates.length) {
+    return;
+  }
+
+  for (const dup of duplicates) {
+    const canonicalRef = db.collection(USER_COLLECTION).doc(canonicalUid);
+    const duplicateRef = db.collection(USER_COLLECTION).doc(dup.id);
+    await db.runTransaction(async (tx) => {
+      const [canonicalSnap, duplicateSnap] = await Promise.all([tx.get(canonicalRef), tx.get(duplicateRef)]);
+      if (!duplicateSnap.exists) {
+        return;
+      }
+      const canonicalRaw = (canonicalSnap.data() || {}) as Record<string, unknown>;
+      const duplicateRaw = (duplicateSnap.data() || {}) as Record<string, unknown>;
+      const mergedPrompts =
+        Math.max(0, Math.floor(Number(canonicalRaw.promptsImprovedTotal || 0) || 0)) +
+        Math.max(0, Math.floor(Number(duplicateRaw.promptsImprovedTotal || 0) || 0));
+      const mergedAllTimeMax = Math.max(
+        Math.max(0, Math.floor(Number(canonicalRaw.allTimeMaxDailyTokenUsage || 0) || 0)),
+        Math.max(0, Math.floor(Number(duplicateRaw.allTimeMaxDailyTokenUsage || 0) || 0))
+      );
+      const nextPatch: Record<string, unknown> = {
+        promptsImprovedTotal: mergedPrompts,
+        allTimeMaxDailyTokenUsage: mergedAllTimeMax,
+        updatedAt: FieldValue.serverTimestamp()
+      };
+      if (billingTierFromUserDoc(canonicalRaw) !== "pro" && billingTierFromUserDoc(duplicateRaw) === "pro") {
+        nextPatch.subscriptionTier = "pro";
+      }
+      if (!canonicalRaw.dailyTokenLimitOverride && duplicateRaw.dailyTokenLimitOverride) {
+        nextPatch.dailyTokenLimitOverride = duplicateRaw.dailyTokenLimitOverride;
+      }
+      if (!canonicalRaw.stripeCustomerId && duplicateRaw.stripeCustomerId) {
+        nextPatch.stripeCustomerId = duplicateRaw.stripeCustomerId;
+      }
+      if (!canonicalRaw.stripeSubscriptionId && duplicateRaw.stripeSubscriptionId) {
+        nextPatch.stripeSubscriptionId = duplicateRaw.stripeSubscriptionId;
+      }
+      tx.set(canonicalRef, nextPatch, { merge: true });
+      tx.set(
+        duplicateRef,
+        {
+          email: null,
+          previousEmail: email,
+          mergedIntoUid: canonicalUid,
+          duplicateDisabled: true,
+          mergedAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp()
+        },
+        { merge: true }
+      );
+    });
+    await mergeDuplicateUsageIntoCanonical(canonicalUid, dup.id);
+  }
+
+  const canonicalAfter = ((await db.collection(USER_COLLECTION).doc(canonicalUid).get()).data() || {}) as Record<string, unknown>;
+  const limits = await loadTierTokenLimits();
+  const effective = effectiveDailyTokenLimitFromUserData(canonicalAfter, limits);
+  await db.collection(USER_COLLECTION).doc(canonicalUid).set(
+    { dailyTokenLimit: effective, updatedAt: FieldValue.serverTimestamp() },
+    { merge: true }
+  );
+}
+
+async function resolveCanonicalUidForEmail(email: string, preferredUid: string | null): Promise<string> {
+  const normalizedEmail = normalizeUserEmail(email);
+  if (!normalizedEmail) {
+    if (preferredUid) {
+      return preferredUid;
+    }
+    throw new Error("Missing email for canonical user mapping");
+  }
+  const db = getFirebaseAdminDb();
+  const emailIndexRef = db.collection(USER_EMAIL_INDEX_COLLECTION).doc(normalizedEmail);
+  const [indexSnap, usersSnap] = await Promise.all([
+    emailIndexRef.get(),
+    db.collection(USER_COLLECTION).where("email", "==", normalizedEmail).get()
+  ]);
+  const indexedUidRaw = (indexSnap.data()?.uid as string | undefined) || null;
+  const docs = usersSnap.docs.map((doc) => ({ id: doc.id, data: (doc.data() || {}) as Record<string, unknown> }));
+  const canonicalUid = pickCanonicalUserIdForEmail(docs, preferredUid, indexedUidRaw);
+  if (!canonicalUid) {
+    return preferredUid || `google_${normalizedEmail.replace(/[^a-z0-9]+/gi, "_")}`;
+  }
+  await emailIndexRef.set(
+    {
+      email: normalizedEmail,
+      uid: canonicalUid,
+      updatedAt: FieldValue.serverTimestamp()
+    },
+    { merge: true }
+  );
+  if (docs.length > 1) {
+    await consolidateUsersByEmail(normalizedEmail, canonicalUid);
+  }
+  return canonicalUid;
+}
+
 async function upsertPromptlyUser(userId: string, email: string | null, patch: Record<string, unknown> = {}) {
+  const normalizedEmail = normalizeUserEmail(email);
   const db = getFirebaseAdminDb();
   const userRef = db.collection(USER_COLLECTION).doc(userId);
   const snap = await userRef.get();
@@ -385,7 +586,7 @@ async function upsertPromptlyUser(userId: string, email: string | null, patch: R
   const dailyTokenLimit = effectiveDailyTokenLimitFromUserData(mergedForLimit, limits);
   const promptlyUser: PromptlyUser = {
     uid: userId,
-    email,
+    email: normalizedEmail,
     plan: String(existing.plan || "free"),
     dailyTokenLimit,
     promptsImprovedTotal: Math.max(0, Math.floor(Number(existing.promptsImprovedTotal || 0) || 0)),
@@ -414,20 +615,17 @@ async function resolvePromptlyUserFromGoogleAccessToken(request: Request) {
     return null;
   }
   const cached = googleAccessTokenCache.get(accessToken);
-  const hintedEmail = readUserEmailHeader(request);
+  const hintedEmail = normalizeUserEmail(readUserEmailHeader(request));
   if (cached && cached.expiresAt > Date.now()) {
     if (hintedEmail && cached.email && hintedEmail !== cached.email) {
       throw new Error("Google account email does not match signed-in Chrome Gmail");
     }
-    const db = getFirebaseAdminDb();
     if (cached.email) {
-      const existingByEmail = await db.collection(USER_COLLECTION).where("email", "==", cached.email).limit(1).get();
-      if (!existingByEmail.empty) {
-        return upsertPromptlyUser(existingByEmail.docs[0].id, cached.email, {
-          googleSub: cached.sub,
-          provider: "google-extension"
-        });
-      }
+      const canonicalUid = await resolveCanonicalUidForEmail(cached.email, `google_${cached.sub}`);
+      return upsertPromptlyUser(canonicalUid, cached.email, {
+        googleSub: cached.sub,
+        provider: "google-extension"
+      });
     }
     return upsertPromptlyUser(`google_${cached.sub}`, cached.email, {
       googleSub: cached.sub,
@@ -444,7 +642,7 @@ async function resolvePromptlyUserFromGoogleAccessToken(request: Request) {
   if (!response.ok) {
     throw new Error(String(body?.error_description || body?.error || "Invalid Google access token"));
   }
-  const email = String(body.email || "").trim().toLowerCase() || null;
+  const email = normalizeUserEmail(body.email);
   const sub = String(body.sub || "").trim();
   if (!sub) {
     throw new Error("Google user info missing subject");
@@ -458,15 +656,12 @@ async function resolvePromptlyUserFromGoogleAccessToken(request: Request) {
     sub
   });
 
-  const db = getFirebaseAdminDb();
   if (email) {
-    const existingByEmail = await db.collection(USER_COLLECTION).where("email", "==", email).limit(1).get();
-    if (!existingByEmail.empty) {
-      return upsertPromptlyUser(existingByEmail.docs[0].id, email, {
-        googleSub: sub,
-        provider: "google-extension"
-      });
-    }
+    const canonicalUid = await resolveCanonicalUidForEmail(email, `google_${sub}`);
+    return upsertPromptlyUser(canonicalUid, email, {
+      googleSub: sub,
+      provider: "google-extension"
+    });
   }
 
   return upsertPromptlyUser(`google_${sub}`, email, {
@@ -487,8 +682,9 @@ export async function requirePromptlyUser(request: Request): Promise<{
   const rawToken = readFirebaseToken(request);
   if (rawToken) {
     const decoded = await getFirebaseAdminAuth().verifyIdToken(rawToken);
-    const email = String(decoded.email || "").trim().toLowerCase() || null;
-    const user = await upsertPromptlyUser(decoded.uid, email, {
+    const email = normalizeUserEmail(decoded.email);
+    const canonicalUid = email ? await resolveCanonicalUidForEmail(email, decoded.uid) : decoded.uid;
+    const user = await upsertPromptlyUser(canonicalUid, email, {
       provider: "firebase"
     });
     return { ok: true, user };
@@ -512,8 +708,9 @@ export async function requireWebFirebaseUser(request: Request): Promise<{
     throw new Error("Missing Firebase auth token");
   }
   const decoded = await getFirebaseAdminAuth().verifyIdToken(rawToken);
-  const email = String(decoded.email || "").trim().toLowerCase() || null;
-  const promptlyUser = await upsertPromptlyUser(decoded.uid, email, {
+  const email = normalizeUserEmail(decoded.email);
+  const canonicalUid = email ? await resolveCanonicalUidForEmail(email, decoded.uid) : decoded.uid;
+  const promptlyUser = await upsertPromptlyUser(canonicalUid, email, {
     provider: "firebase"
   });
   return { ok: true, user: promptlyUser };
@@ -1287,18 +1484,20 @@ export async function adminGetTierLimits(): Promise<{
   ok: true;
   free_daily_token_limit: number;
   pro_daily_token_limit: number;
-  defaults: TierTokenLimits;
+  global_daily_token_limit: number | null;
+  defaults: { free: number; pro: number; global: number | null };
 }> {
   const limits = await loadTierTokenLimits();
   return {
     ok: true,
     free_daily_token_limit: limits.free,
     pro_daily_token_limit: limits.pro,
-    defaults: { free: DAILY_API_TOKEN_LIMIT_DEFAULT, pro: DEFAULT_PRO_DAILY_TOKEN_LIMIT }
+    global_daily_token_limit: limits.globalCap,
+    defaults: { free: DAILY_API_TOKEN_LIMIT_DEFAULT, pro: DEFAULT_PRO_DAILY_TOKEN_LIMIT, global: null }
   };
 }
 
-export async function adminSaveTierLimits(patch: Partial<{ free: number; pro: number }>) {
+export async function adminSaveTierLimits(patch: Partial<{ free: number; pro: number; global: number | null }>) {
   const current = await loadTierTokenLimits();
   const free =
     typeof patch.free === "number" && Number.isFinite(patch.free)
@@ -1308,6 +1507,12 @@ export async function adminSaveTierLimits(patch: Partial<{ free: number; pro: nu
     typeof patch.pro === "number" && Number.isFinite(patch.pro)
       ? Math.max(1, Math.min(Math.floor(patch.pro), ADMIN_DAILY_TOKEN_LIMIT_MAX))
       : current.pro;
+  const globalCap =
+    patch.global === null
+      ? null
+      : typeof patch.global === "number" && Number.isFinite(patch.global)
+        ? Math.max(1, Math.min(Math.floor(patch.global), ADMIN_DAILY_TOKEN_LIMIT_MAX))
+        : current.globalCap;
   await getFirebaseAdminDb()
     .collection(PROMPT_SETTINGS_COLLECTION)
     .doc(TIER_LIMITS_DOC_ID)
@@ -1315,12 +1520,18 @@ export async function adminSaveTierLimits(patch: Partial<{ free: number; pro: nu
       {
         freeDailyTokenLimit: free,
         proDailyTokenLimit: pro,
+        globalDailyTokenLimit: globalCap,
         updatedAt: FieldValue.serverTimestamp()
       },
       { merge: true }
     );
   invalidateTierLimitsCache();
-  return { ok: true as const, free_daily_token_limit: free, pro_daily_token_limit: pro };
+  return {
+    ok: true as const,
+    free_daily_token_limit: free,
+    pro_daily_token_limit: pro,
+    global_daily_token_limit: globalCap
+  };
 }
 
 export async function getCreditsForUser(user: PromptlyUser, request: Request) {
@@ -1434,6 +1645,12 @@ export async function getAdminUserDetail(userId: string, days: number) {
     return { ok: false as const, error: "User not found" };
   }
   const raw = (userSnap.data() || {}) as Record<string, unknown>;
+  if (typeof raw.mergedIntoUid === "string" && raw.mergedIntoUid.trim()) {
+    return {
+      ok: false as const,
+      error: `User merged into canonical account ${raw.mergedIntoUid}`
+    };
+  }
   const tierLimits = await loadTierTokenLimits();
   const dailyLimit = effectiveDailyTokenLimitFromUserData(raw, tierLimits);
   const overrideRaw = raw.dailyTokenLimitOverride;
@@ -1587,8 +1804,12 @@ export async function getAdminUsers(days: number) {
 
   const today = getUtcDay();
   const listLimits = await loadTierTokenLimits();
-  const users = usersSnap.docs.map((doc) => {
+  const users = usersSnap.docs
+    .map((doc) => {
     const raw = doc.data() as Record<string, unknown>;
+      if (raw.duplicateDisabled || typeof raw.mergedIntoUid === "string") {
+        return null;
+      }
     const uid = String(raw.uid || doc.id);
     const dailyLimit = effectiveDailyTokenLimitFromUserData(raw, listLimits);
     const dayTokens = usageByUser.get(uid) || new Map<string, number>();
@@ -1601,26 +1822,80 @@ export async function getAdminUsers(days: number) {
     const last7Days = recentDays.slice(-7).map((day) => dayTokens.get(day) || 0);
     const sevenDayMaxDailyTokenUsage = last7Days.length ? Math.max(...last7Days) : 0;
 
-    return {
-      user_id: uid,
-      email: typeof raw.email === "string" ? raw.email : null,
-      avg_daily_token_usage: avgDailyTokenUsage,
-      seven_day_max_daily_token_usage: sevenDayMaxDailyTokenUsage,
-      all_time_max_daily_token_usage: Math.max(
-        0,
-        Math.floor(Number(raw.allTimeMaxDailyTokenUsage || 0) || 0)
-      ),
-      daily_token_limit: dailyLimit,
-      today_tokens: dayTokens.get(today) || 0,
-      prompts_improved: Math.max(0, Math.floor(Number(raw.promptsImprovedTotal || 0) || 0))
-    };
-  });
+      return {
+        user_id: uid,
+        email: typeof raw.email === "string" ? raw.email : null,
+        avg_daily_token_usage: avgDailyTokenUsage,
+        seven_day_max_daily_token_usage: sevenDayMaxDailyTokenUsage,
+        all_time_max_daily_token_usage: Math.max(
+          0,
+          Math.floor(Number(raw.allTimeMaxDailyTokenUsage || 0) || 0)
+        ),
+        daily_token_limit: dailyLimit,
+        today_tokens: dayTokens.get(today) || 0,
+        prompts_improved: Math.max(0, Math.floor(Number(raw.promptsImprovedTotal || 0) || 0))
+      };
+    })
+    .filter((user): user is NonNullable<typeof user> => Boolean(user));
 
   users.sort((a, b) => b.today_tokens - a.today_tokens);
   return {
     ok: true,
     range_days: rangeDays,
     users
+  };
+}
+
+export async function adminConsolidateDuplicateUsers(maxEmails = 500) {
+  const db = getFirebaseAdminDb();
+  const usersSnap = await db.collection(USER_COLLECTION).get();
+  const byEmail = new Map<string, Array<{ id: string; data: Record<string, unknown> }>>();
+  for (const doc of usersSnap.docs) {
+    const raw = (doc.data() || {}) as Record<string, unknown>;
+    const email = normalizeUserEmail(raw.email);
+    if (!email) {
+      continue;
+    }
+    if (!byEmail.has(email)) {
+      byEmail.set(email, []);
+    }
+    byEmail.get(email)!.push({ id: doc.id, data: raw });
+  }
+
+  let processed = 0;
+  let mergedGroups = 0;
+  let mergedAccounts = 0;
+
+  for (const [email, docs] of byEmail.entries()) {
+    if (processed >= Math.max(1, Math.floor(maxEmails))) {
+      break;
+    }
+    processed += 1;
+    if (docs.length <= 1) {
+      continue;
+    }
+    const canonicalUid = pickCanonicalUserIdForEmail(docs, null, null);
+    if (!canonicalUid) {
+      continue;
+    }
+    mergedGroups += 1;
+    mergedAccounts += Math.max(0, docs.length - 1);
+    await consolidateUsersByEmail(email, canonicalUid);
+    await db.collection(USER_EMAIL_INDEX_COLLECTION).doc(email).set(
+      {
+        email,
+        uid: canonicalUid,
+        updatedAt: FieldValue.serverTimestamp()
+      },
+      { merge: true }
+    );
+  }
+
+  return {
+    ok: true as const,
+    scanned_email_groups: processed,
+    merged_email_groups: mergedGroups,
+    merged_accounts: mergedAccounts
   };
 }
 
