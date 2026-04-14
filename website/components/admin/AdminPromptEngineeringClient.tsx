@@ -10,6 +10,11 @@ type EngineeringResponse = {
   rewrite_auto_template?: string;
   rewrite_manual_template?: string;
   compose_template?: string;
+  rewrite_timeout_ms?: number;
+  create_timeout_ms?: number;
+  rewrite_max_completion_tokens?: number;
+  create_max_completion_tokens?: number;
+  create_continuation_max_rounds?: number;
   error?: string;
 };
 
@@ -18,6 +23,11 @@ export function AdminPromptEngineeringClient() {
   const [autoT, setAutoT] = useState("");
   const [manualT, setManualT] = useState("");
   const [composeT, setComposeT] = useState("");
+  const [rewriteTimeoutMs, setRewriteTimeoutMs] = useState(20000);
+  const [createTimeoutMs, setCreateTimeoutMs] = useState(45000);
+  const [rewriteMaxTokens, setRewriteMaxTokens] = useState(1200);
+  const [createMaxTokens, setCreateMaxTokens] = useState(2800);
+  const [createContinuationRounds, setCreateContinuationRounds] = useState(3);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -39,6 +49,21 @@ export function AdminPromptEngineeringClient() {
       setAutoT(data.rewrite_auto_template || "");
       setManualT(data.rewrite_manual_template || "");
       setComposeT(data.compose_template || "");
+      setRewriteTimeoutMs(
+        Number.isFinite(data.rewrite_timeout_ms) ? Number(data.rewrite_timeout_ms) : 20000
+      );
+      setCreateTimeoutMs(
+        Number.isFinite(data.create_timeout_ms) ? Number(data.create_timeout_ms) : 45000
+      );
+      setRewriteMaxTokens(
+        Number.isFinite(data.rewrite_max_completion_tokens) ? Number(data.rewrite_max_completion_tokens) : 1200
+      );
+      setCreateMaxTokens(
+        Number.isFinite(data.create_max_completion_tokens) ? Number(data.create_max_completion_tokens) : 2800
+      );
+      setCreateContinuationRounds(
+        Number.isFinite(data.create_continuation_max_rounds) ? Number(data.create_continuation_max_rounds) : 3
+      );
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));
     } finally {
@@ -61,7 +86,12 @@ export function AdminPromptEngineeringClient() {
         body: JSON.stringify({
           rewrite_auto_template: autoT,
           rewrite_manual_template: manualT,
-          compose_template: composeT
+          compose_template: composeT,
+          rewrite_timeout_ms: rewriteTimeoutMs,
+          create_timeout_ms: createTimeoutMs,
+          rewrite_max_completion_tokens: rewriteMaxTokens,
+          create_max_completion_tokens: createMaxTokens,
+          create_continuation_max_rounds: createContinuationRounds
         })
       });
       const data = await res.json().catch(() => ({}));
@@ -69,7 +99,7 @@ export function AdminPromptEngineeringClient() {
         setError(typeof data.error === "string" ? data.error : "Save failed");
         return;
       }
-      setMessage("Saved. The next optimize calls will use these templates (cached ~45s on server).");
+      setMessage("Saved. New templates and runtime controls apply on next optimize calls (cache ~45s).");
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));
     } finally {
@@ -95,6 +125,12 @@ export function AdminPromptEngineeringClient() {
             className="rounded-lg border border-violet-500/40 px-3 py-2 text-sm text-violet-200 hover:bg-violet-500/10"
           >
             ← Dashboard
+          </Link>
+          <Link
+            href="/admin/plan-limits"
+            className="rounded-lg border border-violet-500/40 px-3 py-2 text-sm text-violet-200 hover:bg-violet-500/10"
+          >
+            Plan limits
           </Link>
           <AdminLogoutButton />
         </div>
@@ -158,6 +194,77 @@ export function AdminPromptEngineeringClient() {
             />
           </section>
 
+          <section className="rounded-2xl border border-violet-500/20 bg-[#221830]/60 p-5">
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-violet-300/90">
+              Runtime controls
+            </h2>
+            <p className="mb-4 text-xs text-violet-200/70">
+              Control provider timeouts and output budget without redeploying Vercel env vars.
+            </p>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <label className="flex flex-col gap-1 text-xs text-violet-200/80">
+                Rewrite timeout (ms)
+                <input
+                  type="number"
+                  min={8000}
+                  max={120000}
+                  step={1000}
+                  value={rewriteTimeoutMs}
+                  onChange={(e) => setRewriteTimeoutMs(Number(e.target.value) || 20000)}
+                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-violet-200/80">
+                Create timeout (ms)
+                <input
+                  type="number"
+                  min={10000}
+                  max={180000}
+                  step={1000}
+                  value={createTimeoutMs}
+                  onChange={(e) => setCreateTimeoutMs(Number(e.target.value) || 45000)}
+                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-violet-200/80">
+                Rewrite max completion tokens
+                <input
+                  type="number"
+                  min={180}
+                  max={4000}
+                  step={10}
+                  value={rewriteMaxTokens}
+                  onChange={(e) => setRewriteMaxTokens(Number(e.target.value) || 1200)}
+                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-violet-200/80">
+                Create max completion tokens
+                <input
+                  type="number"
+                  min={500}
+                  max={8000}
+                  step={25}
+                  value={createMaxTokens}
+                  onChange={(e) => setCreateMaxTokens(Number(e.target.value) || 2800)}
+                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-violet-200/80 sm:col-span-2">
+                Create continuation rounds (for truncated outputs)
+                <input
+                  type="number"
+                  min={1}
+                  max={6}
+                  step={1}
+                  value={createContinuationRounds}
+                  onChange={(e) => setCreateContinuationRounds(Number(e.target.value) || 3)}
+                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
+                />
+              </label>
+            </div>
+          </section>
+
           <div className="flex justify-end">
             <button
               type="button"
@@ -165,7 +272,7 @@ export function AdminPromptEngineeringClient() {
               disabled={saving}
               className="rounded-xl bg-violet-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-violet-500 disabled:opacity-50"
             >
-              {saving ? "Saving…" : "Save all templates"}
+              {saving ? "Saving…" : "Save templates + runtime controls"}
             </button>
           </div>
         </div>

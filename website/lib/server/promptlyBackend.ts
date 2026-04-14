@@ -272,6 +272,11 @@ function isProviderTimeoutError(error: unknown) {
   return /timed out|timeout/i.test(message);
 }
 
+function isProviderNoContentError(error: unknown) {
+  const message = String(error instanceof Error ? error.message : error || "");
+  return /provider returned no content/i.test(message);
+}
+
 function getRewriteFallbackModel(primaryModel: string) {
   const configured =
     String(process.env.OPENAI_MODEL_REWRITE_FALLBACK || process.env.OPENAI_MODEL_FALLBACK || "").trim() ||
@@ -296,16 +301,23 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, Math.floor(value)));
 }
 
-function getMaxCompletionTokens(prompt: string, requestMode: string, rewriteMode: "AUTO" | "MANUAL") {
+function getMaxCompletionTokens(
+  prompt: string,
+  requestMode: string,
+  rewriteMode: "AUTO" | "MANUAL",
+  controls?: Pick<PromptEngineeringRuntimeControls, "rewrite_max_completion_tokens" | "create_max_completion_tokens">
+) {
   const estimatedPromptTokens = estimateTokensFromChars(String(prompt || "").length);
+  const rewriteMax = normalizeRuntimeControl(controls?.rewrite_max_completion_tokens, 1200, 180, 4000);
+  const createMax = normalizeRuntimeControl(controls?.create_max_completion_tokens, 2800, 500, 8000);
   if (requestMode === "create") {
     // Create needs a larger budget to avoid visibly truncated outputs.
-    return clamp(estimatedPromptTokens * 2.6, 900, 2800);
+    return clamp(estimatedPromptTokens * 2.6, 900, createMax);
   }
   if (rewriteMode === "MANUAL") {
-    return clamp(estimatedPromptTokens * 2, 280, 1200);
+    return clamp(estimatedPromptTokens * 2, 280, rewriteMax);
   }
-  return clamp(estimatedPromptTokens * 1.7, 180, 650);
+  return clamp(estimatedPromptTokens * 1.7, 180, Math.min(650, rewriteMax));
 }
 
 function getExtensionBaseUrl() {
@@ -541,10 +553,43 @@ export type PromptEngineeringTemplates = {
   compose_template: string;
 };
 
-let promptEngineeringCache: { at: number; templates: PromptEngineeringTemplates } | null = null;
+export type PromptEngineeringRuntimeControls = {
+  rewrite_timeout_ms: number;
+  create_timeout_ms: number;
+  rewrite_max_completion_tokens: number;
+  create_max_completion_tokens: number;
+  create_continuation_max_rounds: number;
+};
+
+type PromptEngineeringConfig = PromptEngineeringTemplates & PromptEngineeringRuntimeControls;
+
+let promptEngineeringCache: { at: number; config: PromptEngineeringConfig } | null = null;
 
 function invalidatePromptEngineeringCache() {
   promptEngineeringCache = null;
+}
+
+function getDefaultPromptEngineeringRuntimeControls(): PromptEngineeringRuntimeControls {
+  return {
+    rewrite_timeout_ms: getRewriteTimeoutMs(),
+    create_timeout_ms: getGenerateTimeoutMs(),
+    rewrite_max_completion_tokens: 1200,
+    create_max_completion_tokens: 2800,
+    create_continuation_max_rounds: CREATE_CONTINUATION_MAX_ROUNDS
+  };
+}
+
+function normalizeRuntimeControl(
+  raw: unknown,
+  fallback: number,
+  min: number,
+  max: number
+): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) {
+    return fallback;
+  }
+  return Math.max(min, Math.min(max, Math.floor(n)));
 }
 
 function getDefaultPromptEngineeringTemplates(): PromptEngineeringTemplates {
@@ -568,10 +613,10 @@ Match the user's goal. Be specific and actionable. Keep the final prompt concise
   };
 }
 
-async function loadPromptEngineeringTemplates(): Promise<PromptEngineeringTemplates> {
+async function loadPromptEngineeringConfig(): Promise<PromptEngineeringConfig> {
   const now = Date.now();
   if (promptEngineeringCache && now - promptEngineeringCache.at < PROMPT_ENGINEERING_CACHE_MS) {
-    return promptEngineeringCache.templates;
+    return promptEngineeringCache.config;
   }
   const snap = await getFirebaseAdminDb()
     .collection(PROMPT_SETTINGS_COLLECTION)
@@ -588,8 +633,42 @@ async function loadPromptEngineeringTemplates(): Promise<PromptEngineeringTempla
     rewrite_manual_template: pick("rewrite_manual_template"),
     compose_template: pick("compose_template")
   };
-  promptEngineeringCache = { at: now, templates };
-  return templates;
+  const defaultsRuntime = getDefaultPromptEngineeringRuntimeControls();
+  const runtime: PromptEngineeringRuntimeControls = {
+    rewrite_timeout_ms: normalizeRuntimeControl(
+      raw.rewrite_timeout_ms,
+      defaultsRuntime.rewrite_timeout_ms,
+      8000,
+      120000
+    ),
+    create_timeout_ms: normalizeRuntimeControl(
+      raw.create_timeout_ms,
+      defaultsRuntime.create_timeout_ms,
+      10000,
+      180000
+    ),
+    rewrite_max_completion_tokens: normalizeRuntimeControl(
+      raw.rewrite_max_completion_tokens,
+      defaultsRuntime.rewrite_max_completion_tokens,
+      180,
+      4000
+    ),
+    create_max_completion_tokens: normalizeRuntimeControl(
+      raw.create_max_completion_tokens,
+      defaultsRuntime.create_max_completion_tokens,
+      500,
+      8000
+    ),
+    create_continuation_max_rounds: normalizeRuntimeControl(
+      raw.create_continuation_max_rounds,
+      defaultsRuntime.create_continuation_max_rounds,
+      1,
+      6
+    )
+  };
+  const config: PromptEngineeringConfig = { ...templates, ...runtime };
+  promptEngineeringCache = { at: now, config };
+  return config;
 }
 
 function applyPromptTemplate(template: string, userContent: string) {
@@ -615,7 +694,7 @@ function validateTemplateLengths(templates: PromptEngineeringTemplates) {
 }
 
 export async function adminGetPromptEngineering(): Promise<
-  { ok: true; user_content_token: string } & PromptEngineeringTemplates
+  { ok: true; user_content_token: string } & PromptEngineeringTemplates & PromptEngineeringRuntimeControls
 > {
   const snap = await getFirebaseAdminDb()
     .collection(PROMPT_SETTINGS_COLLECTION)
@@ -623,6 +702,7 @@ export async function adminGetPromptEngineering(): Promise<
     .get();
   const raw = (snap.data() || {}) as Record<string, unknown>;
   const defaults = getDefaultPromptEngineeringTemplates();
+  const defaultsRuntime = getDefaultPromptEngineeringRuntimeControls();
   const coalesce = (key: keyof PromptEngineeringTemplates) =>
     typeof raw[key] === "string" && raw[key].trim().length > 0 ? String(raw[key]) : defaults[key];
 
@@ -631,11 +711,43 @@ export async function adminGetPromptEngineering(): Promise<
     user_content_token: PROMPTLY_USER_CONTENT_TOKEN,
     rewrite_auto_template: coalesce("rewrite_auto_template"),
     rewrite_manual_template: coalesce("rewrite_manual_template"),
-    compose_template: coalesce("compose_template")
+    compose_template: coalesce("compose_template"),
+    rewrite_timeout_ms: normalizeRuntimeControl(
+      raw.rewrite_timeout_ms,
+      defaultsRuntime.rewrite_timeout_ms,
+      8000,
+      120000
+    ),
+    create_timeout_ms: normalizeRuntimeControl(
+      raw.create_timeout_ms,
+      defaultsRuntime.create_timeout_ms,
+      10000,
+      180000
+    ),
+    rewrite_max_completion_tokens: normalizeRuntimeControl(
+      raw.rewrite_max_completion_tokens,
+      defaultsRuntime.rewrite_max_completion_tokens,
+      180,
+      4000
+    ),
+    create_max_completion_tokens: normalizeRuntimeControl(
+      raw.create_max_completion_tokens,
+      defaultsRuntime.create_max_completion_tokens,
+      500,
+      8000
+    ),
+    create_continuation_max_rounds: normalizeRuntimeControl(
+      raw.create_continuation_max_rounds,
+      defaultsRuntime.create_continuation_max_rounds,
+      1,
+      6
+    )
   };
 }
 
-export async function adminSavePromptEngineering(patch: Partial<PromptEngineeringTemplates>) {
+export async function adminSavePromptEngineering(
+  patch: Partial<PromptEngineeringTemplates & PromptEngineeringRuntimeControls>
+) {
   const current = await adminGetPromptEngineering();
   const next: PromptEngineeringTemplates = {
     rewrite_auto_template:
@@ -650,12 +762,45 @@ export async function adminSavePromptEngineering(patch: Partial<PromptEngineerin
       typeof patch.compose_template === "string" ? patch.compose_template : current.compose_template
   };
   validateTemplateLengths(next);
+  const nextRuntime: PromptEngineeringRuntimeControls = {
+    rewrite_timeout_ms: normalizeRuntimeControl(
+      patch.rewrite_timeout_ms,
+      current.rewrite_timeout_ms,
+      8000,
+      120000
+    ),
+    create_timeout_ms: normalizeRuntimeControl(
+      patch.create_timeout_ms,
+      current.create_timeout_ms,
+      10000,
+      180000
+    ),
+    rewrite_max_completion_tokens: normalizeRuntimeControl(
+      patch.rewrite_max_completion_tokens,
+      current.rewrite_max_completion_tokens,
+      180,
+      4000
+    ),
+    create_max_completion_tokens: normalizeRuntimeControl(
+      patch.create_max_completion_tokens,
+      current.create_max_completion_tokens,
+      500,
+      8000
+    ),
+    create_continuation_max_rounds: normalizeRuntimeControl(
+      patch.create_continuation_max_rounds,
+      current.create_continuation_max_rounds,
+      1,
+      6
+    )
+  };
   await getFirebaseAdminDb()
     .collection(PROMPT_SETTINGS_COLLECTION)
     .doc(PROMPT_ENGINEERING_DOC_ID)
     .set(
       {
         ...next,
+        ...nextRuntime,
         updatedAt: FieldValue.serverTimestamp()
       },
       { merge: true }
@@ -775,6 +920,7 @@ async function callOpenAi(options: {
   timeoutMs: number;
   maxCompletionTokens: number;
   requestMode: string;
+  createContinuationMaxRounds?: number;
 }) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort("timeout"), options.timeoutMs);
@@ -783,6 +929,12 @@ async function callOpenAi(options: {
   const url = useResponsesApi ? "https://api.openai.com/v1/responses" : "https://api.openai.com/v1/chat/completions";
 
   try {
+    const continuationRounds = normalizeRuntimeControl(
+      options.createContinuationMaxRounds,
+      CREATE_CONTINUATION_MAX_ROUNDS,
+      1,
+      6
+    );
     if (useResponsesApi) {
       // max_output_tokens counts reasoning + visible text. Omit reasoning on create so the budget goes to the prompt.
       // store:true for create enables previous_response_id continuation when output hits max_output_tokens.
@@ -808,7 +960,7 @@ async function callOpenAi(options: {
       let usage: OptimizerResult["usage"] = null;
       let previousId: string | null = null;
 
-      for (let round = 0; round < CREATE_CONTINUATION_MAX_ROUNDS; round++) {
+      for (let round = 0; round < continuationRounds; round++) {
         const requestBody: Record<string, unknown> =
           round === 0
             ? { ...baseResponsesFields, input: initialInput }
@@ -872,7 +1024,7 @@ async function callOpenAi(options: {
       let aggregated = "";
       let usage: OptimizerResult["usage"] = null;
 
-      for (let round = 0; round < CREATE_CONTINUATION_MAX_ROUNDS; round++) {
+      for (let round = 0; round < continuationRounds; round++) {
         const response = await fetch(url, {
           method: "POST",
           headers: {
@@ -962,14 +1114,14 @@ export async function optimizePrompt(prompt: string, userInstruction: string, re
   const trimmedInstruction = String(userInstruction || "").trim();
   const isCreate = requestMode === "create";
   const mode = trimmedInstruction.includes("MANUAL") ? "MANUAL" : "AUTO";
-  const templates = await loadPromptEngineeringTemplates();
+  const config = await loadPromptEngineeringConfig();
   const template = isCreate
-    ? String(templates.compose_template || "").length > FAST_CREATE_TEMPLATE_MAX_CHARS
+    ? String(config.compose_template || "").length > FAST_CREATE_TEMPLATE_MAX_CHARS
       ? getDefaultPromptEngineeringTemplates().compose_template
-      : templates.compose_template
+      : config.compose_template
     : mode === "MANUAL"
-      ? templates.rewrite_manual_template
-      : templates.rewrite_auto_template;
+      ? config.rewrite_manual_template
+      : config.rewrite_auto_template;
   const userSlotRaw = trimmedPrompt || trimmedInstruction;
   const userSlot = isCreate ? userSlotRaw.slice(0, FAST_CREATE_USER_SLOT_MAX_CHARS) : userSlotRaw;
   const bundledUserMessage = applyPromptTemplate(template, userSlot);
@@ -983,8 +1135,12 @@ export async function optimizePrompt(prompt: string, userInstruction: string, re
     : trimmedPrompt || userSlot;
   const requestOptions = {
     model,
-    timeoutMs: isCreate ? getGenerateTimeoutMs() : getRewriteTimeoutMs(),
-    maxCompletionTokens: getMaxCompletionTokens(completionEstimateSource, requestMode, mode)
+    timeoutMs: isCreate ? config.create_timeout_ms : config.rewrite_timeout_ms,
+    maxCompletionTokens: getMaxCompletionTokens(completionEstimateSource, requestMode, mode, {
+      rewrite_max_completion_tokens: config.rewrite_max_completion_tokens,
+      create_max_completion_tokens: config.create_max_completion_tokens
+    }),
+    createContinuationMaxRounds: config.create_continuation_max_rounds
   };
   const messages = [{ role: "user", content: bundledUserMessage }];
   let firstResult;
@@ -995,10 +1151,11 @@ export async function optimizePrompt(prompt: string, userInstruction: string, re
       ...requestOptions
     });
   } catch (error) {
+    const shouldFallback = isProviderTimeoutError(error) || isProviderNoContentError(error);
     const fallbackModel =
-      requestMode === "create" && isProviderTimeoutError(error)
+      requestMode === "create" && shouldFallback
           ? getCreateFallbackModel(model)
-        : requestMode === "rewrite" && isProviderTimeoutError(error)
+        : requestMode === "rewrite" && shouldFallback
           ? getRewriteFallbackModel(model)
           : "";
     if (!fallbackModel) {
@@ -1010,7 +1167,8 @@ export async function optimizePrompt(prompt: string, userInstruction: string, re
       requestMode,
       model,
       timeoutMs: Math.max(12000, requestOptions.timeoutMs),
-      maxCompletionTokens: requestOptions.maxCompletionTokens
+      maxCompletionTokens: requestOptions.maxCompletionTokens,
+      createContinuationMaxRounds: requestOptions.createContinuationMaxRounds
     });
   }
   const normalized = normalizePlainRewriteOutput(firstResult.rawText, trimmedPrompt || trimmedInstruction);
