@@ -7,9 +7,17 @@ const manageAccountBtn = document.getElementById("manageAccountBtn");
 
 const DEFAULT_APP_BASE_URL = "https://promptly-labs.com";
 
+function normalizeProxyBaseUrl(rawValue) {
+  const normalized = String(rawValue || "").trim().replace(/\/$/, "") || DEFAULT_APP_BASE_URL;
+  if (/\.workers\.dev(\/|$)/i.test(normalized)) {
+    return DEFAULT_APP_BASE_URL;
+  }
+  return normalized;
+}
+
 async function getExtensionAccountUrl() {
   const values = await chrome.storage.sync.get(["proxyBaseUrl"]);
-  const baseUrl = String(values.proxyBaseUrl || "").trim() || DEFAULT_APP_BASE_URL;
+  const baseUrl = normalizeProxyBaseUrl(values.proxyBaseUrl);
   return `${baseUrl.replace(/\/$/, "")}/auth/extension`;
 }
 

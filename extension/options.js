@@ -10,8 +10,16 @@ const DEFAULT_FIREBASE_WEB_API_KEY = "AIzaSyChQ2kiTwunWs9ElDYkU7Cz-i8I9dw29NI";
 const DEFAULT_FIREBASE_AUTH_DOMAIN = "promptly-prod-976ef.firebaseapp.com";
 const DEFAULT_FIREBASE_WEB_OAUTH_CLIENT_ID = "913040005574-npbiuat4hl1d3icqoe5lmtuh34qqd8d6.apps.googleusercontent.com";
 
+function normalizeProxyBaseUrl(rawValue) {
+  const normalized = String(rawValue || "").trim().replace(/\/$/, "") || DEFAULT_APP_BASE_URL;
+  if (/\.workers\.dev(\/|$)/i.test(normalized)) {
+    return DEFAULT_APP_BASE_URL;
+  }
+  return normalized;
+}
+
 function getAccountUrl() {
-  const baseUrl = String(proxyBaseUrlInput.value || "").trim() || DEFAULT_APP_BASE_URL;
+  const baseUrl = normalizeProxyBaseUrl(proxyBaseUrlInput.value);
   return `${baseUrl.replace(/\/$/, "")}/account`;
 }
 
@@ -22,7 +30,7 @@ async function load() {
     "firebaseAuthDomain",
     "firebaseOAuthWebClientId"
   ]);
-  proxyBaseUrlInput.value = values.proxyBaseUrl || DEFAULT_APP_BASE_URL;
+  proxyBaseUrlInput.value = normalizeProxyBaseUrl(values.proxyBaseUrl);
   firebaseWebApiKeyInput.value = values.firebaseWebApiKey || DEFAULT_FIREBASE_WEB_API_KEY;
   firebaseAuthDomainInput.value = values.firebaseAuthDomain || DEFAULT_FIREBASE_AUTH_DOMAIN;
   firebaseOAuthWebClientIdInput.value =
@@ -31,13 +39,20 @@ async function load() {
 }
 
 saveBtn.addEventListener("click", async () => {
+  const rawProxyBaseUrl = String(proxyBaseUrlInput.value || "").trim();
+  const normalizedProxyBaseUrl = normalizeProxyBaseUrl(rawProxyBaseUrl);
+  proxyBaseUrlInput.value = normalizedProxyBaseUrl;
   await chrome.storage.sync.set({
-    proxyBaseUrl: proxyBaseUrlInput.value.trim(),
+    proxyBaseUrl: normalizedProxyBaseUrl,
     firebaseWebApiKey: firebaseWebApiKeyInput.value.trim(),
     firebaseAuthDomain: firebaseAuthDomainInput.value.trim(),
     firebaseOAuthWebClientId: firebaseOAuthWebClientIdInput.value.trim()
   });
-  status.textContent = "Saved.";
+  status.textContent =
+    normalizedProxyBaseUrl === DEFAULT_APP_BASE_URL && /\.workers\.dev(\/|$)/i.test(rawProxyBaseUrl)
+      ? "Saved. Worker URL was replaced with https://promptly-labs.com so website admin settings apply."
+      : "Saved.";
+  showRedirectUriHint();
 });
 
 manageAccountBtn.addEventListener("click", () => {
@@ -49,10 +64,7 @@ function showRedirectUriHint() {
   if (!el || !chrome.identity?.getRedirectURL) {
     return;
   }
-  const appBase = String(proxyBaseUrlInput?.value || "")
-    .trim()
-    .replace(/\/$/, "")
-    .replace(/\/api$/i, "");
+  const appBase = normalizeProxyBaseUrl(proxyBaseUrlInput?.value).replace(/\/api$/i, "");
   const appRoot = appBase || DEFAULT_APP_BASE_URL.replace(/\/$/, "");
   const webOAuthRedirect = `${appRoot}/auth/extension-google-oauth`;
   const signInLanding = `${appRoot}/auth/extension-sign-in`;

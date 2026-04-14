@@ -233,7 +233,7 @@ function parseOAuthCallbackParams(search, hash) {
 }
 
 function appBaseUrlForWebRedirects(rawValue) {
-  let b = normalizeBaseUrl(rawValue);
+  let b = normalizeManagedBaseUrl(rawValue);
   if (b.endsWith("/api")) {
     b = b.slice(0, -4);
   }
@@ -437,6 +437,31 @@ async function launchGoogleWebAuthFlow(clientId) {
 function normalizeBaseUrl(rawValue) {
   const trimmed = String(rawValue || "").trim() || DEFAULT_PROXY_BASE_URL;
   return trimmed.replace(/\/$/, "");
+}
+
+function isWorkersDevBase(normalizedBase) {
+  const b = String(normalizedBase || "").toLowerCase();
+  return /\.workers\.dev(\/|$)/.test(b);
+}
+
+function normalizeManagedBaseUrl(rawValue) {
+  const normalized = normalizeBaseUrl(rawValue);
+  // Worker endpoints bypass website admin prompt-engineering controls.
+  if (isWorkersDevBase(normalized)) {
+    return DEFAULT_PROXY_BASE_URL;
+  }
+  return normalized;
+}
+
+async function getManagedProxyBaseUrl() {
+  const settings = await chrome.storage.sync.get(["proxyBaseUrl"]);
+  const raw = String(settings?.proxyBaseUrl || "").trim();
+  const normalizedRaw = normalizeBaseUrl(raw);
+  const managed = normalizeManagedBaseUrl(raw);
+  if (managed !== normalizedRaw) {
+    await chrome.storage.sync.set({ proxyBaseUrl: managed });
+  }
+  return managed;
 }
 
 /**
@@ -665,13 +690,17 @@ chrome.runtime.onInstalled.addListener(async () => {
     "firebaseOAuthWebClientId"
   ]);
   const next = {
-    proxyBaseUrl: String(existing.proxyBaseUrl || "").trim() || DEFAULT_PROXY_BASE_URL,
+    proxyBaseUrl: normalizeManagedBaseUrl(existing.proxyBaseUrl),
     firebaseWebApiKey: String(existing.firebaseWebApiKey || "").trim() || DEFAULT_FIREBASE_WEB_API_KEY,
     firebaseAuthDomain: String(existing.firebaseAuthDomain || "").trim() || DEFAULT_FIREBASE_AUTH_DOMAIN,
     firebaseOAuthWebClientId:
       String(existing.firebaseOAuthWebClientId || "").trim() || DEFAULT_FIREBASE_WEB_OAUTH_CLIENT_ID
   };
   await chrome.storage.sync.set(next);
+});
+
+chrome.runtime.onStartup.addListener(async () => {
+  await getManagedProxyBaseUrl();
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -731,8 +760,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         let subscriptionTier = "";
         try {
           const identity = await getFirebaseIdentityForApi(false);
-          const settings = await chrome.storage.sync.get(["proxyBaseUrl"]);
-          const baseUrl = normalizeBaseUrl(settings?.proxyBaseUrl);
+          const baseUrl = await getManagedProxyBaseUrl();
           const response = await fetch(buildApiUrl(baseUrl, "/api/account/billing"), {
             method: "GET",
             headers: {
@@ -803,9 +831,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           "x-promptly-google-access-token": googleAccessToken
         };
       }
-      const settings = await chrome.storage.sync.get(["proxyBaseUrl"]);
-      const { proxyBaseUrl } = settings || {};
-      const baseUrl = normalizeBaseUrl(proxyBaseUrl);
+      const baseUrl = await getManagedProxyBaseUrl();
       const prompt = String(message.prompt || "").trim();
       const userInstruction = String(message.userInstruction || "").trim();
       const requestMode = String(message.requestMode || "rewrite").trim() || "rewrite";

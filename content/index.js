@@ -48,6 +48,15 @@
   const visualStyleStorageKey = `promptly:visual-style:${site}`;
   const visualColorStorageKey = `promptly:visual-color:${site}`;
   const DEFAULT_APP_BASE_URL = "https://promptly-labs.com";
+
+  function normalizeProxyBaseUrl(rawValue) {
+    const normalized = String(rawValue || "").trim().replace(/\/$/, "") || DEFAULT_APP_BASE_URL;
+    if (/\.workers\.dev(\/|$)/i.test(normalized)) {
+      return DEFAULT_APP_BASE_URL;
+    }
+    return normalized;
+  }
+
   const promptLifecycleState = {
     lastObservedText: "",
     pendingProgrammaticText: null,
@@ -169,7 +178,7 @@
 
   async function getPromptlyAccountUrl() {
     const values = await chrome.storage.sync.get(["proxyBaseUrl"]);
-    const baseUrl = String(values.proxyBaseUrl || "").trim() || DEFAULT_APP_BASE_URL;
+    const baseUrl = normalizeProxyBaseUrl(values.proxyBaseUrl);
     return `${baseUrl.replace(/\/$/, "")}/account`;
   }
 
