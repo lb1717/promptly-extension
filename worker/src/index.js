@@ -828,14 +828,22 @@ export default {
     const started = Date.now();
     try {
       const optimized = await optimizePromptThroughProvider(env, prompt, userInstruction, requestMode);
-      const providerUsageTotal = Math.max(
+      const providerUsagePrompt = Math.max(0, toNumber(optimized?.usage?.prompt_tokens, 0));
+      const providerUsageCompletion = Math.max(0, toNumber(optimized?.usage?.completion_tokens, 0));
+      const providerUsageTotalRaw = Math.max(
         0,
-        toNumber(
-          optimized?.usage?.total_tokens,
-          toNumber(optimized?.usage?.totalTokens, 0)
-        )
+        toNumber(optimized?.usage?.total_tokens, toNumber(optimized?.usage?.totalTokens, 0))
       );
+      const providerUsageDerivedTotal = Math.max(0, providerUsagePrompt + providerUsageCompletion);
+      const providerUsageTotal =
+        providerUsageTotalRaw > 0 ? providerUsageTotalRaw : providerUsageDerivedTotal;
       const tokenCost = Math.max(1, providerUsageTotal || estimatedInputTokens);
+      const billingBasis =
+        providerUsageTotalRaw > 0
+          ? "provider_total_tokens"
+          : providerUsageDerivedTotal > 0
+            ? "provider_prompt_plus_completion"
+            : "estimated_input_tokens";
       const credits = await consumeDailyTokens(
         env,
         identity.userHash,
@@ -875,6 +883,9 @@ export default {
         optimized_prompt: optimized.optimized_prompt,
         clarifying_questions: optimized.clarifying_questions,
         assumptions: optimized.assumptions,
+        usage: optimized.usage || null,
+        billed_tokens: tokenCost,
+        billing_basis: billingBasis,
         credits: buildCreditsEnvelope(credits, dailyLimit, { estimatedInputTokens })
       };
 
@@ -895,6 +906,7 @@ export default {
         promptChars: prompt.length,
         estimatedInputTokens,
         tokenCost,
+        billingBasis,
         providerUsage: optimized.usage || null,
         responseChars: optimized.optimized_prompt.length,
         timestamp: new Date().toISOString()

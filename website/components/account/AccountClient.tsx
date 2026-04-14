@@ -118,8 +118,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
         provider: "google",
         updatedAt: serverTimestamp(),
         plan: "free",
-        subscriptionTier: "free",
-        dailyTokenLimit: 4_000_000
+        subscriptionTier: "free"
       },
       { merge: true }
     );

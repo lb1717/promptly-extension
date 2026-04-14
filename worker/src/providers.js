@@ -163,7 +163,8 @@ export async function callProvider(env, messages, timeoutMs = 12000, options = {
   try {
     const bodyPayload = {
       model: modelId,
-      messages
+      messages,
+      stream: false
     };
 
     if (cfg.provider === "openai" && !gpt5) {

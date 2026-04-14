@@ -112,6 +112,12 @@ export function AdminDashboardClient() {
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <Link
+            href="/admin/plan-limits"
+            className="rounded-xl border border-violet-500/35 px-3 py-2 text-xs font-semibold text-violet-100 hover:bg-violet-500/15"
+          >
+            Plan limits
+          </Link>
+          <Link
             href="/admin/prompt-engineering"
             className="rounded-xl border border-violet-500/35 px-3 py-2 text-xs font-semibold text-violet-100 hover:bg-violet-500/15"
           >

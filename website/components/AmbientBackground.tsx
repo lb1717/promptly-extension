@@ -98,12 +98,19 @@ function lineAlpha(t: number, e: Edge): number {
   return Math.min(0.4, base + flashLift);
 }
 
+type AmbientBackgroundProps = {
+  /** `static` skips the animated canvas (no constant rAF work); better for long content pages. */
+  variant?: "canvas" | "static";
+};
+
 /** Fills its positioned parent. Graph is built once at first layout (normalized coords); resize only updates the canvas, not topology. */
-export function AmbientBackground() {
+export function AmbientBackground({ variant = "canvas" }: AmbientBackgroundProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
 
   useEffect(() => {
+    if (variant !== "canvas") return;
+
     const canvas = canvasRef.current;
     if (!canvas) return;
     if (!canvas.getContext("2d")) return;
@@ -242,7 +249,16 @@ export function AmbientBackground() {
       window.removeEventListener("resize", onWinResize);
       cancelAnimationFrame(rafRef.current);
     };
-  }, []);
+  }, [variant]);
+
+  if (variant === "static") {
+    return (
+      <div
+        className="pointer-events-none absolute inset-0 z-0 min-h-full bg-black bg-[radial-gradient(ellipse_120%_85%_at_50%_-25%,rgba(91,33,182,0.22),transparent_55%),radial-gradient(ellipse_90%_60%_at_100%_40%,rgba(139,92,246,0.09),transparent_50%)]"
+        aria-hidden
+      />
+    );
+  }
 
   return (
     <canvas

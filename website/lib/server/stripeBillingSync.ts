@@ -1,5 +1,6 @@
 import { FieldValue, Firestore, Timestamp } from "firebase-admin/firestore";
 import type Stripe from "stripe";
+import { applyBillingDerivedDailyTokenLimit } from "@/lib/server/promptlyBackend";
 
 function tierFromSubscriptionMetadata(metaRaw: string): string {
   const meta = metaRaw.toLowerCase().replace(/\s+/g, "_").replace(/-/g, "_");
@@ -44,6 +45,7 @@ export async function syncUserBillingFromSubscription(
     },
     { merge: true }
   );
+  await applyBillingDerivedDailyTokenLimit(firebaseUid);
 }
 
 export async function attachDefaultPaymentMethod(

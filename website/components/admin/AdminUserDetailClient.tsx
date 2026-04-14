@@ -12,7 +12,9 @@ type DetailResponse = {
     user_id: string;
     email: string | null;
     plan: string;
+    subscription_tier?: string;
     daily_token_limit: number;
+    daily_token_limit_override?: number | null;
     prompts_improved: number;
     all_time_max_daily_token_usage: number;
     provider: string | null;
@@ -70,9 +72,8 @@ export function AdminUserDetailClient({ userId }: { userId: string }) {
         return;
       }
       setData(json);
-      if (json.user?.daily_token_limit != null) {
-        setLimitInput(String(json.user.daily_token_limit));
-      }
+      const ov = json.user?.daily_token_limit_override;
+      setLimitInput(ov != null && ov !== undefined ? String(ov) : "");
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));
     } finally {
@@ -87,10 +88,12 @@ export function AdminUserDetailClient({ userId }: { userId: string }) {
   }, [load]);
 
   async function saveLimit() {
-    const next = Math.floor(Number(limitInput));
-    if (!Number.isFinite(next) || next < 1) {
+    const trimmed = limitInput.trim();
+    const payload =
+      trimmed === "" ? { daily_token_limit: null as null } : { daily_token_limit: Math.floor(Number(trimmed)) };
+    if (trimmed !== "" && (!Number.isFinite(payload.daily_token_limit as number) || (payload.daily_token_limit as number) < 1)) {
       setMessage("");
-      setError("Enter a positive number for the daily limit.");
+      setError("Enter a positive number, or leave empty to use the plan default from Plan limits.");
       return;
     }
     setSaving(true);
@@ -100,14 +103,18 @@ export function AdminUserDetailClient({ userId }: { userId: string }) {
       const res = await fetch(`/api/admin/users/${encodeURIComponent(userId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ daily_token_limit: next })
+        body: JSON.stringify(payload)
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(String(json.error || "Save failed"));
         return;
       }
-      setMessage(`Saved. New daily limit: ${formatNumber(json.daily_token_limit ?? next)} tokens (UTC day).`);
+      setMessage(
+        trimmed === ""
+          ? "Cleared override. User now follows Free / Pro caps from Plan limits admin."
+          : `Saved manual override: ${formatNumber(json.daily_token_limit ?? trimmed)} tokens (UTC day).`
+      );
       await load();
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));
@@ -167,21 +174,28 @@ export function AdminUserDetailClient({ userId }: { userId: string }) {
         <>
           <section className="mb-8 rounded-2xl border border-violet-500/20 bg-[#221830]/60 p-5">
             <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-violet-300/90">
-              Throttle abuse — daily token limit
+              Daily token limit
             </h2>
             <p className="mb-4 text-xs text-violet-200/70">
-              Same units as OpenAI <code className="text-violet-100">usage.total_tokens</code>. Resets at UTC
-              midnight. Extension and API pick this up on the next request.
+              <span className="text-violet-100">Effective limit now:</span>{" "}
+              {formatNumber(u.daily_token_limit)} tokens / UTC day (from{" "}
+              <span className="text-violet-100">{u.subscription_tier || "free"}</span> plan in{" "}
+              <Link href="/admin/plan-limits" className="text-violet-300 underline-offset-2 hover:underline">
+                Plan limits
+              </Link>
+              {u.daily_token_limit_override != null ? " or your manual override below" : ""}). Same units as OpenAI{" "}
+              <code className="text-violet-100">usage.total_tokens</code>.
             </p>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
               <label className="flex flex-1 flex-col gap-1 text-xs text-violet-200/90">
-                Daily limit (tokens / UTC day)
+                Manual override (optional — leave empty for plan default)
                 <input
                   type="number"
                   min={1}
                   className="rounded-lg border border-violet-500/30 bg-[#161022] px-3 py-2 text-sm text-white"
                   value={limitInput}
                   onChange={(e) => setLimitInput(e.target.value)}
+                  placeholder="Use plan default"
                 />
               </label>
               <button
@@ -190,7 +204,7 @@ export function AdminUserDetailClient({ userId }: { userId: string }) {
                 disabled={saving}
                 className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500 disabled:opacity-50"
               >
-                {saving ? "Saving…" : "Apply limit"}
+                {saving ? "Saving…" : "Apply"}
               </button>
             </div>
           </section>
@@ -205,6 +219,10 @@ export function AdminUserDetailClient({ userId }: { userId: string }) {
               <div>
                 <dt className="text-xs uppercase text-violet-400/80">Plan</dt>
                 <dd className="text-violet-100">{u.plan}</dd>
+              </div>
+              <div>
+                <dt className="text-xs uppercase text-violet-400/80">Billing tier</dt>
+                <dd className="text-violet-100">{u.subscription_tier || "free"}</dd>
               </div>
               <div>
                 <dt className="text-xs uppercase text-violet-400/80">Provider</dt>

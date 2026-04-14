@@ -1142,6 +1142,7 @@ async function callOpenAi(options: {
       const baseResponsesFields: Record<string, unknown> = {
         model: options.model,
         max_output_tokens: options.maxCompletionTokens,
+        stream: false,
         text: {
           verbosity: "low"
         }
@@ -1171,6 +1172,7 @@ async function callOpenAi(options: {
                   }
                 ],
                 max_output_tokens: options.maxCompletionTokens,
+                stream: false,
                 text: { verbosity: "low" },
                 store: true
               };
@@ -1231,7 +1233,8 @@ async function callOpenAi(options: {
           body: JSON.stringify({
             model: options.model,
             messages: chatMessages,
-            max_tokens: options.maxCompletionTokens
+            max_tokens: options.maxCompletionTokens,
+            stream: false
           }),
           signal: controller.signal
         });
@@ -1276,7 +1279,8 @@ async function callOpenAi(options: {
       body: JSON.stringify({
         model: options.model,
         messages: options.messages,
-        max_tokens: options.maxCompletionTokens
+        max_tokens: options.maxCompletionTokens,
+        stream: false
       }),
       signal: controller.signal
     });

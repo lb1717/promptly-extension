@@ -90,8 +90,18 @@ export async function POST(request: Request) {
     }
 
     const optimized = await optimizePrompt(prompt, userInstruction, requestMode);
-    const providerUsageTotal = Math.max(0, Number(optimized?.usage?.total_tokens || 0));
+    const providerUsagePrompt = Math.max(0, Number(optimized?.usage?.prompt_tokens || 0));
+    const providerUsageCompletion = Math.max(0, Number(optimized?.usage?.completion_tokens || 0));
+    const providerUsageTotalRaw = Math.max(0, Number(optimized?.usage?.total_tokens || 0));
+    const providerUsageDerivedTotal = Math.max(0, providerUsagePrompt + providerUsageCompletion);
+    const providerUsageTotal = providerUsageTotalRaw > 0 ? providerUsageTotalRaw : providerUsageDerivedTotal;
     const tokenCost = Math.max(1, providerUsageTotal || estimatedInputTokens);
+    const billingBasis =
+      providerUsageTotalRaw > 0
+        ? "provider_total_tokens"
+        : providerUsageDerivedTotal > 0
+          ? "provider_prompt_plus_completion"
+          : "estimated_input_tokens";
     const usageResult = await consumeDailyUsage({
       user: auth.user,
       requestMode,
@@ -115,6 +125,9 @@ export async function POST(request: Request) {
         optimized_prompt: optimized.optimized_prompt,
         clarifying_questions: [],
         assumptions: [],
+        usage: optimized.usage || null,
+        billed_tokens: tokenCost,
+        billing_basis: billingBasis,
         credits: buildCreditsEnvelope(usageResult.usage, auth.user.dailyTokenLimit, { estimatedInputTokens })
       },
       {

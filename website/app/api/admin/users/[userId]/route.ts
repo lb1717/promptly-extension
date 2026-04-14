@@ -27,13 +27,19 @@ export async function PATCH(request: Request, context: { params: { userId: strin
   }
   const { userId } = context.params;
   const body = await request.json().catch(() => null);
-  const raw = body && typeof body === "object" ? (body as Record<string, unknown>).daily_token_limit : null;
-  const next =
-    typeof raw === "number"
-      ? raw
-      : typeof raw === "string"
-        ? Number(raw)
-        : NaN;
+  const b = body && typeof body === "object" ? (body as Record<string, unknown>) : null;
+  const rawLimit = b ? b.daily_token_limit : undefined;
+  let next: number | null;
+  if (rawLimit === null) {
+    next = null;
+  } else if (typeof rawLimit === "number") {
+    next = rawLimit;
+  } else if (typeof rawLimit === "string") {
+    const trimmed = rawLimit.trim();
+    next = trimmed === "" ? null : Number(trimmed);
+  } else {
+    next = NaN;
+  }
   try {
     const result = await adminSetUserDailyTokenLimit(decodeURIComponent(userId), next);
     return NextResponse.json(result, { status: 200 });
