@@ -63,7 +63,7 @@ Rules:
 - Do not answer the request itself
 - Do not invent facts or requirements
 - Return only the final prompt text
-- Keep it concise and practical (target 120-260 words, hard max 320 words)`;
+- Keep it concise but complete (target 220-600 words, hard max 900 words)`;
 
   return [
     { role: "system", content: systemPrompt },
@@ -71,7 +71,7 @@ Rules:
     {
       role: "user",
       content:
-        "Length guard: return one high-quality prompt, concise and practical, target 120-260 words, hard max 320 words."
+        "Length guard: return one high-quality prompt, concise but complete, target 220-600 words, hard max 900 words."
     }
   ];
 }
@@ -120,7 +120,7 @@ export async function optimizePromptThroughProvider(
       : "";
   const createTimeoutMs = Math.max(
     10000,
-    Math.min(60000, Number(env.OPENAI_REWRITE_TIMEOUT_MS || env.OPENAI_CREATE_TIMEOUT_MS || 20000))
+    Math.min(90000, Number(env.OPENAI_CREATE_TIMEOUT_MS || env.OPENAI_REWRITE_TIMEOUT_MS || 45000))
   );
   const providerResult = await callProvider(env, messages, createTimeoutMs, {
     useJsonSchema: false,

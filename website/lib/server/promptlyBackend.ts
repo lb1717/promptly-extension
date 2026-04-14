@@ -264,7 +264,7 @@ function getRewriteTimeoutMs() {
 }
 
 function getGenerateTimeoutMs() {
-  return Math.max(10000, Math.min(60000, Number(process.env.OPENAI_CREATE_TIMEOUT_MS || 28000)));
+  return Math.max(12000, Math.min(90000, Number(process.env.OPENAI_CREATE_TIMEOUT_MS || 45000)));
 }
 
 function isProviderTimeoutError(error: unknown) {
@@ -299,8 +299,8 @@ function clamp(value: number, min: number, max: number) {
 function getMaxCompletionTokens(prompt: string, requestMode: string, rewriteMode: "AUTO" | "MANUAL") {
   const estimatedPromptTokens = estimateTokensFromChars(String(prompt || "").length);
   if (requestMode === "create") {
-    // Create should use the same speed profile as Improve Prompt.
-    return clamp(estimatedPromptTokens * 1.7, 180, 650);
+    // Create needs a larger budget to avoid visibly truncated outputs.
+    return clamp(estimatedPromptTokens * 2.6, 900, 2800);
   }
   if (rewriteMode === "MANUAL") {
     return clamp(estimatedPromptTokens * 2, 280, 1200);
@@ -564,7 +564,7 @@ Preserve the user's intent. Add useful structure (objective, context, constraint
 
 ${tok}
 
-Match the user's goal. Be specific and actionable. Keep the final prompt concise and focused (target ~140-320 words, hard max 450 words). Do not chat; output only the constructed prompt.`
+Match the user's goal. Be specific and actionable. Keep the final prompt concise but complete (target ~220-600 words, hard max 900 words). Do not chat; output only the constructed prompt.`
   };
 }
 
@@ -672,7 +672,7 @@ function usesResponsesApi(model: string) {
 const CREATE_TRUNCATION_CONTINUE_MSG =
   "Your previous output hit the length limit mid-stream. Continue from the very next character. Do not repeat anything you already wrote. No preamble or labels—only the rest of the prompt text.";
 
-const CREATE_CONTINUATION_MAX_ROUNDS = 1;
+const CREATE_CONTINUATION_MAX_ROUNDS = 3;
 
 function isResponsesApiTruncated(body: Record<string, unknown>): boolean {
   if (body.status === "incomplete") {
@@ -983,18 +983,15 @@ export async function optimizePrompt(prompt: string, userInstruction: string, re
     : trimmedPrompt || userSlot;
   const requestOptions = {
     model,
-    timeoutMs: getRewriteTimeoutMs(),
+    timeoutMs: isCreate ? getGenerateTimeoutMs() : getRewriteTimeoutMs(),
     maxCompletionTokens: getMaxCompletionTokens(completionEstimateSource, requestMode, mode)
   };
-  // Critical: create uses the same provider execution profile as Improve Prompt.
-  // Only the template differs (compose_template vs rewrite templates).
-  const providerRequestMode = "rewrite";
   const messages = [{ role: "user", content: bundledUserMessage }];
   let firstResult;
   try {
     firstResult = await callOpenAi({
       messages,
-      requestMode: providerRequestMode,
+      requestMode,
       ...requestOptions
     });
   } catch (error) {
@@ -1010,7 +1007,7 @@ export async function optimizePrompt(prompt: string, userInstruction: string, re
     model = fallbackModel;
     firstResult = await callOpenAi({
       messages,
-      requestMode: providerRequestMode,
+      requestMode,
       model,
       timeoutMs: Math.max(12000, requestOptions.timeoutMs),
       maxCompletionTokens: requestOptions.maxCompletionTokens

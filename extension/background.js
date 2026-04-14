@@ -5,7 +5,7 @@ const DEFAULT_FIREBASE_WEB_API_KEY = "AIzaSyChQ2kiTwunWs9ElDYkU7Cz-i8I9dw29NI";
 const DEFAULT_FIREBASE_AUTH_DOMAIN = "promptly-prod-976ef.firebaseapp.com";
 const DEFAULT_FIREBASE_WEB_OAUTH_CLIENT_ID = "913040005574-npbiuat4hl1d3icqoe5lmtuh34qqd8d6.apps.googleusercontent.com";
 const OPTIMIZE_REWRITE_TIMEOUT_MS = 25000;
-const OPTIMIZE_CREATE_TIMEOUT_MS = 30000;
+const OPTIMIZE_CREATE_TIMEOUT_MS = 45000;
 
 /** Web-auth flow does not always populate chrome.identity.getAuthToken cache — persist token for this session. */
 const SESSION_WEB_AUTH_TOKEN = "promptlyWebAuthAccessToken";
@@ -876,7 +876,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         // One retry helps absorb occasional cold starts/transient network stalls.
         const retryTimeoutMs =
           requestMode === "create"
-            ? OPTIMIZE_CREATE_TIMEOUT_MS + 5000
+            ? OPTIMIZE_CREATE_TIMEOUT_MS + 10000
             : OPTIMIZE_REWRITE_TIMEOUT_MS + 5000;
         response = await fetchWithTimeout(optimizeUrl, optimizeInit, retryTimeoutMs);
       }
