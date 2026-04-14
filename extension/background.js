@@ -444,10 +444,27 @@ function isWorkersDevBase(normalizedBase) {
   return /\.workers\.dev(\/|$)/.test(b);
 }
 
+function isAllowedManagedHost(normalizedBase) {
+  try {
+    const parsed = new URL(normalizedBase);
+    const host = String(parsed.hostname || "").toLowerCase();
+    if (host === "promptly-labs.com" || host === "www.promptly-labs.com") {
+      return true;
+    }
+    if (host === "localhost" || host === "127.0.0.1") {
+      return true;
+    }
+    return false;
+  } catch (_error) {
+    return false;
+  }
+}
+
 function normalizeManagedBaseUrl(rawValue) {
   const normalized = normalizeBaseUrl(rawValue);
-  // Worker endpoints bypass website admin prompt-engineering controls.
-  if (isWorkersDevBase(normalized)) {
+  // Only allow managed production host (or localhost for local development).
+  // Any other host can bypass website admin prompt-engineering controls.
+  if (isWorkersDevBase(normalized) || !isAllowedManagedHost(normalized)) {
     return DEFAULT_PROXY_BASE_URL;
   }
   return normalized;
@@ -882,6 +899,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "x-promptly-live-config": "1",
           ...apiAuthHeaders
         },
         body: JSON.stringify({

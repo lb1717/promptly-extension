@@ -89,7 +89,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const optimized = await optimizePrompt(prompt, userInstruction, requestMode);
+    const forceConfigRefresh = request.headers.get("x-promptly-live-config") === "1";
+    const optimized = await optimizePrompt(prompt, userInstruction, requestMode, { forceConfigRefresh });
     const providerUsagePrompt = Math.max(0, Number(optimized?.usage?.prompt_tokens || 0));
     const providerUsageCompletion = Math.max(0, Number(optimized?.usage?.completion_tokens || 0));
     const providerUsageTotalRaw = Math.max(0, Number(optimized?.usage?.total_tokens || 0));

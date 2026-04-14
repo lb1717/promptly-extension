@@ -433,7 +433,7 @@ export function handlePromptlyPreflight(request: Request) {
       ...buildPromptlyCorsHeaders(origin),
       "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
       "Access-Control-Allow-Headers":
-        "Content-Type,x-promptly-client,x-promptly-firebase-token,x-promptly-google-access-token,x-promptly-user-email,x-promptly-estimate-prompt-length,x-promptly-estimate-instruction-length,Authorization"
+        "Content-Type,x-promptly-client,x-promptly-firebase-token,x-promptly-google-access-token,x-promptly-user-email,x-promptly-estimate-prompt-length,x-promptly-estimate-instruction-length,x-promptly-live-config,Authorization"
     }
   });
 }
@@ -904,9 +904,9 @@ Match the user's goal. Be specific and actionable. Keep the final prompt concise
   };
 }
 
-async function loadPromptEngineeringConfig(): Promise<PromptEngineeringConfig> {
+async function loadPromptEngineeringConfig(options: { forceRefresh?: boolean } = {}): Promise<PromptEngineeringConfig> {
   const now = Date.now();
-  if (promptEngineeringCache && now - promptEngineeringCache.at < PROMPT_ENGINEERING_CACHE_MS) {
+  if (!options.forceRefresh && promptEngineeringCache && now - promptEngineeringCache.at < PROMPT_ENGINEERING_CACHE_MS) {
     return promptEngineeringCache.config;
   }
   const snap = await getFirebaseAdminDb()
@@ -1496,12 +1496,17 @@ async function callOpenAi(options: {
   }
 }
 
-export async function optimizePrompt(prompt: string, userInstruction: string, requestMode: string): Promise<OptimizerResult> {
+export async function optimizePrompt(
+  prompt: string,
+  userInstruction: string,
+  requestMode: string,
+  options: { forceConfigRefresh?: boolean } = {}
+): Promise<OptimizerResult> {
   const trimmedPrompt = String(prompt || "").trim();
   const trimmedInstruction = String(userInstruction || "").trim();
   const isCreate = requestMode === "create";
   const mode = trimmedInstruction.includes("MANUAL") ? "MANUAL" : "AUTO";
-  const config = await loadPromptEngineeringConfig();
+  const config = await loadPromptEngineeringConfig({ forceRefresh: !!options.forceConfigRefresh });
   const template = isCreate
     ? String(config.compose_template || "").length > config.create_template_max_chars
       ? getDefaultPromptEngineeringTemplates().compose_template

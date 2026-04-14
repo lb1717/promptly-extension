@@ -9,7 +9,15 @@ const DEFAULT_APP_BASE_URL = "https://promptly-labs.com";
 
 function normalizeProxyBaseUrl(rawValue) {
   const normalized = String(rawValue || "").trim().replace(/\/$/, "") || DEFAULT_APP_BASE_URL;
-  if (/\.workers\.dev(\/|$)/i.test(normalized)) {
+  try {
+    const parsed = new URL(normalized);
+    const host = String(parsed.hostname || "").toLowerCase();
+    const allowed =
+      host === "promptly-labs.com" || host === "www.promptly-labs.com" || host === "localhost" || host === "127.0.0.1";
+    if (!allowed || /\.workers\.dev$/i.test(host)) {
+      return DEFAULT_APP_BASE_URL;
+    }
+  } catch (_error) {
     return DEFAULT_APP_BASE_URL;
   }
   return normalized;
