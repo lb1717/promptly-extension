@@ -285,8 +285,9 @@ function isProviderNoContentError(error: unknown) {
   return /provider returned no content/i.test(message);
 }
 
-function getRewriteFallbackModel(primaryModel: string) {
+function getRewriteFallbackModel(primaryModel: string, configuredFallback?: string) {
   const configured =
+    String(configuredFallback || "").trim() ||
     String(process.env.OPENAI_MODEL_REWRITE_FALLBACK || process.env.OPENAI_MODEL_FALLBACK || "").trim() ||
     "gpt-4.1-mini";
   if (!configured) {
@@ -295,8 +296,9 @@ function getRewriteFallbackModel(primaryModel: string) {
   return configured === primaryModel ? "" : configured;
 }
 
-function getCreateFallbackModel(primaryModel: string) {
+function getCreateFallbackModel(primaryModel: string, configuredFallback?: string) {
   const configured =
+    String(configuredFallback || "").trim() ||
     String(process.env.OPENAI_MODEL_CREATE_FALLBACK || process.env.OPENAI_MODEL_FALLBACK || "").trim() ||
     "gpt-4.1-mini";
   if (!configured) {
@@ -313,10 +315,14 @@ function getMaxCompletionTokens(
   prompt: string,
   requestMode: string,
   rewriteMode: "AUTO" | "MANUAL",
-  controls?: Pick<PromptEngineeringRuntimeControls, "rewrite_max_completion_tokens" | "create_max_completion_tokens">
+  controls?: Pick<
+    PromptEngineeringRuntimeControls,
+    "rewrite_max_completion_tokens" | "create_max_completion_tokens" | "rewrite_auto_hard_cap_tokens"
+  >
 ) {
   const estimatedPromptTokens = estimateTokensFromChars(String(prompt || "").length);
   const rewriteMax = normalizeRuntimeControl(controls?.rewrite_max_completion_tokens, 1200, 180, 4000);
+  const rewriteAutoCap = normalizeRuntimeControl(controls?.rewrite_auto_hard_cap_tokens, 650, 180, 4000);
   const createMax = normalizeRuntimeControl(controls?.create_max_completion_tokens, 2800, 500, 8000);
   if (requestMode === "create") {
     // Create needs a larger budget to avoid visibly truncated outputs.
@@ -325,7 +331,7 @@ function getMaxCompletionTokens(
   if (rewriteMode === "MANUAL") {
     return clamp(estimatedPromptTokens * 2, 280, rewriteMax);
   }
-  return clamp(estimatedPromptTokens * 1.7, 180, Math.min(650, rewriteMax));
+  return clamp(estimatedPromptTokens * 1.7, 180, Math.min(rewriteAutoCap, rewriteMax));
 }
 
 function getExtensionBaseUrl() {
@@ -754,11 +760,24 @@ export type PromptEngineeringRuntimeControls = {
   rewrite_timeout_ms: number;
   create_timeout_ms: number;
   rewrite_max_completion_tokens: number;
+  rewrite_auto_hard_cap_tokens: number;
   create_max_completion_tokens: number;
   create_continuation_max_rounds: number;
+  create_template_max_chars: number;
+  create_user_slot_max_chars: number;
 };
 
-type PromptEngineeringConfig = PromptEngineeringTemplates & PromptEngineeringRuntimeControls;
+export type PromptEngineeringModelControls = {
+  rewrite_auto_model: string;
+  rewrite_manual_model: string;
+  create_model: string;
+  rewrite_fallback_model: string;
+  create_fallback_model: string;
+};
+
+type PromptEngineeringConfig = PromptEngineeringTemplates &
+  PromptEngineeringRuntimeControls &
+  PromptEngineeringModelControls;
 
 let promptEngineeringCache: { at: number; config: PromptEngineeringConfig } | null = null;
 
@@ -771,9 +790,35 @@ function getDefaultPromptEngineeringRuntimeControls(): PromptEngineeringRuntimeC
     rewrite_timeout_ms: getRewriteTimeoutMs(),
     create_timeout_ms: getGenerateTimeoutMs(),
     rewrite_max_completion_tokens: 1200,
+    rewrite_auto_hard_cap_tokens: 650,
     create_max_completion_tokens: 2800,
-    create_continuation_max_rounds: CREATE_CONTINUATION_MAX_ROUNDS
+    create_continuation_max_rounds: CREATE_CONTINUATION_MAX_ROUNDS,
+    create_template_max_chars: FAST_CREATE_TEMPLATE_MAX_CHARS,
+    create_user_slot_max_chars: FAST_CREATE_USER_SLOT_MAX_CHARS
   };
+}
+
+function getDefaultPromptEngineeringModelControls(): PromptEngineeringModelControls {
+  const rewriteDefault = getOpenAiModelForRequest("rewrite", "AUTO");
+  const createDefault = getOpenAiModelForRequest("create", "MANUAL");
+  return {
+    rewrite_auto_model: rewriteDefault,
+    rewrite_manual_model: getOpenAiModelForRequest("rewrite", "MANUAL"),
+    create_model: createDefault,
+    rewrite_fallback_model: getRewriteFallbackModel(rewriteDefault),
+    create_fallback_model: getCreateFallbackModel(createDefault)
+  };
+}
+
+function normalizeModelControl(raw: unknown, fallback: string): string {
+  const value = String(raw || "").trim();
+  if (!value) {
+    return fallback;
+  }
+  if (!/^[A-Za-z0-9._:-]{2,120}$/.test(value)) {
+    return fallback;
+  }
+  return value;
 }
 
 function normalizeRuntimeControl(
@@ -831,6 +876,7 @@ async function loadPromptEngineeringConfig(): Promise<PromptEngineeringConfig> {
     compose_template: pick("compose_template")
   };
   const defaultsRuntime = getDefaultPromptEngineeringRuntimeControls();
+  const defaultsModels = getDefaultPromptEngineeringModelControls();
   const runtime: PromptEngineeringRuntimeControls = {
     rewrite_timeout_ms: normalizeRuntimeControl(
       raw.rewrite_timeout_ms,
@@ -850,6 +896,12 @@ async function loadPromptEngineeringConfig(): Promise<PromptEngineeringConfig> {
       180,
       4000
     ),
+    rewrite_auto_hard_cap_tokens: normalizeRuntimeControl(
+      raw.rewrite_auto_hard_cap_tokens,
+      defaultsRuntime.rewrite_auto_hard_cap_tokens,
+      180,
+      4000
+    ),
     create_max_completion_tokens: normalizeRuntimeControl(
       raw.create_max_completion_tokens,
       defaultsRuntime.create_max_completion_tokens,
@@ -861,9 +913,28 @@ async function loadPromptEngineeringConfig(): Promise<PromptEngineeringConfig> {
       defaultsRuntime.create_continuation_max_rounds,
       1,
       6
+    ),
+    create_template_max_chars: normalizeRuntimeControl(
+      raw.create_template_max_chars,
+      defaultsRuntime.create_template_max_chars,
+      800,
+      24000
+    ),
+    create_user_slot_max_chars: normalizeRuntimeControl(
+      raw.create_user_slot_max_chars,
+      defaultsRuntime.create_user_slot_max_chars,
+      400,
+      12000
     )
   };
-  const config: PromptEngineeringConfig = { ...templates, ...runtime };
+  const models: PromptEngineeringModelControls = {
+    rewrite_auto_model: normalizeModelControl(raw.rewrite_auto_model, defaultsModels.rewrite_auto_model),
+    rewrite_manual_model: normalizeModelControl(raw.rewrite_manual_model, defaultsModels.rewrite_manual_model),
+    create_model: normalizeModelControl(raw.create_model, defaultsModels.create_model),
+    rewrite_fallback_model: normalizeModelControl(raw.rewrite_fallback_model, defaultsModels.rewrite_fallback_model),
+    create_fallback_model: normalizeModelControl(raw.create_fallback_model, defaultsModels.create_fallback_model)
+  };
+  const config: PromptEngineeringConfig = { ...templates, ...runtime, ...models };
   promptEngineeringCache = { at: now, config };
   return config;
 }
@@ -891,7 +962,7 @@ function validateTemplateLengths(templates: PromptEngineeringTemplates) {
 }
 
 export async function adminGetPromptEngineering(): Promise<
-  { ok: true; user_content_token: string } & PromptEngineeringTemplates & PromptEngineeringRuntimeControls
+  { ok: true; user_content_token: string } & PromptEngineeringTemplates & PromptEngineeringRuntimeControls & PromptEngineeringModelControls
 > {
   const snap = await getFirebaseAdminDb()
     .collection(PROMPT_SETTINGS_COLLECTION)
@@ -900,6 +971,7 @@ export async function adminGetPromptEngineering(): Promise<
   const raw = (snap.data() || {}) as Record<string, unknown>;
   const defaults = getDefaultPromptEngineeringTemplates();
   const defaultsRuntime = getDefaultPromptEngineeringRuntimeControls();
+  const defaultsModels = getDefaultPromptEngineeringModelControls();
   const coalesce = (key: keyof PromptEngineeringTemplates) =>
     typeof raw[key] === "string" && raw[key].trim().length > 0 ? String(raw[key]) : defaults[key];
 
@@ -927,6 +999,12 @@ export async function adminGetPromptEngineering(): Promise<
       180,
       4000
     ),
+    rewrite_auto_hard_cap_tokens: normalizeRuntimeControl(
+      raw.rewrite_auto_hard_cap_tokens,
+      defaultsRuntime.rewrite_auto_hard_cap_tokens,
+      180,
+      4000
+    ),
     create_max_completion_tokens: normalizeRuntimeControl(
       raw.create_max_completion_tokens,
       defaultsRuntime.create_max_completion_tokens,
@@ -938,12 +1016,29 @@ export async function adminGetPromptEngineering(): Promise<
       defaultsRuntime.create_continuation_max_rounds,
       1,
       6
-    )
+    ),
+    create_template_max_chars: normalizeRuntimeControl(
+      raw.create_template_max_chars,
+      defaultsRuntime.create_template_max_chars,
+      800,
+      24000
+    ),
+    create_user_slot_max_chars: normalizeRuntimeControl(
+      raw.create_user_slot_max_chars,
+      defaultsRuntime.create_user_slot_max_chars,
+      400,
+      12000
+    ),
+    rewrite_auto_model: normalizeModelControl(raw.rewrite_auto_model, defaultsModels.rewrite_auto_model),
+    rewrite_manual_model: normalizeModelControl(raw.rewrite_manual_model, defaultsModels.rewrite_manual_model),
+    create_model: normalizeModelControl(raw.create_model, defaultsModels.create_model),
+    rewrite_fallback_model: normalizeModelControl(raw.rewrite_fallback_model, defaultsModels.rewrite_fallback_model),
+    create_fallback_model: normalizeModelControl(raw.create_fallback_model, defaultsModels.create_fallback_model)
   };
 }
 
 export async function adminSavePromptEngineering(
-  patch: Partial<PromptEngineeringTemplates & PromptEngineeringRuntimeControls>
+  patch: Partial<PromptEngineeringTemplates & PromptEngineeringRuntimeControls & PromptEngineeringModelControls>
 ) {
   const current = await adminGetPromptEngineering();
   const next: PromptEngineeringTemplates = {
@@ -978,6 +1073,12 @@ export async function adminSavePromptEngineering(
       180,
       4000
     ),
+    rewrite_auto_hard_cap_tokens: normalizeRuntimeControl(
+      patch.rewrite_auto_hard_cap_tokens,
+      current.rewrite_auto_hard_cap_tokens,
+      180,
+      4000
+    ),
     create_max_completion_tokens: normalizeRuntimeControl(
       patch.create_max_completion_tokens,
       current.create_max_completion_tokens,
@@ -989,7 +1090,26 @@ export async function adminSavePromptEngineering(
       current.create_continuation_max_rounds,
       1,
       6
+    ),
+    create_template_max_chars: normalizeRuntimeControl(
+      patch.create_template_max_chars,
+      current.create_template_max_chars,
+      800,
+      24000
+    ),
+    create_user_slot_max_chars: normalizeRuntimeControl(
+      patch.create_user_slot_max_chars,
+      current.create_user_slot_max_chars,
+      400,
+      12000
     )
+  };
+  const nextModels: PromptEngineeringModelControls = {
+    rewrite_auto_model: normalizeModelControl(patch.rewrite_auto_model, current.rewrite_auto_model),
+    rewrite_manual_model: normalizeModelControl(patch.rewrite_manual_model, current.rewrite_manual_model),
+    create_model: normalizeModelControl(patch.create_model, current.create_model),
+    rewrite_fallback_model: normalizeModelControl(patch.rewrite_fallback_model, current.rewrite_fallback_model),
+    create_fallback_model: normalizeModelControl(patch.create_fallback_model, current.create_fallback_model)
   };
   await getFirebaseAdminDb()
     .collection(PROMPT_SETTINGS_COLLECTION)
@@ -998,6 +1118,7 @@ export async function adminSavePromptEngineering(
       {
         ...next,
         ...nextRuntime,
+        ...nextModels,
         updatedAt: FieldValue.serverTimestamp()
       },
       { merge: true }
@@ -1317,20 +1438,24 @@ export async function optimizePrompt(prompt: string, userInstruction: string, re
   const mode = trimmedInstruction.includes("MANUAL") ? "MANUAL" : "AUTO";
   const config = await loadPromptEngineeringConfig();
   const template = isCreate
-    ? String(config.compose_template || "").length > FAST_CREATE_TEMPLATE_MAX_CHARS
+    ? String(config.compose_template || "").length > config.create_template_max_chars
       ? getDefaultPromptEngineeringTemplates().compose_template
       : config.compose_template
     : mode === "MANUAL"
       ? config.rewrite_manual_template
       : config.rewrite_auto_template;
   const userSlotRaw = trimmedPrompt || trimmedInstruction;
-  const userSlot = isCreate ? userSlotRaw.slice(0, FAST_CREATE_USER_SLOT_MAX_CHARS) : userSlotRaw;
+  const userSlot = isCreate ? userSlotRaw.slice(0, config.create_user_slot_max_chars) : userSlotRaw;
   const bundledUserMessage = applyPromptTemplate(template, userSlot);
   const maxBundled = CREDIT_MAX_PROMPT_CHARS + PROMPT_TEMPLATE_MAX_CHARS;
   if (bundledUserMessage.length > maxBundled) {
     throw new Error("Bundled prompt exceeds safe size; shorten the template or user content.");
   }
-  let model = getOpenAiModelForRequest(requestMode, mode);
+  let model = isCreate
+    ? config.create_model
+    : mode === "MANUAL"
+      ? config.rewrite_manual_model
+      : config.rewrite_auto_model;
   const completionEstimateSource = isCreate
     ? `${trimmedPrompt}\n${trimmedInstruction}`.trim()
     : trimmedPrompt || userSlot;
@@ -1339,6 +1464,7 @@ export async function optimizePrompt(prompt: string, userInstruction: string, re
     timeoutMs: isCreate ? config.create_timeout_ms : config.rewrite_timeout_ms,
     maxCompletionTokens: getMaxCompletionTokens(completionEstimateSource, requestMode, mode, {
       rewrite_max_completion_tokens: config.rewrite_max_completion_tokens,
+      rewrite_auto_hard_cap_tokens: config.rewrite_auto_hard_cap_tokens,
       create_max_completion_tokens: config.create_max_completion_tokens
     }),
     createContinuationMaxRounds: config.create_continuation_max_rounds
@@ -1355,9 +1481,9 @@ export async function optimizePrompt(prompt: string, userInstruction: string, re
     const shouldFallback = isProviderTimeoutError(error) || isProviderNoContentError(error);
     const fallbackModel =
       requestMode === "create" && shouldFallback
-          ? getCreateFallbackModel(model)
+          ? getCreateFallbackModel(model, config.create_fallback_model)
         : requestMode === "rewrite" && shouldFallback
-          ? getRewriteFallbackModel(model)
+          ? getRewriteFallbackModel(model, config.rewrite_fallback_model)
           : "";
     if (!fallbackModel) {
       throw error;

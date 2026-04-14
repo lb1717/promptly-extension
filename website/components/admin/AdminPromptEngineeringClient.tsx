@@ -10,11 +10,19 @@ type EngineeringResponse = {
   rewrite_auto_template?: string;
   rewrite_manual_template?: string;
   compose_template?: string;
+  rewrite_auto_model?: string;
+  rewrite_manual_model?: string;
+  create_model?: string;
+  rewrite_fallback_model?: string;
+  create_fallback_model?: string;
   rewrite_timeout_ms?: number;
   create_timeout_ms?: number;
   rewrite_max_completion_tokens?: number;
+  rewrite_auto_hard_cap_tokens?: number;
   create_max_completion_tokens?: number;
   create_continuation_max_rounds?: number;
+  create_template_max_chars?: number;
+  create_user_slot_max_chars?: number;
   error?: string;
 };
 
@@ -23,11 +31,19 @@ export function AdminPromptEngineeringClient() {
   const [autoT, setAutoT] = useState("");
   const [manualT, setManualT] = useState("");
   const [composeT, setComposeT] = useState("");
+  const [autoModel, setAutoModel] = useState("gpt-5-nano");
+  const [manualModel, setManualModel] = useState("gpt-5-nano");
+  const [createModel, setCreateModel] = useState("gpt-5-nano");
+  const [rewriteFallbackModel, setRewriteFallbackModel] = useState("gpt-4.1-mini");
+  const [createFallbackModel, setCreateFallbackModel] = useState("gpt-4.1-mini");
   const [rewriteTimeoutMs, setRewriteTimeoutMs] = useState(20000);
   const [createTimeoutMs, setCreateTimeoutMs] = useState(45000);
   const [rewriteMaxTokens, setRewriteMaxTokens] = useState(1200);
+  const [rewriteAutoHardCapTokens, setRewriteAutoHardCapTokens] = useState(650);
   const [createMaxTokens, setCreateMaxTokens] = useState(2800);
   const [createContinuationRounds, setCreateContinuationRounds] = useState(3);
+  const [createTemplateMaxChars, setCreateTemplateMaxChars] = useState(3500);
+  const [createUserSlotMaxChars, setCreateUserSlotMaxChars] = useState(2200);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -49,6 +65,13 @@ export function AdminPromptEngineeringClient() {
       setAutoT(data.rewrite_auto_template || "");
       setManualT(data.rewrite_manual_template || "");
       setComposeT(data.compose_template || "");
+      setAutoModel(String(data.rewrite_auto_model || "gpt-5-nano").trim() || "gpt-5-nano");
+      setManualModel(String(data.rewrite_manual_model || "gpt-5-nano").trim() || "gpt-5-nano");
+      setCreateModel(String(data.create_model || "gpt-5-nano").trim() || "gpt-5-nano");
+      setRewriteFallbackModel(
+        String(data.rewrite_fallback_model || "gpt-4.1-mini").trim() || "gpt-4.1-mini"
+      );
+      setCreateFallbackModel(String(data.create_fallback_model || "gpt-4.1-mini").trim() || "gpt-4.1-mini");
       setRewriteTimeoutMs(
         Number.isFinite(data.rewrite_timeout_ms) ? Number(data.rewrite_timeout_ms) : 20000
       );
@@ -58,11 +81,20 @@ export function AdminPromptEngineeringClient() {
       setRewriteMaxTokens(
         Number.isFinite(data.rewrite_max_completion_tokens) ? Number(data.rewrite_max_completion_tokens) : 1200
       );
+      setRewriteAutoHardCapTokens(
+        Number.isFinite(data.rewrite_auto_hard_cap_tokens) ? Number(data.rewrite_auto_hard_cap_tokens) : 650
+      );
       setCreateMaxTokens(
         Number.isFinite(data.create_max_completion_tokens) ? Number(data.create_max_completion_tokens) : 2800
       );
       setCreateContinuationRounds(
         Number.isFinite(data.create_continuation_max_rounds) ? Number(data.create_continuation_max_rounds) : 3
+      );
+      setCreateTemplateMaxChars(
+        Number.isFinite(data.create_template_max_chars) ? Number(data.create_template_max_chars) : 3500
+      );
+      setCreateUserSlotMaxChars(
+        Number.isFinite(data.create_user_slot_max_chars) ? Number(data.create_user_slot_max_chars) : 2200
       );
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));
@@ -87,11 +119,19 @@ export function AdminPromptEngineeringClient() {
           rewrite_auto_template: autoT,
           rewrite_manual_template: manualT,
           compose_template: composeT,
+          rewrite_auto_model: autoModel,
+          rewrite_manual_model: manualModel,
+          create_model: createModel,
+          rewrite_fallback_model: rewriteFallbackModel,
+          create_fallback_model: createFallbackModel,
           rewrite_timeout_ms: rewriteTimeoutMs,
           create_timeout_ms: createTimeoutMs,
           rewrite_max_completion_tokens: rewriteMaxTokens,
+          rewrite_auto_hard_cap_tokens: rewriteAutoHardCapTokens,
           create_max_completion_tokens: createMaxTokens,
-          create_continuation_max_rounds: createContinuationRounds
+          create_continuation_max_rounds: createContinuationRounds,
+          create_template_max_chars: createTemplateMaxChars,
+          create_user_slot_max_chars: createUserSlotMaxChars
         })
       });
       const data = await res.json().catch(() => ({}));
@@ -201,6 +241,60 @@ export function AdminPromptEngineeringClient() {
             <p className="mb-4 text-xs text-violet-200/70">
               Control provider timeouts and output budget without redeploying Vercel env vars.
             </p>
+            <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <label className="flex flex-col gap-1 text-xs text-violet-200/80">
+                Auto rewrite model
+                <input
+                  type="text"
+                  value={autoModel}
+                  onChange={(e) => setAutoModel(e.target.value)}
+                  placeholder="gpt-5-nano"
+                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-violet-200/80">
+                Improve model (manual)
+                <input
+                  type="text"
+                  value={manualModel}
+                  onChange={(e) => setManualModel(e.target.value)}
+                  placeholder="gpt-5-nano"
+                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-violet-200/80">
+                Create model
+                <input
+                  type="text"
+                  value={createModel}
+                  onChange={(e) => setCreateModel(e.target.value)}
+                  placeholder="gpt-5-nano"
+                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
+                />
+              </label>
+            </div>
+            <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <label className="flex flex-col gap-1 text-xs text-violet-200/80">
+                Rewrite fallback model
+                <input
+                  type="text"
+                  value={rewriteFallbackModel}
+                  onChange={(e) => setRewriteFallbackModel(e.target.value)}
+                  placeholder="gpt-4.1-mini"
+                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-violet-200/80">
+                Create fallback model
+                <input
+                  type="text"
+                  value={createFallbackModel}
+                  onChange={(e) => setCreateFallbackModel(e.target.value)}
+                  placeholder="gpt-4.1-mini"
+                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
+                />
+              </label>
+            </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <label className="flex flex-col gap-1 text-xs text-violet-200/80">
                 Rewrite timeout (ms)
@@ -239,6 +333,18 @@ export function AdminPromptEngineeringClient() {
                 />
               </label>
               <label className="flex flex-col gap-1 text-xs text-violet-200/80">
+                Auto rewrite hard cap tokens
+                <input
+                  type="number"
+                  min={180}
+                  max={4000}
+                  step={10}
+                  value={rewriteAutoHardCapTokens}
+                  onChange={(e) => setRewriteAutoHardCapTokens(Number(e.target.value) || 650)}
+                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-violet-200/80">
                 Create max completion tokens
                 <input
                   type="number"
@@ -247,6 +353,30 @@ export function AdminPromptEngineeringClient() {
                   step={25}
                   value={createMaxTokens}
                   onChange={(e) => setCreateMaxTokens(Number(e.target.value) || 2800)}
+                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-violet-200/80">
+                Create template max chars
+                <input
+                  type="number"
+                  min={800}
+                  max={24000}
+                  step={100}
+                  value={createTemplateMaxChars}
+                  onChange={(e) => setCreateTemplateMaxChars(Number(e.target.value) || 3500)}
+                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-violet-200/80">
+                Create user slot max chars
+                <input
+                  type="number"
+                  min={400}
+                  max={12000}
+                  step={100}
+                  value={createUserSlotMaxChars}
+                  onChange={(e) => setCreateUserSlotMaxChars(Number(e.target.value) || 2200)}
                   className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
                 />
               </label>
