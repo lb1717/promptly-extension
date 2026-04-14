@@ -55,33 +55,24 @@ function normalizePlainRewriteOutput(rawText, fallbackPrompt) {
 }
 
 function buildGenerateMessages(userPrompt) {
-  const systemPrompt = `Transform the user's request into a complete, high-performance prompt designed for excellent model execution. Preserve the user's core goal, but expand it into a detailed, self-contained prompt with strong structure, explicit priorities, and clear output instructions.
-
-Use emphasis markers to improve compliance and clarity where helpful, including items such as:
-[GOAL]
-[CONTEXT]
-[CRITICAL REQUIREMENTS]
-[NO HALLUCINATIONS]
-[OUTPUT FORMAT]
-[TONE]
-[CONSTRAINTS]
-[SUCCESS CRITERIA]
-and selective emphasis like **important** or *high priority*.
-
-Build a prompt that is substantially more detailed than the original. Add useful scaffolding, constraints, formatting instructions, and execution guidance, but only when relevant to the user's request. Make it thorough, specific, and practical. The final prompt may be much longer than the original and does not need a maximum length.
+  const systemPrompt = `Transform the user's request into one strong, ready-to-use prompt.
 
 Rules:
-- Preserve the true intent
+- Preserve the original intent
+- Improve clarity, structure, constraints, and output format
 - Do not answer the request itself
-- Do not add random assumptions
-- Do not include fake facts, citations, or invented context
-- Explicitly discourage fabrication when relevant
-- Prefer clear structure over verbosity for its own sake
-- Return only the final prompt text`;
+- Do not invent facts or requirements
+- Return only the final prompt text
+- Keep it concise and practical (target 120-260 words, hard max 320 words)`;
 
   return [
     { role: "system", content: systemPrompt },
-    { role: "user", content: String(userPrompt || "").trim() }
+    { role: "user", content: String(userPrompt || "").trim() },
+    {
+      role: "user",
+      content:
+        "Length guard: return one high-quality prompt, concise and practical, target 120-260 words, hard max 320 words."
+    }
   ];
 }
 
@@ -99,8 +90,8 @@ export async function optimizePromptThroughProvider(
         ? String(env.OPENAI_REWRITE_MODEL || "gpt-5-nano").trim()
         : "";
     const rewriteTimeoutMs = Math.max(
-      3000,
-      Math.min(30000, Number(env.OPENAI_REWRITE_TIMEOUT_MS || 15000))
+      10000,
+      Math.min(60000, Number(env.OPENAI_REWRITE_TIMEOUT_MS || 20000))
     );
 
     const providerResult = await callProvider(env, messages, rewriteTimeoutMs, {
@@ -125,11 +116,11 @@ export async function optimizePromptThroughProvider(
   const providerName = String(env.PROVIDER || "openai").toLowerCase();
   const createModel =
     providerName === "openai"
-      ? String(env.OPENAI_REWRITE_MODEL || "gpt-5-nano").trim()
+      ? String(env.OPENAI_REWRITE_MODEL || env.OPENAI_CREATE_MODEL || "gpt-5-nano").trim()
       : "";
   const createTimeoutMs = Math.max(
-    5000,
-    Math.min(45000, Number(env.OPENAI_CREATE_TIMEOUT_MS || 30000))
+    10000,
+    Math.min(60000, Number(env.OPENAI_REWRITE_TIMEOUT_MS || env.OPENAI_CREATE_TIMEOUT_MS || 20000))
   );
   const providerResult = await callProvider(env, messages, createTimeoutMs, {
     useJsonSchema: false,

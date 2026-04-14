@@ -14,6 +14,8 @@
   }
 
   const UI_DISPLAY_DELAY_MS = 300;
+  const BASE_CONTEXT_WINDOW_WIDTH = 330;
+  const EXPANDED_CONTEXT_WINDOW_MULTIPLIER = 1.5;
 
   function purgeLegacyPromptlyNodes() {
     const staleNodes = document.querySelectorAll(
@@ -38,10 +40,14 @@
   let visibilityCreditsRefreshTimer = null;
   let bypassNextAutoSendInterception = false;
   let dragStartOffsetX = 0;
+  let composeWidthExpanded = false;
   const MAX_DRAG_LEFT_PX = -75;
   const MAX_DRAG_RIGHT_PX = 225;
   const offsetStorageKey = `promptly:center-offset-x:${site}`;
   const autoSendStorageKey = `promptly:auto-adjust-on-send:${site}`;
+  const visualStyleStorageKey = `promptly:visual-style:${site}`;
+  const visualColorStorageKey = `promptly:visual-color:${site}`;
+  const DEFAULT_APP_BASE_URL = "https://promptly-labs.com";
   const promptLifecycleState = {
     lastObservedText: "",
     pendingProgrammaticText: null,
@@ -161,7 +167,20 @@
     };
   }
 
+  async function getPromptlyAccountUrl() {
+    const values = await chrome.storage.sync.get(["proxyBaseUrl"]);
+    const baseUrl = String(values.proxyBaseUrl || "").trim() || DEFAULT_APP_BASE_URL;
+    return `${baseUrl.replace(/\/$/, "")}/account`;
+  }
+
   const positionManager = new PositionManager();
+  positionManager.setContextWindowWidth(BASE_CONTEXT_WINDOW_WIDTH);
+  function syncComposeContextWidth() {
+    const width = composeWidthExpanded
+      ? Math.round(BASE_CONTEXT_WINDOW_WIDTH * EXPANDED_CONTEXT_WINDOW_MULTIPLIER)
+      : BASE_CONTEXT_WINDOW_WIDTH;
+    positionManager.setContextWindowWidth(width);
+  }
   let storedOffset = Number.NaN;
   try {
     const storedOffsetRaw = window.localStorage.getItem(offsetStorageKey);
@@ -178,6 +197,18 @@
     autoAdjustOnSend = window.localStorage.getItem(autoSendStorageKey) === "1";
   } catch (_error) {
     autoAdjustOnSend = false;
+  }
+  let savedVisualStyle = "default";
+  try {
+    savedVisualStyle = String(window.localStorage.getItem(visualStyleStorageKey) || "default").trim() || "default";
+  } catch (_error) {
+    savedVisualStyle = "default";
+  }
+  let savedVisualColor = "black";
+  try {
+    savedVisualColor = String(window.localStorage.getItem(visualColorStorageKey) || "black").trim() || "black";
+  } catch (_error) {
+    savedVisualColor = "black";
   }
   const ui = new PromptlyTabUI({
     onToggle: () => {
@@ -203,6 +234,41 @@
         ui.setSignedOut(true);
         throw error;
       }
+    },
+    onLoadSettingsAccount: async () => {
+      try {
+        const data = await getPromptlyAccountStatus();
+        return {
+          email: String(data?.chromeEmail || "").trim() || "Not signed in",
+          subscriptionTier: String(data?.subscriptionTier || "").trim() || ""
+        };
+      } catch (_error) {
+        return { email: "Not signed in" };
+      }
+    },
+    onManageAccount: async () => {
+      window.open(await getPromptlyAccountUrl(), "_blank");
+    },
+    onVisualStyleChange: (style) => {
+      const nextStyle =
+        style === "midnight" ? "midnight" : style === "minimalistic" ? "minimalistic" : "default";
+      try {
+        window.localStorage.setItem(visualStyleStorageKey, nextStyle);
+      } catch (_error) {
+        // Ignore storage failures; style still applies in-session.
+      }
+      ui.setVisualStyle(nextStyle);
+      observers.scheduleUpdate();
+    },
+    onVisualColorChange: (color) => {
+      const next = ["black", "purple", "dark-blue", "dark-green"].includes(color) ? color : "black";
+      try {
+        window.localStorage.setItem(visualColorStorageKey, next);
+      } catch (_error) {
+        // Ignore storage failures; style still applies in-session.
+      }
+      ui.setVisualColor(next);
+      observers.scheduleUpdate();
     },
     onAutoAdjust: async (payload = {}) => {
       if (autoAdjustInFlight || !currentTarget || !adapters.isEditable(currentTarget)) {
@@ -352,7 +418,13 @@
         }
       }
     },
-    onLayoutChange: () => {
+    onLayoutChange: (hint = {}) => {
+      const rawLines = Number(hint?.rawLines || 0);
+      const shouldExpand = rawLines > 1;
+      if (shouldExpand !== composeWidthExpanded) {
+        composeWidthExpanded = shouldExpand;
+        syncComposeContextWidth();
+      }
       observers.scheduleUpdate();
     },
     onToggleAutoSend: () => {
@@ -387,6 +459,8 @@
       }
     }
   });
+  ui.setVisualStyle(savedVisualStyle);
+  ui.setVisualColor(savedVisualColor);
 
   const observers = new PromptlyObservers({
     onUpdate: sync,
@@ -501,6 +575,22 @@
         }
         if (!response || !response.ok) {
           reject(new Error(response?.error || "Not signed in"));
+          return;
+        }
+        resolve(response.data || {});
+      });
+    });
+  }
+
+  async function getPromptlyAccountStatus() {
+    return new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({ type: "PROMPTLY_GET_ACCOUNT_STATUS" }, (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        if (!response || !response.ok) {
+          reject(new Error(response?.error || "Unable to load account status"));
           return;
         }
         resolve(response.data || {});

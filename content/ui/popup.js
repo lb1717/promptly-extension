@@ -418,6 +418,7 @@
         if (typeof this.onLayoutHintChange === "function") {
           this.onLayoutHintChange({
             lineCount: this.visibleLineCount,
+            rawLines: effectiveRawLines,
             scrollable: effectiveRawLines > this.maxVisibleLines
           });
         }

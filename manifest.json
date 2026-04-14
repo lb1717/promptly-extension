@@ -63,7 +63,13 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "content/ui/styles.css"
+        "content/ui/styles.css",
+        "content/ui/images/561135.png",
+        "content/ui/images/WheelWhite.png",
+        "content/ui/images/download-1.png",
+        "content/ui/images/gear.png",
+        "content/ui/images/Promptly Logo White.png",
+        "content/ui/images/Promptly%20Logo%20White.png"
       ],
       "matches": [
         "https://chat.openai.com/*",

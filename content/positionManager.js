@@ -84,6 +84,18 @@
       return this.promptlyCenterOffsetX;
     }
 
+    setContextWindowWidth(widthPx) {
+      const next = Number(widthPx);
+      if (!Number.isFinite(next)) {
+        return;
+      }
+      this.contextWindowWidth = this.clamp(next, 220, 760);
+    }
+
+    getContextWindowWidth() {
+      return this.contextWindowWidth;
+    }
+
     snapToDevicePixel(value) {
       const dpr = window.devicePixelRatio || 1;
       return Math.round(value * dpr) / dpr;
@@ -96,6 +108,19 @@
     compute(targetRect, popupHeight, isOpen = false) {
       const viewportWidth = window.innerWidth;
       const viewportHeight = window.innerHeight;
+      const anchorLeft = targetRect.left;
+      const anchorRight = targetRect.left + targetRect.width;
+      const inset = Math.max(0, this.composerHorizontalInset);
+      const requestedContextWidth = Math.max(220, Number(this.contextWindowWidth) || 330);
+      const maxContextWidthByViewport = Math.max(220, viewportWidth - this.margin * 2);
+      const maxContextWidthByComposer = Math.max(220, anchorRight - anchorLeft - inset * 2);
+      const effectiveContextWindowWidth = this.snapToDevicePixel(
+        this.clamp(
+          requestedContextWidth,
+          220,
+          Math.min(maxContextWidthByViewport, maxContextWidthByComposer)
+        )
+      );
       const rawPromptlyCenterX =
         targetRect.left + targetRect.width / 2 + this.promptlyCenterOffsetX;
 
@@ -118,9 +143,6 @@
 
       // Keep the Promptly bar within the chat composer as the window/composer resizes
       // (proportionate to the anchor bar, not a fixed offset that drifts outside).
-      const anchorLeft = targetRect.left;
-      const anchorRight = targetRect.left + targetRect.width;
-      const inset = Math.max(0, this.composerHorizontalInset);
       const minRightInsideComposer = anchorLeft + inset + this.promptlyBoxWidth;
       const maxRightInsideComposer = anchorRight - inset;
       if (minRightInsideComposer <= maxRightInsideComposer) {
@@ -137,7 +159,7 @@
       }
 
       const minSharedRightEdgeX =
-        this.margin + Math.max(this.promptlyBoxWidth, this.contextWindowWidth);
+        this.margin + Math.max(this.promptlyBoxWidth, effectiveContextWindowWidth);
       const maxSharedRightEdgeX = viewportWidth - this.margin;
       const sharedRightEdgeX = this.snapToDevicePixel(
         this.clamp(rawPromptlyRightEdgeX, minSharedRightEdgeX, maxSharedRightEdgeX)
@@ -146,14 +168,25 @@
       // Both horizontal positions come from one shared right edge so no other
       // lock/drag logic can desync them.
       const tabX = sharedRightEdgeX - this.promptlyBoxWidth;
-      let popupX = sharedRightEdgeX - this.contextWindowWidth + this.contextManualNudgeX;
-      popupX = this.snapToDevicePixel(
-        this.clamp(
-          popupX,
-          this.margin,
-          Math.max(this.margin, viewportWidth - this.contextWindowWidth - this.margin)
-        )
+      let popupX = sharedRightEdgeX - effectiveContextWindowWidth + this.contextManualNudgeX;
+      const minPopupXInsideComposer = Math.max(this.margin, anchorLeft + inset);
+      const maxPopupXInsideComposer = Math.min(
+        viewportWidth - effectiveContextWindowWidth - this.margin,
+        anchorRight - inset - effectiveContextWindowWidth
       );
+      if (minPopupXInsideComposer <= maxPopupXInsideComposer) {
+        popupX = this.snapToDevicePixel(
+          this.clamp(popupX, minPopupXInsideComposer, maxPopupXInsideComposer)
+        );
+      } else {
+        popupX = this.snapToDevicePixel(
+          this.clamp(
+            popupX,
+            this.margin,
+            Math.max(this.margin, viewportWidth - effectiveContextWindowWidth - this.margin)
+          )
+        );
+      }
       let tabY = this.snapToDevicePixel(
         this.clamp(
           adjustedAnchorTop - this.tabHeight,
@@ -262,7 +295,7 @@
         tabWidth: this.promptlyBoxWidth,
         tabY,
         popupX,
-        popupWidth: this.contextWindowWidth,
+        popupWidth: effectiveContextWindowWidth,
         popupY,
         popupHeight: expandedPopupHeight,
         popupMinHeight: expandedPopupHeight,

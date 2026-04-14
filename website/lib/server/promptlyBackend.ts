@@ -8,17 +8,25 @@ export const CREDIT_MAX_ESTIMATED_INPUT_TOKENS = 4000;
 export const PROMPTLY_USER_CONTENT_TOKEN = "<<PROMPTLY_USER_CONTENT>>";
 const PROMPT_SETTINGS_COLLECTION = "promptly_settings";
 const PROMPT_ENGINEERING_DOC_ID = "prompt_engineering";
+const TIER_LIMITS_DOC_ID = "tier_limits";
+const TIER_LIMITS_CACHE_MS = 30_000;
+/** Default Pro daily cap (tokens / UTC day) when admin doc not set — editable in Admin → Plan limits. */
+export const DEFAULT_PRO_DAILY_TOKEN_LIMIT = 12_000_000;
 const PROMPT_TEMPLATE_MAX_CHARS = 24_000;
+const FAST_CREATE_TEMPLATE_MAX_CHARS = 3500;
+const FAST_CREATE_USER_SLOT_MAX_CHARS = 2200;
 /** Extra chars assumed for super-prompt template when estimating credits before loading Firestore. */
 const OPTIMIZE_TEMPLATE_OVERHEAD_CHARS = 6000;
 const PROMPT_ENGINEERING_CACHE_MS = 45_000;
 export const DAILY_BILL_PLAN_CAP = 250_000;
 export const DAILY_API_TOKEN_LIMIT_DEFAULT = 4_000_000;
+/** Upper bound for admin-set daily token limits (abuse throttle). */
+export const ADMIN_DAILY_TOKEN_LIMIT_MAX = 50_000_000;
 
 const REQUIRED_CLIENT_HEADER = "promptly-extension";
 const DEFAULT_OPENAI_MODEL = "gpt-5-nano";
 const DEFAULT_OPENAI_REWRITE_MODEL = "gpt-5-nano";
-const DEFAULT_OPENAI_CREATE_MODEL = "gpt-5-mini";
+const DEFAULT_OPENAI_CREATE_MODEL = "gpt-5-nano";
 const USER_COLLECTION = "users";
 const DAILY_USAGE_COLLECTION = "promptly_usage_daily";
 const GOOGLE_ACCESS_TOKEN_CACHE_TTL_MS = 45 * 60 * 1000;
@@ -156,6 +164,70 @@ function getRecentDays(days: number) {
   return Array.from({ length: count }, (_, idx) => getDateDaysAgo(count - idx - 1));
 }
 
+export type TierTokenLimits = { free: number; pro: number };
+
+let tierLimitsCache: { at: number; limits: TierTokenLimits } | null = null;
+
+function invalidateTierLimitsCache() {
+  tierLimitsCache = null;
+}
+
+export async function loadTierTokenLimits(): Promise<TierTokenLimits> {
+  const now = Date.now();
+  if (tierLimitsCache && now - tierLimitsCache.at < TIER_LIMITS_CACHE_MS) {
+    return tierLimitsCache.limits;
+  }
+  const snap = await getFirebaseAdminDb()
+    .collection(PROMPT_SETTINGS_COLLECTION)
+    .doc(TIER_LIMITS_DOC_ID)
+    .get();
+  const raw = (snap.data() || {}) as Record<string, unknown>;
+  const free = Math.max(
+    1,
+    Math.floor(
+      Number(raw.freeDailyTokenLimit ?? raw.free_daily_token_limit ?? DAILY_API_TOKEN_LIMIT_DEFAULT) ||
+        DAILY_API_TOKEN_LIMIT_DEFAULT
+    )
+  );
+  const pro = Math.max(
+    1,
+    Math.floor(Number(raw.proDailyTokenLimit ?? raw.pro_daily_token_limit ?? DEFAULT_PRO_DAILY_TOKEN_LIMIT) || DEFAULT_PRO_DAILY_TOKEN_LIMIT)
+  );
+  const limits = { free, pro };
+  tierLimitsCache = { at: now, limits };
+  return limits;
+}
+
+export function billingTierFromUserDoc(raw: Record<string, unknown>): "free" | "pro" {
+  const t = String(raw.subscriptionTier || "").toLowerCase();
+  if (t === "pro" || t === "plus" || t === "professional") return "pro";
+  return "free";
+}
+
+export function effectiveDailyTokenLimitFromUserData(raw: Record<string, unknown>, limits: TierTokenLimits): number {
+  const o = raw.dailyTokenLimitOverride;
+  if (typeof o === "number" && Number.isFinite(o) && o >= 1) {
+    return Math.min(Math.max(1, Math.floor(o)), ADMIN_DAILY_TOKEN_LIMIT_MAX);
+  }
+  const tier = billingTierFromUserDoc(raw);
+  const v = tier === "pro" ? limits.pro : limits.free;
+  return Math.max(1, Math.floor(v));
+}
+
+/** After Stripe updates `subscriptionTier`, refresh `dailyTokenLimit` on the user doc. */
+export async function applyBillingDerivedDailyTokenLimit(uid: string): Promise<void> {
+  const db = getFirebaseAdminDb();
+  const ref = db.collection(USER_COLLECTION).doc(uid);
+  const snap = await ref.get();
+  const raw = (snap.data() || {}) as Record<string, unknown>;
+  const limits = await loadTierTokenLimits();
+  const effective = effectiveDailyTokenLimitFromUserData(raw, limits);
+  await ref.set(
+    { dailyTokenLimit: effective, updatedAt: FieldValue.serverTimestamp() },
+    { merge: true }
+  );
+}
+
 function getOpenAiApiKey() {
   return required("OPENAI_API_KEY", process.env.OPENAI_API_KEY);
 }
@@ -188,11 +260,36 @@ function getOpenAiModelForRequest(requestMode: string, rewriteMode: "AUTO" | "MA
 }
 
 function getRewriteTimeoutMs() {
-  return Math.max(3000, Math.min(30000, Number(process.env.OPENAI_REWRITE_TIMEOUT_MS || 15000)));
+  return Math.max(8000, Math.min(60000, Number(process.env.OPENAI_REWRITE_TIMEOUT_MS || 20000)));
 }
 
 function getGenerateTimeoutMs() {
-  return Math.max(5000, Math.min(180000, Number(process.env.OPENAI_CREATE_TIMEOUT_MS || 90000)));
+  return Math.max(10000, Math.min(60000, Number(process.env.OPENAI_CREATE_TIMEOUT_MS || 28000)));
+}
+
+function isProviderTimeoutError(error: unknown) {
+  const message = String(error instanceof Error ? error.message : error || "");
+  return /timed out|timeout/i.test(message);
+}
+
+function getRewriteFallbackModel(primaryModel: string) {
+  const configured =
+    String(process.env.OPENAI_MODEL_REWRITE_FALLBACK || process.env.OPENAI_MODEL_FALLBACK || "").trim() ||
+    "gpt-4.1-mini";
+  if (!configured) {
+    return "";
+  }
+  return configured === primaryModel ? "" : configured;
+}
+
+function getCreateFallbackModel(primaryModel: string) {
+  const configured =
+    String(process.env.OPENAI_MODEL_CREATE_FALLBACK || process.env.OPENAI_MODEL_FALLBACK || "").trim() ||
+    "gpt-4.1-mini";
+  if (!configured) {
+    return "";
+  }
+  return configured === primaryModel ? "" : configured;
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -202,8 +299,8 @@ function clamp(value: number, min: number, max: number) {
 function getMaxCompletionTokens(prompt: string, requestMode: string, rewriteMode: "AUTO" | "MANUAL") {
   const estimatedPromptTokens = estimateTokensFromChars(String(prompt || "").length);
   if (requestMode === "create") {
-    // Large ceiling per segment; create may chain continuations when the API hits max_output_tokens.
-    return clamp(estimatedPromptTokens * 4, 2000, 16384);
+    // Create should use the same speed profile as Improve Prompt.
+    return clamp(estimatedPromptTokens * 1.7, 180, 650);
   }
   if (rewriteMode === "MANUAL") {
     return clamp(estimatedPromptTokens * 2, 280, 1200);
@@ -271,10 +368,9 @@ async function upsertPromptlyUser(userId: string, email: string | null, patch: R
   const userRef = db.collection(USER_COLLECTION).doc(userId);
   const snap = await userRef.get();
   const existing = (snap.data() || {}) as Record<string, unknown>;
-  const dailyTokenLimit = Math.max(
-    1,
-    Math.floor(Number(existing.dailyTokenLimit || DAILY_API_TOKEN_LIMIT_DEFAULT) || DAILY_API_TOKEN_LIMIT_DEFAULT)
-  );
+  const mergedForLimit = { ...existing, ...patch };
+  const limits = await loadTierTokenLimits();
+  const dailyTokenLimit = effectiveDailyTokenLimitFromUserData(mergedForLimit, limits);
   const promptlyUser: PromptlyUser = {
     uid: userId,
     email,
@@ -468,7 +564,7 @@ Preserve the user's intent. Add useful structure (objective, context, constraint
 
 ${tok}
 
-Match the user's goal. Be specific and actionable. Do not chat; output only the constructed prompt.`
+Match the user's goal. Be specific and actionable. Keep the final prompt concise and focused (target ~140-320 words, hard max 450 words). Do not chat; output only the constructed prompt.`
   };
 }
 
@@ -576,7 +672,7 @@ function usesResponsesApi(model: string) {
 const CREATE_TRUNCATION_CONTINUE_MSG =
   "Your previous output hit the length limit mid-stream. Continue from the very next character. Do not repeat anything you already wrote. No preamble or labels—only the rest of the prompt text.";
 
-const CREATE_CONTINUATION_MAX_ROUNDS = 4;
+const CREATE_CONTINUATION_MAX_ROUNDS = 1;
 
 function isResponsesApiTruncated(body: Record<string, unknown>): boolean {
   if (body.status === "incomplete") {
@@ -698,7 +794,7 @@ async function callOpenAi(options: {
         model: options.model,
         max_output_tokens: options.maxCompletionTokens,
         text: {
-          verbosity: isCreate ? "high" : "low"
+          verbosity: "low"
         }
       };
       if (!isCreate) {
@@ -726,7 +822,7 @@ async function callOpenAi(options: {
                   }
                 ],
                 max_output_tokens: options.maxCompletionTokens,
-                text: { verbosity: "high" },
+                text: { verbosity: "low" },
                 store: true
               };
 
@@ -868,30 +964,58 @@ export async function optimizePrompt(prompt: string, userInstruction: string, re
   const mode = trimmedInstruction.includes("MANUAL") ? "MANUAL" : "AUTO";
   const templates = await loadPromptEngineeringTemplates();
   const template = isCreate
-    ? templates.compose_template
+    ? String(templates.compose_template || "").length > FAST_CREATE_TEMPLATE_MAX_CHARS
+      ? getDefaultPromptEngineeringTemplates().compose_template
+      : templates.compose_template
     : mode === "MANUAL"
       ? templates.rewrite_manual_template
       : templates.rewrite_auto_template;
-  const userSlot = trimmedPrompt || trimmedInstruction;
+  const userSlotRaw = trimmedPrompt || trimmedInstruction;
+  const userSlot = isCreate ? userSlotRaw.slice(0, FAST_CREATE_USER_SLOT_MAX_CHARS) : userSlotRaw;
   const bundledUserMessage = applyPromptTemplate(template, userSlot);
   const maxBundled = CREDIT_MAX_PROMPT_CHARS + PROMPT_TEMPLATE_MAX_CHARS;
   if (bundledUserMessage.length > maxBundled) {
     throw new Error("Bundled prompt exceeds safe size; shorten the template or user content.");
   }
-  const model = getOpenAiModelForRequest(requestMode, mode);
+  let model = getOpenAiModelForRequest(requestMode, mode);
   const completionEstimateSource = isCreate
     ? `${trimmedPrompt}\n${trimmedInstruction}`.trim()
     : trimmedPrompt || userSlot;
   const requestOptions = {
     model,
-    timeoutMs: isCreate ? getGenerateTimeoutMs() : getRewriteTimeoutMs(),
+    timeoutMs: getRewriteTimeoutMs(),
     maxCompletionTokens: getMaxCompletionTokens(completionEstimateSource, requestMode, mode)
   };
-  const firstResult = await callOpenAi({
-    messages: [{ role: "user", content: bundledUserMessage }],
-    requestMode,
-    ...requestOptions
-  });
+  // Critical: create uses the same provider execution profile as Improve Prompt.
+  // Only the template differs (compose_template vs rewrite templates).
+  const providerRequestMode = "rewrite";
+  const messages = [{ role: "user", content: bundledUserMessage }];
+  let firstResult;
+  try {
+    firstResult = await callOpenAi({
+      messages,
+      requestMode: providerRequestMode,
+      ...requestOptions
+    });
+  } catch (error) {
+    const fallbackModel =
+      requestMode === "create" && isProviderTimeoutError(error)
+          ? getCreateFallbackModel(model)
+        : requestMode === "rewrite" && isProviderTimeoutError(error)
+          ? getRewriteFallbackModel(model)
+          : "";
+    if (!fallbackModel) {
+      throw error;
+    }
+    model = fallbackModel;
+    firstResult = await callOpenAi({
+      messages,
+      requestMode: providerRequestMode,
+      model,
+      timeoutMs: Math.max(12000, requestOptions.timeoutMs),
+      maxCompletionTokens: requestOptions.maxCompletionTokens
+    });
+  }
   const normalized = normalizePlainRewriteOutput(firstResult.rawText, trimmedPrompt || trimmedInstruction);
   return {
     optimized_prompt: normalized.optimized_prompt,
@@ -1004,6 +1128,46 @@ export function parseEstimateHeader(request: Request, headerName: string, maxVal
   return Math.min(maxValue, Math.floor(value));
 }
 
+export async function adminGetTierLimits(): Promise<{
+  ok: true;
+  free_daily_token_limit: number;
+  pro_daily_token_limit: number;
+  defaults: TierTokenLimits;
+}> {
+  const limits = await loadTierTokenLimits();
+  return {
+    ok: true,
+    free_daily_token_limit: limits.free,
+    pro_daily_token_limit: limits.pro,
+    defaults: { free: DAILY_API_TOKEN_LIMIT_DEFAULT, pro: DEFAULT_PRO_DAILY_TOKEN_LIMIT }
+  };
+}
+
+export async function adminSaveTierLimits(patch: Partial<{ free: number; pro: number }>) {
+  const current = await loadTierTokenLimits();
+  const free =
+    typeof patch.free === "number" && Number.isFinite(patch.free)
+      ? Math.max(1, Math.min(Math.floor(patch.free), ADMIN_DAILY_TOKEN_LIMIT_MAX))
+      : current.free;
+  const pro =
+    typeof patch.pro === "number" && Number.isFinite(patch.pro)
+      ? Math.max(1, Math.min(Math.floor(patch.pro), ADMIN_DAILY_TOKEN_LIMIT_MAX))
+      : current.pro;
+  await getFirebaseAdminDb()
+    .collection(PROMPT_SETTINGS_COLLECTION)
+    .doc(TIER_LIMITS_DOC_ID)
+    .set(
+      {
+        freeDailyTokenLimit: free,
+        proDailyTokenLimit: pro,
+        updatedAt: FieldValue.serverTimestamp()
+      },
+      { merge: true }
+    );
+  invalidateTierLimitsCache();
+  return { ok: true as const, free_daily_token_limit: free, pro_daily_token_limit: pro };
+}
+
 export async function getCreditsForUser(user: PromptlyUser, request: Request) {
   const day = getUtcDay();
   const usage = await getDailyUsage(user.uid, day, user.dailyTokenLimit);
@@ -1082,9 +1246,6 @@ export async function getAdminStats(days: number) {
   };
 }
 
-/** Upper bound for admin-set daily token limits (abuse throttle). */
-export const ADMIN_DAILY_TOKEN_LIMIT_MAX = 50_000_000;
-
 function firestoreTimestampToIso(value: unknown): string | null {
   if (value == null) {
     return null;
@@ -1118,10 +1279,13 @@ export async function getAdminUserDetail(userId: string, days: number) {
     return { ok: false as const, error: "User not found" };
   }
   const raw = (userSnap.data() || {}) as Record<string, unknown>;
-  const dailyLimit = Math.max(
-    1,
-    Math.floor(Number(raw.dailyTokenLimit || DAILY_API_TOKEN_LIMIT_DEFAULT) || DAILY_API_TOKEN_LIMIT_DEFAULT)
-  );
+  const tierLimits = await loadTierTokenLimits();
+  const dailyLimit = effectiveDailyTokenLimitFromUserData(raw, tierLimits);
+  const overrideRaw = raw.dailyTokenLimitOverride;
+  const override =
+    typeof overrideRaw === "number" && Number.isFinite(overrideRaw) && overrideRaw >= 1
+      ? Math.min(Math.floor(overrideRaw), ADMIN_DAILY_TOKEN_LIMIT_MAX)
+      : null;
 
   const usageRows = await Promise.all(
       recentDays.map(async (day) => {
@@ -1150,7 +1314,9 @@ export async function getAdminUserDetail(userId: string, days: number) {
       user_id: uid,
       email: typeof raw.email === "string" ? raw.email : null,
       plan: typeof raw.plan === "string" ? raw.plan : "free",
+      subscription_tier: billingTierFromUserDoc(raw),
       daily_token_limit: dailyLimit,
+      daily_token_limit_override: override,
       prompts_improved: Math.max(0, Math.floor(Number(raw.promptsImprovedTotal || 0) || 0)),
       all_time_max_daily_token_usage: Math.max(
         0,
@@ -1174,17 +1340,10 @@ export async function getAdminUserDetail(userId: string, days: number) {
   };
 }
 
-export async function adminSetUserDailyTokenLimit(userId: string, nextLimit: number) {
+export async function adminSetUserDailyTokenLimit(userId: string, nextLimit: number | null) {
   const uid = String(userId || "").trim();
   if (!uid) {
     throw new Error("Missing user id");
-  }
-  const limit = Math.floor(Number(nextLimit));
-  if (!Number.isFinite(limit) || limit < 1) {
-    throw new Error("daily_token_limit must be a positive integer");
-  }
-  if (limit > ADMIN_DAILY_TOKEN_LIMIT_MAX) {
-    throw new Error(`daily_token_limit cannot exceed ${ADMIN_DAILY_TOKEN_LIMIT_MAX.toLocaleString()}`);
   }
 
   const db = getFirebaseAdminDb();
@@ -1194,15 +1353,53 @@ export async function adminSetUserDailyTokenLimit(userId: string, nextLimit: num
     throw new Error("User not found");
   }
 
+  if (nextLimit == null) {
+    await ref.set(
+      {
+        dailyTokenLimitOverride: FieldValue.delete(),
+        updatedAt: FieldValue.serverTimestamp()
+      },
+      { merge: true }
+    );
+    const raw = ((await ref.get()).data() || {}) as Record<string, unknown>;
+    const limits = await loadTierTokenLimits();
+    const effective = effectiveDailyTokenLimitFromUserData(raw, limits);
+    await ref.set(
+      { dailyTokenLimit: effective, updatedAt: FieldValue.serverTimestamp() },
+      { merge: true }
+    );
+    return {
+      ok: true as const,
+      user_id: uid,
+      daily_token_limit: effective,
+      daily_token_limit_override: null as null
+    };
+  }
+
+  const limit = Math.floor(Number(nextLimit));
+  if (!Number.isFinite(limit) || limit < 1) {
+    throw new Error("daily_token_limit must be a positive integer");
+  }
+  if (limit > ADMIN_DAILY_TOKEN_LIMIT_MAX) {
+    throw new Error(`daily_token_limit cannot exceed ${ADMIN_DAILY_TOKEN_LIMIT_MAX.toLocaleString()}`);
+  }
+
+  const capped = Math.min(limit, ADMIN_DAILY_TOKEN_LIMIT_MAX);
   await ref.set(
     {
-      dailyTokenLimit: limit,
+      dailyTokenLimitOverride: capped,
+      dailyTokenLimit: capped,
       updatedAt: FieldValue.serverTimestamp()
     },
     { merge: true }
   );
 
-  return { ok: true as const, user_id: uid, daily_token_limit: limit };
+  return {
+    ok: true as const,
+    user_id: uid,
+    daily_token_limit: capped,
+    daily_token_limit_override: capped
+  };
 }
 
 export async function getAdminUsers(days: number) {
@@ -1234,13 +1431,11 @@ export async function getAdminUsers(days: number) {
   }
 
   const today = getUtcDay();
+  const listLimits = await loadTierTokenLimits();
   const users = usersSnap.docs.map((doc) => {
     const raw = doc.data() as Record<string, unknown>;
     const uid = String(raw.uid || doc.id);
-    const dailyLimit = Math.max(
-      1,
-      Math.floor(Number(raw.dailyTokenLimit || DAILY_API_TOKEN_LIMIT_DEFAULT) || DAILY_API_TOKEN_LIMIT_DEFAULT)
-    );
+    const dailyLimit = effectiveDailyTokenLimitFromUserData(raw, listLimits);
     const dayTokens = usageByUser.get(uid) || new Map<string, number>();
     const recentValues = recentDays.map((day) => dayTokens.get(day) || 0);
     const activeRecentValues = recentValues.filter((value) => value > 0);

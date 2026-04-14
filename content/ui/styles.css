@@ -9,7 +9,7 @@
   all: initial;
   position: relative;
   display: block;
-  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: "Open Sans", "Noto Sans", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   color-scheme: light dark;
   opacity: 0;
   transition: opacity 300ms ease;
@@ -25,8 +25,28 @@
   --promptly-chip-bg: rgba(99, 102, 241, 0.1);
   --promptly-chip-border: rgba(99, 102, 241, 0.26);
   --promptly-chip-text: #312e81;
-  --promptly-tab-bg: linear-gradient(135deg, #5b21b6, #4c1d95);
+  --promptly-tab-bg: linear-gradient(135deg, #0b0f16, #000000);
   --promptly-shadow: 0 12px 30px rgba(15, 23, 42, 0.16);
+}
+
+.promptly-root[data-visual-color="black"] {
+  --promptly-tab-bg: linear-gradient(135deg, #0b0f16, #000000);
+}
+
+.promptly-root[data-visual-color="purple"] {
+  --promptly-tab-bg: linear-gradient(135deg, #5b21b6, #4c1d95);
+}
+
+.promptly-root[data-visual-color="dark-blue"] {
+  --promptly-tab-bg: linear-gradient(135deg, #1e3a8a, #0b2447);
+}
+
+.promptly-root[data-visual-color="dark-green"] {
+  --promptly-tab-bg: linear-gradient(135deg, #14532d, #052e16);
+}
+
+.promptly-root[data-visual-style="midnight"] {
+  --promptly-tab-bg: linear-gradient(135deg, #111827, #030712);
 }
 
 .promptly-root.is-host-visible {
@@ -99,6 +119,21 @@
   position: relative;
 }
 
+.promptly-tab-logo-minimal {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+.promptly-tab-logo-minimal-icon {
+  display: block;
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+
 .promptly-tab-controls {
   display: inline-flex;
   align-items: center;
@@ -106,6 +141,70 @@
   margin-left: auto;
   padding-left: 4px;
   overflow: visible;
+}
+
+.promptly-root[data-visual-style="minimalistic"] .promptly-tab {
+  width: var(--promptly-tab-height);
+  padding: 0;
+  justify-content: center;
+  left: calc(var(--promptly-tab-width) - var(--promptly-tab-height));
+}
+
+.promptly-root[data-visual-style="minimalistic"] .promptly-tab-text-window,
+.promptly-root[data-visual-style="minimalistic"] .promptly-tab-controls {
+  display: none;
+}
+
+.promptly-root[data-visual-style="minimalistic"] .promptly-tab-logo-minimal {
+  display: inline-flex;
+}
+
+.promptly-root[data-visual-style="minimalistic"].is-minimal-expanded .promptly-tab {
+  width: var(--promptly-tab-width);
+  left: 0;
+  padding: 0 8px;
+  justify-content: flex-start;
+}
+
+.promptly-root[data-visual-style="minimalistic"].is-minimal-expanded .promptly-tab-text-window,
+.promptly-root[data-visual-style="minimalistic"].is-minimal-expanded .promptly-tab-controls {
+  display: inline-flex;
+}
+
+.promptly-root[data-visual-style="minimalistic"].is-minimal-expanded .promptly-tab-text-window {
+  display: inline-block;
+}
+
+.promptly-root[data-visual-style="minimalistic"].is-minimal-expanded .promptly-tab-logo-minimal {
+  display: none;
+}
+
+.promptly-tab-settings {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 0;
+  cursor: pointer;
+  color: rgba(226, 232, 240, 0.95);
+  background: transparent;
+  border: 0;
+}
+
+.promptly-tab-settings:hover {
+  opacity: 0.85;
+}
+
+.promptly-tab-settings-icon {
+  display: block;
+  width: 13px;
+  height: 13px;
+  aspect-ratio: 1 / 1;
+  object-fit: contain;
+  opacity: 1;
+  filter: none;
 }
 
 .promptly-root.is-signed-out .promptly-tab-auto-label,
@@ -137,6 +236,227 @@
   justify-content: center;
 }
 
+.promptly-settings-panel {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  width: 460px;
+  min-height: 170px;
+  padding: 14px 16px;
+  border-radius: 0;
+  border: 1px solid rgba(71, 85, 105, 0.52);
+  background: rgba(0, 0, 0, 0.98);
+  color: #f8fafc;
+  box-shadow: 0 20px 38px rgba(2, 6, 23, 0.5);
+  z-index: 50;
+  opacity: 0;
+  transform: translateY(-8px);
+  pointer-events: none;
+  transition: opacity 180ms ease, transform 180ms ease;
+  font-family: "Noto Sans Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.promptly-settings-panel * {
+  font-family: inherit;
+}
+
+.promptly-root.is-settings-open .promptly-settings-panel {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.promptly-settings-title {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+
+.promptly-settings-close {
+  all: unset;
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.9;
+}
+
+.promptly-settings-close:hover {
+  opacity: 1;
+}
+
+.promptly-settings-section {
+  margin-bottom: 12px;
+}
+
+.promptly-settings-account-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.promptly-settings-label {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-bottom: 5px;
+}
+
+.promptly-settings-email {
+  font-size: 12px;
+  font-weight: 600;
+  color: #e2e8f0;
+  margin-bottom: 0;
+  word-break: break-word;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.promptly-settings-tier-badge {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  color: #e2e8f0;
+  border: 1px solid rgba(148, 163, 184, 0.55);
+  border-radius: 999px;
+  padding: 2px 7px;
+  line-height: 1.1;
+}
+
+.promptly-settings-account-btn {
+  all: unset;
+  display: block;
+  width: auto;
+  max-width: 100%;
+  box-sizing: border-box;
+  cursor: pointer;
+  border-radius: 8px;
+  border: 1px solid rgba(99, 102, 241, 0.55);
+  background: rgba(79, 70, 229, 0.18);
+  color: #e0e7ff;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  white-space: nowrap;
+  padding: 7px 9px;
+}
+
+.promptly-settings-sliders {
+  display: flex;
+  gap: 10px;
+}
+
+.promptly-settings-slider-card {
+  flex: 1 1 50%;
+  min-width: 0;
+}
+
+.promptly-settings-slider {
+  width: 100%;
+  margin: 2px 0 4px;
+  accent-color: #ffffff;
+}
+
+.promptly-settings-ticks {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: #94a3b8;
+}
+
+.promptly-settings-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.promptly-settings-toggle-label {
+  font-size: 11px;
+  color: #cbd5e1;
+}
+
+.promptly-settings-toggle {
+  all: unset;
+  width: 36px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.5);
+  background: rgba(71, 85, 105, 0.45);
+  cursor: pointer;
+  position: relative;
+}
+
+.promptly-settings-toggle-knob {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ffffff;
+  transition: transform 140ms ease;
+}
+
+.promptly-settings-toggle.is-thin .promptly-settings-toggle-knob {
+  transform: translateX(18px);
+}
+
+.promptly-settings-color-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.promptly-settings-color {
+  all: unset;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.promptly-settings-color span {
+  display: none;
+  font-size: 10px;
+  color: #ffffff;
+  line-height: 1;
+}
+
+.promptly-settings-color.is-selected span {
+  display: inline-block;
+}
+
+.promptly-settings-color[data-color="black"] {
+  background: #000000;
+}
+
+.promptly-settings-color[data-color="purple"] {
+  background: #5b21b6;
+}
+
+.promptly-settings-color[data-color="dark-blue"] {
+  background: #1e3a8a;
+}
+
+.promptly-settings-color[data-color="dark-green"] {
+  background: #14532d;
+}
+
 .promptly-tab-text-track {
   display: flex;
   flex-direction: column;
@@ -154,6 +474,7 @@
   line-height: 14px;
   font-size: 12px;
   font-weight: 700;
+  font-family: "Noto Sans Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -233,9 +554,9 @@
 }
 
 .promptly-tab-credit-meter {
-  --promptly-credit-progress: 0%;
-  width: 10px;
-  height: 10px;
+  --promptly-credit-progress: 2%;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   flex: 0 0 auto;
   margin-left: 4px;
@@ -254,8 +575,8 @@
 
 .promptly-tab-credit-wrap {
   --promptly-credit-connector-length: 30px;
-  /* 4px margin + 5px radius = horizontal center of 10px ring */
-  --promptly-credit-meter-center-x: 9px;
+  /* 4px margin + 6px radius = horizontal center of 12px ring */
+  --promptly-credit-meter-center-x: 10px;
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -268,7 +589,7 @@
   content: "";
   position: absolute;
   left: var(--promptly-credit-meter-center-x);
-  top: calc(50% - 5px - var(--promptly-credit-connector-length));
+  top: calc(50% - 6px - var(--promptly-credit-connector-length));
   transform: translateX(-50%);
   width: 1px;
   height: var(--promptly-credit-connector-length);
