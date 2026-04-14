@@ -1337,6 +1337,8 @@ async function callOpenAi(options: {
         baseResponsesFields.reasoning = { effort: "minimal" };
         baseResponsesFields.store = false;
       } else {
+        // Keep create on primary model more responsive by constraining reasoning work.
+        baseResponsesFields.reasoning = { effort: "minimal" };
         baseResponsesFields.store = true;
       }
 
@@ -1549,6 +1551,30 @@ export async function optimizePrompt(
     });
   } catch (error) {
     const shouldFallback = isProviderTimeoutError(error) || isProviderNoContentError(error);
+    if (isCreate && shouldFallback) {
+      const fastRetryTokens = clamp(Math.floor(requestOptions.maxCompletionTokens * 0.65), 500, requestOptions.maxCompletionTokens);
+      try {
+        firstResult = await callOpenAi({
+          messages,
+          requestMode,
+          model,
+          timeoutMs: requestOptions.timeoutMs,
+          maxCompletionTokens: fastRetryTokens,
+          createContinuationMaxRounds: 1
+        });
+      } catch (_fastRetryError) {
+        // Fall through to configured fallback model.
+      }
+      if (firstResult) {
+        const normalizedFast = normalizePlainRewriteOutput(firstResult.rawText, trimmedPrompt || trimmedInstruction);
+        return {
+          optimized_prompt: normalizedFast.optimized_prompt,
+          usage: firstResult.usage,
+          model,
+          provider: "openai"
+        };
+      }
+    }
     const fallbackModel =
       requestMode === "create" && shouldFallback
           ? getCreateFallbackModel(model, config.create_fallback_model)
