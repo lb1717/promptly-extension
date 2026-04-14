@@ -240,6 +240,55 @@ function getOpenAiApiKey() {
   return required("OPENAI_API_KEY", process.env.OPENAI_API_KEY);
 }
 
+async function validateOpenAiModelExists(model: string): Promise<void> {
+  const m = String(model || "").trim();
+  if (!m) {
+    throw new Error("Model id is empty");
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort("timeout"), 12000);
+  try {
+    const isGpt5Family = usesResponsesApi(m);
+    const url = isGpt5Family ? "https://api.openai.com/v1/responses" : "https://api.openai.com/v1/chat/completions";
+    const body = isGpt5Family
+      ? {
+          model: m,
+          input: [{ role: "user", content: [{ type: "input_text", text: "ping" }] }],
+          max_output_tokens: 1,
+          stream: false,
+          store: false
+        }
+      : {
+          model: m,
+          messages: [{ role: "user", content: "ping" }],
+          max_tokens: 1,
+          stream: false
+        };
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${getOpenAiApiKey()}`
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+    const raw = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!response.ok) {
+      const errObj = raw.error as { message?: string } | undefined;
+      const message = String(errObj?.message || `Provider error (${response.status})`);
+      throw new Error(`Model "${m}" failed validation: ${message}`);
+    }
+  } catch (error) {
+    if ((error as Error)?.name === "AbortError") {
+      throw new Error(`Model "${m}" validation timed out`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function getOpenAiModel() {
   return String(process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL).trim() || DEFAULT_OPENAI_MODEL;
 }
@@ -1111,6 +1160,22 @@ export async function adminSavePromptEngineering(
     rewrite_fallback_model: normalizeModelControl(patch.rewrite_fallback_model, current.rewrite_fallback_model),
     create_fallback_model: normalizeModelControl(patch.create_fallback_model, current.create_fallback_model)
   };
+  const modelsToValidate = Array.from(
+    new Set(
+      [
+        nextModels.rewrite_auto_model,
+        nextModels.rewrite_manual_model,
+        nextModels.create_model,
+        nextModels.rewrite_fallback_model,
+        nextModels.create_fallback_model
+      ]
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+    )
+  );
+  for (const model of modelsToValidate) {
+    await validateOpenAiModelExists(model);
+  }
   await getFirebaseAdminDb()
     .collection(PROMPT_SETTINGS_COLLECTION)
     .doc(PROMPT_ENGINEERING_DOC_ID)

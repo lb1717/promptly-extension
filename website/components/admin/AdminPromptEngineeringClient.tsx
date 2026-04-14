@@ -193,57 +193,14 @@ export function AdminPromptEngineeringClient() {
         <div className="flex flex-col gap-8">
           <section className="rounded-2xl border border-violet-500/20 bg-[#221830]/60 p-5">
             <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-violet-300/90">
-              Auto-adjust on send (rewrite)
+              Auto mode
             </h2>
             <p className="mb-3 text-xs text-violet-200/70">
-              Used when the user has Auto on and sends from the chat box (AUTO mode).
-            </p>
-            <textarea
-              value={autoT}
-              onChange={(e) => setAutoT(e.target.value)}
-              rows={12}
-              className="w-full resize-y rounded-xl border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 font-mono text-sm text-violet-50 placeholder:text-violet-400/40"
-            />
-          </section>
-
-          <section className="rounded-2xl border border-violet-500/20 bg-[#221830]/60 p-5">
-            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-violet-300/90">
-              Improve Prompt button (manual rewrite)
-            </h2>
-            <p className="mb-3 text-xs text-violet-200/70">MANUAL rewrite from the extension popup.</p>
-            <textarea
-              value={manualT}
-              onChange={(e) => setManualT(e.target.value)}
-              rows={12}
-              className="w-full resize-y rounded-xl border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 font-mono text-sm text-violet-50 placeholder:text-violet-400/40"
-            />
-          </section>
-
-          <section className="rounded-2xl border border-violet-500/20 bg-[#221830]/60 p-5">
-            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-violet-300/90">
-              Generate prompt (compose)
-            </h2>
-            <p className="mb-3 text-xs text-violet-200/70">
-              The description field in the popup; token is replaced with that text.
-            </p>
-            <textarea
-              value={composeT}
-              onChange={(e) => setComposeT(e.target.value)}
-              rows={12}
-              className="w-full resize-y rounded-xl border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 font-mono text-sm text-violet-50 placeholder:text-violet-400/40"
-            />
-          </section>
-
-          <section className="rounded-2xl border border-violet-500/20 bg-[#221830]/60 p-5">
-            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-violet-300/90">
-              Runtime controls
-            </h2>
-            <p className="mb-4 text-xs text-violet-200/70">
-              Control provider timeouts and output budget without redeploying Vercel env vars.
+              Used when the user has Auto enabled and sends from the chat box.
             </p>
             <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
               <label className="flex flex-col gap-1 text-xs text-violet-200/80">
-                Auto rewrite model
+                Model
                 <input
                   type="text"
                   value={autoModel}
@@ -253,51 +210,7 @@ export function AdminPromptEngineeringClient() {
                 />
               </label>
               <label className="flex flex-col gap-1 text-xs text-violet-200/80">
-                Improve model (manual)
-                <input
-                  type="text"
-                  value={manualModel}
-                  onChange={(e) => setManualModel(e.target.value)}
-                  placeholder="gpt-5-nano"
-                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-xs text-violet-200/80">
-                Create model
-                <input
-                  type="text"
-                  value={createModel}
-                  onChange={(e) => setCreateModel(e.target.value)}
-                  placeholder="gpt-5-nano"
-                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
-                />
-              </label>
-            </div>
-            <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <label className="flex flex-col gap-1 text-xs text-violet-200/80">
-                Rewrite fallback model
-                <input
-                  type="text"
-                  value={rewriteFallbackModel}
-                  onChange={(e) => setRewriteFallbackModel(e.target.value)}
-                  placeholder="gpt-4.1-mini"
-                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-xs text-violet-200/80">
-                Create fallback model
-                <input
-                  type="text"
-                  value={createFallbackModel}
-                  onChange={(e) => setCreateFallbackModel(e.target.value)}
-                  placeholder="gpt-4.1-mini"
-                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
-                />
-              </label>
-            </div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <label className="flex flex-col gap-1 text-xs text-violet-200/80">
-                Rewrite timeout (ms)
+                Timeout (ms)
                 <input
                   type="number"
                   min={8000}
@@ -309,7 +222,117 @@ export function AdminPromptEngineeringClient() {
                 />
               </label>
               <label className="flex flex-col gap-1 text-xs text-violet-200/80">
-                Create timeout (ms)
+                Max completion tokens
+                <input
+                  type="number"
+                  min={180}
+                  max={4000}
+                  step={10}
+                  value={rewriteAutoHardCapTokens}
+                  onChange={(e) => setRewriteAutoHardCapTokens(Number(e.target.value) || 650)}
+                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-violet-200/80 sm:col-span-3">
+                Fallback model (shared with Improve mode)
+                <input
+                  type="text"
+                  value={rewriteFallbackModel}
+                  onChange={(e) => setRewriteFallbackModel(e.target.value)}
+                  placeholder="gpt-4.1-mini"
+                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
+                />
+              </label>
+            </div>
+            <textarea
+              value={autoT}
+              onChange={(e) => setAutoT(e.target.value)}
+              rows={12}
+              className="w-full resize-y rounded-xl border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 font-mono text-sm text-violet-50 placeholder:text-violet-400/40"
+            />
+          </section>
+
+          <section className="rounded-2xl border border-violet-500/20 bg-[#221830]/60 p-5">
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-violet-300/90">
+              Improve mode
+            </h2>
+            <p className="mb-3 text-xs text-violet-200/70">
+              Manual rewrite triggered from the extension popup Improve button.
+            </p>
+            <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <label className="flex flex-col gap-1 text-xs text-violet-200/80">
+                Model
+                <input
+                  type="text"
+                  value={manualModel}
+                  onChange={(e) => setManualModel(e.target.value)}
+                  placeholder="gpt-5-nano"
+                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-violet-200/80">
+                Timeout (ms)
+                <input
+                  type="number"
+                  min={8000}
+                  max={120000}
+                  step={1000}
+                  value={rewriteTimeoutMs}
+                  onChange={(e) => setRewriteTimeoutMs(Number(e.target.value) || 20000)}
+                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-violet-200/80">
+                Max completion tokens
+                <input
+                  type="number"
+                  min={180}
+                  max={4000}
+                  step={10}
+                  value={rewriteMaxTokens}
+                  onChange={(e) => setRewriteMaxTokens(Number(e.target.value) || 1200)}
+                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-violet-200/80 sm:col-span-3">
+                Fallback model (shared with Auto mode)
+                <input
+                  type="text"
+                  value={rewriteFallbackModel}
+                  onChange={(e) => setRewriteFallbackModel(e.target.value)}
+                  placeholder="gpt-4.1-mini"
+                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
+                />
+              </label>
+            </div>
+            <textarea
+              value={manualT}
+              onChange={(e) => setManualT(e.target.value)}
+              rows={12}
+              className="w-full resize-y rounded-xl border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 font-mono text-sm text-violet-50 placeholder:text-violet-400/40"
+            />
+          </section>
+
+          <section className="rounded-2xl border border-violet-500/20 bg-[#221830]/60 p-5">
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-violet-300/90">
+              Create mode
+            </h2>
+            <p className="mb-3 text-xs text-violet-200/70">
+              Generates a full prompt from user description in the popup.
+            </p>
+            <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <label className="flex flex-col gap-1 text-xs text-violet-200/80">
+                Model
+                <input
+                  type="text"
+                  value={createModel}
+                  onChange={(e) => setCreateModel(e.target.value)}
+                  placeholder="gpt-5-nano"
+                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-violet-200/80">
+                Timeout (ms)
                 <input
                   type="number"
                   min={10000}
@@ -321,31 +344,17 @@ export function AdminPromptEngineeringClient() {
                 />
               </label>
               <label className="flex flex-col gap-1 text-xs text-violet-200/80">
-                Rewrite max completion tokens
+                Fallback model
                 <input
-                  type="number"
-                  min={180}
-                  max={4000}
-                  step={10}
-                  value={rewriteMaxTokens}
-                  onChange={(e) => setRewriteMaxTokens(Number(e.target.value) || 1200)}
+                  type="text"
+                  value={createFallbackModel}
+                  onChange={(e) => setCreateFallbackModel(e.target.value)}
+                  placeholder="gpt-4.1-mini"
                   className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
                 />
               </label>
               <label className="flex flex-col gap-1 text-xs text-violet-200/80">
-                Auto rewrite hard cap tokens
-                <input
-                  type="number"
-                  min={180}
-                  max={4000}
-                  step={10}
-                  value={rewriteAutoHardCapTokens}
-                  onChange={(e) => setRewriteAutoHardCapTokens(Number(e.target.value) || 650)}
-                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-xs text-violet-200/80">
-                Create max completion tokens
+                Max completion tokens
                 <input
                   type="number"
                   min={500}
@@ -357,31 +366,7 @@ export function AdminPromptEngineeringClient() {
                 />
               </label>
               <label className="flex flex-col gap-1 text-xs text-violet-200/80">
-                Create template max chars
-                <input
-                  type="number"
-                  min={800}
-                  max={24000}
-                  step={100}
-                  value={createTemplateMaxChars}
-                  onChange={(e) => setCreateTemplateMaxChars(Number(e.target.value) || 3500)}
-                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-xs text-violet-200/80">
-                Create user slot max chars
-                <input
-                  type="number"
-                  min={400}
-                  max={12000}
-                  step={100}
-                  value={createUserSlotMaxChars}
-                  onChange={(e) => setCreateUserSlotMaxChars(Number(e.target.value) || 2200)}
-                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-xs text-violet-200/80 sm:col-span-2">
-                Create continuation rounds (for truncated outputs)
+                Continuation rounds
                 <input
                   type="number"
                   min={1}
@@ -392,7 +377,40 @@ export function AdminPromptEngineeringClient() {
                   className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
                 />
               </label>
+              <label className="flex flex-col gap-1 text-xs text-violet-200/80">
+                Template max chars
+                <input
+                  type="number"
+                  min={800}
+                  max={24000}
+                  step={100}
+                  value={createTemplateMaxChars}
+                  onChange={(e) => setCreateTemplateMaxChars(Number(e.target.value) || 3500)}
+                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-violet-200/80 sm:col-span-3">
+                User description max chars
+                <input
+                  type="number"
+                  min={400}
+                  max={12000}
+                  step={100}
+                  value={createUserSlotMaxChars}
+                  onChange={(e) => setCreateUserSlotMaxChars(Number(e.target.value) || 2200)}
+                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
+                />
+              </label>
             </div>
+            <p className="mb-3 text-xs text-violet-200/70">
+              The template token is replaced with the user description text before model call.
+            </p>
+            <textarea
+              value={composeT}
+              onChange={(e) => setComposeT(e.target.value)}
+              rows={12}
+              className="w-full resize-y rounded-xl border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 font-mono text-sm text-violet-50 placeholder:text-violet-400/40"
+            />
           </section>
 
           <div className="flex justify-end">
