@@ -254,7 +254,7 @@ async function validateOpenAiModelExists(model: string): Promise<void> {
       ? {
           model: m,
           input: [{ role: "user", content: [{ type: "input_text", text: "ping" }] }],
-          max_output_tokens: 1,
+          max_output_tokens: 16,
           stream: false,
           store: false
         }
