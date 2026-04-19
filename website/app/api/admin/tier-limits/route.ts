@@ -25,6 +25,9 @@ export async function PATCH(request: Request) {
     const result = await adminSaveTierLimits({
       free: typeof b.free_daily_token_limit === "number" ? b.free_daily_token_limit : undefined,
       pro: typeof b.pro_daily_token_limit === "number" ? b.pro_daily_token_limit : undefined,
+      student: typeof b.student_daily_token_limit === "number" ? b.student_daily_token_limit : undefined,
+      enterprise:
+        typeof b.enterprise_daily_token_limit === "number" ? b.enterprise_daily_token_limit : undefined,
       global:
         b.global_daily_token_limit === null
           ? null

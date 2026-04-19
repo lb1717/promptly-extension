@@ -1,28 +1,11 @@
 "use client";
 
-import { DEMO_TIMING } from "@/lib/constants";
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 
 const ORIGINAL_PROMPT = "read this pdf and explain the arguments with evidence";
 const IMPROVED_PROMPT =
-  "Read the attached PDF and summarize the main arguments with supporting evidence. Use explicit quotes from the text and do not include any information not found in the document.";
-
-const VIEWPORT_PAD = 2;
-
-function isPromptBoxFullyVisible(el: HTMLElement | null): boolean {
-  if (!el) return false;
-  const r = el.getBoundingClientRect();
-  if (r.width < 4 || r.height < 4) return false;
-  const vh = window.innerHeight;
-  const vw = window.innerWidth;
-  return (
-    r.top >= -VIEWPORT_PAD &&
-    r.left >= -VIEWPORT_PAD &&
-    r.bottom <= vh + VIEWPORT_PAD &&
-    r.right <= vw + VIEWPORT_PAD
-  );
-}
+  "Read the attached PDF and summarize the main arguments with supporting evidence. Use explicit quotes from the text and do not include any extraneous information.";
 
 export function DemoSection() {
   const [promptText, setPromptText] = useState("");
@@ -36,13 +19,10 @@ export function DemoSection() {
   const timersRef = useRef<number[]>([]);
   const promptBoxRef = useRef<HTMLDivElement | null>(null);
   const pauseButtonRef = useRef<HTMLButtonElement | null>(null);
-  const cyclesPlayedRef = useRef(0);
-  const sessionCompleteRef = useRef(false);
-  /** True after user has left the demo (debounced); first paint treats as "enter" so autoplay can run. */
-  const reallyLeftRef = useRef(true);
+  const hasStartedOnceRef = useRef(false);
 
   useEffect(() => {
-    let leaveDebounceTimer: number | undefined;
+    let visibilityObserver: IntersectionObserver | null = null;
 
     const updateCursorTip = () => {
       const promptBox = promptBoxRef.current;
@@ -65,62 +45,7 @@ export function DemoSection() {
       timersRef.current = [];
     };
 
-    const resetToOpeningScene = () => {
-      clearTimers();
-      setIsAnimating(false);
-      setPromptText("");
-      setTabText("Promptly");
-      setPausePulsing(false);
-      setShowClickCursor(false);
-      setTabShineActive(false);
-      updateCursorTip();
-    };
-
-    const syncVisibility = () => {
-      const el = promptBoxRef.current;
-      const visible = isPromptBoxFullyVisible(el);
-
-      if (visible) {
-        window.clearTimeout(leaveDebounceTimer);
-        if (reallyLeftRef.current && !sessionCompleteRef.current) {
-          reallyLeftRef.current = false;
-          cyclesPlayedRef.current = 0;
-          clearTimers();
-          runCycle();
-        }
-        return;
-      }
-
-      window.clearTimeout(leaveDebounceTimer);
-      leaveDebounceTimer = window.setTimeout(() => {
-        reallyLeftRef.current = true;
-        sessionCompleteRef.current = false;
-      }, 280);
-    };
-
-    const handleCycleComplete = () => {
-      if (!isPromptBoxFullyVisible(promptBoxRef.current)) {
-        resetToOpeningScene();
-        return;
-      }
-
-      cyclesPlayedRef.current += 1;
-      if (cyclesPlayedRef.current >= 4) {
-        resetToOpeningScene();
-        sessionCompleteRef.current = true;
-        return;
-      }
-
-      runCycle();
-    };
-
     const runCycle = () => {
-      const el = promptBoxRef.current;
-      if (!isPromptBoxFullyVisible(el)) {
-        resetToOpeningScene();
-        return;
-      }
-
       clearTimers();
       setIsAnimating(true);
       setImprovedRevealKey((prev) => prev + 1);
@@ -160,13 +85,6 @@ export function DemoSection() {
       const improvedRevealMs = 600;
       const postRevealBufferMs = 160;
       const promptImprovedLabelAtMs = improveAtMs + improvedRevealMs + postRevealBufferMs;
-      const holdBeforeRestartMs = 5000;
-      const cycleEndMs =
-        improveAtMs +
-        improvedRevealMs +
-        DEMO_TIMING.disappearDelay * 1000 +
-        DEMO_TIMING.loopDelay * 1000 +
-        holdBeforeRestartMs;
 
       timersRef.current.push(
         window.setTimeout(() => {
@@ -181,38 +99,66 @@ export function DemoSection() {
         window.setTimeout(() => setTabShineActive(false), shineEndMs),
         window.setTimeout(() => setPromptText(IMPROVED_PROMPT), improveAtMs),
         window.setTimeout(() => setTabText("Prompt Improved"), promptImprovedLabelAtMs),
-        window.setTimeout(handleCycleComplete, cycleEndMs)
+        window.setTimeout(() => {
+          setIsAnimating(false);
+          window.dispatchEvent(new CustomEvent("promptly-demo-animation-complete"));
+        }, promptImprovedLabelAtMs + 100)
       );
     };
 
-    const onScrollOrResize = () => {
+    const isPromptBoxInViewport = () => {
+      const el = promptBoxRef.current;
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      return r.bottom >= 0 && r.top <= window.innerHeight && r.right >= 0 && r.left <= window.innerWidth;
+    };
+
+    const startAnimationOnce = () => {
+      if (hasStartedOnceRef.current) return;
+      hasStartedOnceRef.current = true;
       updateCursorTip();
-      syncVisibility();
+      runCycle();
+      window.removeEventListener("scroll", checkVisibilityAndStart);
+      visibilityObserver?.disconnect();
+      visibilityObserver = null;
+    };
+
+    const checkVisibilityAndStart = () => {
+      if (isPromptBoxInViewport()) {
+        startAnimationOnce();
+      }
+    };
+
+    const onResize = () => {
+      updateCursorTip();
+      checkVisibilityAndStart();
     };
 
     updateCursorTip();
-    window.addEventListener("resize", onScrollOrResize);
-    window.addEventListener("scroll", onScrollOrResize, { passive: true });
+    window.addEventListener("resize", onResize);
 
-    const el = promptBoxRef.current;
-    const io =
-      el &&
-      new IntersectionObserver(
-        () => {
-          syncVisibility();
+    if (!hasStartedOnceRef.current && promptBoxRef.current) {
+      visibilityObserver = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (entry.isIntersecting || entry.intersectionRatio > 0) {
+              startAnimationOnce();
+              break;
+            }
+          }
         },
-        { root: null, threshold: [0, 0.05, 0.25, 0.5, 0.75, 0.95, 1] }
+        { threshold: [0, 0.01, 0.1] }
       );
-    if (el && io) io.observe(el);
-
-    syncVisibility();
+      visibilityObserver.observe(promptBoxRef.current);
+      window.addEventListener("scroll", checkVisibilityAndStart, { passive: true });
+      const initialCheckTimer = window.setTimeout(checkVisibilityAndStart, 120);
+      timersRef.current.push(initialCheckTimer);
+    }
 
     return () => {
-      window.clearTimeout(leaveDebounceTimer);
-      window.removeEventListener("resize", onScrollOrResize);
-      window.removeEventListener("scroll", onScrollOrResize);
-      if (io && el) io.unobserve(el);
-      io?.disconnect();
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("scroll", checkVisibilityAndStart);
+      visibilityObserver?.disconnect();
       clearTimers();
     };
   }, []);
@@ -221,15 +167,15 @@ export function DemoSection() {
   const displayPromptText = promptText || (!isAnimating ? ORIGINAL_PROMPT : "");
 
   return (
-    <section id="how-it-works" className="px-4 py-12 sm:py-16">
+    <section id="how-it-works" className="overflow-x-hidden px-3 pb-5 pt-4 sm:px-4 sm:pb-8 sm:pt-8">
       <div className="mx-auto max-w-6xl">
-        <div className="relative mx-auto max-w-5xl rounded-3xl border border-white/10 bg-white/[0.04] px-8 pb-8 pt-20 shadow-glow backdrop-blur-md">
+        <div className="relative mx-auto max-w-5xl rounded-2xl border border-white/10 bg-white/[0.04] px-3 pb-4 pt-14 shadow-glow backdrop-blur-md sm:rounded-3xl sm:px-8 sm:pb-8 sm:pt-20">
           <div
             ref={promptBoxRef}
-            className="relative mx-auto max-w-[980px] rounded-[26px] border border-slate-300/70 bg-white pl-5 pr-5 py-4 shadow-[0_12px_30px_rgba(2,6,23,0.12)]"
+            className="relative mx-auto max-w-[980px] rounded-[18px] border border-slate-300/70 bg-white px-3 py-3 shadow-[0_12px_30px_rgba(2,6,23,0.12)] sm:rounded-[26px] sm:px-5 sm:py-4"
           >
-            <div className="flex items-center gap-4">
-              <p className="flex-1 pl-[10px] text-left text-[28px] leading-tight text-slate-800">
+            <div className="flex items-center gap-2 sm:gap-4">
+              <p className="flex-1 pl-1 text-left text-[13px] leading-snug text-slate-800 sm:pl-[10px] sm:text-[24px] sm:leading-tight">
                 {showImproved ? (
                   <motion.span
                     key={`improved-inline-${improvedRevealKey}`}
@@ -244,18 +190,18 @@ export function DemoSection() {
                   displayPromptText
                 )}
                 {!showImproved && promptText.length > 0 ? (
-                  <span className="ml-1 inline-block h-7 w-[2px] animate-pulse bg-slate-500 align-middle" />
+                  <span className="ml-1 inline-block h-4 w-[1.5px] animate-pulse bg-slate-500 align-middle sm:h-7 sm:w-[2px]" />
                 ) : null}
               </p>
               <img
                 src="/images/microphone.png"
                 alt=""
                 aria-hidden="true"
-                className="h-6 w-6 object-contain grayscale opacity-70"
+                className="h-4 w-4 object-contain grayscale opacity-70 sm:h-6 sm:w-6"
               />
               <motion.button
                 ref={pauseButtonRef}
-                className="grid h-11 w-11 place-items-center rounded-full bg-slate-950 text-white"
+                className="grid h-8 w-8 place-items-center rounded-full bg-slate-950 text-white sm:h-11 sm:w-11"
                 aria-hidden="true"
                 animate={{
                   scale: pausePulsing ? [1, 0.72, 1] : 1
@@ -282,7 +228,7 @@ export function DemoSection() {
 
             {showClickCursor ? (
               <motion.div
-                className="pointer-events-none absolute z-20"
+                className="pointer-events-none absolute z-20 hidden sm:block"
                 style={{ left: `${cursorTip.x - 2}px`, top: `${cursorTip.y + 5}px` }}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -294,7 +240,7 @@ export function DemoSection() {
             ) : null}
 
             <motion.div
-              className="absolute -top-[51px] right-[40px] flex h-[49px] w-[320px] items-center gap-3 overflow-hidden rounded-t-xl rounded-bl-none bg-gradient-to-r from-violet-700 to-violet-600 px-4 text-[14px] text-white shadow-[0_8px_25px_rgba(124,58,237,0.45)]"
+              className="absolute -top-10 right-2 flex h-9 w-[180px] items-center gap-1.5 overflow-hidden rounded-t-lg rounded-bl-none bg-gradient-to-r from-violet-700 to-violet-600 px-2 text-[10px] text-white shadow-[0_8px_25px_rgba(124,58,237,0.45)] sm:-top-[51px] sm:right-[40px] sm:h-[49px] sm:w-[320px] sm:gap-3 sm:rounded-t-xl sm:px-4 sm:text-[14px]"
             >
               {tabShineActive ? (
                 <motion.span
@@ -304,12 +250,12 @@ export function DemoSection() {
                   transition={{ duration: 1.8, ease: "easeInOut" }}
                 />
               ) : null}
-              <span className="relative z-10 inline-flex h-full w-[210px] flex-none items-center overflow-hidden font-semibold leading-none">
+              <span className="relative z-10 inline-flex h-full w-[120px] flex-none items-center overflow-hidden font-semibold leading-none sm:w-[210px]">
                 <span className="invisible whitespace-nowrap">Prompt Improved</span>
                 <AnimatePresence mode="wait" initial={false}>
                   <motion.span
                     key={tabText}
-                    className="absolute inset-x-0 top-[37%] inline-flex -translate-y-1/2 items-center gap-1 whitespace-nowrap"
+                    className="absolute inset-x-0 top-[40%] inline-flex -translate-y-1/2 items-center gap-1 whitespace-nowrap sm:top-[37%]"
                     initial={{ y: 22, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}
                     exit={{ y: -22, opacity: 0 }}
@@ -327,7 +273,7 @@ export function DemoSection() {
                   </motion.span>
                 </AnimatePresence>
               </span>
-              <span className="relative z-10 ml-auto pr-1 text-right text-white/80">Auto</span>
+              <span className="relative z-10 ml-auto pr-0 text-right text-white/80 sm:pr-1">Auto</span>
             </motion.div>
           </div>
         </div>

@@ -6,6 +6,7 @@ import { DemoSection } from "@/components/DemoSection";
 import { FinalCTA } from "@/components/FinalCTA";
 import { Footer } from "@/components/Footer";
 import { Hero } from "@/components/Hero";
+import { HeroStats } from "@/components/HeroStats";
 import { IntegratedWith } from "@/components/IntegratedWith";
 import { Navbar } from "@/components/Navbar";
 import { PricingSection } from "@/components/PricingSection";
@@ -24,6 +25,7 @@ export default function ProductPage() {
         <Hero />
         <DemoSection />
         <IntegratedWith />
+        <HeroStats />
         <PricingSection />
         <ComparisonTable />
         <Benefits />

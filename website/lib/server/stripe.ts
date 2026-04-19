@@ -17,13 +17,21 @@ export function isStripeConfigured(): boolean {
   return Boolean(String(process.env.STRIPE_SECRET_KEY || "").trim());
 }
 
-/** Paid plan above Free — matches Stripe product “Promptly Pro”. Stored in Firestore as `pro`. */
-export type PaidTier = "pro";
+/** Paid plans above Free — stored in Firestore subscriptionTier. */
+export type PaidTier = "pro" | "student" | "enterprise";
 
 export function getStripePriceIdForTier(tier: string): string | null {
   const t = tier.toLowerCase();
   if (t === "pro" || t === "plus" || t === "professional") {
     const id = String(process.env.STRIPE_PRICE_ID_PRO || "").trim();
+    return id || null;
+  }
+  if (t === "student") {
+    const id = String(process.env.STRIPE_PRICE_ID_STUDENT || "").trim();
+    return id || null;
+  }
+  if (t === "enterprise") {
+    const id = String(process.env.STRIPE_PRICE_ID_ENTERPRISE || "").trim();
     return id || null;
   }
   return null;
@@ -32,6 +40,8 @@ export function getStripePriceIdForTier(tier: string): string | null {
 export function normalizePaidTier(tier: string): PaidTier | null {
   const t = tier.toLowerCase().replace(/\s+/g, "_").replace(/-/g, "_");
   if (t === "pro" || t === "promptly_pro") return "pro";
+  if (t === "student" || t === "promptly_student") return "student";
+  if (t === "enterprise" || t === "promptly_enterprise") return "enterprise";
   if (t === "plus" || t === "professional") return "pro";
   return null;
 }

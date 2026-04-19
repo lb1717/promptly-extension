@@ -168,7 +168,13 @@ function getRecentDays(days: number) {
   return Array.from({ length: count }, (_, idx) => getDateDaysAgo(count - idx - 1));
 }
 
-export type TierTokenLimits = { free: number; pro: number; globalCap: number | null };
+export type TierTokenLimits = {
+  free: number;
+  pro: number;
+  student: number;
+  enterprise: number;
+  globalCap: number | null;
+};
 
 let tierLimitsCache: { at: number; limits: TierTokenLimits } | null = null;
 
@@ -195,21 +201,42 @@ export async function loadTierTokenLimits(): Promise<TierTokenLimits> {
   );
   const pro = Math.max(
     1,
-    Math.floor(Number(raw.proDailyTokenLimit ?? raw.pro_daily_token_limit ?? DEFAULT_PRO_DAILY_TOKEN_LIMIT) || DEFAULT_PRO_DAILY_TOKEN_LIMIT)
+    Math.floor(
+      Number(raw.proDailyTokenLimit ?? raw.pro_daily_token_limit ?? DEFAULT_PRO_DAILY_TOKEN_LIMIT) ||
+        DEFAULT_PRO_DAILY_TOKEN_LIMIT
+    )
+  );
+  const student = Math.max(
+    1,
+    Math.floor(
+      Number(raw.studentDailyTokenLimit ?? raw.student_daily_token_limit ?? pro) || pro
+    )
+  );
+  const enterprise = Math.max(
+    1,
+    Math.floor(
+      Number(raw.enterpriseDailyTokenLimit ?? raw.enterprise_daily_token_limit ?? pro) || pro
+    )
   );
   const globalRaw = raw.globalDailyTokenLimit ?? raw.global_daily_token_limit;
   const globalCap =
     typeof globalRaw === "number" && Number.isFinite(globalRaw) && globalRaw >= 1
       ? Math.max(1, Math.min(Math.floor(globalRaw), ADMIN_DAILY_TOKEN_LIMIT_MAX))
       : null;
-  const limits = { free, pro, globalCap };
+  const limits = { free, pro, student, enterprise, globalCap };
   tierLimitsCache = { at: now, limits };
   return limits;
 }
 
-export function billingTierFromUserDoc(raw: Record<string, unknown>): "free" | "pro" {
-  const t = String(raw.subscriptionTier || "").toLowerCase();
-  if (t === "pro" || t === "plus" || t === "professional") return "pro";
+export function billingTierFromUserDoc(raw: Record<string, unknown>): "free" | "pro" | "student" | "enterprise" {
+  const t = String(raw.subscriptionTier || raw.plan || "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, "_")
+    .replace(/-/g, "_");
+  if (t === "enterprise") return "enterprise";
+  if (t === "student") return "student";
+  if (t === "pro" || t === "promptly_pro" || t === "plus" || t === "professional") return "pro";
   return "free";
 }
 
@@ -220,7 +247,14 @@ export function effectiveDailyTokenLimitFromUserData(raw: Record<string, unknown
     return limits.globalCap != null ? Math.min(overrideCapped, limits.globalCap) : overrideCapped;
   }
   const tier = billingTierFromUserDoc(raw);
-  const v = tier === "pro" ? limits.pro : limits.free;
+  const v =
+    tier === "enterprise"
+      ? limits.enterprise
+      : tier === "student"
+        ? limits.student
+        : tier === "pro"
+          ? limits.pro
+          : limits.free;
   const tierCap = Math.max(1, Math.floor(v));
   return limits.globalCap != null ? Math.min(tierCap, limits.globalCap) : tierCap;
 }
@@ -561,8 +595,11 @@ async function consolidateUsersByEmail(email: string, canonicalUid: string) {
         allTimeMaxDailyTokenUsage: mergedAllTimeMax,
         updatedAt: FieldValue.serverTimestamp()
       };
-      if (billingTierFromUserDoc(canonicalRaw) !== "pro" && billingTierFromUserDoc(duplicateRaw) === "pro") {
-        nextPatch.subscriptionTier = "pro";
+      const canonicalTier = billingTierFromUserDoc(canonicalRaw);
+      const duplicateTier = billingTierFromUserDoc(duplicateRaw);
+      const tierRank = { free: 0, student: 1, pro: 2, enterprise: 3 } as const;
+      if (tierRank[duplicateTier] > tierRank[canonicalTier]) {
+        nextPatch.subscriptionTier = duplicateTier;
       }
       if (!canonicalRaw.dailyTokenLimitOverride && duplicateRaw.dailyTokenLimitOverride) {
         nextPatch.dailyTokenLimitOverride = duplicateRaw.dailyTokenLimitOverride;
@@ -1714,20 +1751,32 @@ export async function adminGetTierLimits(): Promise<{
   ok: true;
   free_daily_token_limit: number;
   pro_daily_token_limit: number;
+  student_daily_token_limit: number;
+  enterprise_daily_token_limit: number;
   global_daily_token_limit: number | null;
-  defaults: { free: number; pro: number; global: number | null };
+  defaults: { free: number; pro: number; student: number; enterprise: number; global: number | null };
 }> {
   const limits = await loadTierTokenLimits();
   return {
     ok: true,
     free_daily_token_limit: limits.free,
     pro_daily_token_limit: limits.pro,
+    student_daily_token_limit: limits.student,
+    enterprise_daily_token_limit: limits.enterprise,
     global_daily_token_limit: limits.globalCap,
-    defaults: { free: DAILY_API_TOKEN_LIMIT_DEFAULT, pro: DEFAULT_PRO_DAILY_TOKEN_LIMIT, global: null }
+    defaults: {
+      free: DAILY_API_TOKEN_LIMIT_DEFAULT,
+      pro: DEFAULT_PRO_DAILY_TOKEN_LIMIT,
+      student: DEFAULT_PRO_DAILY_TOKEN_LIMIT,
+      enterprise: DEFAULT_PRO_DAILY_TOKEN_LIMIT,
+      global: null
+    }
   };
 }
 
-export async function adminSaveTierLimits(patch: Partial<{ free: number; pro: number; global: number | null }>) {
+export async function adminSaveTierLimits(
+  patch: Partial<{ free: number; pro: number; student: number; enterprise: number; global: number | null }>
+) {
   const current = await loadTierTokenLimits();
   const free =
     typeof patch.free === "number" && Number.isFinite(patch.free)
@@ -1737,6 +1786,14 @@ export async function adminSaveTierLimits(patch: Partial<{ free: number; pro: nu
     typeof patch.pro === "number" && Number.isFinite(patch.pro)
       ? Math.max(1, Math.min(Math.floor(patch.pro), ADMIN_DAILY_TOKEN_LIMIT_MAX))
       : current.pro;
+  const student =
+    typeof patch.student === "number" && Number.isFinite(patch.student)
+      ? Math.max(1, Math.min(Math.floor(patch.student), ADMIN_DAILY_TOKEN_LIMIT_MAX))
+      : current.student;
+  const enterprise =
+    typeof patch.enterprise === "number" && Number.isFinite(patch.enterprise)
+      ? Math.max(1, Math.min(Math.floor(patch.enterprise), ADMIN_DAILY_TOKEN_LIMIT_MAX))
+      : current.enterprise;
   const globalCap =
     patch.global === null
       ? null
@@ -1750,6 +1807,8 @@ export async function adminSaveTierLimits(patch: Partial<{ free: number; pro: nu
       {
         freeDailyTokenLimit: free,
         proDailyTokenLimit: pro,
+        studentDailyTokenLimit: student,
+        enterpriseDailyTokenLimit: enterprise,
         globalDailyTokenLimit: globalCap,
         updatedAt: FieldValue.serverTimestamp()
       },
@@ -1760,6 +1819,8 @@ export async function adminSaveTierLimits(patch: Partial<{ free: number; pro: nu
     ok: true as const,
     free_daily_token_limit: free,
     pro_daily_token_limit: pro,
+    student_daily_token_limit: student,
+    enterprise_daily_token_limit: enterprise,
     global_daily_token_limit: globalCap
   };
 }

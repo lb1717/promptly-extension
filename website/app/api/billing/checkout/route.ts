@@ -27,12 +27,15 @@ export async function POST(request: Request) {
     }
     const paidTier = normalizePaidTier(String(body.tier || "pro"));
     if (!paidTier) {
-      return NextResponse.json({ error: 'Invalid tier — use "pro" (Promptly Pro)' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Invalid tier — use "pro", "student", or "enterprise"' },
+        { status: 400 }
+      );
     }
     const priceId = getStripePriceIdForTier(paidTier);
     if (!priceId) {
       return NextResponse.json(
-        { error: "Missing STRIPE_PRICE_ID_PRO (Price ID for Promptly Pro in Stripe)" },
+        { error: `Missing Stripe price id env var for tier "${paidTier}"` },
         { status: 503 }
       );
     }

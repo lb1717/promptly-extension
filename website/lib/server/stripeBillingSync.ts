@@ -5,6 +5,8 @@ import { applyBillingDerivedDailyTokenLimit } from "@/lib/server/promptlyBackend
 function tierFromSubscriptionMetadata(metaRaw: string): string {
   const meta = metaRaw.toLowerCase().replace(/\s+/g, "_").replace(/-/g, "_");
   if (meta === "pro" || meta === "promptly_pro") return "pro";
+  if (meta === "student" || meta === "promptly_student") return "student";
+  if (meta === "enterprise" || meta === "promptly_enterprise") return "enterprise";
   if (meta === "plus" || meta === "professional") return "pro";
   return "free";
 }
@@ -13,7 +15,7 @@ function resolvedSubscriptionTier(subscription: Stripe.Subscription): string {
   const status = subscription.status;
   if (status === "canceled" || status === "unpaid" || status === "incomplete_expired") return "free";
   const fromMeta = tierFromSubscriptionMetadata(String(subscription.metadata?.subscriptionTier || ""));
-  if (fromMeta === "pro") return "pro";
+  if (fromMeta === "pro" || fromMeta === "student" || fromMeta === "enterprise") return fromMeta;
   if (status === "active" || status === "trialing" || status === "past_due") return "pro";
   return "free";
 }

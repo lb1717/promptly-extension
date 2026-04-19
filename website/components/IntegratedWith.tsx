@@ -53,11 +53,8 @@ const INTEGRATIONS = [
 
 export function IntegratedWith() {
   return (
-    <section className="border-t border-white/10 px-4 py-12 sm:py-14" aria-label="Integrations">
+    <section className="border-t border-white/10 px-4 pb-6 pt-7 sm:pb-7 sm:pt-6" aria-label="Integrations">
       <div className="mx-auto max-w-6xl text-center">
-        <h2 className="mb-10 text-sm font-semibold uppercase tracking-[0.2em] text-violet-200/80">
-          Integrated With
-        </h2>
         <ul className="mx-auto flex max-w-2xl flex-col items-center justify-center gap-10 sm:flex-row sm:gap-16">
           {INTEGRATIONS.map(({ name, Logo }) => (
             <li key={name} className="flex flex-col items-center gap-3">
@@ -68,6 +65,9 @@ export function IntegratedWith() {
             </li>
           ))}
         </ul>
+        <h2 className="mt-8 text-sm font-semibold uppercase tracking-[0.2em] text-violet-200/80 sm:mt-10">
+          Integrated With
+        </h2>
       </div>
     </section>
   );

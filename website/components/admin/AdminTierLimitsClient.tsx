@@ -8,16 +8,26 @@ type TierLimitsResponse = {
   ok?: boolean;
   free_daily_token_limit?: number;
   pro_daily_token_limit?: number;
+  student_daily_token_limit?: number;
+  enterprise_daily_token_limit?: number;
   global_daily_token_limit?: number | null;
-  defaults?: { free: number; pro: number; global: number | null };
+  defaults?: { free: number; pro: number; student: number; enterprise: number; global: number | null };
   error?: string;
 };
 
 export function AdminTierLimitsClient() {
   const [freeInput, setFreeInput] = useState("");
   const [proInput, setProInput] = useState("");
+  const [studentInput, setStudentInput] = useState("");
+  const [enterpriseInput, setEnterpriseInput] = useState("");
   const [globalInput, setGlobalInput] = useState("");
-  const [defaults, setDefaults] = useState<{ free: number; pro: number; global: number | null } | null>(null);
+  const [defaults, setDefaults] = useState<{
+    free: number;
+    pro: number;
+    student: number;
+    enterprise: number;
+    global: number | null;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [consolidating, setConsolidating] = useState(false);
@@ -36,6 +46,8 @@ export function AdminTierLimitsClient() {
       }
       if (data.free_daily_token_limit != null) setFreeInput(String(data.free_daily_token_limit));
       if (data.pro_daily_token_limit != null) setProInput(String(data.pro_daily_token_limit));
+      if (data.student_daily_token_limit != null) setStudentInput(String(data.student_daily_token_limit));
+      if (data.enterprise_daily_token_limit != null) setEnterpriseInput(String(data.enterprise_daily_token_limit));
       setGlobalInput(data.global_daily_token_limit == null ? "" : String(data.global_daily_token_limit));
       if (data.defaults) setDefaults(data.defaults);
     } catch (e) {
@@ -52,6 +64,8 @@ export function AdminTierLimitsClient() {
   async function save() {
     const free = Math.floor(Number(freeInput));
     const pro = Math.floor(Number(proInput));
+    const student = Math.floor(Number(studentInput));
+    const enterprise = Math.floor(Number(enterpriseInput));
     const globalRaw = globalInput.trim();
     const global = globalRaw === "" ? null : Math.floor(Number(globalRaw));
     if (
@@ -59,9 +73,13 @@ export function AdminTierLimitsClient() {
       free < 1 ||
       !Number.isFinite(pro) ||
       pro < 1 ||
+      !Number.isFinite(student) ||
+      student < 1 ||
+      !Number.isFinite(enterprise) ||
+      enterprise < 1 ||
       (global !== null && (!Number.isFinite(global) || global < 1))
     ) {
-      setError("Enter positive integers for Free/Pro. Leave global blank to disable global cap.");
+      setError("Enter positive integers for Free/Pro/Student/Enterprise. Leave global blank to disable global cap.");
       setMessage("");
       return;
     }
@@ -75,6 +93,8 @@ export function AdminTierLimitsClient() {
         body: JSON.stringify({
           free_daily_token_limit: free,
           pro_daily_token_limit: pro,
+          student_daily_token_limit: student,
+          enterprise_daily_token_limit: enterprise,
           global_daily_token_limit: global
         })
       });
@@ -84,7 +104,7 @@ export function AdminTierLimitsClient() {
         return;
       }
       setMessage(
-        "Saved. Free/Pro caps apply by subscription tier, then global cap (if set) is enforced across all users."
+        "Saved. Free/Pro/Student/Enterprise caps apply by subscription tier, then global cap (if set) is enforced across all users."
       );
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));
@@ -125,9 +145,11 @@ export function AdminTierLimitsClient() {
           <h1 className="text-2xl font-semibold text-white">Plan limits</h1>
           <p className="mt-1 text-sm text-violet-200/70">
             Daily token budget per UTC day from OpenAI usage. <strong className="text-violet-100">Free</strong> users
-            use the first value; <strong className="text-violet-100">Promptly Pro</strong> (
-            <code className="text-amber-200/90">subscriptionTier: pro</code>) uses the second. Stripe webhooks set
-            tier; limits apply on every extension/API request. You can also set one global ceiling across all plans.
+            use the first value; <strong className="text-violet-100">Promptly Pro</strong>,{" "}
+            <strong className="text-violet-100">Student</strong>, and{" "}
+            <strong className="text-violet-100">Enterprise</strong> each use their own configured limit. Stripe
+            webhooks and saved subscription tiers set this value; limits apply on every extension/API request. You can
+            also set one global ceiling across all plans.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -168,10 +190,11 @@ export function AdminTierLimitsClient() {
           {defaults ? (
             <p className="mb-4 text-xs text-violet-200/65">
               Built-in defaults if unset: Free {defaults.free.toLocaleString()} · Pro {defaults.pro.toLocaleString()} ·
-              Global cap disabled
+              Student {defaults.student.toLocaleString()} · Enterprise {defaults.enterprise.toLocaleString()} · Global
+              cap disabled
             </p>
           ) : null}
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
             <label className="flex flex-col gap-1 text-xs text-violet-200/90">
               Free plan (tokens / UTC day)
               <input
@@ -190,6 +213,26 @@ export function AdminTierLimitsClient() {
                 className="rounded-lg border border-violet-500/30 bg-[#161022] px-3 py-2 text-sm text-white"
                 value={proInput}
                 onChange={(e) => setProInput(e.target.value)}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-violet-200/90">
+              Student (tokens / UTC day)
+              <input
+                type="number"
+                min={1}
+                className="rounded-lg border border-violet-500/30 bg-[#161022] px-3 py-2 text-sm text-white"
+                value={studentInput}
+                onChange={(e) => setStudentInput(e.target.value)}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-violet-200/90">
+              Enterprise (tokens / UTC day)
+              <input
+                type="number"
+                min={1}
+                className="rounded-lg border border-violet-500/30 bg-[#161022] px-3 py-2 text-sm text-white"
+                value={enterpriseInput}
+                onChange={(e) => setEnterpriseInput(e.target.value)}
               />
             </label>
             <label className="flex flex-col gap-1 text-xs text-violet-200/90">

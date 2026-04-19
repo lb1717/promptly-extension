@@ -3,23 +3,60 @@ import { Button } from "@/components/ui/Button";
 const PLANS = [
   {
     name: "Free",
-    price: "$0",
-    cadence: "forever",
-    blurb: "Try Promptly on your everyday prompts with generous daily limits.",
-    bullets: ["Core rewrite & improve", "Works in ChatGPT, Claude, Gemini", "Upgrade anytime"],
+    price: "$0.00",
+    cadence: "month",
+    blurb: "Simple prompt improvement for everyday usage.",
+    bullets: [
+      "Daily usage tokens: limited",
+      "Core models and functionality"
+    ],
     cta: "Get started",
     href: "/account",
     featured: false
   },
   {
     name: "Promptly Pro",
-    price: "$0.99",
+    price: "$2.99",
     cadence: "month",
-    blurb: "Everything in Free, with higher limits and priority quality of service.",
-    bullets: ["Higher daily usage", "Early access to new lab techniques", "Email support"],
+    blurb: "Higher quality and speed for frequent users.",
+    bullets: [
+      "Daily usage tokens: 25× Free",
+      "Model quality: higher than Free",
+      "Model speed: faster than Free"
+    ],
     cta: "Upgrade to Pro",
     href: "/account",
+    featured: false
+  },
+  {
+    name: "Enterprise",
+    price: "$30.00",
+    cadence: "month",
+    blurb: "Maximum capability, speed, and reliability at scale.",
+    bullets: [
+      "Daily usage tokens: 100× Free",
+      "Model quality: highest available",
+      "Model speed: fastest processing",
+      "Research-grade intelligent prompt engineering",
+      "Priority during peak times"
+    ],
+    cta: "Choose Enterprise",
+    href: "/account",
     featured: true
+  },
+  {
+    name: "Student",
+    price: "$1.49",
+    cadence: "month",
+    blurb: "Pro-level capability with student pricing.",
+    bullets: [
+      "Daily usage tokens: 25× Free",
+      "All features included in Pro",
+      "Discounted price versus Pro"
+    ],
+    cta: "Choose Student",
+    href: "/account",
+    featured: false
   }
 ] as const;
 
@@ -31,9 +68,9 @@ export function PricingSection() {
           Plans
         </h2>
         <p className="mx-auto mb-12 max-w-2xl text-center text-lg font-semibold text-white sm:text-xl">
-          Free for everyday use, or Promptly Pro when you need more.
+          Choose the plan that fits your workflow.
         </p>
-        <div className="mx-auto grid max-w-4xl gap-6 md:grid-cols-2">
+        <div className="mx-auto grid max-w-6xl gap-6 md:grid-cols-2 xl:grid-cols-4">
           {PLANS.map((plan) => (
             <div
               key={plan.name}

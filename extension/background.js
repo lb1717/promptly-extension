@@ -720,6 +720,24 @@ chrome.runtime.onStartup.addListener(async () => {
   await getManagedProxyBaseUrl();
 });
 
+if (chrome.action && chrome.runtime && typeof chrome.runtime.openOptionsPage === "function") {
+  chrome.action.onClicked.addListener((tab) => {
+    const tabId = Number(tab?.id);
+    if (!Number.isFinite(tabId)) {
+      return;
+    }
+    chrome.tabs.sendMessage(
+      tabId,
+      { type: "PROMPTLY_OPEN_IN_PAGE_SETTINGS" },
+      () => {
+        if (chrome.runtime.lastError) {
+          // Ignore pages where Promptly content script is not injected.
+        }
+      }
+    );
+  });
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (
     !message ||

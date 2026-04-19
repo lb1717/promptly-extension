@@ -1933,6 +1933,13 @@
     .catch(() => {
       // Tooltip keeps default text when usage fetch fails.
     });
+  chrome.runtime.onMessage.addListener((message) => {
+    if (!message || message.type !== "PROMPTLY_OPEN_IN_PAGE_SETTINGS") {
+      return;
+    }
+    ui.setSettingsOpen(true);
+    observers.scheduleUpdate();
+  });
   document.addEventListener("pointerdown", handlePointerDown, true);
   document.addEventListener("click", handleDocumentClick, true);
   document.addEventListener("submit", handleDocumentSubmit, true);

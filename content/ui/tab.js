@@ -7,6 +7,22 @@
     return Math.max(0, Math.min(2, Math.round(n)));
   }
 
+  function normalizeSettingsPlanTier(tier) {
+    const t = String(tier || "")
+      .trim()
+      .toLowerCase();
+    if (t === "enterprise") {
+      return "enterprise";
+    }
+    if (t === "student") {
+      return "student";
+    }
+    if (t === "pro" || t === "plus" || t === "professional") {
+      return "pro";
+    }
+    return "free";
+  }
+
   function setTickHighlight(ticksRoot, level) {
     if (!(ticksRoot instanceof Element)) {
       return;
@@ -515,12 +531,12 @@
       });
       if (this.settingsQualitySlider) {
         this.settingsQualitySlider.addEventListener("change", () => {
-          this.enforceFreeSliderLevel("quality", this.settingsQualitySlider);
+          this.enforceTierSliderLevel("quality", this.settingsQualitySlider);
         });
       }
       if (this.settingsSpeedSlider) {
         this.settingsSpeedSlider.addEventListener("change", () => {
-          this.enforceFreeSliderLevel("speed", this.settingsSpeedSlider);
+          this.enforceTierSliderLevel("speed", this.settingsSpeedSlider);
         });
       }
       if (this.settingsTitleIcon) {
@@ -709,20 +725,18 @@
       if (!this.settingsTierEl) {
         return;
       }
-      const t = String(tier || "").trim().toLowerCase();
-      if (!t) {
-        // Treat missing/empty tier as Free so slider upsell gating always applies for non-Pro users.
-        this.settingsTierEl.textContent = "Free";
-        this.settingsTierEl.hidden = false;
-        this.settingsPlanTier = "free";
-        this.hideSettingsSliderUpgradePrompts();
-        return;
-      }
-      const isPro = t === "pro" || t === "plus" || t === "professional";
-      const label = isPro ? "Pro" : "Free";
+      const normalized = normalizeSettingsPlanTier(tier);
+      const label =
+        normalized === "enterprise"
+          ? "Enterprise"
+          : normalized === "student"
+            ? "Student"
+            : normalized === "pro"
+              ? "Pro"
+              : "Free";
       this.settingsTierEl.textContent = label;
       this.settingsTierEl.hidden = false;
-      this.settingsPlanTier = isPro ? "pro" : "free";
+      this.settingsPlanTier = normalized;
       this.hideSettingsSliderUpgradePrompts();
     }
 
@@ -732,9 +746,23 @@
       }
     }
 
-    showSettingsSliderUpgradePrompt(kind) {
+    showSettingsSliderUpgradePrompt(kind, options = {}) {
       if (!(this.settingsSlidersUpgradePrompt instanceof HTMLElement)) {
         return;
+      }
+      const message = String(options.message || "").trim();
+      if (message) {
+        this.showToast(message, { tone: "info", durationMs: 2200 });
+      }
+      if (this.settingsSliderUpgradeButton) {
+        const buttonText = String(options.buttonText || "").trim() || "Upgrade plan";
+        this.settingsSliderUpgradeButton.textContent = buttonText;
+        this.settingsSliderUpgradeButton.setAttribute(
+          "aria-label",
+          buttonText === "Upgrade to Enterprise"
+            ? "Upgrade to Enterprise for top slider options"
+            : "Upgrade plan for premium sliders"
+        );
       }
       this.hideSettingsSliderUpgradePrompts();
       this.settingsSlidersUpgradePrompt.hidden = false;
@@ -749,34 +777,45 @@
       }, 2600);
     }
 
-    enforceFreeSliderLevel(kind, sliderEl) {
-      if (!(sliderEl instanceof HTMLInputElement)) {
-        return;
+    getTierSliderMaxLevel() {
+      if (this.settingsPlanTier === "enterprise") {
+        return 2;
       }
-      if (this.settingsPlanTier !== "free") {
+      if (this.settingsPlanTier === "pro" || this.settingsPlanTier === "student") {
+        return 1;
+      }
+      return 0;
+    }
+
+    enforceTierSliderLevel(kind, sliderEl) {
+      if (!(sliderEl instanceof HTMLInputElement)) {
         return;
       }
       const level = nearestSliderLevel(sliderEl.value);
-      if (level <= 0) {
+      const allowedMaxLevel = this.getTierSliderMaxLevel();
+      if (level <= allowedMaxLevel) {
         return;
       }
-      sliderEl.value = "0";
+      sliderEl.value = String(allowedMaxLevel);
       sliderEl.dispatchEvent(new Event("input", { bubbles: true }));
       sliderEl.dispatchEvent(new Event("change", { bubbles: true }));
-      this.showSettingsSliderUpgradePrompt(kind);
+      const lockedByEnterpriseGate =
+        (this.settingsPlanTier === "pro" || this.settingsPlanTier === "student") && level >= 2;
+      this.showSettingsSliderUpgradePrompt(kind, {
+        buttonText: lockedByEnterpriseGate ? "Upgrade to Enterprise" : "Upgrade plan",
+        message: lockedByEnterpriseGate ? "Upgrade to Enterprise" : "Upgrade plan"
+      });
     }
 
     handleSettingsSliderRelease(kind, level, sliderEl, userInitiated = false) {
-      if (this.settingsPlanTier !== "free") {
-        return;
-      }
       if (!(sliderEl instanceof HTMLInputElement)) {
         return;
       }
-      if (Number(level) <= 0) {
+      const allowedMaxLevel = this.getTierSliderMaxLevel();
+      if (Number(level) <= allowedMaxLevel) {
         return;
       }
-      this.enforceFreeSliderLevel(kind, sliderEl);
+      this.enforceTierSliderLevel(kind, sliderEl);
     }
 
     setVisualStyle(style) {

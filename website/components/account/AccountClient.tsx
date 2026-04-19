@@ -28,6 +28,8 @@ function tierLabel(tier: string): string {
   const t = tier.toLowerCase();
   if (t === "free") return "Free";
   if (t === "pro" || t === "plus" || t === "professional") return "Promptly Pro";
+  if (t === "enterprise") return "Enterprise";
+  if (t === "student") return "Student";
   return t ? t.charAt(0).toUpperCase() + t.slice(1) : "Free";
 }
 
@@ -51,6 +53,58 @@ type BillingPayload = {
   stripeConfigured: boolean;
   billingPortalAvailable: boolean;
 };
+
+const ACCOUNT_PLANS = [
+  {
+    key: "free",
+    name: "Free",
+    price: "$0.00/mo",
+    subtitle: "Simple prompt improvement for everyday usage",
+    details: [
+      "Daily usage tokens: limited",
+      "Core models and functionality"
+    ],
+    idealFor: "casual users, beginners, and quick prompt edits"
+  },
+  {
+    key: "pro",
+    name: "Promptly Pro",
+    price: "$2.99/mo",
+    subtitle: "Better quality and speed for frequent use",
+    details: [
+      "Daily usage tokens: 25× Free",
+      "Model quality: higher than Free",
+      "Model speed: faster than Free"
+    ],
+    idealFor: "professionals, builders, and frequent users"
+  },
+  {
+    key: "enterprise",
+    name: "Enterprise",
+    price: "$30.00/mo",
+    subtitle: "Maximum capability, speed, and reliability",
+    details: [
+      "Daily usage tokens: 100× Free",
+      "Model quality: highest available",
+      "Model speed: fastest processing",
+      "Research-grade intelligent prompt engineering",
+      "Priority during peak times"
+    ],
+    idealFor: "teams, startups, and advanced users"
+  },
+  {
+    key: "student",
+    name: "Student",
+    price: "$1.49/mo",
+    subtitle: "Pro-level capabilities at student pricing",
+    details: [
+      "Daily usage tokens: 25× Free",
+      "All features included in Pro",
+      "Discounted price versus Pro"
+    ],
+    idealFor: "students learning, building, and experimenting"
+  }
+] as const;
 
 export function AccountClient({ extensionMode = false }: { extensionMode?: boolean }) {
   const [user, setUser] = useState<User | null>(null);
@@ -104,6 +158,14 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
     if (!user) return "Not signed in";
     return user.emailVerified ? "Verified" : "Unverified email";
   }, [user]);
+
+  const currentTierKey = useMemo(() => {
+    const raw = String(billing?.subscriptionTier || "free").toLowerCase();
+    if (raw === "pro" || raw === "plus" || raw === "professional") return "pro";
+    if (raw === "enterprise") return "enterprise";
+    if (raw === "student") return "student";
+    return "free";
+  }, [billing?.subscriptionTier]);
 
   async function syncUserToFirestore(currentUser: User) {
     const db = getFirebaseDb();
@@ -319,25 +381,95 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                 >
                   {portalBusy ? "Opening portal…" : "Manage subscription & cards"}
                 </button>
-              ) : billing?.stripeConfigured &&
-                user &&
-                ["free", "none"].includes(String(billing.subscriptionTier).toLowerCase()) ? (
-                <button
-                  type="button"
-                  onClick={() => startStripeCheckout(user)}
-                  disabled={checkoutBusy}
-                  className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500 disabled:opacity-60"
-                >
-                  {checkoutBusy ? "Redirecting…" : "Subscribe to Promptly Pro"}
-                </button>
-              ) : (
-                <Link
-                  href="/product#pricing"
-                  className="inline-flex items-center justify-center rounded-xl border border-violet-400/35 px-4 py-2 text-sm font-semibold text-violet-100 hover:bg-violet-500/10"
-                >
-                  View plans
-                </Link>
-              )}
+              ) : null}
+            </div>
+            <p className="mt-4 text-sm text-violet-200/70">
+              Select from all available plans. Your active plan is highlighted below.
+            </p>
+
+            <div className="mt-6 grid gap-4 lg:grid-cols-4">
+              {ACCOUNT_PLANS.map((plan) => {
+                const isCurrent = currentTierKey === plan.key;
+                const isPopular = plan.key === "enterprise";
+                const proCheckoutAvailable = Boolean(
+                  user && billing?.stripeConfigured && plan.key === "pro" && ["free", "none"].includes(currentTierKey)
+                );
+                const comingSoon = plan.key === "enterprise" || plan.key === "student";
+
+                return (
+                  <article
+                    key={plan.key}
+                    className={`relative flex flex-col rounded-xl border p-4 ${
+                      isCurrent
+                        ? "border-violet-400/60 bg-violet-500/[0.12] shadow-[0_10px_30px_rgba(124,58,237,0.18)]"
+                        : isPopular
+                          ? "border-amber-300/45 bg-amber-500/[0.08] shadow-[0_10px_28px_rgba(245,158,11,0.15)]"
+                          : "border-white/10 bg-black/25"
+                    }`}
+                  >
+                    {isPopular ? (
+                      <span className="absolute -top-2.5 left-3 rounded-full bg-amber-500 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-black">
+                        Popular
+                      </span>
+                    ) : null}
+                    {isCurrent ? (
+                      <span className="absolute -top-2.5 right-3 rounded-full bg-violet-500 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white">
+                        Current plan
+                      </span>
+                    ) : null}
+                    <h3 className="text-lg font-semibold text-white">{plan.name}</h3>
+                    <p className="mt-1 text-sm font-semibold text-violet-100">{plan.price}</p>
+                    <p className="mt-2 text-xs text-violet-200/75">{plan.subtitle}</p>
+                    <ul className="mt-3 space-y-1.5 text-xs text-violet-100/85">
+                      {plan.details.map((item) => (
+                        <li key={item} className="flex gap-2">
+                          <span className="text-violet-400">•</span>
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="mt-3 text-[11px] text-violet-200/65">
+                      <span className="font-semibold text-violet-100/85">Ideal for:</span> {plan.idealFor}
+                    </p>
+
+                    <div className="mt-4">
+                      {isCurrent ? (
+                        <button
+                          type="button"
+                          disabled
+                          className="inline-flex w-full items-center justify-center rounded-lg border border-violet-300/40 px-3 py-2 text-xs font-semibold text-violet-100/90 opacity-90"
+                        >
+                          Current plan
+                        </button>
+                      ) : proCheckoutAvailable ? (
+                        <button
+                          type="button"
+                          onClick={() => user && startStripeCheckout(user)}
+                          disabled={checkoutBusy}
+                          className="inline-flex w-full items-center justify-center rounded-lg bg-violet-600 px-3 py-2 text-xs font-semibold text-white hover:bg-violet-500 disabled:opacity-60"
+                        >
+                          {checkoutBusy ? "Redirecting…" : "Upgrade to Promptly Pro"}
+                        </button>
+                      ) : comingSoon ? (
+                        <button
+                          type="button"
+                          disabled
+                          className="inline-flex w-full items-center justify-center rounded-lg border border-white/15 px-3 py-2 text-xs font-semibold text-violet-200/75"
+                        >
+                          Checkout setup coming soon
+                        </button>
+                      ) : (
+                        <Link
+                          href="/product#pricing"
+                          className="inline-flex w-full items-center justify-center rounded-lg border border-violet-400/35 px-3 py-2 text-xs font-semibold text-violet-100 hover:bg-violet-500/10"
+                        >
+                          View plan details
+                        </Link>
+                      )}
+                    </div>
+                  </article>
+                );
+              })}
             </div>
 
             {billingError ? (
