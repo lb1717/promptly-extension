@@ -3,7 +3,6 @@ import {
   buildCreditsEnvelope,
   buildPromptlyCorsHeaders,
   consumeDailyUsage,
-  conservativeBillFromEstimatedInput,
   CREDIT_MAX_ESTIMATED_INPUT_TOKENS,
   CREDIT_MAX_INSTRUCTION_CHARS,
   CREDIT_MAX_PROMPT_CHARS,
@@ -68,21 +67,10 @@ export async function POST(request: Request) {
     }
 
     const creditsBefore = await getCreditsForUser(auth.user, request);
-    const conservativeBill = conservativeBillFromEstimatedInput(estimatedInputTokens, auth.user.dailyTokenLimit);
     if (creditsBefore.usage.used >= auth.user.dailyTokenLimit) {
       return NextResponse.json(
         {
           error: "Daily API token limit reached",
-          credits: buildCreditsEnvelope(creditsBefore.usage, auth.user.dailyTokenLimit, { estimatedInputTokens })
-        },
-        { status: 429, headers: buildPromptlyCorsHeaders(origin) }
-      );
-    }
-    if (creditsBefore.usage.used + conservativeBill > auth.user.dailyTokenLimit) {
-      return NextResponse.json(
-        {
-          error:
-            "Not enough API tokens for this prompt size (same units as OpenAI usage.total_tokens). Shorten the prompt or wait until UTC midnight reset.",
           credits: buildCreditsEnvelope(creditsBefore.usage, auth.user.dailyTokenLimit, { estimatedInputTokens })
         },
         { status: 429, headers: buildPromptlyCorsHeaders(origin) }
@@ -113,7 +101,7 @@ export async function POST(request: Request) {
     if (!usageResult.ok) {
       return NextResponse.json(
         {
-          error: "Not enough API tokens for this response (OpenAI usage.total_tokens). Try a shorter prompt or wait until UTC midnight reset.",
+          error: "Daily API token limit reached",
           credits: buildCreditsEnvelope(usageResult.usage, auth.user.dailyTokenLimit, { estimatedInputTokens })
         },
         { status: 429, headers: buildPromptlyCorsHeaders(origin) }

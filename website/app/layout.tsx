@@ -15,7 +15,15 @@ const notoSansMono = Noto_Sans_Mono({
 
 export const metadata: Metadata = {
   title: "Promptly | Better prompts, better results",
-  description: "Premium landing page for the Promptly Chrome extension."
+  description: "Premium landing page for the Promptly Chrome extension.",
+  icons: {
+    icon: [
+      { url: "/favicon.png", type: "image/png", sizes: "48x48" },
+      { url: "/icon-512.png", type: "image/png", sizes: "512x512" }
+    ],
+    shortcut: [{ url: "/favicon.png", type: "image/png" }],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }]
+  }
 };
 
 export const viewport: Viewport = {

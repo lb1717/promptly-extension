@@ -1,11 +1,18 @@
 (() => {
   class PromptlyPopup {
-    constructor(rootNode, onSuggestionClick, onAutoAdjustClick, onLayoutHintChange) {
+    constructor(
+      rootNode,
+      onSuggestionClick,
+      onAutoAdjustClick,
+      onLayoutHintChange,
+      onRepositionHintTest
+    ) {
       this.rootNode = rootNode;
       this.doc = rootNode.ownerDocument || document;
       this.onSuggestionClick = onSuggestionClick;
       this.onAutoAdjustClick = onAutoAdjustClick;
       this.onLayoutHintChange = onLayoutHintChange;
+      this.onRepositionHintTest = onRepositionHintTest;
       this.root = this.doc.createElement("section");
       this.root.className = "promptly-popup";
       this.root.setAttribute("aria-hidden", "true");
@@ -24,6 +31,7 @@
       this.composeFieldBaseline = null;
       this.composeFieldDirty = false;
       this.composeStageTimer = null;
+      this.composeGeneratedStageTimer = null;
       this.composeShineWatchdogTimer = null;
       this.composeShineEnforcerRaf = null;
       this.composeShineHardOverrideActive = false;
@@ -42,8 +50,11 @@
       /** After success display, keep label on idle Generate Prompt. */
       this.composeUseIdleLabel = false;
       this.composeThoughtLineEls = [];
+      /** Keep compose section collapsed from submit until generated prompt lands. */
+      this.composeCollapseUntilGenerated = false;
+      this.minVisibleLines = 1;
       this.visibleLineCount = 1;
-      this.maxVisibleLines = 4;
+      this.maxVisibleLines = 3;
       this.lastRenderedWordCount = 0;
       /** Smoothed 0–100 display for manual strength; snaps when Promptly enhances. */
       this.strengthDisplay = null;
@@ -55,9 +66,13 @@
       this.topRow = this.doc.createElement("div");
       this.topRow.className = "promptly-top-metrics";
 
+      this.improveCurrentTitle = this.doc.createElement("span");
+      this.improveCurrentTitle.className = "promptly-improve-current-title";
+      this.improveCurrentTitle.textContent = "Refine Prompt";
+
       this.strengthInlineLabel = this.doc.createElement("span");
       this.strengthInlineLabel.className = "promptly-strength-inline-label";
-      this.strengthInlineLabel.textContent = "Prompt strength";
+      this.strengthInlineLabel.textContent = "strength";
 
       this.wordCountLabel = this.doc.createElement("span");
       this.wordCountLabel.className = "promptly-word-count-label";
@@ -106,11 +121,11 @@
       });
 
       this.dividerOne = this.doc.createElement("div");
-      this.dividerOne.className = "promptly-divider";
+      this.dividerOne.className = "promptly-divider promptly-divider-collapse-indicator";
 
       this.suggestionTitle = this.doc.createElement("div");
       this.suggestionTitle.className = "promptly-section-label";
-      this.suggestionTitle.textContent = "Create a Superprompt";
+      this.suggestionTitle.textContent = "Advanced Prompt Builder";
 
       this.rewriteInputWrap = this.doc.createElement("div");
       this.rewriteInputWrap.className = "promptly-rewrite-input-wrap";
@@ -118,7 +133,7 @@
       this.rewriteInstructionInput.rows = 1;
       this.rewriteInstructionInput.wrap = "soft";
       this.rewriteInstructionInput.className = "promptly-rewrite-input";
-      this.rewriteInstructionInput.placeholder = "Describe the prompt you want to write";
+      this.rewriteInstructionInput.placeholder = "Describe what the prompt should accomplish…";
       this.rewriteInstructionInput.addEventListener("focus", () => {
         // Only arm the clear once per successful generate — not on every refocus (that caused
         // every keystroke after the first to wipe the field again).
@@ -174,6 +189,13 @@
           } else {
             this.rewriteSendButton.dataset.stage = "idle";
           }
+        }
+        this.updateComposeFocusMode();
+        if (
+          String(this.rewriteInstructionInput.value || "").trim().toLowerCase() === "repostesting" &&
+          typeof this.onRepositionHintTest === "function"
+        ) {
+          this.onRepositionHintTest();
         }
       });
       this.rewriteInstructionInput.addEventListener("keydown", (event) => {
@@ -231,6 +253,8 @@
         if (!userInstruction) {
           return;
         }
+        this.composeCollapseUntilGenerated = true;
+        this.updateComposeFocusMode(true);
         if (typeof this.onAutoAdjustClick === "function") {
           this.onAutoAdjustClick({
             mode: "compose",
@@ -246,7 +270,7 @@
       this.suggestions.className = "promptly-suggestion-row";
 
       this.dividerTwo = this.doc.createElement("div");
-      this.dividerTwo.className = "promptly-divider";
+      this.dividerTwo.className = "promptly-divider promptly-divider-secondary";
 
       this.strengthTrack = this.doc.createElement("div");
       this.strengthTrack.className = "promptly-strength-track";
@@ -255,6 +279,7 @@
       this.strengthTrack.append(this.strengthFill);
 
       this.topRow.append(
+        this.improveCurrentTitle,
         this.strengthInlineLabel,
         this.strengthTrack,
         this.wordCountInline
@@ -272,6 +297,54 @@
       this.autoAdjustSuffix = "";
       this.autoStageResetTimer = null;
       this.updateInputLineMode();
+      this.updateComposeFocusMode();
+    }
+
+    updateComposeFocusMode(forceValue = null) {
+      const hasText = String(this.rewriteInstructionInput?.value || "").trim().length > 0;
+      const isComposeBusy =
+        !!this.rewriteSendButton?.disabled ||
+        this.rewriteSendButton?.classList?.contains("is-working") ||
+        this.composeAwaitingPromptWrite;
+      const shouldFocus =
+        forceValue == null
+          ? (this.composeCollapseUntilGenerated && !this.composePromptWritten) ||
+            (hasText && !this.composePromptWritten && !isComposeBusy)
+          : !!forceValue;
+      this.root.classList.toggle("promptly-compose-focus-mode", shouldFocus);
+      this.updateInputLineMode();
+    }
+
+    resetComposeInputToSingleLine() {
+      const input = this.rewriteInstructionInput;
+      if (!input) {
+        return;
+      }
+      const { lineHeightPx, paddingY } = this.getInputLineMetrics();
+      const oneLineHeight = Math.round(paddingY + lineHeightPx * 1);
+      this.visibleLineCount = 1;
+      this.root.dataset.rewriteLines = "1";
+      input.style.height = `${oneLineHeight}px`;
+      input.style.overflowY = "hidden";
+      input.style.whiteSpace = "nowrap";
+      input.style.overflowX = "hidden";
+      input.style.wordBreak = "normal";
+      input.style.overflowWrap = "normal";
+    }
+
+    showComposeGeneratedTemporarily() {
+      if (!this.rewriteSendButton) {
+        return;
+      }
+      if (this.composeGeneratedStageTimer) {
+        window.clearTimeout(this.composeGeneratedStageTimer);
+        this.composeGeneratedStageTimer = null;
+      }
+      this.rewriteSendButton.dataset.stage = "written";
+      this.composeGeneratedStageTimer = window.setTimeout(() => {
+        this.composeGeneratedStageTimer = null;
+        this.rewriteSendButton.dataset.stage = this.composeUseIdleLabel ? "idle" : "written";
+      }, 1250);
     }
 
     shouldLogComposeDebug() {
@@ -379,23 +452,13 @@
       return { rawLines, lineHeightPx, paddingY };
     }
 
-    /**
-     * Temporary: when inline error areas are too small, show the full message in the rewrite textarea.
-     * TODO: remove this workaround when error UI supports long copy.
-     */
-    appendPromptlyErrorToRewriteField(fullMessage) {
-      const msg = String(fullMessage || "").trim();
-      if (!msg || !this.rewriteInstructionInput) {
-        return;
+    truncateInlineError(message, maxLen) {
+      const msg = String(message || "").trim();
+      const max = Math.max(8, Number(maxLen) || 8);
+      if (msg.length <= max) {
+        return msg;
       }
-      const header = "[Promptly — error]\n";
-      const existing = String(this.rewriteInstructionInput.value || "");
-      const block = `${header}${msg}\n\n`;
-      if (existing.includes(header) && existing.includes(msg)) {
-        return;
-      }
-      this.rewriteInstructionInput.value = existing ? `${block}${existing}` : block;
-      this.updateInputLineMode();
+      return `${msg.slice(0, max - 1).trimEnd()}…`;
     }
 
     updateInputLineMode() {
@@ -403,11 +466,44 @@
       if (!input) {
         return;
       }
+      const isComposeFocusMode = this.root.classList.contains("promptly-compose-focus-mode");
+      if (isComposeFocusMode) {
+        input.style.whiteSpace = "pre-wrap";
+        input.style.overflowWrap = "break-word";
+        input.style.wordBreak = "break-word";
+        input.style.overflowX = "hidden";
+        input.style.height = "100%";
+        input.style.overflowY = "auto";
+        if (this.visibleLineCount !== this.maxVisibleLines) {
+          this.visibleLineCount = this.maxVisibleLines;
+          this.root.dataset.rewriteLines = String(this.visibleLineCount);
+          if (typeof this.onLayoutHintChange === "function") {
+            // Keep layout stable in compose focus mode; avoid width/height reflow on line breaks.
+            this.onLayoutHintChange({
+              lineCount: this.visibleLineCount,
+              rawLines: 1,
+              scrollable: true
+            });
+          }
+        }
+        return;
+      }
+      if (this.composePromptWritten) {
+        this.resetComposeInputToSingleLine();
+        return;
+      }
+      input.style.whiteSpace = "pre-wrap";
+      input.style.overflowWrap = "break-word";
+      input.style.wordBreak = "break-word";
+      input.style.overflowX = "hidden";
       input.style.height = "auto";
       const isEmpty = String(input.value || "").trim().length === 0;
       const { rawLines, lineHeightPx, paddingY } = this.getInputLineMetrics();
       const effectiveRawLines = isEmpty ? 1 : rawLines;
-      const nextVisibleLines = Math.min(this.maxVisibleLines, effectiveRawLines);
+      const nextVisibleLines = Math.min(
+        this.maxVisibleLines,
+        Math.max(this.minVisibleLines, effectiveRawLines)
+      );
       const nextHeight = Math.round(paddingY + lineHeightPx * nextVisibleLines);
       input.style.height = `${nextHeight}px`;
       input.style.overflowY = effectiveRawLines > this.maxVisibleLines ? "auto" : "hidden";
@@ -418,7 +514,7 @@
         if (typeof this.onLayoutHintChange === "function") {
           this.onLayoutHintChange({
             lineCount: this.visibleLineCount,
-            rawLines: effectiveRawLines,
+            rawLines: 1,
             scrollable: effectiveRawLines > this.maxVisibleLines
           });
         }
@@ -620,11 +716,20 @@
         window.clearTimeout(this.autoStageResetTimer);
         this.autoStageResetTimer = null;
       }
+      if (this.composeGeneratedStageTimer) {
+        window.clearTimeout(this.composeGeneratedStageTimer);
+        this.composeGeneratedStageTimer = null;
+      }
       const modeKey = String(mode || "improve").toLowerCase();
       if (modeKey === "compose") {
         this.rewriteSendButton.classList.remove("has-compose-inline-error");
         this.rewriteSendErrorText.textContent = "";
         this.rewriteSendButton.disabled = isLoading;
+        if (isLoading || (this.composeCollapseUntilGenerated && !this.composePromptWritten)) {
+          this.updateComposeFocusMode(true);
+        } else {
+          this.updateComposeFocusMode(false);
+        }
         if (isLoading) {
           const alreadyActive =
             this.composeStageLoopActive ||
@@ -653,6 +758,7 @@
           return;
         }
         if (isError) {
+          this.composeCollapseUntilGenerated = false;
           this.logComposeDebug("compose-loading-error", { stageText: String(stageText || "") });
           this.endComposeStageLoop();
           this.composeAwaitingPromptWrite = false;
@@ -672,12 +778,10 @@
             .trim();
           const COMPOSE_INLINE_ERROR_MAX = 120;
           if (errMsg) {
-            if (errMsg.length > COMPOSE_INLINE_ERROR_MAX) {
-              this.appendPromptlyErrorToRewriteField(errMsg);
-              this.rewriteSendErrorText.textContent = "See text box above";
-            } else {
-              this.rewriteSendErrorText.textContent = errMsg;
-            }
+            this.rewriteSendErrorText.textContent = this.truncateInlineError(
+              errMsg,
+              COMPOSE_INLINE_ERROR_MAX
+            );
             this.rewriteSendButton.classList.add("has-compose-inline-error");
             this.composeSendErrorResetTimer = window.setTimeout(() => {
               this.rewriteSendButton.classList.remove("has-compose-inline-error");
@@ -691,17 +795,26 @@
           requestAnimationFrame(() => {
             this.rewriteSendButton.classList.remove("is-compose-text-reset");
             this.resetComposeThoughtLinePlaceholders();
+            this.updateComposeFocusMode();
           });
           return;
         }
         this.composePromptWritten = true;
-        // Decouple API loading from write monitoring: loading is done now, writing monitor
-        // continues in parallel while shine stays active via enforcer/watchdog.
+        this.composeCollapseUntilGenerated = false;
         this.endComposeStageLoop();
-        this.composeAwaitingPromptWrite = true;
-        // Stay on compose0 so the visible line remains "Analyzing" until paste is confirmed.
-        this.rewriteSendButton.dataset.stage = "compose0";
-        this.logComposeDebug("compose-loading-off-parallel-write");
+        this.composeAwaitingPromptWrite = false;
+        this.composeAwaitingPreWriteWordCount = null;
+        this.composeLastObservedWriteWordCount = null;
+        if (this.composeAwaitingFinalizeTimer) {
+          window.clearTimeout(this.composeAwaitingFinalizeTimer);
+          this.composeAwaitingFinalizeTimer = null;
+        }
+        this.logComposeDebug("compose-loading-off-generated");
+        this.rewriteSendButton.classList.remove("is-working");
+        this.stopComposeShineWatchdog();
+        this.stopComposeShineEnforcer();
+        this.applyComposeShineHardOverride(false);
+        this.composeUseIdleLabel = true;
         this.awaitingOneTimeScratchClear = true;
         {
           const root = this.rewriteInstructionInput.getRootNode();
@@ -711,8 +824,12 @@
         }
         this.composeFieldBaseline = String(this.rewriteInstructionInput?.value ?? "");
         this.composeFieldDirty = false;
-        // Do not stop local thinking/shimmer here; wait until setContent confirms box write.
-        // Keep description text in the field; user can edit fresh after focus + typing (beforeinput).
+        this.showComposeGeneratedTemporarily();
+        this.resetComposeInputToSingleLine();
+        if (this.rewriteInstructionInput && this.doc.activeElement === this.rewriteInstructionInput) {
+          this.rewriteInstructionInput.blur();
+        }
+        this.updateComposeFocusMode(false);
         return;
       }
 
@@ -760,13 +877,11 @@
         const errFull = String(stageText)
           .replace(/^failed:\s*/i, "")
           .trim();
-        const IMPROVE_INLINE_ERROR_MAX = 16;
-        if (errFull.length > IMPROVE_INLINE_ERROR_MAX) {
-          this.appendPromptlyErrorToRewriteField(errFull);
-          this.autoAdjustErrorText.textContent = "See text box ↓";
-        } else {
-          this.autoAdjustErrorText.textContent = errFull;
-        }
+        const IMPROVE_INLINE_ERROR_MAX = 24;
+        this.autoAdjustErrorText.textContent = this.truncateInlineError(
+          errFull,
+          IMPROVE_INLINE_ERROR_MAX
+        );
         this.autoAdjustButton.classList.add("has-inline-error");
         this.autoErrorResetTimer = window.setTimeout(() => {
           this.autoAdjustButton.classList.remove("has-inline-error");
@@ -788,6 +903,9 @@
       this.wordCountValue.textContent = wordCount > 99999 ? "MAX." : String(wordCount);
       this.autoAdjustSuffix = model.autoAdjustSuffix || "";
       this.composePromptWritten = !!model.composePromptWritten;
+      if (this.composePromptWritten) {
+        this.composeCollapseUntilGenerated = false;
+      }
       if (this.composeAwaitingPromptWrite && this.composePromptWritten) {
         const pre = Number(this.composeAwaitingPreWriteWordCount);
         const hasObservedWrite =
@@ -825,6 +943,13 @@
         this.composeFieldBaseline = null;
         this.composeFieldDirty = false;
       }
+      if (this.composePromptWritten) {
+        this.resetComposeInputToSingleLine();
+        if (this.rewriteInstructionInput && this.doc.activeElement === this.rewriteInstructionInput) {
+          this.rewriteInstructionInput.blur();
+        }
+      }
+      this.updateComposeFocusMode();
       this.root.classList.toggle("promptly-hide-improve-section", !!model.hideImprovePromptSection);
       if (!this.rewriteSendButton.classList.contains("is-working")) {
         const hasText = String(this.rewriteInstructionInput?.value || "").trim().length > 0;
@@ -883,7 +1008,7 @@
     }
 
     getHeight() {
-      return 150 + (this.visibleLineCount - 1) * 14;
+      return 150;
     }
 
     fitToBounds(width, height) {

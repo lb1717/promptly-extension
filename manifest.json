@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Promptly",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Prompt assistance tab anchored to AI prompt inputs on ChatGPT, Claude, and Gemini.",
   "permissions": [
     "storage",
@@ -80,17 +80,17 @@
     }
   ],
   "icons": {
-    "16": "extension/icons/promptly-logo.png",
-    "32": "extension/icons/promptly-logo.png",
-    "48": "extension/icons/promptly-logo.png",
-    "128": "extension/icons/promptly-logo.png"
+    "16": "extension/icons/promptly-icon-16.png",
+    "32": "extension/icons/promptly-icon-32.png",
+    "48": "extension/icons/promptly-icon-48.png",
+    "128": "extension/icons/promptly-icon-128.png"
   },
   "action": {
     "default_title": "Promptly",
     "default_popup": "extension/popup.html",
     "default_icon": {
-      "16": "extension/icons/promptly-logo.png",
-      "32": "extension/icons/promptly-logo.png"
+      "16": "extension/icons/promptly-icon-16.png",
+      "32": "extension/icons/promptly-icon-32.png"
     }
   },
   "options_page": "extension/options.html",

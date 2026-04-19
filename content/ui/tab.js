@@ -1,4 +1,64 @@
 (() => {
+  function nearestSliderLevel(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) {
+      return 0;
+    }
+    return Math.max(0, Math.min(2, Math.round(n)));
+  }
+
+  function setTickHighlight(ticksRoot, level) {
+    if (!(ticksRoot instanceof Element)) {
+      return;
+    }
+    ticksRoot.querySelectorAll("span[data-level]").forEach((node) => {
+      const isActive = String(node.getAttribute("data-level") || "") === String(level);
+      node.classList.toggle("is-active", isActive);
+    });
+  }
+
+  function setSliderProgressFill(sliderEl) {
+    if (!(sliderEl instanceof HTMLInputElement)) {
+      return;
+    }
+    const min = Number(sliderEl.min || 0);
+    const max = Number(sliderEl.max || 100);
+    const value = Number(sliderEl.value || min);
+    const range = Math.max(1e-6, max - min);
+    const pct = Math.max(0, Math.min(100, ((value - min) / range) * 100));
+    sliderEl.style.setProperty("--promptly-slider-fill-pct", `${pct}%`);
+  }
+
+  function wireSnapToNearestTick(sliderEl, options = {}) {
+    if (!(sliderEl instanceof HTMLInputElement)) {
+      return;
+    }
+    const ticksRootSelector = sliderEl.classList.contains("promptly-settings-quality")
+      ? ".promptly-settings-quality-ticks"
+      : sliderEl.classList.contains("promptly-settings-speed")
+        ? ".promptly-settings-speed-ticks"
+        : "";
+    const ticksRoot = ticksRootSelector
+      ? sliderEl.closest(".promptly-settings-slider-card")?.querySelector(ticksRootSelector)
+      : null;
+    const apply = (snapToNearest, userInitiated = false) => {
+      const level = nearestSliderLevel(sliderEl.value);
+      if (snapToNearest) {
+        sliderEl.value = String(level);
+      }
+      setTickHighlight(ticksRoot, level);
+      setSliderProgressFill(sliderEl);
+      if (snapToNearest && typeof options.onRelease === "function") {
+        options.onRelease(level, sliderEl, userInitiated);
+      }
+    };
+    sliderEl.addEventListener("input", () => apply(false, true));
+    sliderEl.addEventListener("pointerup", () => apply(true, true));
+    sliderEl.addEventListener("touchend", () => apply(true, true), { passive: true });
+    sliderEl.addEventListener("change", () => apply(true, true));
+    apply(true, false);
+  }
+
   function createWhiteTransparentIconDataUrl(sourceUrl) {
     return new Promise((resolve, reject) => {
       const img = new Image();
@@ -74,6 +134,10 @@
       this.suppressNextClick = false;
       this.tabStatusResetTimer = null;
       this.tabStatusPrepTimer = null;
+      this.repositionHintTimer = null;
+      this.repositionHintSeenStorageKey = "promptly_reposition_hint_seen_v1";
+      this.settingsPlanTier = "free";
+      this.settingsSliderUpgradeTimers = {};
 
       this.host = document.createElement("div");
       this.host.dataset.promptlyRoot = "true";
@@ -119,9 +183,15 @@
         "</span>" +
         "</span>";
       this.autoSendSwitch = this.tabButton.querySelector(".promptly-tab-auto-switch");
+      this.autoSendLabel = this.tabButton.querySelector(".promptly-tab-auto-label");
       this.signInButton = this.tabButton.querySelector(".promptly-tab-signin");
       this.minimalLogoIcon = this.tabButton.querySelector(".promptly-tab-logo-minimal-icon");
       if (this.minimalLogoIcon) {
+        this.minimalLogoIcon.setAttribute("draggable", "false");
+        this.minimalLogoIcon.draggable = false;
+        this.minimalLogoIcon.addEventListener("dragstart", (event) => {
+          event.preventDefault();
+        });
         const rawLogoUrl = chrome.runtime.getURL("content/ui/images/Promptly Logo White.png");
         const encodedLogoUrl = rawLogoUrl.replace(/ /g, "%20");
         this.minimalLogoIcon.src = encodedLogoUrl;
@@ -140,6 +210,7 @@
         this.settingsIcon.setAttribute("aria-hidden", "true");
         this.settingsButton.append(this.settingsIcon);
         const sourceUrl = `${chrome.runtime.getURL("content/ui/images/gear.png")}?v=1`;
+        this.settingsIconSourceUrl = sourceUrl;
         this.settingsIcon.src = sourceUrl;
         createWhiteTransparentIconDataUrl(sourceUrl)
           .then((dataUrl) => {
@@ -161,17 +232,21 @@
           "<span class='promptly-credit-line promptly-credit-line-strong'>—</span>" +
           "<span class='promptly-credit-line promptly-credit-line-muted'>— / — Tokens</span>";
       }
-      this.autoSendSwitch.addEventListener("click", (event) => {
+      const runToggleAutoSend = (event) => {
         event.preventDefault();
         event.stopPropagation();
         if (typeof this.onToggleAutoSend === "function") {
           this.onToggleAutoSend();
         }
-      });
+      };
+      this.autoSendSwitch.addEventListener("click", runToggleAutoSend);
+      if (this.autoSendLabel) {
+        this.autoSendLabel.addEventListener("click", runToggleAutoSend);
+      }
       const runSignInFlow = (event) => {
         event.preventDefault();
         event.stopPropagation();
-        this.showErrorToast("Opening Google sign-in…");
+        this.showToast("Opening Google sign-in…", { tone: "info" });
         if (typeof this.onSignIn === "function") {
           Promise.resolve(this.onSignIn())
             .then(() => {
@@ -336,6 +411,9 @@
           if (typeof this.onLayoutChange === "function") {
             this.onLayoutChange();
           }
+        },
+        () => {
+          this.showRepositionHint({ force: true });
         }
       );
       this.popupMask = document.createElement("div");
@@ -346,54 +424,118 @@
       this.errorToast.setAttribute("role", "status");
       this.errorToast.textContent = "";
       this.errorToastTimer = null;
+      this.repositionHint = document.createElement("div");
+      this.repositionHint.className = "promptly-tab-reposition-hint";
+      this.repositionHint.setAttribute("role", "status");
+      this.repositionHint.innerHTML =
+        "<span class='promptly-tab-reposition-text'>Slide to reposition</span>" +
+        "<span class='promptly-tab-reposition-arrow' aria-hidden='true'>←────→</span>";
       this.settingsPanel = document.createElement("aside");
       this.settingsPanel.className = "promptly-settings-panel";
       this.settingsPanel.setAttribute("aria-hidden", "true");
       this.settingsPanel.innerHTML =
         "<button type='button' class='promptly-settings-close' aria-label='Close settings'>×</button>" +
+        "<div class='promptly-settings-header'>" +
+        "<img class='promptly-settings-title-icon' alt='' aria-hidden='true' />" +
         "<div class='promptly-settings-title'>Settings</div>" +
-        "<div class='promptly-settings-section'>" +
-        "<div class='promptly-settings-label'>Account</div>" +
+        "<span class='promptly-settings-separator promptly-settings-header-separator' aria-hidden='true'>|</span>" +
+        "<a class='promptly-settings-header-link' href='https://promptly-labs.com' target='_blank' rel='noopener noreferrer'>Promptly Labs</a>" +
+        "</div>" +
+        "<div class='promptly-settings-section promptly-settings-section-account'>" +
+        "<div class='promptly-settings-label promptly-settings-heading'>Account</div>" +
         "<div class='promptly-settings-account-row'>" +
         "<div class='promptly-settings-email'>Not signed in</div>" +
         "<div class='promptly-settings-tier-badge' hidden>Free</div>" +
         "<button type='button' class='promptly-settings-account-btn'>Manage account / subscription</button>" +
         "</div>" +
         "</div>" +
-        "<div class='promptly-settings-section'>" +
+        "<div class='promptly-settings-section promptly-settings-section-account-sliders'>" +
+        "<div class='promptly-settings-sliders-wrap'>" +
         "<div class='promptly-settings-sliders'>" +
         "<div class='promptly-settings-slider-card'>" +
         "<div class='promptly-settings-label'>Model quality</div>" +
-        "<input class='promptly-settings-slider promptly-settings-quality' type='range' min='0' max='2' step='1' value='0' />" +
-        "<div class='promptly-settings-ticks'><span>Base</span><span>Premium</span><span>MAX</span></div>" +
+        "<div class='promptly-settings-slider-zone'>" +
+        "<input class='promptly-settings-slider promptly-settings-quality' type='range' min='0' max='2' step='0.01' value='0' />" +
+        "</div>" +
+        "<div class='promptly-settings-ticks promptly-settings-quality-ticks'><span data-level='0'>Base</span><span data-level='1'>Premium</span><span data-level='2'>MAX</span></div>" +
         "</div>" +
         "<div class='promptly-settings-slider-card'>" +
         "<div class='promptly-settings-label'>Speed</div>" +
-        "<input class='promptly-settings-slider promptly-settings-speed' type='range' min='0' max='2' step='1' value='0' />" +
-        "<div class='promptly-settings-ticks'><span>Normal</span><span>Efficient</span><span>FAST</span></div>" +
+        "<div class='promptly-settings-slider-zone'>" +
+        "<input class='promptly-settings-slider promptly-settings-speed' type='range' min='0' max='2' step='0.01' value='0' />" +
+        "</div>" +
+        "<div class='promptly-settings-ticks promptly-settings-speed-ticks'><span data-level='0'>Normal</span><span data-level='1'>Efficient</span><span data-level='2'>FAST</span></div>" +
+        "</div>" +
+        "</div>" +
+        "<div class='promptly-settings-sliders-upgrade-prompt' hidden>" +
+        "<button type='button' class='promptly-settings-slider-upgrade-btn' aria-label='Upgrade plan for premium sliders'>Upgrade plan</button>" +
         "</div>" +
         "</div>" +
         "</div>" +
-        "<div class='promptly-settings-section'>" +
-        "<div class='promptly-settings-label'>Visuals</div>" +
-        "<div class='promptly-settings-toggle-row'>" +
-        "<span class='promptly-settings-toggle-label'>Wide mode</span>" +
-        "<button type='button' class='promptly-settings-toggle' role='switch' aria-checked='false' aria-label='Toggle thin mode'><span class='promptly-settings-toggle-knob'></span></button>" +
-        "<span class='promptly-settings-toggle-label'>Thin mode</span>" +
-        "</div>" +
+        "<div class='promptly-settings-section promptly-settings-section-visuals'>" +
+        "<div class='promptly-settings-label promptly-settings-heading'>Visuals</div>" +
+        "<div class='promptly-settings-visuals-row'>" +
+        "<span class='promptly-settings-inline-label'>Theme:</span>" +
         "<div class='promptly-settings-color-row'>" +
         "<button type='button' class='promptly-settings-color is-selected' data-color='black' aria-label='Black'><span>✓</span></button>" +
         "<button type='button' class='promptly-settings-color' data-color='purple' aria-label='Purple'><span>✓</span></button>" +
         "<button type='button' class='promptly-settings-color' data-color='dark-blue' aria-label='Dark blue'><span>✓</span></button>" +
         "<button type='button' class='promptly-settings-color' data-color='dark-green' aria-label='Dark green'><span>✓</span></button>" +
         "</div>" +
+        "<span class='promptly-settings-separator' aria-hidden='true'>|</span>" +
+        "<span class='promptly-settings-toggle-label promptly-settings-toggle-wide is-active'>Wide mode</span>" +
+        "<button type='button' class='promptly-settings-toggle' role='switch' aria-checked='false' aria-label='Toggle thin mode'><span class='promptly-settings-toggle-knob'></span></button>" +
+        "<span class='promptly-settings-toggle-label promptly-settings-toggle-thin'>Thin mode</span>" +
         "</div>";
       this.settingsEmailEl = this.settingsPanel.querySelector(".promptly-settings-email");
       this.settingsTierEl = this.settingsPanel.querySelector(".promptly-settings-tier-badge");
       this.settingsAccountBtn = this.settingsPanel.querySelector(".promptly-settings-account-btn");
       this.settingsCloseBtn = this.settingsPanel.querySelector(".promptly-settings-close");
+      this.settingsTitleIcon = this.settingsPanel.querySelector(".promptly-settings-title-icon");
       this.settingsStyleToggle = this.settingsPanel.querySelector(".promptly-settings-toggle");
+      this.settingsWideLabel = this.settingsPanel.querySelector(".promptly-settings-toggle-wide");
+      this.settingsThinLabel = this.settingsPanel.querySelector(".promptly-settings-toggle-thin");
+      this.settingsQualitySlider = this.settingsPanel.querySelector(".promptly-settings-quality");
+      this.settingsSpeedSlider = this.settingsPanel.querySelector(".promptly-settings-speed");
+      this.settingsSliderCards = Array.from(
+        this.settingsPanel.querySelectorAll(".promptly-settings-slider-card")
+      );
+      this.settingsSlidersUpgradePrompt = this.settingsPanel.querySelector(
+        ".promptly-settings-sliders-upgrade-prompt"
+      );
+      this.settingsSliderUpgradeButton = this.settingsPanel.querySelector(
+        ".promptly-settings-slider-upgrade-btn"
+      );
       this.settingsColorButtons = Array.from(this.settingsPanel.querySelectorAll(".promptly-settings-color"));
+      wireSnapToNearestTick(this.settingsQualitySlider, {
+        onRelease: (level, sliderEl) => this.handleSettingsSliderRelease("quality", level, sliderEl)
+      });
+      wireSnapToNearestTick(this.settingsSpeedSlider, {
+        onRelease: (level, sliderEl) => this.handleSettingsSliderRelease("speed", level, sliderEl)
+      });
+      if (this.settingsQualitySlider) {
+        this.settingsQualitySlider.addEventListener("change", () => {
+          this.enforceFreeSliderLevel("quality", this.settingsQualitySlider);
+        });
+      }
+      if (this.settingsSpeedSlider) {
+        this.settingsSpeedSlider.addEventListener("change", () => {
+          this.enforceFreeSliderLevel("speed", this.settingsSpeedSlider);
+        });
+      }
+      if (this.settingsTitleIcon) {
+        const sourceUrl = this.settingsIconSourceUrl || `${chrome.runtime.getURL("content/ui/images/gear.png")}?v=1`;
+        this.settingsTitleIcon.src = sourceUrl;
+        createWhiteTransparentIconDataUrl(sourceUrl)
+          .then((dataUrl) => {
+            if (this.settingsTitleIcon && this.settingsTitleIcon.isConnected) {
+              this.settingsTitleIcon.src = dataUrl;
+            }
+          })
+          .catch(() => {
+            // Keep raw icon as fallback.
+          });
+      }
       this.settingsCloseBtn.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -423,11 +565,23 @@
           }
         });
       });
+      if (this.settingsSliderUpgradeButton) {
+        this.settingsSliderUpgradeButton.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          this.hideSettingsSliderUpgradePrompts();
+          if (typeof this.onManageAccount === "function") {
+            this.onManageAccount();
+            return;
+          }
+          this.showToast("Upgrade plan", { tone: "info", durationMs: 2200 });
+        });
+      }
       this.settingsPanel.addEventListener("click", (event) => {
         event.stopPropagation();
       });
       // Attach toast to the tab itself so it follows the tab's translate3d placement.
-      this.tabButton.append(this.errorToast);
+      this.tabButton.append(this.errorToast, this.repositionHint);
       this.root.append(this.popupMask, this.tabButton, this.settingsPanel);
       this.setTabStatus("idle");
       this.shadowRoot.append(styleLink, this.root);
@@ -445,6 +599,16 @@
         window.clearTimeout(this.errorToastTimer);
         this.errorToastTimer = null;
       }
+      if (this.repositionHintTimer) {
+        window.clearTimeout(this.repositionHintTimer);
+        this.repositionHintTimer = null;
+      }
+      Object.keys(this.settingsSliderUpgradeTimers || {}).forEach((key) => {
+        const timer = this.settingsSliderUpgradeTimers[key];
+        if (timer) {
+          window.clearTimeout(timer);
+        }
+      });
       this.host.remove();
     }
 
@@ -529,7 +693,7 @@
         this.setSettingsTierBadge(String(data?.subscriptionTier || "").trim());
       } catch (_error) {
         this.setSettingsAccountEmail("Not signed in");
-        this.setSettingsTierBadge("");
+        this.setSettingsTierBadge("free");
       }
     }
 
@@ -547,12 +711,72 @@
       }
       const t = String(tier || "").trim().toLowerCase();
       if (!t) {
-        this.settingsTierEl.hidden = true;
+        // Treat missing/empty tier as Free so slider upsell gating always applies for non-Pro users.
+        this.settingsTierEl.textContent = "Free";
+        this.settingsTierEl.hidden = false;
+        this.settingsPlanTier = "free";
+        this.hideSettingsSliderUpgradePrompts();
         return;
       }
-      const label = t === "pro" || t === "plus" || t === "professional" ? "Pro" : "Free";
+      const isPro = t === "pro" || t === "plus" || t === "professional";
+      const label = isPro ? "Pro" : "Free";
       this.settingsTierEl.textContent = label;
       this.settingsTierEl.hidden = false;
+      this.settingsPlanTier = isPro ? "pro" : "free";
+      this.hideSettingsSliderUpgradePrompts();
+    }
+
+    hideSettingsSliderUpgradePrompts() {
+      if (this.settingsSlidersUpgradePrompt) {
+        this.settingsSlidersUpgradePrompt.hidden = true;
+      }
+    }
+
+    showSettingsSliderUpgradePrompt(kind) {
+      if (!(this.settingsSlidersUpgradePrompt instanceof HTMLElement)) {
+        return;
+      }
+      this.hideSettingsSliderUpgradePrompts();
+      this.settingsSlidersUpgradePrompt.hidden = false;
+      const normalized = kind === "speed" ? "speed" : "quality";
+      const prevTimer = this.settingsSliderUpgradeTimers[normalized];
+      if (prevTimer) {
+        window.clearTimeout(prevTimer);
+      }
+      this.settingsSliderUpgradeTimers[normalized] = window.setTimeout(() => {
+        this.hideSettingsSliderUpgradePrompts();
+        this.settingsSliderUpgradeTimers[normalized] = null;
+      }, 2600);
+    }
+
+    enforceFreeSliderLevel(kind, sliderEl) {
+      if (!(sliderEl instanceof HTMLInputElement)) {
+        return;
+      }
+      if (this.settingsPlanTier !== "free") {
+        return;
+      }
+      const level = nearestSliderLevel(sliderEl.value);
+      if (level <= 0) {
+        return;
+      }
+      sliderEl.value = "0";
+      sliderEl.dispatchEvent(new Event("input", { bubbles: true }));
+      sliderEl.dispatchEvent(new Event("change", { bubbles: true }));
+      this.showSettingsSliderUpgradePrompt(kind);
+    }
+
+    handleSettingsSliderRelease(kind, level, sliderEl, userInitiated = false) {
+      if (this.settingsPlanTier !== "free") {
+        return;
+      }
+      if (!(sliderEl instanceof HTMLInputElement)) {
+        return;
+      }
+      if (Number(level) <= 0) {
+        return;
+      }
+      this.enforceFreeSliderLevel(kind, sliderEl);
     }
 
     setVisualStyle(style) {
@@ -569,6 +793,11 @@
         this.settingsStyleToggle.setAttribute("aria-checked", thin ? "true" : "false");
         this.settingsStyleToggle.classList.toggle("is-thin", thin);
       }
+      if (this.settingsWideLabel && this.settingsThinLabel) {
+        const thin = next === "minimalistic";
+        this.settingsWideLabel.classList.toggle("is-active", !thin);
+        this.settingsThinLabel.classList.toggle("is-active", thin);
+      }
     }
 
     setVisualColor(color) {
@@ -583,15 +812,18 @@
       }
     }
 
-    showErrorToast(message) {
+    showToast(message, options = {}) {
       const msg = String(message || "").trim();
       if (!msg || !this.errorToast) {
         return;
       }
+      const tone = String(options?.tone || "error").trim().toLowerCase();
+      const durationMs = Math.max(1200, Number(options?.durationMs) || 7000);
       if (this.errorToastTimer) {
         window.clearTimeout(this.errorToastTimer);
         this.errorToastTimer = null;
       }
+      this.errorToast.dataset.tone = tone === "success" || tone === "info" ? tone : "error";
       this.errorToast.textContent = msg;
       this.errorToast.classList.add("is-visible");
       // Force visibility even if some page CSS ends up interfering.
@@ -599,10 +831,45 @@
       this.errorToast.style.transform = "translate3d(0, -110%, 0)";
       this.errorToastTimer = window.setTimeout(() => {
         this.errorToast.classList.remove("is-visible");
+        this.errorToast.dataset.tone = "";
         this.errorToast.style.opacity = "";
         this.errorToast.style.transform = "";
         this.errorToastTimer = null;
-      }, 7000);
+      }, durationMs);
+    }
+
+    showErrorToast(message) {
+      this.showToast(message, { tone: "error" });
+    }
+
+    showRepositionHint(options = {}) {
+      if (!this.repositionHint) {
+        return;
+      }
+      const force = !!options?.force;
+      if (!force) {
+        try {
+          const seen = String(window.localStorage.getItem(this.repositionHintSeenStorageKey) || "");
+          if (seen === "1") {
+            return;
+          }
+          window.localStorage.setItem(this.repositionHintSeenStorageKey, "1");
+        } catch (_error) {
+          // Ignore storage errors; still show once for this session.
+        }
+      }
+      if (this.repositionHintTimer) {
+        window.clearTimeout(this.repositionHintTimer);
+        this.repositionHintTimer = null;
+      }
+      this.repositionHint.classList.remove("is-replay");
+      // Force reflow so the arrow animation can replay.
+      void this.repositionHint.offsetWidth;
+      this.repositionHint.classList.add("is-visible", "is-replay");
+      this.repositionHintTimer = window.setTimeout(() => {
+        this.repositionHint.classList.remove("is-visible", "is-replay");
+        this.repositionHintTimer = null;
+      }, 3600);
     }
 
     setCreditUsage(credits) {
@@ -610,8 +877,8 @@
         return;
       }
       const fmt = (n) => Math.max(0, Math.floor(Number(n) || 0)).toLocaleString("en-US");
-      const used = Math.max(0, Number(credits.used || 0));
       const max = Math.max(1, Number(credits.max || 1));
+      const used = Math.min(max, Math.max(0, Number(credits.used || 0)));
       const usedPercent = Math.max(0, Math.min(100, Math.round((used / max) * 100)));
       const displayPercent = Math.max(2, usedPercent);
       this.creditUsageMeter.style.setProperty("--promptly-credit-progress", `${displayPercent}%`);

@@ -103,8 +103,10 @@ export function conservativeBillFromEstimatedInput(estimatedInputTokens: number,
 }
 
 function toCreditsView(raw: { used: number; limit: number; remaining?: number }) {
-  const used = Math.max(0, Number(raw.used || 0));
+  const usedRaw = Math.max(0, Number(raw.used || 0));
   const limit = Math.max(1, Number(raw.limit || 1));
+  // UI should never show usage beyond the daily cap.
+  const used = Math.min(limit, usedRaw);
   const remaining = Math.max(0, Number(raw.remaining ?? Math.max(0, limit - used)));
   const rawUsedPercent = Math.max(0, Math.min(100, Math.round((used / limit) * 100)));
   const usedPercent = used > 0 ? Math.max(1, rawUsedPercent) : 0;
@@ -136,7 +138,8 @@ export function buildCreditsEnvelope(
     if (est > CREDIT_MAX_ESTIMATED_INPUT_TOKENS) {
       canRunEstimatedPrompt = false;
     } else {
-      canRunEstimatedPrompt = used + plannedBillEstimate <= limit;
+      // Soft pre-check: allow run while still under daily cap.
+      canRunEstimatedPrompt = used < limit;
     }
   }
 
@@ -1623,7 +1626,7 @@ export async function consumeDailyUsage(params: {
     const currentAuto = Math.max(0, Math.floor(Number(usageRaw.auto || 0) || 0));
     const currentManual = Math.max(0, Math.floor(Number(usageRaw.manual || 0) || 0));
     const currentGenerated = Math.max(0, Math.floor(Number(usageRaw.generated || 0) || 0));
-    const nextUsed = currentUsed + params.tokenCost;
+    const nextUsedRaw = currentUsed + params.tokenCost;
 
     const snapshotUsage: DailyUsage = {
       uid: params.user.uid,
@@ -1637,9 +1640,10 @@ export async function consumeDailyUsage(params: {
       limit: dailyLimit
     };
 
-    if (nextUsed > dailyLimit) {
+    if (currentUsed >= dailyLimit) {
       return { ok: false as const, usage: snapshotUsage };
     }
+    const nextUsed = Math.min(dailyLimit, nextUsedRaw);
 
     const nextUsage: DailyUsage = {
       ...snapshotUsage,

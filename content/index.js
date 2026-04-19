@@ -37,6 +37,7 @@
   let allowDisplay = false;
   let autoAdjustInFlight = false;
   let autoAdjustOnSend = false;
+  let autoModeBlockedByTokens = false;
   let visibilityCreditsRefreshTimer = null;
   let bypassNextAutoSendInterception = false;
   let dragStartOffsetX = 0;
@@ -131,6 +132,37 @@
       return false;
     }
     return !looksLikePureGibberish(raw);
+  }
+
+  function isCreditsHardExhausted(credits) {
+    const max = Math.max(1, Number(credits?.max || 1));
+    const used = Math.max(0, Number(credits?.used || 0));
+    return Boolean(credits?.hard_exhausted) || used >= max;
+  }
+
+  function persistAutoSendPreference() {
+    try {
+      window.localStorage.setItem(autoSendStorageKey, autoAdjustOnSend ? "1" : "0");
+    } catch (_error) {
+      // Ignore storage errors.
+    }
+  }
+
+  function applyCreditsToUi(credits, options = {}) {
+    if (!credits) {
+      return;
+    }
+    const exhausted = isCreditsHardExhausted(credits);
+    autoModeBlockedByTokens = exhausted;
+    ui.setCreditUsage(credits);
+    if (exhausted && autoAdjustOnSend) {
+      autoAdjustOnSend = false;
+      persistAutoSendPreference();
+    }
+    ui.setAutoSendEnabled(autoAdjustOnSend && !autoModeBlockedByTokens);
+    if (exhausted && options?.announceNoTokens) {
+      ui.showErrorToast("No more tokens left today.");
+    }
   }
 
   function extractJsonObjectFromModelOutput(text) {
@@ -238,11 +270,15 @@
     },
     onSuggestionClick: () => {},
     onSignIn: async () => {
-      ui.showErrorToast("Starting sign-in…");
+      ui.showToast("Starting sign-in…", { tone: "info" });
       try {
         const result = await ensureChromeSignedIn();
-        ui.showErrorToast(`Signed in as ${String(result?.chromeEmail || "").trim() || "your account"}.`);
+        ui.showToast(
+          `Signed in as ${String(result?.chromeEmail || "").trim() || "your account"}.`,
+          { tone: "success" }
+        );
         ui.setSignedOut(false);
+        ui.showRepositionHint();
         if (result?.chromeEmail) {
           refreshCreditsFromServer();
         }
@@ -363,7 +399,7 @@
         const optimization = await optimizationPromise;
         const optimizedPrompt = optimization.optimizedPrompt;
         if (optimization.credits) {
-          ui.setCreditUsage(optimization.credits);
+          applyCreditsToUi(optimization.credits, { announceNoTokens: true });
         }
         if (!isComposeMode) {
           ui.setAutoAdjustLoading(true, "updating", false, "improve");
@@ -397,7 +433,7 @@
         const rawReason = String(_error?.message || _error || "failed");
         ui.showErrorToast(mapPromptlyErrorToToast(rawReason));
         if (_error?.promptlyCredits) {
-          ui.setCreditUsage(_error.promptlyCredits);
+          applyCreditsToUi(_error.promptlyCredits, { announceNoTokens: true });
         }
         const limitReached = /daily api token limit reached|daily credit limit reached/i.test(rawReason);
         const tokenShortfall = /not enough api tokens|not enough daily tokens/i.test(rawReason);
@@ -410,7 +446,7 @@
           try {
             const credits = await fetchCreditUsageViaProxy();
             if (credits) {
-              ui.setCreditUsage(credits);
+              applyCreditsToUi(credits, { announceNoTokens: true });
             }
           } catch (_creditsError) {
             // Ignore credits refresh failure; primary error is already surfaced.
@@ -445,12 +481,16 @@
       observers.scheduleUpdate();
     },
     onToggleAutoSend: () => {
-      autoAdjustOnSend = !autoAdjustOnSend;
-      try {
-        window.localStorage.setItem(autoSendStorageKey, autoAdjustOnSend ? "1" : "0");
-      } catch (_error) {
-        // Ignore storage errors.
+      if (autoModeBlockedByTokens) {
+        autoAdjustOnSend = false;
+        persistAutoSendPreference();
+        ui.setAutoSendEnabled(false);
+        ui.showErrorToast("No more tokens left today.");
+        observers.scheduleUpdate();
+        return;
       }
+      autoAdjustOnSend = !autoAdjustOnSend;
+      persistAutoSendPreference();
       ui.setAutoSendEnabled(autoAdjustOnSend);
       observers.scheduleUpdate();
     },
@@ -733,7 +773,7 @@
     try {
       const credits = await fetchCreditUsageViaProxy(estimate);
       if (credits) {
-        ui.setCreditUsage(credits);
+        applyCreditsToUi(credits);
         ui.setSignedOut(false);
       }
     } catch (e) {
@@ -1747,23 +1787,30 @@
     if (autoAdjustInFlight || !currentTarget) {
       return;
     }
-    if (!isOpen) {
-      ui.setTabStatus("rewriting");
+    if (autoModeBlockedByTokens) {
+      autoAdjustOnSend = false;
+      persistAutoSendPreference();
+      ui.setAutoSendEnabled(false);
+      ui.showErrorToast("No more tokens left today.");
+      triggerSendAfterAdjust(trigger);
+      return;
     }
     const originalPrompt = getPromptText(currentTarget).trim();
-    if (!isImprovePromptSubstantive(originalPrompt)) {
-      if (!isOpen) {
-        ui.setTabStatus("idle");
-      }
+    const alreadyHandledByPromptly =
+      promptLifecycleState.hasPromptlyRewrite ||
+      promptLifecycleState.composePromptWritten ||
+      promptLifecycleState.improveMutedByCompose;
+    // If current prompt is already improved/generated, never run auto again — just send.
+    if (alreadyHandledByPromptly) {
       triggerSendAfterAdjust(trigger);
       return;
     }
-    if (promptLifecycleState.hasPromptlyRewrite) {
-      if (!isOpen) {
-        ui.setTabStatus("idle");
-      }
+    if (!isImprovePromptSubstantive(originalPrompt)) {
       triggerSendAfterAdjust(trigger);
       return;
+    }
+    if (!isOpen) {
+      ui.setTabStatus("rewriting");
     }
 
     autoAdjustInFlight = true;
@@ -1785,7 +1832,7 @@
       );
       const optimizedPrompt = optimization.optimizedPrompt;
       if (optimization.credits) {
-        ui.setCreditUsage(optimization.credits);
+        applyCreditsToUi(optimization.credits, { announceNoTokens: true });
       }
       ui.setAutoAdjustLoading(true, "updating");
       markPromptlyRewrite(optimizedPrompt);
@@ -1803,7 +1850,7 @@
       }
       ui.showErrorToast(mapPromptlyErrorToToast(String(_error?.message || _error || "")));
       if (_error?.promptlyCredits) {
-        ui.setCreditUsage(_error.promptlyCredits);
+        applyCreditsToUi(_error.promptlyCredits, { announceNoTokens: true });
       }
       // Block send when unauthenticated; otherwise fail open and send original prompt.
       if (!isOpen) {
@@ -1880,7 +1927,7 @@
   fetchCreditUsageViaProxy()
     .then((credits) => {
       if (credits) {
-        ui.setCreditUsage(credits);
+        applyCreditsToUi(credits);
       }
     })
     .catch(() => {
