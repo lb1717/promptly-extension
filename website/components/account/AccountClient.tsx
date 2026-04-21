@@ -241,10 +241,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
         throw new Error(data?.error || `Checkout failed (${res.status})`);
       }
       if (typeof data.url === "string" && data.url) {
-        const popup = window.open(data.url, "_blank", "noopener,noreferrer");
-        if (!popup) {
-          window.location.href = data.url;
-        }
+        window.location.href = data.url;
       }
     } catch (e) {
       setBillingError(String(e instanceof Error ? e.message : e));
@@ -433,6 +430,11 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                       </span>
                     ) : null}
                     <h3 className="text-lg font-semibold text-white">{plan.name}</h3>
+                    {plan.key === "pro" || plan.key === "student" ? (
+                      <p className="mt-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-300">
+                        Free trial
+                      </p>
+                    ) : null}
                     <p className="mt-1 text-sm font-semibold text-violet-100">{plan.price}</p>
                     <p className="mt-2 text-xs text-violet-200/75">{plan.subtitle}</p>
                     <ul className="mt-3 space-y-1.5 text-xs text-violet-100/85">

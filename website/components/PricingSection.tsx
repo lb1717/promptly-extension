@@ -92,6 +92,9 @@ export function PricingSection() {
                 </span>
               ) : null}
               <h3 className="text-xl font-semibold text-white">{plan.name}</h3>
+              {plan.key === "pro" || plan.key === "student" ? (
+                <p className="mt-2 text-xs font-semibold uppercase tracking-wider text-emerald-300">Free trial</p>
+              ) : null}
               <p className="mt-3 flex items-baseline gap-1">
                 <span className="text-3xl font-semibold tabular-nums text-white sm:text-4xl">{plan.price}</span>
                 <span className="text-sm text-violet-200/70">/{plan.cadence}</span>
