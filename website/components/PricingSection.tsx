@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/Button";
 
 const PLANS = [
   {
+    key: "free",
     name: "Free",
     price: "$0.00",
     cadence: "month",
@@ -11,10 +12,11 @@ const PLANS = [
       "Core models and functionality"
     ],
     cta: "Get started",
-    href: "/account",
+    href: "/account?plan=free",
     featured: false
   },
   {
+    key: "pro",
     name: "Promptly Pro",
     price: "$2.99",
     cadence: "month",
@@ -25,10 +27,11 @@ const PLANS = [
       "Model speed: faster than Free"
     ],
     cta: "Upgrade to Pro",
-    href: "/account",
+    href: "/account?plan=pro",
     featured: false
   },
   {
+    key: "enterprise",
     name: "Enterprise",
     price: "$30.00",
     cadence: "month",
@@ -41,10 +44,11 @@ const PLANS = [
       "Priority during peak times"
     ],
     cta: "Choose Enterprise",
-    href: "/account",
+    href: "/account?plan=enterprise",
     featured: true
   },
   {
+    key: "student",
     name: "Student",
     price: "$1.49",
     cadence: "month",
@@ -55,7 +59,7 @@ const PLANS = [
       "Discounted price versus Pro"
     ],
     cta: "Choose Student",
-    href: "/account",
+    href: "/account?plan=student",
     featured: false
   }
 ] as const;

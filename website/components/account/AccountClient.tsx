@@ -116,6 +116,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
   const [billingError, setBillingError] = useState("");
   const [portalBusy, setPortalBusy] = useState(false);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
+  const [showBillingDetails, setShowBillingDetails] = useState(false);
 
   const loadBilling = useCallback(async (current: User) => {
     setBillingLoading(true);
@@ -232,6 +233,30 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ tier: "pro" })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error || `Checkout failed (${res.status})`);
+      }
+      if (typeof data.url === "string" && data.url) {
+        window.location.href = data.url;
+      }
+    } catch (e) {
+      setBillingError(String(e instanceof Error ? e.message : e));
+    } finally {
+      setCheckoutBusy(false);
+    }
+  }
+
+  async function startStripeCheckoutForTier(currentUser: User, tier: "pro" | "student" | "enterprise") {
+    setCheckoutBusy(true);
+    setBillingError("");
+    try {
+      const token = await currentUser.getIdToken();
+      const res = await fetch("/api/billing/checkout", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ tier })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -372,16 +397,27 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
               <h2 className="text-sm font-semibold uppercase tracking-[0.15em] text-violet-200/80">
                 Subscription
               </h2>
-              {billing?.billingPortalAvailable ? (
-                <button
-                  type="button"
-                  onClick={() => user && openStripeCustomerPortal(user)}
-                  disabled={portalBusy || !user}
-                  className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500 disabled:opacity-60"
-                >
-                  {portalBusy ? "Opening portal…" : "Manage subscription & cards"}
-                </button>
-              ) : null}
+              <div className="flex flex-wrap items-center gap-2">
+                {billing ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowBillingDetails((prev) => !prev)}
+                    className="inline-flex items-center justify-center rounded-xl border border-violet-400/35 px-4 py-2 text-sm font-semibold text-violet-100 hover:bg-violet-500/10"
+                  >
+                    {showBillingDetails ? "Hide billing details" : "Show billing details"}
+                  </button>
+                ) : null}
+                {billing?.billingPortalAvailable ? (
+                  <button
+                    type="button"
+                    onClick={() => user && openStripeCustomerPortal(user)}
+                    disabled={portalBusy || !user}
+                    className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500 disabled:opacity-60"
+                  >
+                    {portalBusy ? "Opening portal…" : "Manage subscription & cards"}
+                  </button>
+                ) : null}
+              </div>
             </div>
             <p className="mt-4 text-sm text-violet-200/70">
               Select from all available plans. Your active plan is highlighted below.
@@ -391,10 +427,8 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
               {ACCOUNT_PLANS.map((plan) => {
                 const isCurrent = currentTierKey === plan.key;
                 const isPopular = plan.key === "enterprise";
-                const proCheckoutAvailable = Boolean(
-                  user && billing?.stripeConfigured && plan.key === "pro" && ["free", "none"].includes(currentTierKey)
-                );
-                const comingSoon = plan.key === "enterprise" || plan.key === "student";
+                const paidTier = plan.key === "pro" || plan.key === "student" || plan.key === "enterprise";
+                const canCheckoutPaidTier = Boolean(user && billing?.stripeConfigured && paidTier && !isCurrent);
 
                 return (
                   <article
@@ -441,22 +475,34 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                         >
                           Current plan
                         </button>
-                      ) : proCheckoutAvailable ? (
+                      ) : canCheckoutPaidTier ? (
                         <button
                           type="button"
-                          onClick={() => user && startStripeCheckout(user)}
+                          onClick={() =>
+                            user &&
+                            startStripeCheckoutForTier(user, plan.key as "pro" | "student" | "enterprise")
+                          }
                           disabled={checkoutBusy}
                           className="inline-flex w-full items-center justify-center rounded-lg bg-violet-600 px-3 py-2 text-xs font-semibold text-white hover:bg-violet-500 disabled:opacity-60"
                         >
-                          {checkoutBusy ? "Redirecting…" : "Upgrade to Promptly Pro"}
+                          {checkoutBusy ? "Redirecting…" : `Choose ${plan.name}`}
                         </button>
-                      ) : comingSoon ? (
+                      ) : plan.key === "free" && billing?.billingPortalAvailable ? (
+                        <button
+                          type="button"
+                          onClick={() => user && openStripeCustomerPortal(user)}
+                          disabled={portalBusy}
+                          className="inline-flex w-full items-center justify-center rounded-lg border border-white/15 px-3 py-2 text-xs font-semibold text-violet-200/85 hover:bg-white/5 disabled:opacity-60"
+                        >
+                          {portalBusy ? "Opening portal…" : "Downgrade in billing portal"}
+                        </button>
+                      ) : paidTier ? (
                         <button
                           type="button"
                           disabled
                           className="inline-flex w-full items-center justify-center rounded-lg border border-white/15 px-3 py-2 text-xs font-semibold text-violet-200/75"
                         >
-                          Checkout setup coming soon
+                          Checkout not configured
                         </button>
                       ) : (
                         <Link
@@ -492,7 +538,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                       ? `Renews or ends ${new Date(billing.currentPeriodEnd).toLocaleString()}`
                       : "—"}
                   </p>
-                  {billing.nextInvoiceAmount != null ? (
+                  {showBillingDetails && billing.nextInvoiceAmount != null ? (
                     <p className="mt-1 text-xs text-violet-200/65">
                       Next invoice: {(billing.nextInvoiceAmount / 100).toFixed(2)} {billing.currency}
                     </p>
@@ -508,9 +554,22 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                 </div>
               </div>
             ) : null}
+            {billing?.billingPortalAvailable ? (
+              <div className="mt-6 border-t border-white/10 pt-4 text-right">
+                <button
+                  type="button"
+                  onClick={() => user && openStripeCustomerPortal(user)}
+                  disabled={portalBusy}
+                  className="text-xs text-violet-300/70 underline-offset-2 hover:text-violet-200 hover:underline disabled:opacity-60"
+                >
+                  Need to cancel or change renewal? Open billing portal
+                </button>
+              </div>
+            ) : null}
           </section>
 
-          <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-md sm:p-8">
+          {showBillingDetails ? (
+            <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-md sm:p-8">
             <h2 className="text-sm font-semibold uppercase tracking-[0.15em] text-violet-200/80">Payment method</h2>
             {billing?.paymentMethod ? (
               <div className="mt-6 flex max-w-md items-center gap-4 rounded-xl border border-white/10 bg-gradient-to-br from-slate-900/90 to-slate-950/90 p-4">
@@ -548,9 +607,25 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                 .
               </p>
             ) : null}
-          </section>
+            </section>
+          ) : (
+            <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-md sm:p-8">
+              <h2 className="text-sm font-semibold uppercase tracking-[0.15em] text-violet-200/80">Billing details</h2>
+              <p className="mt-4 text-sm text-violet-200/75">
+                Billing amounts, card details, and invoice history are hidden by default.
+              </p>
+              <button
+                type="button"
+                onClick={() => setShowBillingDetails(true)}
+                className="mt-4 inline-flex items-center justify-center rounded-xl border border-violet-400/35 px-4 py-2 text-sm font-semibold text-violet-100 hover:bg-violet-500/10"
+              >
+                Show billing details
+              </button>
+            </section>
+          )}
 
-          <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-md sm:p-8">
+          {showBillingDetails ? (
+            <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-md sm:p-8">
             <h2 className="text-sm font-semibold uppercase tracking-[0.15em] text-violet-200/80">Payments</h2>
             {billing && Array.isArray(billing.payments) && billing.payments.length > 0 ? (
               <div className="mt-4 overflow-x-auto">
@@ -588,7 +663,8 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                 document.
               </p>
             )}
-          </section>
+            </section>
+          ) : null}
 
           {extensionMode ? (
             <div className="rounded-xl border border-cyan-400/20 bg-cyan-500/10 px-4 py-3 text-xs text-cyan-100">
