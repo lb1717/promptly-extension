@@ -22,6 +22,7 @@ const PLANS = [
     cadence: "month",
     blurb: "Higher quality and speed for frequent users.",
     bullets: [
+      "7-day free trial (card required)",
       "Daily usage tokens: 25× Free",
       "Model quality: higher than Free",
       "Model speed: faster than Free"
@@ -54,6 +55,7 @@ const PLANS = [
     cadence: "month",
     blurb: "Pro-level capability with student pricing.",
     bullets: [
+      "7-day free trial (card required)",
       "Daily usage tokens: 25× Free",
       "All features included in Pro",
       "Discounted price versus Pro"
@@ -78,7 +80,7 @@ export function PricingSection() {
           {PLANS.map((plan) => (
             <div
               key={plan.name}
-              className={`relative flex flex-col rounded-2xl border p-6 backdrop-blur-md sm:p-8 ${
+              className={`relative flex h-full flex-col rounded-2xl border p-6 backdrop-blur-md sm:p-8 ${
                 plan.featured
                   ? "border-violet-400/40 bg-violet-500/[0.12] shadow-[0_20px_60px_rgba(124,58,237,0.2)]"
                   : "border-white/10 bg-white/[0.04]"
@@ -106,7 +108,7 @@ export function PricingSection() {
               <Button
                 href={plan.href}
                 variant={plan.featured ? "primary" : "ghost"}
-                className="mt-8 w-full justify-center py-3"
+                className="mt-auto w-full justify-center py-3"
               >
                 {plan.cta}
               </Button>

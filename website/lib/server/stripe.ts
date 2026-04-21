@@ -46,6 +46,34 @@ export function normalizePaidTier(tier: string): PaidTier | null {
   return null;
 }
 
+function parsePositiveIntEnv(raw: string): number | null {
+  const value = Number(raw);
+  if (!Number.isFinite(value)) return null;
+  const intValue = Math.floor(value);
+  if (intValue < 1) return null;
+  return intValue;
+}
+
+export function getStripeTrialDaysForTier(tier: PaidTier): number | null {
+  const perTierRaw =
+    tier === "pro"
+      ? String(process.env.STRIPE_TRIAL_DAYS_PRO || "").trim()
+      : tier === "student"
+        ? String(process.env.STRIPE_TRIAL_DAYS_STUDENT || "").trim()
+        : String(process.env.STRIPE_TRIAL_DAYS_ENTERPRISE || "").trim();
+  const globalRaw = String(process.env.STRIPE_TRIAL_DAYS || "").trim();
+  const parsedPerTier = perTierRaw ? parsePositiveIntEnv(perTierRaw) : null;
+  const parsedGlobal = globalRaw ? parsePositiveIntEnv(globalRaw) : null;
+  return parsedPerTier ?? parsedGlobal ?? null;
+}
+
+export function getStripeAllowPromotionCodes(): boolean {
+  const raw = String(process.env.STRIPE_ALLOW_PROMO_CODES || "true")
+    .trim()
+    .toLowerCase();
+  return !(raw === "0" || raw === "false" || raw === "no" || raw === "off");
+}
+
 export function getOriginFromRequest(request: Request): string {
   const env = String(process.env.NEXT_PUBLIC_APP_URL || process.env.APP_BASE_URL || "")
     .trim()

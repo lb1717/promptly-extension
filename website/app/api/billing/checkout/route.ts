@@ -2,9 +2,11 @@ import { NextResponse } from "next/server";
 import { getFirebaseAdminDb } from "@/lib/server/firebaseAdmin";
 import { requireWebFirebaseUser } from "@/lib/server/promptlyBackend";
 import {
+  getStripeAllowPromotionCodes,
   getOriginFromRequest,
   getStripe,
   getStripePriceIdForTier,
+  getStripeTrialDaysForTier,
   isStripeConfigured,
   normalizePaidTier
 } from "@/lib/server/stripe";
@@ -47,11 +49,15 @@ export async function POST(request: Request) {
 
     const origin = getOriginFromRequest(request);
     const stripe = getStripe();
+    const trialDays = getStripeTrialDaysForTier(paidTier);
+    const allowPromotionCodes = getStripeAllowPromotionCodes();
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       payment_method_types: ["card"],
+      payment_method_collection: "always",
       line_items: [{ price: priceId, quantity: 1 }],
+      allow_promotion_codes: allowPromotionCodes,
       success_url: `${origin}/account?checkout=success`,
       cancel_url: `${origin}/account?checkout=cancel`,
       client_reference_id: user.uid,
@@ -59,6 +65,7 @@ export async function POST(request: Request) {
       customer_email: existingCustomer ? undefined : user.email || undefined,
       metadata: { firebaseUid: user.uid },
       subscription_data: {
+        ...(trialDays ? { trial_period_days: trialDays } : {}),
         metadata: { firebaseUid: user.uid, subscriptionTier: paidTier }
       }
     });

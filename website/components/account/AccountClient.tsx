@@ -72,11 +72,12 @@ const ACCOUNT_PLANS = [
     price: "$2.99/mo",
     subtitle: "Better quality and speed for frequent use",
     details: [
+      "7-day free trial (card required)",
       "Daily usage tokens: 25× Free",
       "Model quality: higher than Free",
       "Model speed: faster than Free"
     ],
-    idealFor: "professionals, builders, and frequent users"
+    idealFor: "frequent users and builders"
   },
   {
     key: "enterprise",
@@ -90,7 +91,7 @@ const ACCOUNT_PLANS = [
       "Research-grade intelligent prompt engineering",
       "Priority during peak times"
     ],
-    idealFor: "teams, startups, and advanced users"
+    idealFor: "industry professionals and researchers"
   },
   {
     key: "student",
@@ -98,6 +99,7 @@ const ACCOUNT_PLANS = [
     price: "$1.49/mo",
     subtitle: "Pro-level capabilities at student pricing",
     details: [
+      "7-day free trial (card required)",
       "Daily usage tokens: 25× Free",
       "All features included in Pro",
       "Discounted price versus Pro"
@@ -115,7 +117,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
   const [billingLoading, setBillingLoading] = useState(false);
   const [billingError, setBillingError] = useState("");
   const [portalBusy, setPortalBusy] = useState(false);
-  const [checkoutBusy, setCheckoutBusy] = useState(false);
+  const [checkoutBusyTier, setCheckoutBusyTier] = useState<"pro" | "student" | "enterprise" | null>(null);
   const [showBillingDetails, setShowBillingDetails] = useState(false);
 
   const loadBilling = useCallback(async (current: User) => {
@@ -224,32 +226,8 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
     }
   }
 
-  async function startStripeCheckout(currentUser: User) {
-    setCheckoutBusy(true);
-    setBillingError("");
-    try {
-      const token = await currentUser.getIdToken();
-      const res = await fetch("/api/billing/checkout", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ tier: "pro" })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data?.error || `Checkout failed (${res.status})`);
-      }
-      if (typeof data.url === "string" && data.url) {
-        window.location.href = data.url;
-      }
-    } catch (e) {
-      setBillingError(String(e instanceof Error ? e.message : e));
-    } finally {
-      setCheckoutBusy(false);
-    }
-  }
-
   async function startStripeCheckoutForTier(currentUser: User, tier: "pro" | "student" | "enterprise") {
-    setCheckoutBusy(true);
+    setCheckoutBusyTier(tier);
     setBillingError("");
     try {
       const token = await currentUser.getIdToken();
@@ -263,12 +241,15 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
         throw new Error(data?.error || `Checkout failed (${res.status})`);
       }
       if (typeof data.url === "string" && data.url) {
-        window.location.href = data.url;
+        const popup = window.open(data.url, "_blank", "noopener,noreferrer");
+        if (!popup) {
+          window.location.href = data.url;
+        }
       }
     } catch (e) {
       setBillingError(String(e instanceof Error ? e.message : e));
     } finally {
-      setCheckoutBusy(false);
+      setCheckoutBusyTier(null);
     }
   }
 
@@ -466,7 +447,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                       <span className="font-semibold text-violet-100/85">Ideal for:</span> {plan.idealFor}
                     </p>
 
-                    <div className="mt-4">
+                    <div className="mt-auto pt-4">
                       {isCurrent ? (
                         <button
                           type="button"
@@ -482,10 +463,10 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                             user &&
                             startStripeCheckoutForTier(user, plan.key as "pro" | "student" | "enterprise")
                           }
-                          disabled={checkoutBusy}
+                          disabled={checkoutBusyTier !== null}
                           className="inline-flex w-full items-center justify-center rounded-lg bg-violet-600 px-3 py-2 text-xs font-semibold text-white hover:bg-violet-500 disabled:opacity-60"
                         >
-                          {checkoutBusy ? "Redirecting…" : `Choose ${plan.name}`}
+                          {checkoutBusyTier === plan.key ? "Redirecting…" : `Choose ${plan.name}`}
                         </button>
                       ) : plan.key === "free" && billing?.billingPortalAvailable ? (
                         <button
