@@ -38,8 +38,8 @@ export function AdminPromptEngineeringClient() {
   const [createFallbackModel, setCreateFallbackModel] = useState("gpt-4.1-mini");
   const [rewriteTimeoutMs, setRewriteTimeoutMs] = useState(20000);
   const [createTimeoutMs, setCreateTimeoutMs] = useState(45000);
-  const [rewriteMaxTokens, setRewriteMaxTokens] = useState(1200);
-  const [rewriteAutoHardCapTokens, setRewriteAutoHardCapTokens] = useState(650);
+  const [rewriteMaxTokens, setRewriteMaxTokens] = useState(2200);
+  const [rewriteAutoHardCapTokens, setRewriteAutoHardCapTokens] = useState(2200);
   const [createMaxTokens, setCreateMaxTokens] = useState(2800);
   const [createContinuationRounds, setCreateContinuationRounds] = useState(3);
   const [createTemplateMaxChars, setCreateTemplateMaxChars] = useState(3500);
@@ -79,10 +79,10 @@ export function AdminPromptEngineeringClient() {
         Number.isFinite(data.create_timeout_ms) ? Number(data.create_timeout_ms) : 45000
       );
       setRewriteMaxTokens(
-        Number.isFinite(data.rewrite_max_completion_tokens) ? Number(data.rewrite_max_completion_tokens) : 1200
+        Number.isFinite(data.rewrite_max_completion_tokens) ? Number(data.rewrite_max_completion_tokens) : 2200
       );
       setRewriteAutoHardCapTokens(
-        Number.isFinite(data.rewrite_auto_hard_cap_tokens) ? Number(data.rewrite_auto_hard_cap_tokens) : 650
+        Number.isFinite(data.rewrite_auto_hard_cap_tokens) ? Number(data.rewrite_auto_hard_cap_tokens) : 2200
       );
       setCreateMaxTokens(
         Number.isFinite(data.create_max_completion_tokens) ? Number(data.create_max_completion_tokens) : 2800
@@ -153,13 +153,16 @@ export function AdminPromptEngineeringClient() {
         <div>
           <h1 className="text-2xl font-semibold text-white">Prompt engineering</h1>
           <p className="mt-1 text-sm text-violet-200/70">
+            Production <span className="font-mono text-violet-100">POST /api/optimize</span> on this site uses{" "}
+            <span className="text-violet-100">only</span> the three templates below (plus runtime limits and models).
             Each mode uses one template string. The token{" "}
             <span className="font-mono text-amber-200">{token}</span> must appear{" "}
-            <span className="text-violet-100">exactly once</span>. Text before and after the token becomes the
-            policy message (sent as <span className="font-mono text-violet-100">system</span> for Chat Completions, or{" "}
-            <span className="font-mono text-violet-100">developer</span> for the Responses API). The user&apos;s box
-            text is sent in a separate <span className="font-mono text-violet-100">user</span> message with a short
-            server-side label so the model does not treat the slot as hidden instructions.
+            <span className="text-violet-100">exactly once</span>. Text before and after the token becomes the policy
+            message (sent as <span className="font-mono text-violet-100">system</span> for Chat Completions, or{" "}
+            <span className="font-mono text-violet-100">developer</span> for the Responses API). The user&apos;s prompt
+            text is sent alone in a second <span className="font-mono text-violet-100">user</span> message. If the
+            extension proxy URL points at a separate worker host, that host may use its own built-in prompts unless
+            it forwards to this API.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -200,7 +203,8 @@ export function AdminPromptEngineeringClient() {
             </h2>
             <p className="mb-3 text-xs text-violet-200/70">
               Used when the user has Auto enabled and sends from the chat box. Put your rewrite rules around the token;
-              the composer text arrives only in the second user message.
+              the composer text arrives only in the second user message. Output length uses the Improve section
+              &quot;Max completion tokens&quot;; the Auto-only number below is legacy and still saved for compatibility.
             </p>
             <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
               <label className="flex flex-col gap-1 text-xs text-violet-200/80">
@@ -226,14 +230,14 @@ export function AdminPromptEngineeringClient() {
                 />
               </label>
               <label className="flex flex-col gap-1 text-xs text-violet-200/80">
-                Max completion tokens
+                Max completion tokens (legacy field)
                 <input
                   type="number"
                   min={180}
                   max={20000}
                   step={10}
                   value={rewriteAutoHardCapTokens}
-                  onChange={(e) => setRewriteAutoHardCapTokens(Number(e.target.value) || 650)}
+                  onChange={(e) => setRewriteAutoHardCapTokens(Number(e.target.value) || 2200)}
                   className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
                 />
               </label>
@@ -288,14 +292,14 @@ export function AdminPromptEngineeringClient() {
                 />
               </label>
               <label className="flex flex-col gap-1 text-xs text-violet-200/80">
-                Max completion tokens
+                Max completion tokens (Auto + Improve output)
                 <input
                   type="number"
                   min={180}
                   max={20000}
                   step={10}
                   value={rewriteMaxTokens}
-                  onChange={(e) => setRewriteMaxTokens(Number(e.target.value) || 1200)}
+                  onChange={(e) => setRewriteMaxTokens(Number(e.target.value) || 2200)}
                   className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
                 />
               </label>

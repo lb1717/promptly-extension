@@ -399,22 +399,20 @@ function clamp(value: number, min: number, max: number) {
 
 function getMaxCompletionTokens(
   requestMode: string,
-  rewriteMode: "AUTO" | "MANUAL",
+  _rewriteMode: "AUTO" | "MANUAL",
   controls?: Pick<
     PromptEngineeringRuntimeControls,
     "rewrite_max_completion_tokens" | "create_max_completion_tokens" | "rewrite_auto_hard_cap_tokens"
   >
 ) {
-  const rewriteMax = normalizeRuntimeControl(controls?.rewrite_max_completion_tokens, 1200, 180, 20000);
-  const rewriteAutoCap = normalizeRuntimeControl(controls?.rewrite_auto_hard_cap_tokens, 650, 180, 20000);
+  const rewriteMax = normalizeRuntimeControl(controls?.rewrite_max_completion_tokens, 2200, 180, 20000);
   const createMax = normalizeRuntimeControl(controls?.create_max_completion_tokens, 2800, 500, 20000);
   if (requestMode === "create") {
     return createMax;
   }
-  if (rewriteMode === "MANUAL") {
-    return rewriteMax;
-  }
-  return rewriteAutoCap;
+  // Improve (MANUAL) and Auto share this ceiling ("Max completion tokens" under Improve). Using a
+  // separate lower Auto-only cap caused mid-output truncation on the Responses API for long rewrites.
+  return rewriteMax;
 }
 
 function getExtensionBaseUrl() {
@@ -1062,7 +1060,7 @@ function getDefaultPromptEngineeringRuntimeControls(): PromptEngineeringRuntimeC
     rewrite_timeout_ms: getRewriteTimeoutMs(),
     create_timeout_ms: getGenerateTimeoutMs(),
     rewrite_max_completion_tokens: 2200,
-    rewrite_auto_hard_cap_tokens: 1200,
+    rewrite_auto_hard_cap_tokens: 2200,
     create_max_completion_tokens: 2800,
     create_continuation_max_rounds: CREATE_CONTINUATION_MAX_ROUNDS,
     create_template_max_chars: FAST_CREATE_TEMPLATE_MAX_CHARS,
