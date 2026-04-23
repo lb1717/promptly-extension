@@ -1008,20 +1008,77 @@ function polishRewriteModelOutput(optimized: string, userSlot: string): string {
   return out;
 }
 
+const ABBREV_BEFORE_PERIOD = /(?:^|\s)(?:Mr|Mrs|Ms|Mx|Dr|Prof|Sr|Jr|St|Vs|etc)\s*$/i;
+
+/**
+ * Insert blank-line paragraph breaks between sentences inside one dense block.
+ * Skips common abbreviations (Dr., Ms., …) using the text before each matched period.
+ */
+function insertParagraphBreaksAtSentences(block: string): string {
+  return block.replace(
+    /([.!?])(\s+)(?=[\u201c"'A-Za-z\u00c0-\u024f(\[])/g,
+    (full, punct: string, spaces: string, offset: number) => {
+      const before = block.slice(0, offset);
+      if (ABBREV_BEFORE_PERIOD.test(before)) {
+        return full;
+      }
+      return `${punct}\n\n${spaces.replace(/^\n+/, "")}`;
+    }
+  );
+}
+
+/**
+ * Split long prose blocks (already separated by blank lines) so each section gets
+ * sentence-level breaks when the model glued multiple sentences on one line.
+ */
+function formatDenseParagraphBlocks(t: string): string {
+  return t
+    .split(/\n\n+/)
+    .map((raw) => {
+      const b = raw.trim();
+      if (b.length < 120) {
+        return b;
+      }
+      const lines = b.split("\n");
+      const listLines = lines.filter((ln) => /^\s*(-\s|\*\s|\d{1,3}\.\s)/.test(ln)).length;
+      if (listLines >= Math.max(2, Math.ceil(lines.length * 0.4))) {
+        return b;
+      }
+      if (!/[.!?][\s\u00a0]+[\u201c"'A-Za-z\u00c0-\u024f(\[]/.test(b)) {
+        return b;
+      }
+      return insertParagraphBreaksAtSentences(b);
+    })
+    .filter((p) => p.length > 0)
+    .join("\n\n");
+}
+
 /**
  * Models often return one dense block. Insert paragraph gaps where we can do so safely,
  * and normalize newlines so clients (and contenteditable + pre-line) can show structure.
  */
 function postFormatPlainTextForApi(s: string): string {
-  let t = String(s || "").replace(/\r\n/g, "\n").trim();
+  let t = String(s || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\u2028|\u2029/g, "\n")
+    .trim();
   if (!t) {
     return t;
   }
+  if (t.includes("\\n")) {
+    t = t.replace(/\\n/g, "\n");
+  }
   // Blank line before list lines that follow non-list text on the previous line
   t = t.replace(/([^\n])\n(-\s|\*\s|\d{1,2}\.\s)/g, "$1\n\n$2");
-  // If still no paragraph break in a long answer, split at sentence boundaries (conservative).
-  if (!/\n\n/.test(t) && t.length > 360) {
-    t = t.replace(/([.!?])\s+(?=[A-Za-z\u00c0-\u024f\u201c"'(\[])/g, "$1\n\n");
+  t = formatDenseParagraphBlocks(t);
+  // Whole body still one wall (no blank line anywhere): sentence-split and/or clause breaks
+  if (!/\n\n/.test(t)) {
+    if (t.length >= 80) {
+      t = insertParagraphBreaksAtSentences(t);
+    }
+    if (!/\n\n/.test(t) && t.length >= 200) {
+      t = t.replace(/;\s+/g, ";\n\n");
+    }
   }
   t = t.replace(/\n{3,}/g, "\n\n");
   return t.trim();
@@ -1921,7 +1978,7 @@ export async function optimizePrompt(
       if (firstResult) {
         const normalizedFast = normalizePlainRewriteOutput(firstResult.rawText, trimmedPrompt || trimmedInstruction);
         return {
-          optimized_prompt: normalizedFast.optimized_prompt,
+          optimized_prompt: postFormatPlainTextForApi(normalizedFast.optimized_prompt),
           usage: firstResult.usage,
           model,
           provider: "openai"
@@ -2013,7 +2070,7 @@ export async function optimizePrompt(
   }
 
   return {
-    optimized_prompt: normalized.optimized_prompt,
+    optimized_prompt: postFormatPlainTextForApi(normalized.optimized_prompt),
     usage: mergedUsage,
     model,
     provider: "openai"

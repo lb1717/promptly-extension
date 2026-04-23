@@ -823,25 +823,20 @@
   }
 
   /**
-   * Default HTML collapses \\n in contenteditable. Prefer pre-line so plain \\n and \\n\\n show as breaks.
+   * Host composers often use white-space: normal so plain "\\n" from the API collapses visually.
+   * Always force a whitespace mode that preserves newlines when we inject model text.
    */
-  function ensureWritableNewlinesVisible(target, plainText) {
+  function ensureContentEditablePlainNewlines(target) {
     if (!(target instanceof HTMLElement)) {
       return;
     }
     if (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) {
       return;
     }
-    if (!String(plainText || "").includes("\n")) {
-      return;
-    }
     if (!target.isContentEditable) {
       return;
     }
-    const ws = window.getComputedStyle(target).whiteSpace || "";
-    if (ws !== "pre-wrap" && ws !== "pre-line" && ws !== "break-spaces") {
-      target.style.whiteSpace = "pre-line";
-    }
+    target.style.whiteSpace = "pre-wrap";
   }
 
   /**
@@ -937,7 +932,17 @@
       dispatchInputEvents(target, text);
     }
 
-    ensureWritableNewlinesVisible(target, text);
+    ensureContentEditablePlainNewlines(target);
+
+    if (!surfaceMatchesDesired()) {
+      try {
+        target.innerHTML = plainTextToPasteHtml(text);
+        target.style.whiteSpace = "normal";
+        dispatchInputEvents(target, text);
+      } catch (_e) {
+        ensureContentEditablePlainNewlines(target);
+      }
+    }
   }
 
   function replaceTargetText(target, text) {

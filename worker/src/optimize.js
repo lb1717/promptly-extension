@@ -225,16 +225,60 @@ function stripEchoedOptimizeUserPackage(output) {
   return "";
 }
 
+const ABBREV_BEFORE_PERIOD = /(?:^|\s)(?:Mr|Mrs|Ms|Mx|Dr|Prof|Sr|Jr|St|Vs|etc)\s*$/i;
+
+function insertParagraphBreaksAtSentences(block) {
+  return block.replace(/([.!?])(\s+)(?=[\u201c"'A-Za-z\u00c0-\u024f(\[])/g, (full, punct, spaces, offset) => {
+    const before = block.slice(0, offset);
+    if (ABBREV_BEFORE_PERIOD.test(before)) {
+      return full;
+    }
+    return `${punct}\n\n${spaces.replace(/^\n+/, "")}`;
+  });
+}
+
+function formatDenseParagraphBlocks(t) {
+  return t
+    .split(/\n\n+/)
+    .map((raw) => {
+      const b = raw.trim();
+      if (b.length < 120) {
+        return b;
+      }
+      const lines = b.split("\n");
+      const listLines = lines.filter((ln) => /^\s*(-\s|\*\s|\d{1,3}\.\s)/.test(ln)).length;
+      if (listLines >= Math.max(2, Math.ceil(lines.length * 0.4))) {
+        return b;
+      }
+      if (!/[.!?][\s\u00a0]+[\u201c"'A-Za-z\u00c0-\u024f(\[]/.test(b)) {
+        return b;
+      }
+      return insertParagraphBreaksAtSentences(b);
+    })
+    .filter((p) => p.length > 0)
+    .join("\n\n");
+}
+
 function postFormatPlainTextForApi(s) {
   let t = String(s || "")
     .replace(/\r\n/g, "\n")
+    .replace(/\u2028|\u2029/g, "\n")
     .trim();
   if (!t) {
     return t;
   }
+  if (t.includes("\\n")) {
+    t = t.replace(/\\n/g, "\n");
+  }
   t = t.replace(/([^\n])\n(-\s|\*\s|\d{1,2}\.\s)/g, "$1\n\n$2");
-  if (!/\n\n/.test(t) && t.length > 360) {
-    t = t.replace(/([.!?])\s+(?=[A-Za-z\u00c0-\u024f\u201c"'(\[])/g, "$1\n\n");
+  t = formatDenseParagraphBlocks(t);
+  if (!/\n\n/.test(t)) {
+    if (t.length >= 80) {
+      t = insertParagraphBreaksAtSentences(t);
+    }
+    if (!/\n\n/.test(t) && t.length >= 200) {
+      t = t.replace(/;\s+/g, ";\n\n");
+    }
   }
   t = t.replace(/\n{3,}/g, "\n\n");
   return t.trim();
@@ -368,7 +412,7 @@ export async function optimizePromptThroughProvider(
     }
 
     return {
-      optimized_prompt: optimizedOut,
+      optimized_prompt: postFormatPlainTextForApi(optimizedOut),
       clarifying_questions: [],
       assumptions: [],
       classification: null,
@@ -396,7 +440,7 @@ export async function optimizePromptThroughProvider(
   });
   const normalized = normalizePlainRewriteOutput(providerResult.rawText, prompt || userInstruction);
   return {
-    optimized_prompt: normalized.optimized_prompt,
+    optimized_prompt: postFormatPlainTextForApi(normalized.optimized_prompt),
     clarifying_questions: [],
     assumptions: [],
     classification: null,
