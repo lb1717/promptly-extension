@@ -78,7 +78,7 @@
     appliedSuggestionKeys: new Set()
   };
 
-  /** Generate prompt now uses the worker's built-in super prompt; no extra client prompt text needed. */
+  /** Generate prompt: server uses Prompt engineering compose template when calling /api/optimize. */
   const COMPOSE_FROM_DESCRIPTION_META = "";
 
   /** Tiny mode markers only; the worker owns the actual super prompts. */

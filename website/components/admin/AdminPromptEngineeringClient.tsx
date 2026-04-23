@@ -327,7 +327,8 @@ export function AdminPromptEngineeringClient() {
               Create mode
             </h2>
             <p className="mb-3 text-xs text-violet-200/70">
-              Generates a full prompt from user description in the popup.
+              Generates a full task prompt from the user description in the popup. The template should steer the model
+              to output instructions for doing the user&apos;s real task—not meta-lessons on how to write prompts.
             </p>
             <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
               <label className="flex flex-col gap-1 text-xs text-violet-200/80">

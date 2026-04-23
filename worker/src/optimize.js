@@ -225,6 +225,21 @@ function stripEchoedOptimizeUserPackage(output) {
   return "";
 }
 
+function postFormatPlainTextForApi(s) {
+  let t = String(s || "")
+    .replace(/\r\n/g, "\n")
+    .trim();
+  if (!t) {
+    return t;
+  }
+  t = t.replace(/([^\n])\n(-\s|\*\s|\d{1,2}\.\s)/g, "$1\n\n$2");
+  if (!/\n\n/.test(t) && t.length > 360) {
+    t = t.replace(/([.!?])\s+(?=[A-Za-z\u00c0-\u024f\u201c"'(\[])/g, "$1\n\n");
+  }
+  t = t.replace(/\n{3,}/g, "\n\n");
+  return t.trim();
+}
+
 function mergeTokenUsage(a, b) {
   if (!a && !b) {
     return null;
@@ -251,6 +266,16 @@ function normalizePlainRewriteOutput(rawText, fallbackPrompt, sourceForStrip = "
   if (fence) {
     t = fence[1].trim();
   }
+  if (t.startsWith("{") && /"prompt"\s*:/.test(t)) {
+    try {
+      const parsed = JSON.parse(t);
+      if (parsed && typeof parsed.prompt === "string" && parsed.prompt.trim()) {
+        t = parsed.prompt.trim();
+      }
+    } catch (_e) {
+      /* keep t */
+    }
+  }
   if (t.startsWith("{") && t.includes("improved_prompt")) {
     const parsed = parseModelJsonLoose(t);
     if (parsed && typeof parsed.improved_prompt === "string" && parsed.improved_prompt.trim()) {
@@ -269,19 +294,20 @@ function normalizePlainRewriteOutput(rawText, fallbackPrompt, sourceForStrip = "
       t = stripVerbatimSourceAppend(t, sourceForStrip);
     }
   }
+  t = postFormatPlainTextForApi(t);
   return { optimized_prompt: t.slice(0, 12000) };
 }
 
 function buildGenerateMessages(userPrompt) {
-  const systemPrompt = `Transform the user's request into one strong, ready-to-use prompt.
+  const systemPrompt = `The user message is a short description of a REAL task they want an LLM to perform—not a request for lessons on prompt engineering.
 
-Rules:
-- Preserve the original intent
-- Improve clarity, structure, constraints, and output format
-- Do not answer the request itself
-- Do not invent facts or requirements
-- Return only the final prompt text
-- Keep it concise but complete (target 220-600 words, hard max 900 words)`;
+Output ONE ready-to-paste prompt the LLM can follow to DO THAT TASK: direct operational instructions (goals, audience, inputs, constraints, tone, deliverable format, length). Write as if the assistant will execute the work now.
+
+Do NOT return meta-text about composing prompts (no "write a prompt that", no "this document guides you to craft…"). The output must BE the task prompt itself—not instructions about how to write prompts.
+
+Layout: blank line between sections (two newlines); blank line before and after lists; "- " or "1. " for lists. Plain text only—no # markdown headings, no code fences.
+
+Target 220–600 words when the task needs detail; shorter if trivial. Hard max 900 words.`;
 
   return [
     { role: "system", content: systemPrompt },
@@ -289,7 +315,7 @@ Rules:
     {
       role: "user",
       content:
-        "Length guard: return one high-quality prompt, concise but complete, target 220-600 words, hard max 900 words."
+        "Return only the final prompt as plain paragraphs and lists. Do not answer the task yourself; output the prompt that would get another model to do it."
     }
   ];
 }
