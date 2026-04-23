@@ -1242,12 +1242,17 @@ const REWRITE_TRUNCATION_CONTINUE_MSG =
   "Your previous rewrite output hit the length limit mid-stream. Continue the rewritten prompt from the very next character. Do not repeat anything you already wrote. Return only the remaining rewritten prompt text.";
 const REWRITE_CONTINUATION_MAX_ROUNDS = 3;
 
-function isResponsesApiTruncated(body: Record<string, unknown>): boolean {
-  if (body.status === "incomplete") {
+function isResponsesApiTruncated(body: Record<string, unknown>, requestMode: string): boolean {
+  const reason = (body.incomplete_details as { reason?: string } | undefined)?.reason;
+  if (reason === "max_output_tokens") {
     return true;
   }
-  const reason = (body.incomplete_details as { reason?: string } | undefined)?.reason;
-  return reason === "max_output_tokens";
+  // Rewrite/improve: only continue on explicit output-token cap; generic "incomplete"
+  // often causes a second round that repeats the prior text then appends "continuation".
+  if (requestMode === "rewrite") {
+    return false;
+  }
+  return body.status === "incomplete";
 }
 
 function mergeTokenUsage(
@@ -1282,14 +1287,24 @@ function usageFromResponsesBody(body: Record<string, unknown>): OptimizerResult[
   };
 }
 
-function extractResponsesApiText(body: Record<string, unknown>) {
+function extractResponsesApiText(body: Record<string, unknown>, options?: { continuationRound?: number }) {
+  const round = Math.max(0, Math.floor(Number(options?.continuationRound) || 0));
   const direct = body.output_text;
   if (typeof direct === "string" && direct.trim()) {
     return direct.trim();
   }
   const output = Array.isArray(body.output) ? body.output : [];
+  const messageItems = output.filter(
+    (item): item is { type?: string; content?: Array<{ type?: string; text?: string }> } =>
+      !!item && typeof item === "object" && (item as { type?: string }).type === "message"
+  );
+  // Continuation responses may include prior assistant segments; join only the last message
+  // so we do not concatenate duplicate full rewrites + tail.
+  const itemsToScan =
+    round > 0 && messageItems.length > 0 ? [messageItems[messageItems.length - 1]] : output;
+
   const textParts: string[] = [];
-  for (const item of output) {
+  for (const item of itemsToScan) {
     if (!item || typeof item !== "object") {
       continue;
     }
@@ -1425,18 +1440,22 @@ async function callOpenAi(options: {
           throw new Error(String(errObj?.message || `Provider error (${response.status})`));
         }
 
-        const piece = extractResponsesApiText(body);
+        const piece = extractResponsesApiText(body, { continuationRound: round });
         const roundUsage = usageFromResponsesBody(body);
         usage = mergeTokenUsage(usage, roundUsage);
 
         if (piece) {
-          aggregated += piece;
+          if (round > 0 && aggregated && piece.startsWith(aggregated)) {
+            aggregated = piece;
+          } else {
+            aggregated += piece;
+          }
         }
 
         const id = typeof body.id === "string" ? body.id : "";
         previousId = id || previousId;
 
-        const truncated = modeSupportsContinuation && isResponsesApiTruncated(body);
+        const truncated = modeSupportsContinuation && isResponsesApiTruncated(body, options.requestMode);
         if (!truncated || !modeSupportsContinuation) {
           break;
         }
