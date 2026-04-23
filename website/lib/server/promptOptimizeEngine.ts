@@ -32,6 +32,7 @@ export function resolveOptimizeEngineMode(payload: {
   if (legacyRm === "rewrite") {
     return "auto";
   }
+  // Ambiguous legacy payloads (no mode hints): safe default for API callers without optimize_mode.
   return "auto";
 }
 

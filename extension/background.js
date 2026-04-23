@@ -869,7 +869,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const baseUrl = await getManagedProxyBaseUrl();
       const prompt = String(message.prompt || "").trim();
       const userInstruction = String(message.userInstruction || "").trim();
-      const optimizeMode = String(message.optimizeMode || "improve").trim().toLowerCase() || "improve";
+      const rawMode = String(message.optimizeMode || "improve").trim().toLowerCase() || "improve";
+      const optimizeMode = ["auto", "improve", "generate"].includes(rawMode) ? rawMode : "improve";
 
       if (!baseUrl) {
         sendResponse({

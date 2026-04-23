@@ -666,42 +666,46 @@
           optimizeMode
         },
         (response) => {
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
-            return;
-          }
-          if (!response || !response.ok) {
-            const err = new Error(response?.error || "Auto adjust failed");
-            if (response?.needsSignIn) {
-              err.promptlyNeedsSignIn = true;
+          try {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+              return;
             }
-            if (response?.credits) {
-              err.promptlyCredits = response.credits;
+            if (!response || !response.ok) {
+              const err = new Error(response?.error || "Auto adjust failed");
+              if (response?.needsSignIn) {
+                err.promptlyNeedsSignIn = true;
+              }
+              if (response?.credits) {
+                err.promptlyCredits = response.credits;
+              }
+              reject(err);
+              return;
             }
-            reject(err);
-            return;
-          }
-          const optimized = String(response.data.optimized_prompt || "").trim();
-          if (!optimized) {
-            reject(new Error("Empty optimized prompt"));
-            return;
-          }
-          if (optimizeMode === "generate") {
-            const interpreted = interpretComposeOptimizedOutput(optimized);
-            if (!interpreted.ok) {
-              reject(new Error(interpreted.message));
+            const optimized = String(response.data.optimized_prompt || "").trim();
+            if (!optimized) {
+              reject(new Error("Empty optimized prompt"));
+              return;
+            }
+            if (optimizeMode === "generate") {
+              const interpreted = interpretComposeOptimizedOutput(optimized);
+              if (!interpreted.ok) {
+                reject(new Error(interpreted.message));
+                return;
+              }
+              resolve({
+                optimizedPrompt: interpreted.prompt,
+                credits: response.data.credits || null
+              });
               return;
             }
             resolve({
-              optimizedPrompt: interpreted.prompt,
+              optimizedPrompt: optimized,
               credits: response.data.credits || null
             });
-            return;
+          } catch (err) {
+            reject(err instanceof Error ? err : new Error(String(err)));
           }
-          resolve({
-            optimizedPrompt: optimized,
-            credits: response.data.credits || null
-          });
         }
       );
     });

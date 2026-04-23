@@ -23,7 +23,7 @@ export function resolveOptimizeModeFromPayload(payload) {
   if (rm === "rewrite") {
     return "auto";
   }
-  return "improve";
+  return "auto";
 }
 
 function buildAutoTaskTurn(userPrompt) {
