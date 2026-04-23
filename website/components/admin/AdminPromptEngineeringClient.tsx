@@ -226,7 +226,7 @@ export function AdminPromptEngineeringClient() {
                 <input
                   type="number"
                   min={180}
-                  max={4000}
+                  max={20000}
                   step={10}
                   value={rewriteAutoHardCapTokens}
                   onChange={(e) => setRewriteAutoHardCapTokens(Number(e.target.value) || 650)}
@@ -287,7 +287,7 @@ export function AdminPromptEngineeringClient() {
                 <input
                   type="number"
                   min={180}
-                  max={4000}
+                  max={20000}
                   step={10}
                   value={rewriteMaxTokens}
                   onChange={(e) => setRewriteMaxTokens(Number(e.target.value) || 1200)}
@@ -358,7 +358,7 @@ export function AdminPromptEngineeringClient() {
                 <input
                   type="number"
                   min={500}
-                  max={8000}
+                  max={20000}
                   step={25}
                   value={createMaxTokens}
                   onChange={(e) => setCreateMaxTokens(Number(e.target.value) || 2800)}

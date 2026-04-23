@@ -398,7 +398,6 @@ function clamp(value: number, min: number, max: number) {
 }
 
 function getMaxCompletionTokens(
-  prompt: string,
   requestMode: string,
   rewriteMode: "AUTO" | "MANUAL",
   controls?: Pick<
@@ -406,18 +405,16 @@ function getMaxCompletionTokens(
     "rewrite_max_completion_tokens" | "create_max_completion_tokens" | "rewrite_auto_hard_cap_tokens"
   >
 ) {
-  const estimatedPromptTokens = estimateTokensFromChars(String(prompt || "").length);
-  const rewriteMax = normalizeRuntimeControl(controls?.rewrite_max_completion_tokens, 1200, 180, 4000);
-  const rewriteAutoCap = normalizeRuntimeControl(controls?.rewrite_auto_hard_cap_tokens, 650, 180, 4000);
-  const createMax = normalizeRuntimeControl(controls?.create_max_completion_tokens, 2800, 500, 8000);
+  const rewriteMax = normalizeRuntimeControl(controls?.rewrite_max_completion_tokens, 1200, 180, 20000);
+  const rewriteAutoCap = normalizeRuntimeControl(controls?.rewrite_auto_hard_cap_tokens, 650, 180, 20000);
+  const createMax = normalizeRuntimeControl(controls?.create_max_completion_tokens, 2800, 500, 20000);
   if (requestMode === "create") {
-    // Create needs a larger budget to avoid visibly truncated outputs.
-    return clamp(estimatedPromptTokens * 2.6, 900, createMax);
+    return createMax;
   }
   if (rewriteMode === "MANUAL") {
-    return clamp(estimatedPromptTokens * 2, 280, rewriteMax);
+    return rewriteMax;
   }
-  return clamp(estimatedPromptTokens * 1.7, 180, Math.min(rewriteAutoCap, rewriteMax));
+  return rewriteAutoCap;
 }
 
 function getExtensionBaseUrl() {
@@ -983,19 +980,19 @@ async function loadPromptEngineeringConfig(options: { forceRefresh?: boolean } =
       raw.rewrite_max_completion_tokens,
       defaultsRuntime.rewrite_max_completion_tokens,
       180,
-      4000
+      20000
     ),
     rewrite_auto_hard_cap_tokens: normalizeRuntimeControl(
       raw.rewrite_auto_hard_cap_tokens,
       defaultsRuntime.rewrite_auto_hard_cap_tokens,
       180,
-      4000
+      20000
     ),
     create_max_completion_tokens: normalizeRuntimeControl(
       raw.create_max_completion_tokens,
       defaultsRuntime.create_max_completion_tokens,
       500,
-      8000
+      20000
     ),
     create_continuation_max_rounds: normalizeRuntimeControl(
       raw.create_continuation_max_rounds,
@@ -1086,19 +1083,19 @@ export async function adminGetPromptEngineering(): Promise<
       raw.rewrite_max_completion_tokens,
       defaultsRuntime.rewrite_max_completion_tokens,
       180,
-      4000
+      20000
     ),
     rewrite_auto_hard_cap_tokens: normalizeRuntimeControl(
       raw.rewrite_auto_hard_cap_tokens,
       defaultsRuntime.rewrite_auto_hard_cap_tokens,
       180,
-      4000
+      20000
     ),
     create_max_completion_tokens: normalizeRuntimeControl(
       raw.create_max_completion_tokens,
       defaultsRuntime.create_max_completion_tokens,
       500,
-      8000
+      20000
     ),
     create_continuation_max_rounds: normalizeRuntimeControl(
       raw.create_continuation_max_rounds,
@@ -1160,19 +1157,19 @@ export async function adminSavePromptEngineering(
       patch.rewrite_max_completion_tokens,
       current.rewrite_max_completion_tokens,
       180,
-      4000
+      20000
     ),
     rewrite_auto_hard_cap_tokens: normalizeRuntimeControl(
       patch.rewrite_auto_hard_cap_tokens,
       current.rewrite_auto_hard_cap_tokens,
       180,
-      4000
+      20000
     ),
     create_max_completion_tokens: normalizeRuntimeControl(
       patch.create_max_completion_tokens,
       current.create_max_completion_tokens,
       500,
-      8000
+      20000
     ),
     create_continuation_max_rounds: normalizeRuntimeControl(
       patch.create_continuation_max_rounds,
@@ -1568,13 +1565,10 @@ export async function optimizePrompt(
     : mode === "MANUAL"
       ? config.rewrite_manual_model
       : config.rewrite_auto_model;
-  const completionEstimateSource = isCreate
-    ? `${trimmedPrompt}\n${trimmedInstruction}`.trim()
-    : trimmedPrompt || userSlot;
   const requestOptions = {
     model,
     timeoutMs: isCreate ? config.create_timeout_ms : config.rewrite_timeout_ms,
-    maxCompletionTokens: getMaxCompletionTokens(completionEstimateSource, requestMode, mode, {
+    maxCompletionTokens: getMaxCompletionTokens(requestMode, mode, {
       rewrite_max_completion_tokens: config.rewrite_max_completion_tokens,
       rewrite_auto_hard_cap_tokens: config.rewrite_auto_hard_cap_tokens,
       create_max_completion_tokens: config.create_max_completion_tokens
