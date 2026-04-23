@@ -869,7 +869,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const baseUrl = await getManagedProxyBaseUrl();
       const prompt = String(message.prompt || "").trim();
       const userInstruction = String(message.userInstruction || "").trim();
-      const requestMode = String(message.requestMode || "rewrite").trim() || "rewrite";
+      const optimizeMode = String(message.optimizeMode || "improve").trim().toLowerCase() || "improve";
 
       if (!baseUrl) {
         sendResponse({
@@ -923,10 +923,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         body: JSON.stringify({
           prompt,
           user_instruction: userInstruction,
-          request_mode: requestMode
+          optimize_mode: optimizeMode
         })
       };
-      const optimizeTimeoutMs = requestMode === "create" ? OPTIMIZE_CREATE_TIMEOUT_MS : OPTIMIZE_REWRITE_TIMEOUT_MS;
+      const optimizeTimeoutMs =
+        optimizeMode === "generate" ? OPTIMIZE_CREATE_TIMEOUT_MS : OPTIMIZE_REWRITE_TIMEOUT_MS;
       let response;
       try {
         response = await fetchWithTimeout(optimizeUrl, optimizeInit, optimizeTimeoutMs);
@@ -937,7 +938,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         }
         // One retry helps absorb occasional cold starts/transient network stalls.
         const retryTimeoutMs =
-          requestMode === "create"
+          optimizeMode === "generate"
             ? OPTIMIZE_CREATE_TIMEOUT_MS + 10000
             : OPTIMIZE_REWRITE_TIMEOUT_MS + 5000;
         response = await fetchWithTimeout(optimizeUrl, optimizeInit, retryTimeoutMs);

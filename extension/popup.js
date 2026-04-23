@@ -92,7 +92,7 @@ autoAdjustBtn.addEventListener("click", async () => {
           type: "PROMPTLY_OPTIMIZE_PROMPT",
           prompt,
           userInstruction: "",
-          requestMode: "rewrite"
+          optimizeMode: "improve"
         },
         (response) => {
           if (chrome.runtime.lastError) {

@@ -78,24 +78,6 @@
     appliedSuggestionKeys: new Set()
   };
 
-  /** Generate prompt: server uses Prompt engineering compose template when calling /api/optimize. */
-  const COMPOSE_FROM_DESCRIPTION_META = "";
-
-  /** Tiny mode markers only; the worker owns the actual super prompts. */
-  const REWRITE_SUFFIX_AUTO_V3 = "[REWRITE_MODE: AUTO_REWRITE]";
-  const REWRITE_SUFFIX_MANUAL_V3 = "[REWRITE_MODE: MANUAL_REWRITE]";
-
-  function resolveRewriteUserInstruction(userInstruction) {
-    const u = String(userInstruction || "").trim();
-    if (!u || u.length < 40 || u.includes(REWRITE_SUFFIX_AUTO_V3)) {
-      return REWRITE_SUFFIX_AUTO_V3;
-    }
-    if (u.includes(REWRITE_SUFFIX_MANUAL_V3) || /rewrite\s+and\s+improve/i.test(u)) {
-      return REWRITE_SUFFIX_MANUAL_V3;
-    }
-    return REWRITE_SUFFIX_MANUAL_V3;
-  }
-
   /** Lenient gate for Improve / auto-rewrite: not empty; 2+ words OR one clear word (3+ chars). */
   function isImprovePromptSubstantive(text) {
     const t = String(text || "").trim();
@@ -384,18 +366,12 @@
         if (!isComposeMode) {
           await verifyCurrentUserSession();
         }
-        const fallbackInstruction = String(payload.suffix || "").trim();
-        const requestMode = isComposeMode ? "create" : "rewrite";
+        const userHint = String(payload.suffix || "").trim();
+        const optimizeMode = isComposeMode ? "generate" : "improve";
         ui.setAutoAdjustLoading(true, "analyzing", false, isComposeMode ? "compose" : "improve");
         const optimizationPromise = isComposeMode
-          ? optimizePromptViaProxy(userInstruction, COMPOSE_FROM_DESCRIPTION_META, requestMode, {
-              compose: true
-            })
-          : optimizePromptViaProxy(
-              originalPrompt,
-              fallbackInstruction,
-              requestMode
-            );
+          ? optimizePromptViaProxy(userInstruction, "", { optimizeMode })
+          : optimizePromptViaProxy(originalPrompt, userHint, { optimizeMode });
         const optimization = await optimizationPromise;
         const optimizedPrompt = optimization.optimizedPrompt;
         if (optimization.credits) {
@@ -679,24 +655,15 @@
     });
   }
 
-  async function optimizePromptViaProxy(
-    prompt,
-    userInstruction = "",
-    requestMode = "rewrite",
-    options = {}
-  ) {
-    const compose = !!options.compose;
-    const instructionForProxy =
-      !compose && requestMode === "rewrite"
-        ? resolveRewriteUserInstruction(userInstruction)
-        : userInstruction;
+  async function optimizePromptViaProxy(prompt, userInstruction = "", options = {}) {
+    const optimizeMode = options.optimizeMode || (options.compose ? "generate" : "improve");
     return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage(
         {
           type: "PROMPTLY_OPTIMIZE_PROMPT",
           prompt,
-          userInstruction: instructionForProxy,
-          requestMode
+          userInstruction: String(userInstruction || "").trim(),
+          optimizeMode
         },
         (response) => {
           if (chrome.runtime.lastError) {
@@ -1664,7 +1631,7 @@
         : promptLifecycleState.lockedSuggestions || pickSuggestions(context, suggestionCount);
     const suggestions = withSuggestionState(baseSuggestions);
     const strengthPercent = computePromptStrengthPercent(promptText);
-    const autoAdjustSuffix = REWRITE_SUFFIX_MANUAL_V3;
+    const autoAdjustSuffix = "";
 
     return {
       wordCount: context.wordCount,
@@ -1956,13 +1923,9 @@
       await verifyCurrentUserSession();
       refreshCreditsFromServer({
         promptLength: originalPrompt.length,
-        instructionLength: REWRITE_SUFFIX_AUTO_V3.length
+        instructionLength: 0
       });
-      const optimization = await optimizePromptViaProxy(
-        originalPrompt,
-        REWRITE_SUFFIX_AUTO_V3,
-        "rewrite"
-      );
+      const optimization = await optimizePromptViaProxy(originalPrompt, "", { optimizeMode: "auto" });
       const optimizedPrompt = optimization.optimizedPrompt;
       if (optimization.credits) {
         applyCreditsToUi(optimization.credits, { announceNoTokens: true });

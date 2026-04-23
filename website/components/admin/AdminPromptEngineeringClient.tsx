@@ -153,16 +153,18 @@ export function AdminPromptEngineeringClient() {
         <div>
           <h1 className="text-2xl font-semibold text-white">Prompt engineering</h1>
           <p className="mt-1 text-sm text-violet-200/70">
-            Production <span className="font-mono text-violet-100">POST /api/optimize</span> on this site uses{" "}
-            <span className="text-violet-100">only</span> the three templates below (plus runtime limits and models).
-            Each mode uses one template string. The token{" "}
+            Production <span className="font-mono text-violet-100">POST /api/optimize</span> uses{" "}
+            <span className="font-mono text-violet-100">optimize_mode</span>:{" "}
+            <span className="text-violet-100">auto</span>, <span className="text-violet-100">improve</span>, or{" "}
+            <span className="text-violet-100">generate</span> (legacy <span className="font-mono">request_mode</span> is
+            still accepted). Each mode uses one template string below plus runtime limits and models. The token{" "}
             <span className="font-mono text-amber-200">{token}</span> must appear{" "}
-            <span className="text-violet-100">exactly once</span>. Text before and after the token becomes the policy
-            message (sent as <span className="font-mono text-violet-100">system</span> for Chat Completions, or{" "}
-            <span className="font-mono text-violet-100">developer</span> for the Responses API). The user&apos;s prompt
-            text is sent alone in a second <span className="font-mono text-violet-100">user</span> message. If the
-            extension proxy URL points at a separate worker host, that host may use its own built-in prompts unless
-            it forwards to this API.
+            <span className="text-violet-100">exactly once</span>. Text before and after the token is sent as the{" "}
+            <span className="font-mono text-violet-100">first user</span> message (meta instructions). A second{" "}
+            <span className="font-mono text-violet-100">user</span> message carries a fixed &quot;rewrite / generate from
+            this&quot; wrapper plus the user&apos;s text. OpenAI Chat Completions and the Responses API both receive
+            that two-turn user sequence (Responses maps roles the same way). If the extension proxy points at a separate
+            worker host, that host may use its own built-in prompts unless it forwards to this API.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -202,9 +204,10 @@ export function AdminPromptEngineeringClient() {
               Auto mode
             </h2>
             <p className="mb-3 text-xs text-violet-200/70">
-              Used when the user has Auto enabled and sends from the chat box. Put your rewrite rules around the token;
-              the composer text arrives only in the second user message. Output length uses the Improve section
-              &quot;Max completion tokens&quot;; the Auto-only number below is legacy and still saved for compatibility.
+              Used when the user has Auto enabled and sends from the chat box (<span className="font-mono">auto</span>
+              ). Put your framework around the token; the user&apos;s input arrives in the second user message with an
+              auto-style task line. Output cap uses the lower of &quot;Max completion tokens&quot; and &quot;Auto hard
+              cap&quot; below.
             </p>
             <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
               <label className="flex flex-col gap-1 text-xs text-violet-200/80">
@@ -230,7 +233,7 @@ export function AdminPromptEngineeringClient() {
                 />
               </label>
               <label className="flex flex-col gap-1 text-xs text-violet-200/80">
-                Max completion tokens (legacy field)
+                Auto hard cap (completion tokens)
                 <input
                   type="number"
                   min={180}
@@ -265,8 +268,9 @@ export function AdminPromptEngineeringClient() {
               Improve mode
             </h2>
             <p className="mb-3 text-xs text-violet-200/70">
-              Manual rewrite triggered from the extension popup Improve button. Same split: policy around the token,
-              raw prompt in the follow-up user message.
+              Used for explicit Improve (<span className="font-mono">improve</span>) from the tab or extension. Same
+              split: framework around the token, then a second user message with an improve-style task line and the
+              user&apos;s prompt.
             </p>
             <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
               <label className="flex flex-col gap-1 text-xs text-violet-200/80">
@@ -324,10 +328,10 @@ export function AdminPromptEngineeringClient() {
 
           <section className="rounded-2xl border border-violet-500/20 bg-[#221830]/60 p-5">
             <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-violet-300/90">
-              Create mode
+              Generate mode
             </h2>
             <p className="mb-3 text-xs text-violet-200/70">
-              Generates a full task prompt from the user description in the popup. The template should steer the model
+              Used for Generate Prompt (<span className="font-mono">generate</span>). The template should steer the model
               to output instructions for doing the user&apos;s real task—not meta-lessons on how to write prompts.
               Avoid templates that push boilerplate &lt;forbidden&gt; blocks about generic prompts; bans should reflect
               the user&apos;s actual task only.

@@ -8,12 +8,12 @@ import {
   CREDIT_MAX_PROMPT_CHARS,
   estimateBundledInputTokensForOptimize,
   getCreditsForUser,
-  getModeFromInstruction,
   getUtcDay,
   handlePromptlyPreflight,
   optimizePrompt,
   requirePromptlyUser
 } from "@/lib/server/promptlyBackend";
+import { resolveOptimizeEngineMode } from "@/lib/server/promptOptimizeEngine";
 
 export const runtime = "nodejs";
 
@@ -36,8 +36,11 @@ export async function POST(request: Request) {
     const prompt = typeof payload.prompt === "string" ? payload.prompt.trim() : "";
     const userInstruction =
       typeof payload.user_instruction === "string" ? payload.user_instruction.trim() : "";
-    const requestMode =
-      typeof payload.request_mode === "string" ? payload.request_mode.trim().toLowerCase() : "rewrite";
+    const optimizeMode = resolveOptimizeEngineMode({
+      optimize_mode: (payload as Record<string, unknown>).optimize_mode,
+      request_mode: (payload as Record<string, unknown>).request_mode,
+      user_instruction: userInstruction
+    });
 
     if (!prompt && !userInstruction) {
       return NextResponse.json(
@@ -77,7 +80,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const optimized = await optimizePrompt(prompt, userInstruction, requestMode, { forceConfigRefresh: true });
+    const optimized = await optimizePrompt(prompt, userInstruction, optimizeMode, { forceConfigRefresh: true });
     const providerUsagePrompt = Math.max(0, Number(optimized?.usage?.prompt_tokens || 0));
     const providerUsageCompletion = Math.max(0, Number(optimized?.usage?.completion_tokens || 0));
     const providerUsageTotalRaw = Math.max(0, Number(optimized?.usage?.total_tokens || 0));
@@ -92,8 +95,7 @@ export async function POST(request: Request) {
           : "estimated_input_tokens";
     const usageResult = await consumeDailyUsage({
       user: auth.user,
-      requestMode,
-      rewriteMode: requestMode === "rewrite" ? getModeFromInstruction(userInstruction) : undefined,
+      optimizeMode,
       day: getUtcDay(),
       tokenCost
     });

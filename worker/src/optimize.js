@@ -6,29 +6,51 @@ export function estimateTokensFromChars(charCount) {
   return Math.ceil(charCount / 4);
 }
 
-const INTERNAL_AUTO_MARKER = "[REWRITE_MODE: AUTO_REWRITE]";
-const INTERNAL_MANUAL_MARKER = "[REWRITE_MODE: MANUAL_REWRITE]";
-
-const REWRITE_OUTPUT_LINE_BREAK_REMINDER =
-  "Formatting rule for your reply only (this is not part of the user's prompt): output plain text with visible paragraph breaks. You must insert actual newline characters in the completion: put a completely blank line (two newlines in a row) between paragraphs and between prose and any list. Put each list item on its own line beginning with \"- \" or \"1. \", \"2. \", etc. Do not return one long unbroken line—downstream clients paste this string literally and rely on those newline characters.";
-
-const REWRITE_STRUCTURED_JSON_USER_REMINDER =
-  "Your entire assistant message must be one JSON object with exactly one property \"paragraphs\" whose value is a non-empty array of strings. Each string is one paragraph of the improved prompt (plain text only inside strings). No markdown fences, no keys other than \"paragraphs\", no text before or after the JSON.";
-
-const STRUCTURED_REWRITE_INSTRUCTION_SUFFIX = `Structured output (enforced by the API): your completion must be JSON with a single key "paragraphs" whose value is a non-empty array of strings. Each string is one user-visible paragraph of the improved prompt (plain text only inside the strings). The server joins them with blank lines for paste. Use several short paragraphs (several array elements) when the prompt has sections or lists; you may use newline characters inside a string for bullet lines within one paragraph.`;
-
-function inferRewriteMode(userPrompt, userInstruction = "") {
-  const hint = String(userInstruction || "").trim();
-  if (hint.includes(INTERNAL_MANUAL_MARKER)) {
-    return "MANUAL";
+/** Keep in sync with `website/lib/server/promptOptimizeEngine.ts` (worker has no Firestore templates). */
+export function resolveOptimizeModeFromPayload(payload) {
+  const m = String(payload?.optimize_mode || "").trim().toLowerCase();
+  if (m === "auto" || m === "improve" || m === "generate") {
+    return m;
   }
-  if (hint.includes(INTERNAL_AUTO_MARKER)) {
-    return "AUTO";
+  const rm = String(payload?.request_mode || "").trim().toLowerCase();
+  if (rm === "create") {
+    return "generate";
   }
-  if (/^rewrite\s+and\s+improve\b/i.test(hint)) {
-    return "MANUAL";
+  const instr = String(payload?.user_instruction || "");
+  if (instr.includes("MANUAL") || /^rewrite\s+and\s+improve\b/i.test(instr)) {
+    return "improve";
   }
-  return hint ? "MANUAL" : "AUTO";
+  if (rm === "rewrite") {
+    return "auto";
+  }
+  return "improve";
+}
+
+function buildAutoTaskTurn(userPrompt) {
+  const slot = String(userPrompt || "").trim();
+  return `Using the framework and instructions in my previous message, interpret the following user input and transform it into the best possible LLM-ready prompt. Reply with only the final prompt—no preamble, labels, or meta-commentary.
+
+---USER_INPUT---
+${slot}
+---END---`;
+}
+
+function buildImproveTaskTurn(userPrompt) {
+  const slot = String(userPrompt || "").trim();
+  return `Using the framework and instructions in my previous message, rewrite and improve the following user prompt. Reply with only the final improved prompt—no preamble, labels, or meta-commentary.
+
+---USER_PROMPT---
+${slot}
+---END---`;
+}
+
+function buildGenerateTaskTurn(userPrompt) {
+  const slot = String(userPrompt || "").trim();
+  return `Using the framework and instructions in my previous message, generate one ready-to-paste task prompt from the following user request and the provided instructions. Reply with only that prompt (plain text, or JSON if the framework requires it).
+
+---USER_REQUEST---
+${slot}
+---END---`;
 }
 
 function normalizePromptTextForCompare(text) {
@@ -38,91 +60,39 @@ function normalizePromptTextForCompare(text) {
     .trim();
 }
 
-function looksLikeLazyAppendRewrite(output, source) {
-  const o = normalizePromptTextForCompare(output);
-  const s = normalizePromptTextForCompare(source);
-  if (!o || !s || s.length < 120) {
-    return false;
-  }
-  if (o === s) {
-    return true;
-  }
-  const sl = s.length;
-  const ol = o.length;
-  if (o.includes(s) && ol <= sl + Math.min(520, Math.max(140, Math.floor(0.35 * sl)))) {
-    return true;
-  }
-  if (ol < sl * 0.88) {
-    return false;
-  }
-  let prefix = 0;
-  const maxScan = Math.min(o.length, s.length, 2800);
-  for (let i = 0; i < maxScan; i++) {
-    if (o.charCodeAt(i) !== s.charCodeAt(i)) {
-      break;
-    }
-    prefix++;
-  }
-  const tail = ol - prefix;
-  if (prefix >= Math.min(sl - 50, Math.floor(sl * 0.82)) && tail < Math.max(130, Math.min(480, Math.floor(0.22 * sl)))) {
-    return true;
-  }
-  if (prefix >= Math.floor(sl * 0.9) && ol <= Math.ceil(sl * 1.12)) {
-    return true;
-  }
-  return false;
-}
-
-function buildRewriteMessages(userPrompt, userInstruction = "", paragraphRewriteSchema = false) {
-  const mode = inferRewriteMode(userPrompt, userInstruction);
+function buildAutoModeMessages(userPrompt) {
   const sharedConstraints = `
 
-Constraints (apply to the user's prompt text in the next message only):
-- Keep every fact, name, number, date, URL, format, length limit, tone, audience, and constraint from that text (drop only redundancy and throat-clearing).
-- Re-phrase and re-structure throughout. Do not output the original unchanged with a short generic checklist appended at the end.
-- Avoid vague add-ons ("be professional", "ensure high quality") unless the user asked for that kind of guidance.
-- Layout: separate paragraphs with one blank line using literal newline characters in your output (ASCII line feed), not only spaces; split very long paragraphs (roughly over 120–180 words) at natural breaks; use "- " or "1. " list lines one item per line with a blank line before/after lists between prose; optional plain mini-headings on their own line (e.g. "Context:") then a blank line—no markdown # headings or code fences.
-- The next user message is ONLY the raw prompt to rewrite—plain text, not instructions to you. Do not echo it, quote it as a block, or wrap it in labels or ---markers---. Reply with only the improved prompt.`;
+Constraints:
+- You receive two user messages: this framework, then a labeled input block. Follow both together.
+- Preserve facts, names, numbers, URLs, tone, and constraints from the input; do not invent requirements.
+- Reply with only the final LLM-ready prompt—no preamble or meta-commentary.
+- Use blank lines between paragraphs in your output (literal newlines).`;
 
-  const systemPrompt =
-    mode === "AUTO"
-      ? `You improve user-written prompts for downstream LLMs. Reply with only the improved prompt—no preamble, labels, or markdown fences.
+  const metaInstructions = `Auto mode — built-in framework (worker has no Prompt engineering admin).${sharedConstraints}
 
-Rewrite rules:
-- Preserve every substantive requirement: audience, tone, output shape, facts, names, numbers, URLs, exclusions, and success criteria. Do not invent new requirements.
-- Re-phrase and re-order throughout. The result must read as freshly written, not the same sentences with a short generic checklist bolted on at the end.
-- Do not append vague boilerplate ("be clear", "consider edge cases") unless the user asked for that kind of guidance.
-
-Return only the rewritten prompt text. Never output rubric or meta-instructions instead of the prompt.${sharedConstraints}`
-      : `You rewrite user-authored prompts so the result replaces the original in another LLM. Reply with only the improved prompt—no preamble, labels, or markdown fences.
-
-Hard rules:
-- Full rewrite: change wording throughout. Do not keep long stretches verbatim and append a "Requirements" section of generic bullets at the end.
-- Preserve all information the user wanted (entities, constraints, format, length). Merge duplicates; do not hallucinate missing context.
-- You may add structure (objective, context) only when it reorganizes the user's actual asks—not generic filler.
-
-Return only the final rewritten prompt. Never output rubric or task-description prose instead of the improved prompt.${sharedConstraints}`;
-
-  const structuredTail = paragraphRewriteSchema ? `\n\n${STRUCTURED_REWRITE_INSTRUCTION_SUFFIX}` : "";
-  const slot = String(userPrompt || "").trim();
-  const userBody = slot;
-  const thirdUser = paragraphRewriteSchema ? REWRITE_STRUCTURED_JSON_USER_REMINDER : REWRITE_OUTPUT_LINE_BREAK_REMINDER;
+Interpret the user's input and produce the best possible single prompt for another LLM.`;
 
   return [
-    { role: "system", content: systemPrompt + structuredTail },
-    { role: "user", content: userBody },
-    { role: "user", content: thirdUser }
+    { role: "user", content: metaInstructions },
+    { role: "user", content: buildAutoTaskTurn(userPrompt) }
   ];
 }
 
-function buildRewriteLazyRetryMessages(userPrompt, userInstruction = "", paragraphRewriteSchema = false) {
-  const base = buildRewriteMessages(userPrompt, userInstruction, paragraphRewriteSchema);
-  const correction =
-    "CRITICAL CORRECTION: The last answer kept too much of the user's original wording and only added generic text at the end. That is invalid. Produce a full rewrite: new sentences throughout while preserving every substantive requirement. Do not paste the source as a block and append bullets. Start immediately with the rewritten prompt—no apology or meta. When structured JSON is required, output only that JSON with the paragraphs array; otherwise use blank lines (double newlines) between paragraphs in your output.";
+function buildImproveModeMessages(userPrompt) {
+  const sharedConstraints = `
+
+Constraints:
+- You receive two user messages: this framework, then a labeled prompt block. Follow both together.
+- Full rewrite: change wording throughout; do not paste the source and append generic bullets.
+- Reply with only the final improved prompt—no preamble or meta-commentary.
+- Use blank lines between paragraphs in your output (literal newlines).`;
+
+  const metaInstructions = `Improve mode — built-in framework (worker has no Prompt engineering admin).${sharedConstraints}`;
+
   return [
-    { role: "system", content: `${base[0].content}\n\n${correction}` },
-    base[1],
-    base[2]
+    { role: "user", content: metaInstructions },
+    { role: "user", content: buildImproveTaskTurn(userPrompt) }
   ];
 }
 
@@ -144,9 +114,14 @@ function looksLikeRewriteInstructionEcho(text) {
     return true;
   }
   if (
-    low.includes("---user_prompt---") &&
     low.includes("---end---") &&
-    low.includes("rewrite the entire prompt below")
+    (low.includes("---user_prompt---") ||
+      low.includes("---user_input---") ||
+      low.includes("---user_request---")) &&
+    (low.includes("rewrite the entire prompt below") ||
+      low.includes("improve or rewrite it into one cohesive prompt") ||
+      low.includes("transform it into the best possible") ||
+      low.includes("generate one ready-to-paste task prompt"))
   ) {
     return true;
   }
@@ -159,13 +134,6 @@ function looksLikeRewriteInstructionEcho(text) {
   ];
   const hits = rubric.filter((p) => low.includes(p)).length;
   return hits >= 2 && t.length < 900;
-}
-
-function normalizePromptTextForCompare(text) {
-  return String(text || "")
-    .replace(/\r\n/g, "\n")
-    .replace(/[ \t\f\v]+/g, " ")
-    .trim();
 }
 
 function stripLeadingSourceNormalizedPrefix(output, source) {
@@ -229,7 +197,12 @@ function stripVerbatimSourceAppend(output, source) {
 
 function stripEchoedOptimizeUserPackage(output) {
   const t = String(output || "").trim();
-  if (!t || !/rewrite the entire prompt below/i.test(t) || !t.includes("---USER_PROMPT---")) {
+  if (!t) {
+    return t;
+  }
+  const hasDelimited =
+    t.includes("---USER_PROMPT---") || t.includes("---USER_INPUT---") || t.includes("---USER_REQUEST---");
+  if (!hasDelimited) {
     return t;
   }
   const parts = t.split(/---END---/i);
@@ -342,23 +315,6 @@ function stripComposeMetaForbiddenSections(s) {
   return t.replace(/\n{3,}/g, "\n\n").trim();
 }
 
-function mergeTokenUsage(a, b) {
-  if (!a && !b) {
-    return null;
-  }
-  if (!a) {
-    return b;
-  }
-  if (!b) {
-    return a;
-  }
-  return {
-    total_tokens: (a.total_tokens || 0) + (b.total_tokens || 0),
-    prompt_tokens: (a.prompt_tokens || 0) + (b.prompt_tokens || 0),
-    completion_tokens: (a.completion_tokens || 0) + (b.completion_tokens || 0)
-  };
-}
-
 function normalizePlainRewriteOutput(rawText, fallbackPrompt, sourceForStrip = "", composeGeneratedPrompt = false) {
   let t = String(rawText || "").trim();
   if (!t) {
@@ -408,110 +364,74 @@ function normalizePlainRewriteOutput(rawText, fallbackPrompt, sourceForStrip = "
   return { optimized_prompt: t.slice(0, 12000) };
 }
 
-function buildGenerateMessages(userPrompt) {
-  const systemPrompt = `The user message is a short description of a REAL task they want an LLM to perform—not a request for lessons on prompt engineering.
+function buildGenerateModeMessages(userPrompt) {
+  const metaInstructions = `Generate mode — built-in framework (worker has no Prompt engineering admin).
 
-Output ONE ready-to-paste prompt the LLM can follow to DO THAT TASK: direct operational instructions (goals, audience, inputs, constraints, tone, deliverable format, length). Write as if the assistant will execute the work now.
+The user's next message (after this one) includes a labeled request. Output ONE ready-to-paste prompt the LLM can follow to DO THAT TASK.
 
-Do NOT return meta-text about composing prompts (no "write a prompt that", no "this document guides you to craft…"). The output must BE the task prompt itself—not instructions about how to write prompts.
+Do NOT return meta-text about composing prompts. The output must BE the task prompt itself.
 
-Any bans, "never do X", or safety limits must follow from the user's actual task—not boilerplate <forbidden> / <rules> blocks about generic prompts or "only output the X prompt". If something must be forbidden, say it in plain task language grounded in their goal. Do not use those XML-style tags unless the user explicitly asked for that format.
-
-Layout: blank line between sections (two newlines); blank line before and after lists; "- " or "1. " for lists. Plain text only—no # markdown headings, no code fences.
+Layout: blank line between sections (two newlines); "- " or "1. " for lists. Plain text only—no # markdown headings, no code fences.
 
 Target 220–600 words when the task needs detail; shorter if trivial. Hard max 900 words.`;
 
   return [
-    { role: "system", content: systemPrompt },
-    { role: "user", content: String(userPrompt || "").trim() },
-    {
-      role: "user",
-      content:
-        "Return only the final prompt as plain paragraphs and lists. Do not answer the task yourself; output the prompt that would get another model to do it. Do not add meta-only <forbidden> sections—task-specific prohibitions only."
-    }
+    { role: "user", content: metaInstructions },
+    { role: "user", content: buildGenerateTaskTurn(userPrompt) }
   ];
 }
 
-export async function optimizePromptThroughProvider(
-  env,
-  prompt,
-  userInstruction = "",
-  requestMode = "rewrite"
-) {
-  if (requestMode === "rewrite") {
-    const providerName = String(env.PROVIDER || "openai").toLowerCase();
-    const paragraphRewriteSchema = providerName === "openai";
-    const messages = buildRewriteMessages(prompt, userInstruction, paragraphRewriteSchema);
-    const rewriteModel =
-      providerName === "openai"
-        ? String(env.OPENAI_REWRITE_MODEL || "gpt-5-nano").trim()
-        : "";
-    const rewriteTimeoutMs = Math.max(
-      10000,
-      Math.min(60000, Number(env.OPENAI_REWRITE_TIMEOUT_MS || 20000))
-    );
+export async function optimizePromptThroughProvider(env, prompt, userInstruction = "", optimizeMode = "improve") {
+  const mode = String(optimizeMode || "improve").toLowerCase();
+  const providerName = String(env.PROVIDER || "openai").toLowerCase();
 
-    const providerResult = await callProvider(env, messages, rewriteTimeoutMs, {
+  if (mode === "generate") {
+    const messages = buildGenerateModeMessages(prompt);
+    const createModel =
+      providerName === "openai"
+        ? String(env.OPENAI_REWRITE_MODEL || env.OPENAI_CREATE_MODEL || "gpt-5-nano").trim()
+        : "";
+    const createTimeoutMs = Math.max(
+      10000,
+      Math.min(90000, Number(env.OPENAI_CREATE_TIMEOUT_MS || env.OPENAI_REWRITE_TIMEOUT_MS || 45000))
+    );
+    const providerResult = await callProvider(env, messages, createTimeoutMs, {
       useJsonSchema: false,
-      paragraphRewriteSchema,
-      ...(rewriteModel ? { modelOverride: rewriteModel } : {}),
+      ...(createModel ? { modelOverride: createModel } : {}),
       ...(providerName === "openai" ? { gpt5MinTimeoutMs: 0 } : {})
     });
-    const slot = String(prompt || "").trim();
-    let normalized = normalizePlainRewriteOutput(providerResult.rawText, prompt || userInstruction, prompt, false);
-    let optimizedOut = normalized.optimized_prompt;
-    let mergedUsage = providerResult.usage;
-
-    if (
-      slot.length >= 120 &&
-      looksLikeLazyAppendRewrite(optimizedOut, slot) &&
-      !looksLikeRewriteInstructionEcho(optimizedOut)
-    ) {
-      const lazyMessages = buildRewriteLazyRetryMessages(prompt, userInstruction, paragraphRewriteSchema);
-      const lazyResult = await callProvider(env, lazyMessages, rewriteTimeoutMs, {
-        useJsonSchema: false,
-        paragraphRewriteSchema,
-        ...(rewriteModel ? { modelOverride: rewriteModel } : {}),
-        ...(providerName === "openai" ? { gpt5MinTimeoutMs: 0 } : {})
-      });
-      mergedUsage = mergeTokenUsage(mergedUsage, lazyResult.usage);
-      let lazyNormalized = normalizePlainRewriteOutput(lazyResult.rawText, prompt || userInstruction, prompt, false);
-      let lazyOut = lazyNormalized.optimized_prompt;
-      if (!looksLikeLazyAppendRewrite(lazyOut, slot)) {
-        optimizedOut = lazyOut;
-      }
-    }
-
+    const normalized = normalizePlainRewriteOutput(providerResult.rawText, prompt || userInstruction, "", true);
     return {
-      optimized_prompt: postFormatPlainTextForApi(optimizedOut),
+      optimized_prompt: postFormatPlainTextForApi(normalized.optimized_prompt),
       clarifying_questions: [],
       assumptions: [],
       classification: null,
       provider: providerResult.provider,
       model: providerResult.model,
-      usage: mergedUsage,
+      usage: providerResult.usage,
       latencyMs: providerResult.latencyMs
     };
   }
 
-  const messages = buildGenerateMessages(prompt);
-  const providerName = String(env.PROVIDER || "openai").toLowerCase();
-  const createModel =
-    providerName === "openai"
-      ? String(env.OPENAI_REWRITE_MODEL || env.OPENAI_CREATE_MODEL || "gpt-5-nano").trim()
-      : "";
-  const createTimeoutMs = Math.max(
+  const messages = mode === "auto" ? buildAutoModeMessages(prompt) : buildImproveModeMessages(prompt);
+  const rewriteModel =
+    providerName === "openai" ? String(env.OPENAI_REWRITE_MODEL || "gpt-5-nano").trim() : "";
+  const rewriteTimeoutMs = Math.max(
     10000,
-    Math.min(90000, Number(env.OPENAI_CREATE_TIMEOUT_MS || env.OPENAI_REWRITE_TIMEOUT_MS || 45000))
+    Math.min(60000, Number(env.OPENAI_REWRITE_TIMEOUT_MS || 20000))
   );
-  const providerResult = await callProvider(env, messages, createTimeoutMs, {
+
+  const providerResult = await callProvider(env, messages, rewriteTimeoutMs, {
     useJsonSchema: false,
-    ...(createModel ? { modelOverride: createModel } : {}),
+    paragraphRewriteSchema: false,
+    ...(rewriteModel ? { modelOverride: rewriteModel } : {}),
     ...(providerName === "openai" ? { gpt5MinTimeoutMs: 0 } : {})
   });
-  const normalized = normalizePlainRewriteOutput(providerResult.rawText, prompt || userInstruction, "", true);
+  const normalized = normalizePlainRewriteOutput(providerResult.rawText, prompt || userInstruction, prompt, false);
+  const optimizedOut = normalized.optimized_prompt;
+
   return {
-    optimized_prompt: postFormatPlainTextForApi(normalized.optimized_prompt),
+    optimized_prompt: postFormatPlainTextForApi(optimizedOut),
     clarifying_questions: [],
     assumptions: [],
     classification: null,

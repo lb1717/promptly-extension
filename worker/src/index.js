@@ -1,6 +1,6 @@
 import { parseAllowedOrigins, handlePreflight, isOriginAllowed, createCorsHeaders } from "./cors.js";
 import { validateUserKey, createUserApiKey, revokeUserApiKey } from "./auth.js";
-import { optimizePromptThroughProvider } from "./optimize.js";
+import { optimizePromptThroughProvider, resolveOptimizeModeFromPayload } from "./optimize.js";
 import {
   buildCreditsEnvelope,
   conservativeBillFromEstimatedInput,
@@ -372,12 +372,21 @@ function requireAdmin(request, env) {
   return !!token && token === env.ADMIN_TOKEN;
 }
 
-function getModeBucket(requestMode) {
-  const mode = String(requestMode || "").toLowerCase();
+function getModeBucket(optimizeMode) {
+  const mode = String(optimizeMode || "").toLowerCase();
+  if (mode === "auto") {
+    return "auto";
+  }
+  if (mode === "generate") {
+    return "generated";
+  }
+  if (mode === "improve") {
+    return "manual";
+  }
   if (mode.includes("auto")) {
     return "auto";
   }
-  if (mode.includes("generate") || mode.includes("gen")) {
+  if (mode.includes("generate") || mode.includes("gen") || mode === "create") {
     return "generated";
   }
   if (mode.includes("manual") || mode.includes("rewrite") || mode.includes("custom")) {
@@ -581,7 +590,7 @@ export default {
         if (!day || !daySet.has(day)) {
           continue;
         }
-        const bucket = getModeBucket(record.requestMode);
+        const bucket = getModeBucket(record.optimizeMode || record.requestMode);
         const row = timelineMap.get(day);
         if (!row) {
           continue;
@@ -759,8 +768,7 @@ export default {
     const prompt = payload.prompt.trim();
     const userInstruction =
       typeof payload.user_instruction === "string" ? payload.user_instruction.trim() : "";
-    const requestMode =
-      typeof payload.request_mode === "string" ? payload.request_mode.trim().toLowerCase() : "rewrite";
+    const optimizeMode = resolveOptimizeModeFromPayload(payload);
     if (!prompt && !userInstruction) {
       return jsonResponse(400, { error: "prompt or user_instruction is required" }, corsOrigin);
     }
@@ -827,7 +835,7 @@ export default {
 
     const started = Date.now();
     try {
-      const optimized = await optimizePromptThroughProvider(env, prompt, userInstruction, requestMode);
+      const optimized = await optimizePromptThroughProvider(env, prompt, userInstruction, optimizeMode);
       const providerUsagePrompt = Math.max(0, toNumber(optimized?.usage?.prompt_tokens, 0));
       const providerUsageCompletion = Math.max(0, toNumber(optimized?.usage?.completion_tokens, 0));
       const providerUsageTotalRaw = Math.max(
@@ -891,14 +899,14 @@ export default {
 
       const latencyMs = Date.now() - started;
       console.log(
-        `[promptly] /optimize ok request_mode=${requestMode} provider=${optimized.provider} model=${optimized.model} latency_ms=${latencyMs}`
+        `[promptly] /optimize ok optimize_mode=${optimizeMode} provider=${optimized.provider} model=${optimized.model} latency_ms=${latencyMs}`
       );
       const metadata = {
         keyId: authResult.keyId,
         userIdHash: identity.userHash,
         userEmail: identity.email,
         day,
-        requestMode,
+        optimizeMode,
         provider: optimized.provider,
         model: optimized.model,
         status: 200,
@@ -926,7 +934,7 @@ export default {
         userIdHash: identity.userHash,
         userEmail: identity.email,
         day,
-        requestMode,
+        optimizeMode,
         status: 502,
         latencyMs,
         promptChars: prompt.length,
