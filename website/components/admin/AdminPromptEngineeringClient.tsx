@@ -153,10 +153,13 @@ export function AdminPromptEngineeringClient() {
         <div>
           <h1 className="text-2xl font-semibold text-white">Prompt engineering</h1>
           <p className="mt-1 text-sm text-violet-200/70">
-            One super-prompt per mode. The provider receives a{" "}
-            <span className="font-mono text-violet-100">single user message</span>: the template with{" "}
-            <span className="font-mono text-amber-200">{token}</span> replaced by the box text (or the compose
-            description). No separate system prompt or extra framing.
+            Each mode uses one template string. The token{" "}
+            <span className="font-mono text-amber-200">{token}</span> must appear{" "}
+            <span className="text-violet-100">exactly once</span>. Text before and after the token becomes the
+            policy message (sent as <span className="font-mono text-violet-100">system</span> for Chat Completions, or{" "}
+            <span className="font-mono text-violet-100">developer</span> for the Responses API). The user&apos;s box
+            text is sent in a separate <span className="font-mono text-violet-100">user</span> message with a short
+            server-side label so the model does not treat the slot as hidden instructions.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -196,7 +199,8 @@ export function AdminPromptEngineeringClient() {
               Auto mode
             </h2>
             <p className="mb-3 text-xs text-violet-200/70">
-              Used when the user has Auto enabled and sends from the chat box.
+              Used when the user has Auto enabled and sends from the chat box. Put your rewrite rules around the token;
+              the composer text arrives only in the second user message.
             </p>
             <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
               <label className="flex flex-col gap-1 text-xs text-violet-200/80">
@@ -257,7 +261,8 @@ export function AdminPromptEngineeringClient() {
               Improve mode
             </h2>
             <p className="mb-3 text-xs text-violet-200/70">
-              Manual rewrite triggered from the extension popup Improve button.
+              Manual rewrite triggered from the extension popup Improve button. Same split: policy around the token,
+              raw prompt in the follow-up user message.
             </p>
             <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
               <label className="flex flex-col gap-1 text-xs text-violet-200/80">
@@ -403,7 +408,8 @@ export function AdminPromptEngineeringClient() {
               </label>
             </div>
             <p className="mb-3 text-xs text-violet-200/70">
-              The template token is replaced with the user description text before model call.
+              The description is not spliced into the policy string; it is sent only in the second user message. Keep
+              the token once so your before/after text can reference “the next user message.”
             </p>
             <textarea
               value={composeT}
