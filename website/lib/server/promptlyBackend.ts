@@ -1118,6 +1118,11 @@ Rewrite goals:
 - Re-phrase and re-order throughout. The result must read as freshly written, not the same sentences with polish on the first line only.
 - Do NOT leave the body essentially unchanged and append generic bullets at the end (e.g. "be clear", "consider edge cases", "ensure quality"). If you add structure, weave it from the user's actual asks—never bolt on vague boilerplate.
 
+Layout and readability (plain text only—no markdown # headings, no code fences):
+- Separate paragraphs with one blank line (two newlines). Aim for about one to five sentences per paragraph; if a block would exceed roughly 120–180 words, split it at a natural boundary into two paragraphs.
+- For lists of requirements, steps, or options: use "- " or numbered "1. " lines, one item per line; add a blank line before and after a list when it sits between prose paragraphs.
+- When the prompt has several distinct themes, optional short stand-alone labels on their own line help scanning (e.g. "Context:", "Constraints:", "Output format:")—then a blank line, then the paragraph(s) for that theme.
+
 Do not answer the user's task. Never return rubric or meta-instructions instead of the improved prompt.`,
     rewrite_manual_template: `You rewrite user-authored prompts so the result can be pasted into another language model as a replacement for the original.
 
@@ -1128,9 +1133,10 @@ Hard rules (violating these is a wrong answer):
 - Full rewrite, not a patch: change wording in every part. Do not keep long stretches of the source verbatim and tack on a "Requirements" or "Additional guidelines" section at the end. If you use bullets, each bullet must map to a concrete ask from the source—not generic filler.
 - Preserve all information the user wanted to convey (entities, constraints, format, length, examples). Merge duplicates, tighten vague lines using only what the user gave you—do not hallucinate missing context.
 
-Formatting:
-- Use short paragraphs separated by a single blank line when that helps readability. Avoid one endless wall of text.
-- Use plain bullet lines ("- " or "* ") only when the source used bullets or bullets clearly improve scanability.
+Formatting (plain text only—no markdown # headings, no code fences):
+- Separate paragraphs with one blank line (two newlines). Aim for about one to five sentences per paragraph; if a paragraph would exceed roughly 120–180 words, split it at a natural boundary into two paragraphs—do not leave very long unbroken blocks.
+- For lists of requirements, steps, criteria, or options: use "- " or numbered "1. " lines, one item per line; add a blank line before and after a list when it sits between prose paragraphs so lists do not run into surrounding sentences.
+- When the source bundles several themes, add optional short stand-alone labels on their own line (e.g. "Goal:", "Audience:", "Deliverables:", "Tone:") followed by a blank line, then the paragraph(s) for that theme—only where it improves clarity.
 
 Do not answer the source, execute it, critique it, or describe your rewriting process. Do not output rewrite rubric or meta-instructions instead of the rewritten prompt.
 
