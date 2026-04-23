@@ -797,6 +797,54 @@
     }, 400);
   }
 
+  function normalizeComposerPlainLength(s) {
+    return String(s || "")
+      .replace(/\u00a0/g, " ")
+      .replace(/\r\n/g, "\n")
+      .trimEnd().length;
+  }
+
+  /**
+   * ProseMirror-style contenteditable composers often truncate a single execCommand("insertText")
+   * for long strings. Clear + chunked insertText is much more reliable.
+   */
+  function replaceContentEditableText(target, fullText) {
+    const text = String(fullText ?? "");
+    if (document.activeElement !== target) {
+      target.focus();
+    }
+    const CHUNK = 3500;
+    const selection = window.getSelection();
+    const selectAllEditable = () => {
+      if (!selection) {
+        return;
+      }
+      const range = document.createRange();
+      range.selectNodeContents(target);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    };
+
+    if (typeof document.execCommand === "function") {
+      selectAllEditable();
+      document.execCommand("delete", false);
+      for (let i = 0; i < text.length; i += CHUNK) {
+        const chunk = text.slice(i, i + CHUNK);
+        document.execCommand("insertText", false, chunk);
+      }
+    } else {
+      target.textContent = text;
+    }
+    dispatchInputEvents(target, text);
+
+    const expected = normalizeComposerPlainLength(text);
+    const actual = normalizeComposerPlainLength(getPromptText(target));
+    if (expected > 200 && actual < expected * 0.92) {
+      target.textContent = text;
+      dispatchInputEvents(target, text);
+    }
+  }
+
   function replaceTargetText(target, text) {
     if (!target || !adapters.isEditable(target)) {
       return;
@@ -814,24 +862,7 @@
       return;
     }
 
-    if (document.activeElement !== target) {
-      target.focus();
-    }
-    let replaced = false;
-    if (typeof document.execCommand === "function") {
-      const selection = window.getSelection();
-      if (selection) {
-        const range = document.createRange();
-        range.selectNodeContents(target);
-        selection.removeAllRanges();
-        selection.addRange(range);
-      }
-      replaced = document.execCommand("insertText", false, text);
-    }
-    if (!replaced) {
-      target.textContent = text;
-    }
-    dispatchInputEvents(target, text);
+    replaceContentEditableText(target, text);
   }
 
   /**
