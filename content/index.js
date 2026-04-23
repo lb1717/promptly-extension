@@ -807,6 +807,43 @@
       .trimEnd().length;
   }
 
+  /** Minimal HTML for clipboard paste: double newlines → paragraphs, single newlines → <br>. */
+  function plainTextToPasteHtml(s) {
+    const raw = String(s || "").replace(/\r\n/g, "\n");
+    if (!raw) {
+      return "<p></p>";
+    }
+    const esc = (t) =>
+      t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const chunks = raw.split(/\n\n+/).filter((c) => c.trim().length > 0);
+    if (chunks.length === 0) {
+      return `<p>${esc(raw)}</p>`;
+    }
+    return chunks.map((p) => `<p>${esc(p).replace(/\n/g, "<br>")}</p>`).join("");
+  }
+
+  /**
+   * Default HTML collapses \\n in contenteditable. Prefer pre-line so plain \\n and \\n\\n show as breaks.
+   */
+  function ensureWritableNewlinesVisible(target, plainText) {
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+    if (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) {
+      return;
+    }
+    if (!String(plainText || "").includes("\n")) {
+      return;
+    }
+    if (!target.isContentEditable) {
+      return;
+    }
+    const ws = window.getComputedStyle(target).whiteSpace || "";
+    if (ws !== "pre-wrap" && ws !== "pre-line" && ws !== "break-spaces") {
+      target.style.whiteSpace = "pre-line";
+    }
+  }
+
   /**
    * ProseMirror-style contenteditable composers often truncate a single execCommand("insertText")
    * for long strings. Prefer synthetic paste after a hard clear, then chunked insertText, then
@@ -836,6 +873,7 @@
       try {
         const dt = new DataTransfer();
         dt.setData("text/plain", text);
+        dt.setData("text/html", plainTextToPasteHtml(text));
         target.dispatchEvent(
           new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: dt })
         );
@@ -898,6 +936,8 @@
       target.textContent = text;
       dispatchInputEvents(target, text);
     }
+
+    ensureWritableNewlinesVisible(target, text);
   }
 
   function replaceTargetText(target, text) {

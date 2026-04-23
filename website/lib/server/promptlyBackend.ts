@@ -1009,7 +1009,9 @@ function polishRewriteModelOutput(optimized: string, userSlot: string): string {
 }
 
 function normalizePlainRewriteOutput(rawText: string, fallbackPrompt: string) {
-  let t = String(rawText || "").trim();
+  let t = String(rawText || "")
+    .replace(/\r\n/g, "\n")
+    .trim();
   if (!t) {
     return { optimized_prompt: fallbackPrompt };
   }
