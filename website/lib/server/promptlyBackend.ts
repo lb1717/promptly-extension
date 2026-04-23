@@ -3,7 +3,7 @@ import { getFirebaseAdminAuth, getFirebaseAdminDb } from "@/lib/server/firebaseA
 
 export const CREDIT_MAX_PROMPT_CHARS = 12000;
 export const CREDIT_MAX_INSTRUCTION_CHARS = 3000;
-export const CREDIT_MAX_ESTIMATED_INPUT_TOKENS = 4000;
+export const CREDIT_MAX_ESTIMATED_INPUT_TOKENS = 20000;
 /** Placeholder for the user's prompt (rewrite/auto) or compose description; put anywhere in admin super-prompts. */
 export const PROMPTLY_USER_CONTENT_TOKEN = "<<PROMPTLY_USER_CONTENT>>";
 const PROMPT_SETTINGS_COLLECTION = "promptly_settings";
@@ -1238,6 +1238,9 @@ const CREATE_TRUNCATION_CONTINUE_MSG =
   "Your previous output hit the length limit mid-stream. Continue from the very next character. Do not repeat anything you already wrote. No preamble or labels—only the rest of the prompt text.";
 
 const CREATE_CONTINUATION_MAX_ROUNDS = 3;
+const REWRITE_TRUNCATION_CONTINUE_MSG =
+  "Your previous rewrite output hit the length limit mid-stream. Continue the rewritten prompt from the very next character. Do not repeat anything you already wrote. Return only the remaining rewritten prompt text.";
+const REWRITE_CONTINUATION_MAX_ROUNDS = 3;
 
 function isResponsesApiTruncated(body: Record<string, unknown>): boolean {
   if (body.status === "incomplete") {
@@ -1346,18 +1349,23 @@ async function callOpenAi(options: {
   const timeout = setTimeout(() => controller.abort("timeout"), options.timeoutMs);
   const useResponsesApi = usesResponsesApi(options.model);
   const isCreate = options.requestMode === "create";
+  const isRewrite = options.requestMode === "rewrite";
+  const modeSupportsContinuation = isCreate || isRewrite;
+  const continuationPrompt = isCreate ? CREATE_TRUNCATION_CONTINUE_MSG : REWRITE_TRUNCATION_CONTINUE_MSG;
   const url = useResponsesApi ? "https://api.openai.com/v1/responses" : "https://api.openai.com/v1/chat/completions";
 
   try {
-    const continuationRounds = normalizeRuntimeControl(
-      options.createContinuationMaxRounds,
-      CREATE_CONTINUATION_MAX_ROUNDS,
-      1,
-      6
-    );
+    const continuationRounds = modeSupportsContinuation
+      ? normalizeRuntimeControl(
+          isCreate ? options.createContinuationMaxRounds : REWRITE_CONTINUATION_MAX_ROUNDS,
+          isCreate ? CREATE_CONTINUATION_MAX_ROUNDS : REWRITE_CONTINUATION_MAX_ROUNDS,
+          1,
+          6
+        )
+      : 1;
     if (useResponsesApi) {
-      // max_output_tokens counts reasoning + visible text. Omit reasoning on create so the budget goes to the prompt.
-      // store:true for create enables previous_response_id continuation when output hits max_output_tokens.
+      // max_output_tokens counts reasoning + visible text.
+      // store:true enables previous_response_id continuation when output hits max_output_tokens.
       const initialInput = options.messages.map((message) => ({
         role: message.role,
         content: [{ type: "input_text", text: message.content }]
@@ -1372,7 +1380,7 @@ async function callOpenAi(options: {
       };
       if (!isCreate) {
         baseResponsesFields.reasoning = { effort: "minimal" };
-        baseResponsesFields.store = false;
+        baseResponsesFields.store = modeSupportsContinuation;
       } else {
         // Keep create on primary model more responsive by constraining reasoning work.
         baseResponsesFields.reasoning = { effort: "minimal" };
@@ -1393,7 +1401,7 @@ async function callOpenAi(options: {
                 input: [
                   {
                     role: "user",
-                    content: [{ type: "input_text", text: CREATE_TRUNCATION_CONTINUE_MSG }]
+                    content: [{ type: "input_text", text: continuationPrompt }]
                   }
                 ],
                 max_output_tokens: options.maxCompletionTokens,
@@ -1428,8 +1436,8 @@ async function callOpenAi(options: {
         const id = typeof body.id === "string" ? body.id : "";
         previousId = id || previousId;
 
-        const truncated = isCreate && isResponsesApiTruncated(body);
-        if (!truncated || !isCreate) {
+        const truncated = modeSupportsContinuation && isResponsesApiTruncated(body);
+        if (!truncated || !modeSupportsContinuation) {
           break;
         }
         if (!previousId) {
@@ -1443,7 +1451,7 @@ async function callOpenAi(options: {
       return { rawText: aggregated, usage };
     }
 
-    if (isCreate) {
+    if (modeSupportsContinuation) {
       let chatMessages: Array<{ role: string; content: string }> = [...options.messages];
       let aggregated = "";
       let usage: OptimizerResult["usage"] = null;
@@ -1485,7 +1493,7 @@ async function callOpenAi(options: {
         chatMessages = [
           ...chatMessages,
           { role: "assistant", content: piece },
-          { role: "user", content: CREATE_TRUNCATION_CONTINUE_MSG }
+          { role: "user", content: continuationPrompt }
         ];
       }
 

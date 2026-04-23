@@ -2,7 +2,7 @@ import { estimateTokensFromChars } from "./optimize.js";
 
 export const CREDIT_MAX_PROMPT_CHARS = 12000;
 export const CREDIT_MAX_INSTRUCTION_CHARS = 3000;
-export const CREDIT_MAX_ESTIMATED_INPUT_TOKENS = 4000;
+export const CREDIT_MAX_ESTIMATED_INPUT_TOKENS = 20000;
 /**
  * Max single-request planned tokens in preflight (heuristic cap on char-based estimates).
  * Real billing uses provider `usage.total_tokens` (OpenAI-style API tokens).
