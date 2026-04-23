@@ -252,6 +252,51 @@
     return getPromptElementUniversal(previousTarget);
   }
 
+  /**
+   * Host UIs often wrap the real editor (e.g. #prompt-textarea) around an inner ProseMirror/contenteditable.
+   * Writing to the outer node can truncate or be discarded; reads/writes should use the same inner surface.
+   */
+  function getPromptWriteSurface(target) {
+    if (!isElement(target)) {
+      return target;
+    }
+    if (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) {
+      return target;
+    }
+    if (target.classList && target.classList.contains("ProseMirror")) {
+      return target;
+    }
+
+    const nestedSelector = "[contenteditable='true'], [contenteditable='']";
+    let nested = [];
+    try {
+      nested = Array.from(target.querySelectorAll(nestedSelector)).filter(
+        (node) => node instanceof Element && node !== target && isEditable(node)
+      );
+    } catch (_e) {
+      return target;
+    }
+    if (nested.length === 0) {
+      return target;
+    }
+
+    const pm = nested.find((n) => n.classList && n.classList.contains("ProseMirror"));
+    if (pm) {
+      return pm;
+    }
+
+    let best = nested[0];
+    let bestH = 0;
+    for (const n of nested) {
+      const h = n.scrollHeight || 0;
+      if (h > bestH) {
+        bestH = h;
+        best = n;
+      }
+    }
+    return best;
+  }
+
   function getAnchorElementForGemini(target) {
     if (!target || !isElement(target)) {
       return target;
@@ -428,6 +473,7 @@
     getSite,
     isEditable,
     getPromptElement,
+    getPromptWriteSurface,
     getPromptElementForChatGPT,
     getPromptElementForClaude,
     getPromptElementForGemini,

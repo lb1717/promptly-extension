@@ -551,7 +551,10 @@
     if (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) {
       return String(target.value || "");
     }
-    return String(target.innerText || target.textContent || "").replace(/\u00a0/g, " ");
+    const surface =
+      typeof adapters.getPromptWriteSurface === "function" ? adapters.getPromptWriteSurface(target) : target;
+    const el = surface && adapters.isEditable(surface) ? surface : target;
+    return String(el.innerText || el.textContent || "").replace(/\u00a0/g, " ");
   }
 
   function setNativeValue(element, value) {
@@ -806,14 +809,32 @@
 
   /**
    * ProseMirror-style contenteditable composers often truncate a single execCommand("insertText")
-   * for long strings. Clear + chunked insertText is much more reliable.
+   * for long strings. Prefer synthetic paste, then clear + small chunks, then textContent fallback.
    */
   function replaceContentEditableText(target, fullText) {
     const text = String(fullText ?? "");
     if (document.activeElement !== target) {
       target.focus();
     }
-    const CHUNK = 3500;
+
+    const readSurfacePlainLength = () =>
+      normalizeComposerPlainLength(
+        String(target.innerText || target.textContent || "").replace(/\u00a0/g, " ")
+      );
+
+    const trySyntheticPaste = () => {
+      try {
+        const dt = new DataTransfer();
+        dt.setData("text/plain", text);
+        target.dispatchEvent(
+          new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: dt })
+        );
+      } catch (_e) {
+        // Synthetic paste is not supported in all environments.
+      }
+    };
+
+    const expected = normalizeComposerPlainLength(text);
     const selection = window.getSelection();
     const selectAllEditable = () => {
       if (!selection) {
@@ -825,6 +846,16 @@
       selection.addRange(range);
     };
 
+    if (text.length > 400) {
+      selectAllEditable();
+      trySyntheticPaste();
+      dispatchInputEvents(target, text);
+      if (expected > 200 && readSurfacePlainLength() >= expected * 0.92) {
+        return;
+      }
+    }
+
+    const CHUNK = 700;
     if (typeof document.execCommand === "function") {
       selectAllEditable();
       document.execCommand("delete", false);
@@ -837,9 +868,7 @@
     }
     dispatchInputEvents(target, text);
 
-    const expected = normalizeComposerPlainLength(text);
-    const actual = normalizeComposerPlainLength(getPromptText(target));
-    if (expected > 200 && actual < expected * 0.92) {
+    if (expected > 200 && readSurfacePlainLength() < expected * 0.92) {
       target.textContent = text;
       dispatchInputEvents(target, text);
     }
@@ -862,7 +891,9 @@
       return;
     }
 
-    replaceContentEditableText(target, text);
+    const surface =
+      typeof adapters.getPromptWriteSurface === "function" ? adapters.getPromptWriteSurface(target) : target;
+    replaceContentEditableText(surface || target, text);
   }
 
   /**
