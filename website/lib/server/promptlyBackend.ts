@@ -1208,7 +1208,7 @@ Rewrite goals:
 - Do NOT leave the body essentially unchanged and append generic bullets at the end (e.g. "be clear", "consider edge cases", "ensure quality"). If you add structure, weave it from the user's actual asks—never bolt on vague boilerplate.
 
 Layout and readability (plain text only—no markdown # headings, no code fences):
-- MANDATORY: your reply must contain real paragraph breaks—use two newline characters (one blank line) between every major section and between prose and any list. A single wall of text with no blank lines is invalid.
+- MANDATORY: your reply must contain real paragraph breaks as literal newline characters in the model output (ASCII line feed), not only spaces—use two newlines in a row (one blank line) between every major section and between prose and any list. A single wall of text with no blank lines is invalid.
 - Aim for about one to five sentences per paragraph; if a block would exceed roughly 120–180 words, split it at a natural boundary into two paragraphs.
 - For lists: use "- " or numbered "1. " lines, one item per line; add a blank line before and after each list block.
 - Optional short stand-alone labels on their own line (e.g. "Context:", "Constraints:") then a blank line, then paragraphs—only where it helps.
@@ -1224,7 +1224,7 @@ Hard rules (violating these is a wrong answer):
 - Preserve all information the user wanted to convey (entities, constraints, format, length, examples). Merge duplicates, tighten vague lines using only what the user gave you—do not hallucinate missing context.
 
 Formatting (plain text only—no markdown # headings, no code fences):
-- MANDATORY: your reply must contain real paragraph breaks—use two newline characters (one blank line) between sections and between prose and any list. A single wall of text with no blank lines is invalid.
+- MANDATORY: your reply must contain real paragraph breaks as literal newline characters in the output (ASCII line feed), not only spaces—use two newlines in a row (one blank line) between sections and between prose and any list. A single wall of text with no blank lines is invalid.
 - Aim for about one to five sentences per paragraph; if a paragraph would exceed roughly 120–180 words, split it at a natural boundary—do not leave very long unbroken blocks.
 - For lists: use "- " or numbered "1. " lines, one item per line; add a blank line before and after each list block.
 - Optional labels (e.g. "Goal:", "Audience:") on their own line, blank line, then paragraphs—only where it improves clarity.
@@ -1573,8 +1573,30 @@ const CREATE_TRUNCATION_CONTINUE_MSG =
 
 const CREATE_CONTINUATION_MAX_ROUNDS = 3;
 const REWRITE_TRUNCATION_CONTINUE_MSG =
-  "Your previous rewrite output hit the length limit mid-stream. Continue the rewritten prompt from the very next character. Do not repeat anything you already wrote. Return only the remaining rewritten prompt text.";
+  "Your previous rewrite output hit the length limit mid-stream. Continue the rewritten prompt from the very next character. Do not repeat anything you already wrote. Return only the remaining rewritten prompt text. Keep paragraph breaks: use blank lines (double newlines) between paragraphs as before.";
 const REWRITE_CONTINUATION_MAX_ROUNDS = 3;
+
+/** Final user turn on every improve/rewrite call so the model emits real newline characters in the completion (not one wall of text). */
+const REWRITE_OUTPUT_LINE_BREAK_REMINDER =
+  "Formatting rule for your reply only (this is not part of the user's prompt): output plain text with visible paragraph breaks. You must insert actual newline characters in the completion: put a completely blank line (two newlines in a row) between paragraphs and between prose and any list. Put each list item on its own line beginning with \"- \" or \"1. \", \"2. \", etc. Do not return one long unbroken line—downstream clients paste this string literally and rely on those newline characters.";
+
+function buildOptimizeMessagesForRequest(
+  isCreate: boolean,
+  instructions: string,
+  userMessageBody: string
+): Array<{ role: string; content: string }> {
+  if (isCreate) {
+    return [
+      { role: "system", content: instructions },
+      { role: "user", content: userMessageBody }
+    ];
+  }
+  return [
+    { role: "system", content: instructions },
+    { role: "user", content: userMessageBody },
+    { role: "user", content: REWRITE_OUTPUT_LINE_BREAK_REMINDER }
+  ];
+}
 
 function isResponsesApiTruncated(body: Record<string, unknown>, requestMode: string): boolean {
   const reason = (body.incomplete_details as { reason?: string } | undefined)?.reason;
@@ -1928,7 +1950,8 @@ export async function optimizePrompt(
     ? `Build one LLM-ready prompt that performs this user task (not meta-instructions about writing prompts). User description:\n\n${userSlot}`
     : userSlot;
   const maxBundled = CREDIT_MAX_PROMPT_CHARS + PROMPT_TEMPLATE_MAX_CHARS;
-  if (instructions.length + userMessageBody.length > maxBundled) {
+  const rewriteReminderOverhead = isCreate ? 0 : REWRITE_OUTPUT_LINE_BREAK_REMINDER.length;
+  if (instructions.length + userMessageBody.length + rewriteReminderOverhead > maxBundled) {
     throw new Error("Bundled prompt exceeds safe size; shorten the template or user content.");
   }
   let model = isCreate
@@ -1946,12 +1969,9 @@ export async function optimizePrompt(
     }),
     createContinuationMaxRounds: config.create_continuation_max_rounds
   };
-  const messages = [
-    { role: "system", content: instructions },
-    { role: "user", content: userMessageBody }
-  ];
-  const rewriteEchoRetrySystem = `${instructions}\n\nFINAL CONSTRAINT: Your entire reply must be the improved prompt text only. Never output rewrite rubric, task instructions, or meta-commentary—start with the first token of the improved prompt.`;
-  const rewriteLazyAppendRetrySystem = `${instructions}\n\nCRITICAL CORRECTION: The last answer kept too much of the user's original wording (often the whole opening) and only added generic text at the end. That is invalid.\nYou must produce a full rewrite: new sentences throughout while preserving every substantive requirement from the source. Regroup content if helpful. Do not paste the source as a block and append bullets. Start immediately with the rewritten prompt—no apology or meta.`;
+  const messages = buildOptimizeMessagesForRequest(isCreate, instructions, userMessageBody);
+  const rewriteEchoRetrySystem = `${instructions}\n\nFINAL CONSTRAINT: Your entire reply must be the improved prompt text only. Never output rewrite rubric, task instructions, or meta-commentary—start with the first token of the improved prompt. Still follow the paragraph and newline rules from the prior formatting message (blank lines between paragraphs).`;
+  const rewriteLazyAppendRetrySystem = `${instructions}\n\nCRITICAL CORRECTION: The last answer kept too much of the user's original wording (often the whole opening) and only added generic text at the end. That is invalid.\nYou must produce a full rewrite: new sentences throughout while preserving every substantive requirement from the source. Regroup content if helpful. Do not paste the source as a block and append bullets. Start immediately with the rewritten prompt—no apology or meta. Still use blank lines (double newlines) between paragraphs in your output.`;
   let firstResult;
   try {
     firstResult = await callOpenAi({
@@ -2014,10 +2034,7 @@ export async function optimizePrompt(
     userSlot.length >= 24 &&
     looksLikeRewriteInstructionEcho(normalized.optimized_prompt)
   ) {
-    const retryMessages = [
-      { role: "system", content: rewriteEchoRetrySystem },
-      { role: "user", content: userMessageBody }
-    ];
+    const retryMessages = buildOptimizeMessagesForRequest(false, rewriteEchoRetrySystem, userMessageBody);
     const retryResult = await callOpenAi({
       messages: retryMessages,
       requestMode,
@@ -2044,10 +2061,11 @@ export async function optimizePrompt(
     looksLikeLazyAppendRewrite(normalized.optimized_prompt, userSlot) &&
     !looksLikeRewriteInstructionEcho(normalized.optimized_prompt)
   ) {
-    const lazyRetryMessages = [
-      { role: "system" as const, content: rewriteLazyAppendRetrySystem },
-      { role: "user" as const, content: userMessageBody }
-    ];
+    const lazyRetryMessages = buildOptimizeMessagesForRequest(
+      false,
+      rewriteLazyAppendRetrySystem,
+      userMessageBody
+    );
     const lazyRetryResult = await callOpenAi({
       messages: lazyRetryMessages,
       requestMode,
