@@ -686,7 +686,7 @@
             reject(new Error("Empty optimized prompt"));
             return;
           }
-          if (compose) {
+          if (optimizeMode === "generate") {
             const interpreted = interpretComposeOptimizedOutput(optimized);
             if (!interpreted.ok) {
               reject(new Error(interpreted.message));
