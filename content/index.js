@@ -809,7 +809,9 @@
 
   /**
    * ProseMirror-style contenteditable composers often truncate a single execCommand("insertText")
-   * for long strings. Prefer synthetic paste, then clear + small chunks, then textContent fallback.
+   * for long strings. Prefer synthetic paste after a hard clear, then chunked insertText, then
+   * textContent fallback. Always clear existing text first—otherwise paste can append and leave
+   * the old prompt above the improved text.
    */
   function replaceContentEditableText(target, fullText) {
     const text = String(fullText ?? "");
@@ -817,10 +819,18 @@
       target.focus();
     }
 
+    const normPlain = (s) =>
+      String(s || "")
+        .replace(/\u00a0/g, " ")
+        .replace(/\r\n/g, "\n")
+        .trim();
+
     const readSurfacePlainLength = () =>
       normalizeComposerPlainLength(
         String(target.innerText || target.textContent || "").replace(/\u00a0/g, " ")
       );
+
+    const surfaceMatchesDesired = () => normPlain(target.innerText || target.textContent) === normPlain(text);
 
     const trySyntheticPaste = () => {
       try {
@@ -846,29 +856,45 @@
       selection.addRange(range);
     };
 
-    if (text.length > 400) {
+    const clearSelection = () => {
       selectAllEditable();
+      if (typeof document.execCommand === "function") {
+        document.execCommand("delete", false);
+      } else if (selection && selection.rangeCount > 0) {
+        selection.getRangeAt(0).deleteContents();
+      } else {
+        target.textContent = "";
+      }
+    };
+
+    const insertInChunks = () => {
+      const CHUNK = 700;
+      if (typeof document.execCommand === "function") {
+        clearSelection();
+        for (let i = 0; i < text.length; i += CHUNK) {
+          document.execCommand("insertText", false, text.slice(i, i + CHUNK));
+        }
+      } else {
+        target.textContent = text;
+      }
+      dispatchInputEvents(target, text);
+    };
+
+    clearSelection();
+
+    if (text.length > 400) {
       trySyntheticPaste();
       dispatchInputEvents(target, text);
-      if (expected > 200 && readSurfacePlainLength() >= expected * 0.92) {
-        return;
-      }
     }
 
-    const CHUNK = 700;
-    if (typeof document.execCommand === "function") {
-      selectAllEditable();
-      document.execCommand("delete", false);
-      for (let i = 0; i < text.length; i += CHUNK) {
-        const chunk = text.slice(i, i + CHUNK);
-        document.execCommand("insertText", false, chunk);
-      }
-    } else {
-      target.textContent = text;
+    if (text.length <= 400 || !surfaceMatchesDesired()) {
+      insertInChunks();
     }
-    dispatchInputEvents(target, text);
 
     if (expected > 200 && readSurfacePlainLength() < expected * 0.92) {
+      target.textContent = text;
+      dispatchInputEvents(target, text);
+    } else if (!surfaceMatchesDesired() && expected > 80) {
       target.textContent = text;
       dispatchInputEvents(target, text);
     }
