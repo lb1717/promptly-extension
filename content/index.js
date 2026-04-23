@@ -908,7 +908,9 @@
     if (!surfaceMatchesDesired()) {
       try {
         target.innerHTML = plainTextToPasteHtml(text);
-        target.style.whiteSpace = "normal";
+        // `normal` collapses literal newlines in text nodes; host composers often need pre-wrap
+        // so pasted/improved prompts keep paragraph structure until ProseMirror normalizes.
+        target.style.whiteSpace = "pre-wrap";
         dispatchInputEvents(target, text);
       } catch (_e) {
         ensureContentEditablePlainNewlines(target);
