@@ -33,6 +33,30 @@ function isOpenAiGpt5FamilyModel(modelId) {
   return /^gpt-5/i.test(String(modelId || ""));
 }
 
+/** Improve/rewrite: strict paragraphs array → server joins with blank lines (Chat Completions). */
+function getOpenAiRewriteParagraphsResponseFormat() {
+  return {
+    type: "json_schema",
+    json_schema: {
+      name: "improved_prompt_paragraphs",
+      strict: true,
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["paragraphs"],
+        properties: {
+          paragraphs: {
+            type: "array",
+            minItems: 1,
+            description: "Each string is one paragraph; joined with blank lines for display.",
+            items: { type: "string" }
+          }
+        }
+      }
+    }
+  };
+}
+
 function getOpenAiPromptRefinerResponseFormat() {
   return {
     type: "json_schema",
@@ -171,7 +195,9 @@ export async function callProvider(env, messages, timeoutMs = 12000, options = {
       bodyPayload.temperature = 0.1;
     }
 
-    if (cfg.provider === "openai" && useJsonSchema) {
+    if (cfg.provider === "openai" && options.paragraphRewriteSchema) {
+      bodyPayload.response_format = getOpenAiRewriteParagraphsResponseFormat();
+    } else if (cfg.provider === "openai" && useJsonSchema) {
       bodyPayload.response_format = getOpenAiPromptRefinerResponseFormat();
     }
 

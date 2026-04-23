@@ -1057,6 +1057,37 @@ function formatDenseParagraphBlocks(t: string): string {
  * Models often return one dense block. Insert paragraph gaps where we can do so safely,
  * and normalize newlines so clients (and contenteditable + pre-line) can show structure.
  */
+/** When improve uses structured outputs, the API returns this shape; we join to plain text with blank lines. */
+function tryDecodeStructuredRewriteParagraphsJson(raw: string): string | null {
+  let t = String(raw || "").trim();
+  const jsonFence = t.match(/^```(?:json)?\s*([\s\S]*?)```\s*$/i);
+  if (jsonFence) {
+    t = jsonFence[1].trim();
+  }
+  if (!t.startsWith("{")) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(t) as { paragraphs?: unknown };
+    if (!parsed || !Array.isArray(parsed.paragraphs) || parsed.paragraphs.length === 0) {
+      return null;
+    }
+    const parts: string[] = [];
+    for (const p of parsed.paragraphs) {
+      const s = String(p ?? "").trim();
+      if (s.length > 0) {
+        parts.push(s);
+      }
+    }
+    if (parts.length === 0) {
+      return null;
+    }
+    return parts.join("\n\n");
+  } catch {
+    return null;
+  }
+}
+
 function postFormatPlainTextForApi(s: string): string {
   let t = String(s || "")
     .replace(/\r\n/g, "\n")
@@ -1090,6 +1121,12 @@ function normalizePlainRewriteOutput(rawText: string, fallbackPrompt: string) {
     .trim();
   if (!t) {
     return { optimized_prompt: fallbackPrompt };
+  }
+  const structuredPlain = tryDecodeStructuredRewriteParagraphsJson(t);
+  if (structuredPlain !== null) {
+    t = structuredPlain.replace(/\r\n/g, "\n").trim();
+    t = postFormatPlainTextForApi(t);
+    return { optimized_prompt: t.slice(0, 100_000) };
   }
   const fence = t.match(/^```(?:\w+)?\s*([\s\S]*?)```\s*$/);
   if (fence) {
@@ -1580,10 +1617,29 @@ const REWRITE_CONTINUATION_MAX_ROUNDS = 3;
 const REWRITE_OUTPUT_LINE_BREAK_REMINDER =
   "Formatting rule for your reply only (this is not part of the user's prompt): output plain text with visible paragraph breaks. You must insert actual newline characters in the completion: put a completely blank line (two newlines in a row) between paragraphs and between prose and any list. Put each list item on its own line beginning with \"- \" or \"1. \", \"2. \", etc. Do not return one long unbroken line—downstream clients paste this string literally and rely on those newline characters.";
 
+/** Third user turn when Responses API uses strict JSON schema for paragraphs (see callOpenAi). */
+const REWRITE_STRUCTURED_JSON_USER_REMINDER =
+  "Your entire assistant message must be one JSON object with exactly one property \"paragraphs\" whose value is a non-empty array of strings. Each string is one paragraph of the improved prompt (plain text only inside strings). No markdown fences, no keys other than \"paragraphs\", no text before or after the JSON.";
+
+/** Appended to developer/system instructions when improve uses structured paragraphs (GPT-5 Responses API). */
+const STRUCTURED_REWRITE_INSTRUCTION_SUFFIX = `Structured output (enforced by the API): your completion must be JSON with a single key "paragraphs" whose value is a non-empty array of strings. Each string is one user-visible paragraph of the improved prompt (plain text only inside the strings). The server joins them with blank lines for paste. Use several short paragraphs (several array elements) when the prompt has sections or lists; you may use newline characters inside a string for bullet lines within one paragraph.`;
+
+function getRewriteThirdUserTurnContent(structuredParagraphs: boolean): string {
+  return structuredParagraphs ? REWRITE_STRUCTURED_JSON_USER_REMINDER : REWRITE_OUTPUT_LINE_BREAK_REMINDER;
+}
+
+function applyStructuredRewriteInstructionSuffix(baseInstructions: string, structuredParagraphs: boolean): string {
+  if (!structuredParagraphs) {
+    return baseInstructions;
+  }
+  return `${baseInstructions}\n\n${STRUCTURED_REWRITE_INSTRUCTION_SUFFIX}`;
+}
+
 function buildOptimizeMessagesForRequest(
   isCreate: boolean,
   instructions: string,
-  userMessageBody: string
+  userMessageBody: string,
+  structuredParagraphs: boolean
 ): Array<{ role: string; content: string }> {
   if (isCreate) {
     return [
@@ -1594,7 +1650,7 @@ function buildOptimizeMessagesForRequest(
   return [
     { role: "system", content: instructions },
     { role: "user", content: userMessageBody },
-    { role: "user", content: REWRITE_OUTPUT_LINE_BREAK_REMINDER }
+    { role: "user", content: getRewriteThirdUserTurnContent(structuredParagraphs) }
   ];
 }
 
@@ -1717,6 +1773,8 @@ async function callOpenAi(options: {
   maxCompletionTokens: number;
   requestMode: string;
   createContinuationMaxRounds?: number;
+  /** When true (rewrite + GPT-5 Responses API), enforce JSON `paragraphs[]` so line breaks are guaranteed. */
+  rewriteStructuredParagraphs?: boolean;
 }) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort("timeout"), options.timeoutMs);
@@ -1728,7 +1786,8 @@ async function callOpenAi(options: {
   const url = useResponsesApi ? "https://api.openai.com/v1/responses" : "https://api.openai.com/v1/chat/completions";
 
   try {
-    const continuationRounds = modeSupportsContinuation
+    const rewriteStructured = isRewrite && options.rewriteStructuredParagraphs === true;
+    let continuationRounds = modeSupportsContinuation
       ? normalizeRuntimeControl(
           isCreate ? options.createContinuationMaxRounds : REWRITE_CONTINUATION_MAX_ROUNDS,
           isCreate ? CREATE_CONTINUATION_MAX_ROUNDS : REWRITE_CONTINUATION_MAX_ROUNDS,
@@ -1736,6 +1795,9 @@ async function callOpenAi(options: {
           6
         )
       : 1;
+    if (rewriteStructured) {
+      continuationRounds = 1;
+    }
     if (useResponsesApi) {
       // max_output_tokens counts reasoning + visible text.
       // store:true enables previous_response_id continuation when output hits max_output_tokens.
@@ -1748,13 +1810,33 @@ async function callOpenAi(options: {
         role: mapRoleForResponses(message.role),
         content: [{ type: "input_text", text: message.content }]
       }));
+      const textField: Record<string, unknown> = { verbosity: responsesTextVerbosity };
+      if (rewriteStructured) {
+        textField.format = {
+          type: "json_schema",
+          name: "improved_prompt_paragraphs",
+          strict: true,
+          description: "Improved user prompt as ordered plain-text paragraphs.",
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            required: ["paragraphs"],
+            properties: {
+              paragraphs: {
+                type: "array",
+                minItems: 1,
+                description: "Each string is one paragraph; joined with blank lines for display.",
+                items: { type: "string" }
+              }
+            }
+          }
+        };
+      }
       const baseResponsesFields: Record<string, unknown> = {
         model: options.model,
         max_output_tokens: options.maxCompletionTokens,
         stream: false,
-        text: {
-          verbosity: responsesTextVerbosity
-        }
+        text: textField
       };
       if (!isCreate) {
         baseResponsesFields.reasoning = { effort: "minimal" };
@@ -1784,7 +1866,7 @@ async function callOpenAi(options: {
                 ],
                 max_output_tokens: options.maxCompletionTokens,
                 stream: false,
-                text: { verbosity: responsesTextVerbosity },
+                text: textField,
                 store: true
               };
 
@@ -1945,20 +2027,24 @@ export async function optimizePrompt(
       : config.rewrite_auto_template;
   const userSlotRaw = trimmedPrompt || trimmedInstruction;
   const userSlot = isCreate ? userSlotRaw.slice(0, config.create_user_slot_max_chars) : userSlotRaw;
-  const { instructions } = splitPromptTemplateForOptimize(template);
+  const { instructions: instructionsBase } = splitPromptTemplateForOptimize(template);
   const userMessageBody = isCreate
     ? `Build one LLM-ready prompt that performs this user task (not meta-instructions about writing prompts). User description:\n\n${userSlot}`
     : userSlot;
-  const maxBundled = CREDIT_MAX_PROMPT_CHARS + PROMPT_TEMPLATE_MAX_CHARS;
-  const rewriteReminderOverhead = isCreate ? 0 : REWRITE_OUTPUT_LINE_BREAK_REMINDER.length;
-  if (instructions.length + userMessageBody.length + rewriteReminderOverhead > maxBundled) {
-    throw new Error("Bundled prompt exceeds safe size; shorten the template or user content.");
-  }
   let model = isCreate
     ? config.create_model
     : mode === "MANUAL"
       ? config.rewrite_manual_model
       : config.rewrite_auto_model;
+  let rewriteStructuredParagraphs = !isCreate && usesResponsesApi(model);
+  let instructions = applyStructuredRewriteInstructionSuffix(instructionsBase, rewriteStructuredParagraphs);
+  const maxBundled = CREDIT_MAX_PROMPT_CHARS + PROMPT_TEMPLATE_MAX_CHARS;
+  const rewriteBundledThirdOverhead = isCreate
+    ? 0
+    : Math.max(REWRITE_OUTPUT_LINE_BREAK_REMINDER.length, REWRITE_STRUCTURED_JSON_USER_REMINDER.length);
+  if (instructions.length + userMessageBody.length + rewriteBundledThirdOverhead > maxBundled) {
+    throw new Error("Bundled prompt exceeds safe size; shorten the template or user content.");
+  }
   const requestOptions = {
     model,
     timeoutMs: isCreate ? config.create_timeout_ms : config.rewrite_timeout_ms,
@@ -1969,15 +2055,21 @@ export async function optimizePrompt(
     }),
     createContinuationMaxRounds: config.create_continuation_max_rounds
   };
-  const messages = buildOptimizeMessagesForRequest(isCreate, instructions, userMessageBody);
-  const rewriteEchoRetrySystem = `${instructions}\n\nFINAL CONSTRAINT: Your entire reply must be the improved prompt text only. Never output rewrite rubric, task instructions, or meta-commentary—start with the first token of the improved prompt. Still follow the paragraph and newline rules from the prior formatting message (blank lines between paragraphs).`;
-  const rewriteLazyAppendRetrySystem = `${instructions}\n\nCRITICAL CORRECTION: The last answer kept too much of the user's original wording (often the whole opening) and only added generic text at the end. That is invalid.\nYou must produce a full rewrite: new sentences throughout while preserving every substantive requirement from the source. Regroup content if helpful. Do not paste the source as a block and append bullets. Start immediately with the rewritten prompt—no apology or meta. Still use blank lines (double newlines) between paragraphs in your output.`;
+  let messages = buildOptimizeMessagesForRequest(
+    isCreate,
+    instructions,
+    userMessageBody,
+    rewriteStructuredParagraphs
+  );
+  let rewriteEchoRetrySystem = `${instructions}\n\nFINAL CONSTRAINT: Your entire reply must be the improved prompt only—plain paragraphs or, when structured output is enabled, JSON with only a "paragraphs" array as instructed. Never output rewrite rubric, task instructions, or meta-commentary. Start with the first token of the improved prompt.`;
+  let rewriteLazyAppendRetrySystem = `${instructions}\n\nCRITICAL CORRECTION: The last answer kept too much of the user's original wording (often the whole opening) and only added generic text at the end. That is invalid.\nYou must produce a full rewrite: new sentences throughout while preserving every substantive requirement from the source. Regroup content if helpful. Do not paste the source as a block and append bullets. Start immediately with the rewritten prompt—no apology or meta. When structured JSON is required, output only that JSON with the paragraphs array; otherwise use blank lines between paragraphs.`;
   let firstResult;
   try {
     firstResult = await callOpenAi({
       messages,
       requestMode,
-      ...requestOptions
+      ...requestOptions,
+      rewriteStructuredParagraphs
     });
   } catch (error) {
     const shouldFallback = isProviderTimeoutError(error) || isProviderNoContentError(error);
@@ -1990,7 +2082,8 @@ export async function optimizePrompt(
           model,
           timeoutMs: requestOptions.timeoutMs,
           maxCompletionTokens: fastRetryTokens,
-          createContinuationMaxRounds: 1
+          createContinuationMaxRounds: 1,
+          rewriteStructuredParagraphs: false
         });
       } catch (_fastRetryError) {
         // Fall through to configured fallback model.
@@ -2015,13 +2108,24 @@ export async function optimizePrompt(
       throw error;
     }
     model = fallbackModel;
+    rewriteStructuredParagraphs = !isCreate && usesResponsesApi(model);
+    instructions = applyStructuredRewriteInstructionSuffix(instructionsBase, rewriteStructuredParagraphs);
+    messages = buildOptimizeMessagesForRequest(
+      isCreate,
+      instructions,
+      userMessageBody,
+      rewriteStructuredParagraphs
+    );
+    rewriteEchoRetrySystem = `${instructions}\n\nFINAL CONSTRAINT: Your entire reply must be the improved prompt only—plain paragraphs or, when structured output is enabled, JSON with only a "paragraphs" array as instructed. Never output rewrite rubric, task instructions, or meta-commentary. Start with the first token of the improved prompt.`;
+    rewriteLazyAppendRetrySystem = `${instructions}\n\nCRITICAL CORRECTION: The last answer kept too much of the user's original wording (often the whole opening) and only added generic text at the end. That is invalid.\nYou must produce a full rewrite: new sentences throughout while preserving every substantive requirement from the source. Regroup content if helpful. Do not paste the source as a block and append bullets. Start immediately with the rewritten prompt—no apology or meta. When structured JSON is required, output only that JSON with the paragraphs array; otherwise use blank lines between paragraphs.`;
     firstResult = await callOpenAi({
       messages,
       requestMode,
       model,
       timeoutMs: Math.max(12000, requestOptions.timeoutMs),
       maxCompletionTokens: requestOptions.maxCompletionTokens,
-      createContinuationMaxRounds: requestOptions.createContinuationMaxRounds
+      createContinuationMaxRounds: requestOptions.createContinuationMaxRounds,
+      rewriteStructuredParagraphs
     });
   }
   let normalized = normalizePlainRewriteOutput(firstResult.rawText, trimmedPrompt || trimmedInstruction);
@@ -2034,14 +2138,20 @@ export async function optimizePrompt(
     userSlot.length >= 24 &&
     looksLikeRewriteInstructionEcho(normalized.optimized_prompt)
   ) {
-    const retryMessages = buildOptimizeMessagesForRequest(false, rewriteEchoRetrySystem, userMessageBody);
+    const retryMessages = buildOptimizeMessagesForRequest(
+      false,
+      rewriteEchoRetrySystem,
+      userMessageBody,
+      rewriteStructuredParagraphs
+    );
     const retryResult = await callOpenAi({
       messages: retryMessages,
       requestMode,
       model,
       timeoutMs: requestOptions.timeoutMs,
       maxCompletionTokens: requestOptions.maxCompletionTokens,
-      createContinuationMaxRounds: requestOptions.createContinuationMaxRounds
+      createContinuationMaxRounds: requestOptions.createContinuationMaxRounds,
+      rewriteStructuredParagraphs
     });
     mergedUsage = mergeTokenUsage(firstResult.usage, retryResult.usage);
     normalized = normalizePlainRewriteOutput(retryResult.rawText, trimmedPrompt || trimmedInstruction);
@@ -2064,7 +2174,8 @@ export async function optimizePrompt(
     const lazyRetryMessages = buildOptimizeMessagesForRequest(
       false,
       rewriteLazyAppendRetrySystem,
-      userMessageBody
+      userMessageBody,
+      rewriteStructuredParagraphs
     );
     const lazyRetryResult = await callOpenAi({
       messages: lazyRetryMessages,
@@ -2072,7 +2183,8 @@ export async function optimizePrompt(
       model,
       timeoutMs: requestOptions.timeoutMs,
       maxCompletionTokens: requestOptions.maxCompletionTokens,
-      createContinuationMaxRounds: requestOptions.createContinuationMaxRounds
+      createContinuationMaxRounds: requestOptions.createContinuationMaxRounds,
+      rewriteStructuredParagraphs
     });
     mergedUsage = mergeTokenUsage(mergedUsage, lazyRetryResult.usage);
     let lazyNormalized = normalizePlainRewriteOutput(

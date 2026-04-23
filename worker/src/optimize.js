@@ -12,6 +12,11 @@ const INTERNAL_MANUAL_MARKER = "[REWRITE_MODE: MANUAL_REWRITE]";
 const REWRITE_OUTPUT_LINE_BREAK_REMINDER =
   "Formatting rule for your reply only (this is not part of the user's prompt): output plain text with visible paragraph breaks. You must insert actual newline characters in the completion: put a completely blank line (two newlines in a row) between paragraphs and between prose and any list. Put each list item on its own line beginning with \"- \" or \"1. \", \"2. \", etc. Do not return one long unbroken line—downstream clients paste this string literally and rely on those newline characters.";
 
+const REWRITE_STRUCTURED_JSON_USER_REMINDER =
+  "Your entire assistant message must be one JSON object with exactly one property \"paragraphs\" whose value is a non-empty array of strings. Each string is one paragraph of the improved prompt (plain text only inside strings). No markdown fences, no keys other than \"paragraphs\", no text before or after the JSON.";
+
+const STRUCTURED_REWRITE_INSTRUCTION_SUFFIX = `Structured output (enforced by the API): your completion must be JSON with a single key "paragraphs" whose value is a non-empty array of strings. Each string is one user-visible paragraph of the improved prompt (plain text only inside the strings). The server joins them with blank lines for paste. Use several short paragraphs (several array elements) when the prompt has sections or lists; you may use newline characters inside a string for bullet lines within one paragraph.`;
+
 function inferRewriteMode(userPrompt, userInstruction = "") {
   const hint = String(userInstruction || "").trim();
   if (hint.includes(INTERNAL_MANUAL_MARKER)) {
@@ -68,7 +73,7 @@ function looksLikeLazyAppendRewrite(output, source) {
   return false;
 }
 
-function buildRewriteMessages(userPrompt, userInstruction = "") {
+function buildRewriteMessages(userPrompt, userInstruction = "", paragraphRewriteSchema = false) {
   const mode = inferRewriteMode(userPrompt, userInstruction);
   const sharedConstraints = `
 
@@ -98,20 +103,22 @@ Hard rules:
 
 Return only the final rewritten prompt. Never output rubric or task-description prose instead of the improved prompt.${sharedConstraints}`;
 
+  const structuredTail = paragraphRewriteSchema ? `\n\n${STRUCTURED_REWRITE_INSTRUCTION_SUFFIX}` : "";
   const slot = String(userPrompt || "").trim();
   const userBody = slot;
+  const thirdUser = paragraphRewriteSchema ? REWRITE_STRUCTURED_JSON_USER_REMINDER : REWRITE_OUTPUT_LINE_BREAK_REMINDER;
 
   return [
-    { role: "system", content: systemPrompt },
+    { role: "system", content: systemPrompt + structuredTail },
     { role: "user", content: userBody },
-    { role: "user", content: REWRITE_OUTPUT_LINE_BREAK_REMINDER }
+    { role: "user", content: thirdUser }
   ];
 }
 
-function buildRewriteLazyRetryMessages(userPrompt, userInstruction = "") {
-  const base = buildRewriteMessages(userPrompt, userInstruction);
+function buildRewriteLazyRetryMessages(userPrompt, userInstruction = "", paragraphRewriteSchema = false) {
+  const base = buildRewriteMessages(userPrompt, userInstruction, paragraphRewriteSchema);
   const correction =
-    "CRITICAL CORRECTION: The last answer kept too much of the user's original wording and only added generic text at the end. That is invalid. Produce a full rewrite: new sentences throughout while preserving every substantive requirement. Do not paste the source as a block and append bullets. Start immediately with the rewritten prompt—no apology or meta. Still use blank lines (double newlines) between paragraphs in your output.";
+    "CRITICAL CORRECTION: The last answer kept too much of the user's original wording and only added generic text at the end. That is invalid. Produce a full rewrite: new sentences throughout while preserving every substantive requirement. Do not paste the source as a block and append bullets. Start immediately with the rewritten prompt—no apology or meta. When structured JSON is required, output only that JSON with the paragraphs array; otherwise use blank lines (double newlines) between paragraphs in your output.";
   return [
     { role: "system", content: `${base[0].content}\n\n${correction}` },
     base[1],
@@ -292,6 +299,36 @@ function postFormatPlainTextForApi(s) {
   return t.trim();
 }
 
+function tryDecodeStructuredRewriteParagraphsJson(raw) {
+  let t = String(raw || "").trim();
+  const jsonFence = t.match(/^```(?:json)?\s*([\s\S]*?)```\s*$/i);
+  if (jsonFence) {
+    t = jsonFence[1].trim();
+  }
+  if (!t.startsWith("{")) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(t);
+    if (!parsed || !Array.isArray(parsed.paragraphs) || parsed.paragraphs.length === 0) {
+      return null;
+    }
+    const parts = [];
+    for (const p of parsed.paragraphs) {
+      const s = String(p ?? "").trim();
+      if (s) {
+        parts.push(s);
+      }
+    }
+    if (!parts.length) {
+      return null;
+    }
+    return parts.join("\n\n");
+  } catch {
+    return null;
+  }
+}
+
 function mergeTokenUsage(a, b) {
   if (!a && !b) {
     return null;
@@ -313,6 +350,11 @@ function normalizePlainRewriteOutput(rawText, fallbackPrompt, sourceForStrip = "
   let t = String(rawText || "").trim();
   if (!t) {
     return { optimized_prompt: fallbackPrompt };
+  }
+  const structuredPlain = tryDecodeStructuredRewriteParagraphsJson(t);
+  if (structuredPlain != null) {
+    t = postFormatPlainTextForApi(structuredPlain.replace(/\r\n/g, "\n").trim());
+    return { optimized_prompt: t.slice(0, 12000) };
   }
   const fence = t.match(/^```(?:\w+)?\s*([\s\S]*?)```\s*$/);
   if (fence) {
@@ -379,8 +421,9 @@ export async function optimizePromptThroughProvider(
   requestMode = "rewrite"
 ) {
   if (requestMode === "rewrite") {
-    const messages = buildRewriteMessages(prompt, userInstruction);
     const providerName = String(env.PROVIDER || "openai").toLowerCase();
+    const paragraphRewriteSchema = providerName === "openai";
+    const messages = buildRewriteMessages(prompt, userInstruction, paragraphRewriteSchema);
     const rewriteModel =
       providerName === "openai"
         ? String(env.OPENAI_REWRITE_MODEL || "gpt-5-nano").trim()
@@ -392,6 +435,7 @@ export async function optimizePromptThroughProvider(
 
     const providerResult = await callProvider(env, messages, rewriteTimeoutMs, {
       useJsonSchema: false,
+      paragraphRewriteSchema,
       ...(rewriteModel ? { modelOverride: rewriteModel } : {}),
       ...(providerName === "openai" ? { gpt5MinTimeoutMs: 0 } : {})
     });
@@ -405,9 +449,10 @@ export async function optimizePromptThroughProvider(
       looksLikeLazyAppendRewrite(optimizedOut, slot) &&
       !looksLikeRewriteInstructionEcho(optimizedOut)
     ) {
-      const lazyMessages = buildRewriteLazyRetryMessages(prompt, userInstruction);
+      const lazyMessages = buildRewriteLazyRetryMessages(prompt, userInstruction, paragraphRewriteSchema);
       const lazyResult = await callProvider(env, lazyMessages, rewriteTimeoutMs, {
         useJsonSchema: false,
+        paragraphRewriteSchema,
         ...(rewriteModel ? { modelOverride: rewriteModel } : {}),
         ...(providerName === "openai" ? { gpt5MinTimeoutMs: 0 } : {})
       });
