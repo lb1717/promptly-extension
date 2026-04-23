@@ -329,6 +329,19 @@ function tryDecodeStructuredRewriteParagraphsJson(raw) {
   }
 }
 
+function stripComposeMetaForbiddenSections(s) {
+  let t = String(s || "");
+  t = t.replace(/<forbidden\b[^>]*>[\s\S]*?<\/forbidden>/gi, (block) => {
+    const inner = block.replace(/<\/?forbidden\b[^>]*>/gi, "").toLowerCase();
+    const looksLikePromptMetaPolice =
+      /generic\s+prompts?|meta[-\s]?content|prompt\s+engineering|compose\s+(a\s+)?prompt|write\s+a\s+prompt|output\s+anything\s+besides|anything\s+besides\s+the|only\s+output\s+the|not\s+output\s+generic|meta[-\s]?instructions?\s+about|rubric\s+for\s+writing|lessons\s+on\s+prompts/i.test(
+        inner
+      );
+    return looksLikePromptMetaPolice ? "" : block;
+  });
+  return t.replace(/\n{3,}/g, "\n\n").trim();
+}
+
 function mergeTokenUsage(a, b) {
   if (!a && !b) {
     return null;
@@ -346,7 +359,7 @@ function mergeTokenUsage(a, b) {
   };
 }
 
-function normalizePlainRewriteOutput(rawText, fallbackPrompt, sourceForStrip = "") {
+function normalizePlainRewriteOutput(rawText, fallbackPrompt, sourceForStrip = "", composeGeneratedPrompt = false) {
   let t = String(rawText || "").trim();
   if (!t) {
     return { optimized_prompt: fallbackPrompt };
@@ -389,6 +402,9 @@ function normalizePlainRewriteOutput(rawText, fallbackPrompt, sourceForStrip = "
     }
   }
   t = postFormatPlainTextForApi(t);
+  if (composeGeneratedPrompt) {
+    t = stripComposeMetaForbiddenSections(t);
+  }
   return { optimized_prompt: t.slice(0, 12000) };
 }
 
@@ -398,6 +414,8 @@ function buildGenerateMessages(userPrompt) {
 Output ONE ready-to-paste prompt the LLM can follow to DO THAT TASK: direct operational instructions (goals, audience, inputs, constraints, tone, deliverable format, length). Write as if the assistant will execute the work now.
 
 Do NOT return meta-text about composing prompts (no "write a prompt that", no "this document guides you to craft…"). The output must BE the task prompt itself—not instructions about how to write prompts.
+
+Any bans, "never do X", or safety limits must follow from the user's actual task—not boilerplate <forbidden> / <rules> blocks about generic prompts or "only output the X prompt". If something must be forbidden, say it in plain task language grounded in their goal. Do not use those XML-style tags unless the user explicitly asked for that format.
 
 Layout: blank line between sections (two newlines); blank line before and after lists; "- " or "1. " for lists. Plain text only—no # markdown headings, no code fences.
 
@@ -409,7 +427,7 @@ Target 220–600 words when the task needs detail; shorter if trivial. Hard max 
     {
       role: "user",
       content:
-        "Return only the final prompt as plain paragraphs and lists. Do not answer the task yourself; output the prompt that would get another model to do it."
+        "Return only the final prompt as plain paragraphs and lists. Do not answer the task yourself; output the prompt that would get another model to do it. Do not add meta-only <forbidden> sections—task-specific prohibitions only."
     }
   ];
 }
@@ -440,7 +458,7 @@ export async function optimizePromptThroughProvider(
       ...(providerName === "openai" ? { gpt5MinTimeoutMs: 0 } : {})
     });
     const slot = String(prompt || "").trim();
-    let normalized = normalizePlainRewriteOutput(providerResult.rawText, prompt || userInstruction, prompt);
+    let normalized = normalizePlainRewriteOutput(providerResult.rawText, prompt || userInstruction, prompt, false);
     let optimizedOut = normalized.optimized_prompt;
     let mergedUsage = providerResult.usage;
 
@@ -457,7 +475,7 @@ export async function optimizePromptThroughProvider(
         ...(providerName === "openai" ? { gpt5MinTimeoutMs: 0 } : {})
       });
       mergedUsage = mergeTokenUsage(mergedUsage, lazyResult.usage);
-      let lazyNormalized = normalizePlainRewriteOutput(lazyResult.rawText, prompt || userInstruction, prompt);
+      let lazyNormalized = normalizePlainRewriteOutput(lazyResult.rawText, prompt || userInstruction, prompt, false);
       let lazyOut = lazyNormalized.optimized_prompt;
       if (!looksLikeLazyAppendRewrite(lazyOut, slot)) {
         optimizedOut = lazyOut;
@@ -491,7 +509,7 @@ export async function optimizePromptThroughProvider(
     ...(createModel ? { modelOverride: createModel } : {}),
     ...(providerName === "openai" ? { gpt5MinTimeoutMs: 0 } : {})
   });
-  const normalized = normalizePlainRewriteOutput(providerResult.rawText, prompt || userInstruction);
+  const normalized = normalizePlainRewriteOutput(providerResult.rawText, prompt || userInstruction, "", true);
   return {
     optimized_prompt: postFormatPlainTextForApi(normalized.optimized_prompt),
     clarifying_questions: [],

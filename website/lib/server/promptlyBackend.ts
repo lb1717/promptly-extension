@@ -1115,7 +1115,28 @@ function postFormatPlainTextForApi(s: string): string {
   return t.trim();
 }
 
-function normalizePlainRewriteOutput(rawText: string, fallbackPrompt: string) {
+/**
+ * Generate Prompt (compose) sometimes echoes `<forbidden>` blocks about prompt-engineering meta
+ * ("no generic prompts") instead of task-specific bans. Remove those; keep blocks that look task-grounded.
+ */
+function stripComposeMetaForbiddenSections(s: string): string {
+  let t = String(s || "");
+  t = t.replace(/<forbidden\b[^>]*>[\s\S]*?<\/forbidden>/gi, (block) => {
+    const inner = block.replace(/<\/?forbidden\b[^>]*>/gi, "").toLowerCase();
+    const looksLikePromptMetaPolice =
+      /generic\s+prompts?|meta[-\s]?content|prompt\s+engineering|compose\s+(a\s+)?prompt|write\s+a\s+prompt|output\s+anything\s+besides|anything\s+besides\s+the|only\s+output\s+the|not\s+output\s+generic|meta[-\s]?instructions?\s+about|rubric\s+for\s+writing|lessons\s+on\s+prompts/i.test(
+        inner
+      );
+    return looksLikePromptMetaPolice ? "" : block;
+  });
+  return t.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function normalizePlainRewriteOutput(
+  rawText: string,
+  fallbackPrompt: string,
+  options?: { create?: boolean }
+) {
   let t = String(rawText || "")
     .replace(/\r\n/g, "\n")
     .trim();
@@ -1143,6 +1164,9 @@ function normalizePlainRewriteOutput(rawText: string, fallbackPrompt: string) {
     }
   }
   t = postFormatPlainTextForApi(t);
+  if (options?.create) {
+    t = stripComposeMetaForbiddenSections(t);
+  }
   return { optimized_prompt: t.slice(0, 100_000) };
 }
 
@@ -1279,6 +1303,7 @@ Output ONE ready-to-paste prompt that instructs an LLM to DO THAT TASK. Write in
 Hard rules:
 - Do NOT output meta-instructions about how to compose or critique prompts (no "This prompt will guide you to craft…", no "brainstorm angles", no "write a prompt that asks…"). The output IS the task prompt itself.
 - Do NOT frame the work as "write a prompt for X" unless the user's literal task is prompt-design. Otherwise, the body should read like instructions for doing X.
+- Prohibitions, "never do X", or safety limits must follow from the user's actual task (what they said to avoid, domain-appropriate constraints, compliance for that deliverable). Do NOT add XML/markdown scaffolding such as <forbidden>, <rules>, or similar sections whose only purpose is to police prompt-writing ("no generic prompts", "only output the review prompt", meta about this tool). If the user did not ask for that tag format, do not use it. When something must be forbidden, state it plainly inside the task instructions, grounded in the user's goal.
 - MANDATORY layout: use two newline characters (one blank line) between sections; one blank line before and after every list; use "- " or "1. " list lines where they clarify requirements. Plain text only—no markdown # headings, no code fences.
 
 Reply with only that prompt as plain text—no preamble—or JSON {"prompt":"..."} if plain text is impossible.
@@ -2029,7 +2054,13 @@ export async function optimizePrompt(
   const userSlot = isCreate ? userSlotRaw.slice(0, config.create_user_slot_max_chars) : userSlotRaw;
   const { instructions: instructionsBase } = splitPromptTemplateForOptimize(template);
   const userMessageBody = isCreate
-    ? `Build one LLM-ready prompt that performs this user task (not meta-instructions about writing prompts). User description:\n\n${userSlot}`
+    ? `Build one LLM-ready prompt that performs this user task (not meta-instructions about writing prompts).
+
+Any "must not" / forbidden items in your output must come from the user's real task (what they said to avoid, or sensible limits for that domain)—not boilerplate about generic prompts, meta content, or "only output the X prompt". Do not wrap those meta rules in <forbidden> or similar tags unless the user explicitly asked for that structure.
+
+User description:
+
+${userSlot}`
     : userSlot;
   let model = isCreate
     ? config.create_model
@@ -2089,7 +2120,9 @@ export async function optimizePrompt(
         // Fall through to configured fallback model.
       }
       if (firstResult) {
-        const normalizedFast = normalizePlainRewriteOutput(firstResult.rawText, trimmedPrompt || trimmedInstruction);
+        const normalizedFast = normalizePlainRewriteOutput(firstResult.rawText, trimmedPrompt || trimmedInstruction, {
+          create: true
+        });
         return {
           optimized_prompt: postFormatPlainTextForApi(normalizedFast.optimized_prompt),
           usage: firstResult.usage,
@@ -2128,7 +2161,9 @@ export async function optimizePrompt(
       rewriteStructuredParagraphs
     });
   }
-  let normalized = normalizePlainRewriteOutput(firstResult.rawText, trimmedPrompt || trimmedInstruction);
+  let normalized = normalizePlainRewriteOutput(firstResult.rawText, trimmedPrompt || trimmedInstruction, {
+    create: isCreate
+  });
   if (!isCreate) {
     normalized = { optimized_prompt: polishRewriteModelOutput(normalized.optimized_prompt, userSlot) };
   }
@@ -2154,7 +2189,9 @@ export async function optimizePrompt(
       rewriteStructuredParagraphs
     });
     mergedUsage = mergeTokenUsage(firstResult.usage, retryResult.usage);
-    normalized = normalizePlainRewriteOutput(retryResult.rawText, trimmedPrompt || trimmedInstruction);
+    normalized = normalizePlainRewriteOutput(retryResult.rawText, trimmedPrompt || trimmedInstruction, {
+      create: false
+    });
     if (!isCreate) {
       normalized = { optimized_prompt: polishRewriteModelOutput(normalized.optimized_prompt, userSlot) };
     }
@@ -2187,10 +2224,9 @@ export async function optimizePrompt(
       rewriteStructuredParagraphs
     });
     mergedUsage = mergeTokenUsage(mergedUsage, lazyRetryResult.usage);
-    let lazyNormalized = normalizePlainRewriteOutput(
-      lazyRetryResult.rawText,
-      trimmedPrompt || trimmedInstruction
-    );
+    let lazyNormalized = normalizePlainRewriteOutput(lazyRetryResult.rawText, trimmedPrompt || trimmedInstruction, {
+      create: false
+    });
     lazyNormalized = {
       optimized_prompt: polishRewriteModelOutput(lazyNormalized.optimized_prompt, userSlot)
     };
