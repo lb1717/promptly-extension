@@ -1,8 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  // Local default `.next-build` avoids odd local presets; Vercel sets `VERCEL=1` and expects `.next`.
-  distDir: process.env.NEXT_DIST_DIR || (process.env.VERCEL ? ".next" : ".next-build"),
+  // Default `.next-build` so builds match Vercel when Output Directory is set to `.next-build`.
+  // If your Vercel project uses the default Next folder instead, set env `NEXT_DIST_DIR=.next`.
+  distDir: process.env.NEXT_DIST_DIR || ".next-build",
   async headers() {
     return [
       {
