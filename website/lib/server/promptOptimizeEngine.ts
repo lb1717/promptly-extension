@@ -36,7 +36,10 @@ export function resolveOptimizeEngineMode(payload: {
   return "auto";
 }
 
-/** Framework text: template split at the user token (Prompt 1). */
+/**
+ * Validates template shape for admin saves (token must appear exactly once).
+ * Returns the framework-only text without the user slot (instructions joined around the removed token).
+ */
 export function extractFrameworkInstructionsFromTemplate(template: string): string {
   const t = String(template || "").trim();
   const tok = PROMPTLY_USER_CONTENT_TOKEN;
@@ -59,37 +62,24 @@ export function extractFrameworkInstructionsFromTemplate(template: string): stri
   return instructions;
 }
 
-export function buildPrompt1FrameworkFromTemplate(template: string): string {
-  return extractFrameworkInstructionsFromTemplate(template);
-}
-
-/** Task turn (Prompt 2): mode-specific instruction + delimited user slot. */
-export function buildPrompt2TaskForMode(mode: OptimizeEngineMode, userSlot: string): string {
-  const slot = String(userSlot || "").trim();
-  switch (mode) {
-    case "auto":
-      return `Using the framework and instructions in my previous message, interpret the following user input and transform it into the best possible LLM-ready prompt. Reply with only the final prompt—no preamble, labels, or meta-commentary.
-
----USER_INPUT---
-${slot}
----END---`;
-    case "improve":
-      return `Using the framework and instructions in my previous message, rewrite and improve the following user prompt. Reply with only the final improved prompt—no preamble, labels, or meta-commentary.
-
----USER_PROMPT---
-${slot}
----END---`;
-    case "generate":
-      return `Using the framework and instructions in my previous message, generate one ready-to-paste task prompt from the following user request and the provided instructions. Reply with only that prompt (plain text, or JSON if the framework requires it).
-
----USER_REQUEST---
-${slot}
----END---`;
-    default: {
-      const _exhaustive: never = mode;
-      return _exhaustive;
-    }
+/**
+ * One-shot optimize message: substitute the Firestore/admin template's user slot with actual user text.
+ * The template must contain `<<PROMPTLY_USER_CONTENT>>` exactly once.
+ */
+export function fillPromptTemplateWithUserSlot(template: string, userSlot: string): string {
+  const t = String(template || "").trim();
+  const tok = PROMPTLY_USER_CONTENT_TOKEN;
+  if (!t.includes(tok)) {
+    throw new Error(
+      `Prompt engineering template must include the token ${tok} exactly as shown (you may place it anywhere).`
+    );
   }
+  const parts = t.split(tok);
+  if (parts.length !== 2) {
+    throw new Error(`${tok} must appear exactly once in the template (found ${parts.length - 1}).`);
+  }
+  const slot = String(userSlot || "").trim();
+  return `${parts[0]}${slot}${parts[1]}`.trim();
 }
 
 export type EngineTemplateFields = {
@@ -142,14 +132,4 @@ export function pickTimeoutMsForMode(
   timeouts: { rewrite_timeout_ms: number; create_timeout_ms: number }
 ): number {
   return mode === "generate" ? timeouts.create_timeout_ms : timeouts.rewrite_timeout_ms;
-}
-
-export function buildDualUserTurnMessages(
-  frameworkInstructions: string,
-  taskTurn: string
-): Array<{ role: "user"; content: string }> {
-  return [
-    { role: "user", content: String(frameworkInstructions || "").trim() },
-    { role: "user", content: String(taskTurn || "").trim() }
-  ];
 }

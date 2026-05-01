@@ -4,8 +4,10 @@ const FIREBASE_ID_TOKEN_BUFFER_SEC = 60;
 const DEFAULT_FIREBASE_WEB_API_KEY = "AIzaSyChQ2kiTwunWs9ElDYkU7Cz-i8I9dw29NI";
 const DEFAULT_FIREBASE_AUTH_DOMAIN = "promptly-prod-976ef.firebaseapp.com";
 const DEFAULT_FIREBASE_WEB_OAUTH_CLIENT_ID = "913040005574-npbiuat4hl1d3icqoe5lmtuh34qqd8d6.apps.googleusercontent.com";
-const OPTIMIZE_REWRITE_TIMEOUT_MS = 25000;
-const OPTIMIZE_CREATE_TIMEOUT_MS = 95000;
+// Match website prompt-engineering caps (Firebase `rewrite_timeout_ms` / `create_timeout_ms`
+// normalized in promptlyBackend `loadPromptEngineeringConfig`: rewrite 8k–120k, create 10k–180k).
+const OPTIMIZE_REWRITE_TIMEOUT_MS = 120000;
+const OPTIMIZE_CREATE_TIMEOUT_MS = 180000;
 
 /** Web-auth flow does not always populate chrome.identity.getAuthToken cache — persist token for this session. */
 const SESSION_WEB_AUTH_TOKEN = "promptlyWebAuthAccessToken";
@@ -961,11 +963,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         });
         return;
       }
-      if (!body.optimized_prompt) {
+      const rawOut = typeof body.optimized_prompt === "string" ? body.optimized_prompt : "";
+      const trimmedOut = rawOut.trim();
+      const fallback =
+        optimizeMode === "generate"
+          ? String(userInstruction || prompt || "").trim()
+          : String(prompt || userInstruction || "").trim();
+      const optimized_prompt = trimmedOut || fallback;
+      if (!optimized_prompt) {
         sendResponse({ ok: false, error: "No optimized_prompt returned" });
         return;
       }
-      sendResponse({ ok: true, data: body });
+      sendResponse({ ok: true, data: { ...body, optimized_prompt } });
     } catch (error) {
       sendResponse({ ok: false, error: String(error?.message || error) });
     }

@@ -16,6 +16,10 @@
   const UI_DISPLAY_DELAY_MS = 300;
   const BASE_CONTEXT_WINDOW_WIDTH = 330;
   const EXPANDED_CONTEXT_WINDOW_MULTIPLIER = 1.5;
+  /** Claude-only: nudge anchor top upward so the tab sits flush on the prompt shell (px). */
+  const CLAUDE_PLACEMENT_TOP_OFFSET_PX = -14;
+  /** After Generate Prompt succeeds with the panel open, collapse back to tab-only (ms). */
+  const COMPOSE_SUCCESS_PANEL_AUTO_CLOSE_MS = 2000;
 
   function purgeLegacyPromptlyNodes() {
     const staleNodes = document.querySelectorAll(
@@ -42,6 +46,15 @@
   let bypassNextAutoSendInterception = false;
   let dragStartOffsetX = 0;
   let composeWidthExpanded = false;
+  let composePopupAutoCloseTimer = null;
+
+  function clearComposePopupAutoCloseTimer() {
+    if (composePopupAutoCloseTimer != null) {
+      window.clearTimeout(composePopupAutoCloseTimer);
+      composePopupAutoCloseTimer = null;
+    }
+  }
+
   const MAX_DRAG_LEFT_PX = -75;
   const MAX_DRAG_RIGHT_PX = 225;
   const offsetStorageKey = `promptly:center-offset-x:${site}`;
@@ -75,8 +88,154 @@
     /** After Generate Prompt: Improve button shows muted/disabled "Prompt Already Strong ✓". After Improve: muted "Prompt Improved ✓". */
     improveMutedByCompose: false,
     lockedSuggestions: null,
-    appliedSuggestionKeys: new Set()
+    appliedSuggestionKeys: new Set(),
+    /** Mutually exclusive groups; one random option per session after Improve (not Generate). */
+    furtherImproveChoices: null,
+    appliedFurtherImproveIds: new Set()
   };
+
+  const FURTHER_IMPROVE_GROUPS = [
+    {
+      options: [
+        {
+          id: "uploaded-sources",
+          label: "Use Uploaded Sources",
+          snippet:
+            "<<Restrict all responses strictly to the provided uploaded sources and do not use any external knowledge.>>"
+        },
+        {
+          id: "web-research",
+          label: "Enable Web Research",
+          snippet:
+            "<<Incorporate relevant, up-to-date information from external sources when necessary to improve accuracy.>>"
+        }
+      ]
+    },
+    {
+      options: [
+        {
+          id: "concise-output",
+          label: "Concise Output Mode",
+          snippet:
+            "<<Deliver responses that are brief, direct, and free of unnecessary verbosity.>>"
+        },
+        {
+          id: "in-depth",
+          label: "In-Depth Explanation",
+          snippet:
+            "<<Provide thorough, detailed explanations with depth, nuance, and supporting reasoning.>>"
+        }
+      ]
+    },
+    {
+      options: [
+        {
+          id: "beginner-friendly",
+          label: "Beginner-Friendly Mode",
+          snippet:
+            "<<Explain concepts clearly and simply, defining terms and avoiding unnecessary complexity.>>"
+        },
+        {
+          id: "expert-detail",
+          label: "Expert-Level Detail",
+          snippet:
+            "<<Assume an expert audience and use advanced terminology with deep technical detail.>>"
+        }
+      ]
+    },
+    {
+      options: [
+        {
+          id: "human-like",
+          label: "Human-Like Writing",
+          snippet:
+            "<<Write in a natural, human-like tone with varied sentence structure and avoid robotic phrasing.>>"
+        },
+        {
+          id: "professional-tone",
+          label: "Professional Tone",
+          snippet:
+            "<<Use a formal, structured, and professional tone appropriate for business or academic contexts.>>"
+        },
+        {
+          id: "creative-thinking",
+          label: "Creative Thinking Mode",
+          snippet:
+            "<<Encourage originality and generate creative, non-obvious ideas or approaches.>>"
+        }
+      ]
+    },
+    {
+      options: [
+        {
+          id: "step-by-step",
+          label: "Step-by-Step Logic",
+          snippet: "<<Break down reasoning into clear, sequential steps that are easy to follow.>>"
+        },
+        {
+          id: "structured-formatting",
+          label: "Structured Formatting",
+          snippet:
+            "<<Organize the response using clear sections, headings, and structured formatting for readability.>>"
+        }
+      ]
+    },
+    {
+      options: [
+        {
+          id: "no-hallucination",
+          label: "Strict No Hallucination",
+          snippet:
+            "<<Do not fabricate information; if uncertain or lacking data, explicitly state the limitation.>>"
+        },
+        {
+          id: "self-check",
+          label: "Self-Check Responses",
+          snippet:
+            "<<Review the response for errors, inconsistencies, or omissions and correct them before finalizing.>>"
+        }
+      ]
+    },
+    {
+      options: [
+        {
+          id: "cite-sources",
+          label: "Cite All Sources",
+          snippet:
+            "<<Provide clear citations or references for all factual claims and sourced information.>>"
+        }
+      ]
+    },
+    {
+      options: [
+        {
+          id: "actionable",
+          label: "Actionable Responses",
+          snippet:
+            "<<Focus on practical, executable guidance and avoid abstract or non-actionable content.>>"
+        }
+      ]
+    }
+  ];
+
+  function shuffleFurtherImproveGroups(groups) {
+    const arr = [...groups];
+    for (let i = arr.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  function pickFurtherImproveOptions(wordCount) {
+    const need = wordCount <= 100 ? 5 : 6;
+    const shuffled = shuffleFurtherImproveGroups(FURTHER_IMPROVE_GROUPS);
+    const n = Math.min(need, shuffled.length);
+    return shuffled.slice(0, n).map((group) => {
+      const opts = group.options;
+      return opts[Math.floor(Math.random() * opts.length)];
+    });
+  }
 
   /** Lenient gate for Improve / auto-rewrite: not empty; 2+ words OR one clear word (3+ chars). */
   function isImprovePromptSubstantive(text) {
@@ -241,6 +400,155 @@
   } catch (_error) {
     savedVisualColor = "black";
   }
+
+  /** Skip strict visibility bounds (findMeasurableBoundsHost) when appending to the host composer. */
+  function isLikelyWritableComposer(el) {
+    if (!el || !el.isConnected) {
+      return false;
+    }
+    if (typeof adapters.isInsidePromptlyUi === "function" && adapters.isInsidePromptlyUi(el)) {
+      return false;
+    }
+    if ("disabled" in el && el.disabled) {
+      return false;
+    }
+    if ("readOnly" in el && el.readOnly) {
+      return false;
+    }
+    if (el instanceof HTMLTextAreaElement) {
+      return true;
+    }
+    if (el instanceof HTMLInputElement) {
+      return el.type === "text" || el.type === "search";
+    }
+    if (el.getAttribute("role") === "textbox") {
+      return true;
+    }
+    return !!(el.isContentEditable || el.getAttribute("contenteditable") === "true");
+  }
+
+  function readPromptPlainForVerify(target) {
+    if (!target || !isLikelyWritableComposer(target)) {
+      return "";
+    }
+    if (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) {
+      return String(target.value || "");
+    }
+    const surface =
+      typeof adapters.getPromptWriteSurface === "function" ? adapters.getPromptWriteSurface(target) : target;
+    const el = surface && isLikelyWritableComposer(surface) ? surface : target;
+    return String(el.innerText || el.textContent || "").replace(/\u00a0/g, " ");
+  }
+
+  function queryFallbackHostComposer() {
+    const owned = (node) =>
+      !!node &&
+      typeof adapters.isInsidePromptlyUi === "function" &&
+      adapters.isInsidePromptlyUi(node);
+    const selectors = [
+      "#prompt-textarea",
+      '[data-testid="chat-input"]',
+      "textarea[data-testid]",
+      "div.ProseMirror[contenteditable='true'][role='textbox']",
+      "div[contenteditable='true'][role='textbox']"
+    ];
+    for (const sel of selectors) {
+      let el = null;
+      try {
+        el = document.querySelector(sel);
+      } catch (_e) {
+        continue;
+      }
+      if (!el || !el.isConnected || owned(el)) {
+        continue;
+      }
+      if (adapters.isEditable(el) || isLikelyWritableComposer(el)) {
+        return el;
+      }
+    }
+    return null;
+  }
+
+  /** ChatGPT / Claude sometimes mount the composer inside shadow roots — querySelector on document misses them. */
+  function queryFallbackHostComposerDeep() {
+    const owned = (node) =>
+      !!node &&
+      typeof adapters.isInsidePromptlyUi === "function" &&
+      adapters.isInsidePromptlyUi(node);
+    const candidates = [];
+    const seen = new Set();
+    function collect(root) {
+      if (!root || !root.querySelectorAll) {
+        return;
+      }
+      root.querySelectorAll("textarea, [contenteditable='true'], [role='textbox']").forEach((el) => {
+        if (!(el instanceof Element) || seen.has(el)) {
+          return;
+        }
+        seen.add(el);
+        if (!el.isConnected || owned(el)) {
+          return;
+        }
+        const rect = el.getBoundingClientRect();
+        if (rect.width < 32 || rect.height < 8) {
+          return;
+        }
+        candidates.push(el);
+      });
+      root.querySelectorAll("*").forEach((el) => {
+        if (el.shadowRoot) {
+          collect(el.shadowRoot);
+        }
+      });
+    }
+    collect(document.documentElement);
+    candidates.sort((a, b) => {
+      const rb = b.getBoundingClientRect().bottom;
+      const ra = a.getBoundingClientRect().bottom;
+      return rb - ra;
+    });
+    for (const el of candidates) {
+      if (adapters.isEditable(el) || isLikelyWritableComposer(el)) {
+        return el;
+      }
+    }
+    return null;
+  }
+
+  /** Best-effort main chat composer for “improve further” — prefer a fresh scan, then tracked targets. */
+  function resolveFurtherImproveHost() {
+    const owned = (node) =>
+      !!node &&
+      typeof adapters.isInsidePromptlyUi === "function" &&
+      adapters.isInsidePromptlyUi(node);
+    const pick = (node) => {
+      if (!node || !node.isConnected || owned(node)) {
+        return null;
+      }
+      return isLikelyWritableComposer(node) ? node : null;
+    };
+    let host = null;
+    if (typeof adapters.getPromptElement === "function") {
+      host = pick(adapters.getPromptElement(null));
+      if (!host) {
+        host = pick(adapters.getPromptElement(currentTarget));
+      }
+    }
+    if (!host) {
+      host = pick(currentTarget);
+    }
+    if (!host) {
+      host = pick(hintedTarget);
+    }
+    if (!host) {
+      host = pick(queryFallbackHostComposer());
+    }
+    if (!host) {
+      host = pick(queryFallbackHostComposerDeep());
+    }
+    return host;
+  }
+
   const ui = new PromptlyTabUI({
     onToggle: () => {
       isOpen = !isOpen;
@@ -305,7 +613,40 @@
       ui.setVisualColor(next);
       observers.scheduleUpdate();
     },
+    onFurtherImproveAppend: ({ id, snippet }) => {
+      const fid = String(id || "").trim();
+      const snip = String(snippet || "").trim();
+      if (!fid || !snip) {
+        return;
+      }
+      if (promptLifecycleState.appliedFurtherImproveIds.has(fid)) {
+        return;
+      }
+      const host = resolveFurtherImproveHost();
+      if (!host) {
+        return;
+      }
+      try {
+        host.focus({ preventScroll: true });
+      } catch (_err) {
+        try {
+          host.focus();
+        } catch (_err2) {
+          // Host may reject programmatic focus; replaceTargetText still attempts insertion.
+        }
+      }
+      const ok = applyFurtherImproveSnippet(host, snip);
+      if (!ok) {
+        observers.scheduleUpdate();
+        return;
+      }
+      promptLifecycleState.appliedFurtherImproveIds.add(fid);
+      hintedTarget = host;
+      refreshOpenPopupFromHost(host);
+      observers.scheduleUpdate();
+    },
     onAutoAdjust: async (payload = {}) => {
+      clearComposePopupAutoCloseTimer();
       if (autoAdjustInFlight || !currentTarget || !adapters.isEditable(currentTarget)) {
         return;
       }
@@ -395,8 +736,20 @@
           composeSuccessUiHandled = true;
           promptLifecycleState.composePromptWritten = true;
           promptLifecycleState.improveMutedByCompose = true;
+          if (isOpen) {
+            composePopupAutoCloseTimer = window.setTimeout(() => {
+              composePopupAutoCloseTimer = null;
+              closePopup();
+            }, COMPOSE_SUCCESS_PANEL_AUTO_CLOSE_MS);
+          }
         } else {
           promptLifecycleState.improveMutedByCompose = false;
+          const wc = String(optimizedPrompt || "")
+            .trim()
+            .split(/\s+/)
+            .filter(Boolean).length;
+          promptLifecycleState.furtherImproveChoices = pickFurtherImproveOptions(wc);
+          promptLifecycleState.appliedFurtherImproveIds = new Set();
         }
         if (!isOpen) {
           ui.setTabStatus(isComposeMode ? "strong" : "improved");
@@ -599,6 +952,10 @@
     if (lowered.includes("not enough api tokens")) return "Not enough tokens left for this prompt.";
     if (lowered.includes("timeout")) return "Request timed out. Try again.";
     if (lowered.includes("sign in with promptly first")) return "Sign in with the tab Sign in button, then try again.";
+    // Legacy server message; current API never returns this for improve.
+    if (lowered.includes("echoed the request") || lowered.includes("request wrapper")) {
+      return "Try Improve again in a moment.";
+    }
     return msg.length > 140 ? `${msg.slice(0, 140)}…` : msg;
   }
 
@@ -683,12 +1040,17 @@
               return;
             }
             const optimized = String(response.data.optimized_prompt || "").trim();
-            if (!optimized) {
+            const clientFallback =
+              optimizeMode === "generate"
+                ? String(userInstruction || prompt || "").trim()
+                : String(prompt || userInstruction || "").trim();
+            const effective = optimized || clientFallback;
+            if (!effective) {
               reject(new Error("Empty optimized prompt"));
               return;
             }
             if (optimizeMode === "generate") {
-              const interpreted = interpretComposeOptimizedOutput(optimized);
+              const interpreted = interpretComposeOptimizedOutput(effective);
               if (!interpreted.ok) {
                 reject(new Error(interpreted.message));
                 return;
@@ -700,7 +1062,7 @@
               return;
             }
             resolve({
-              optimizedPrompt: optimized,
+              optimizedPrompt: effective,
               credits: response.data.credits || null
             });
           } catch (err) {
@@ -835,11 +1197,14 @@
 
     const surfaceMatchesDesired = () => normPlain(target.innerText || target.textContent) === normPlain(text);
 
-    const trySyntheticPaste = () => {
+    const trySyntheticPaste = (htmlOverride) => {
       try {
         const dt = new DataTransfer();
         dt.setData("text/plain", text);
-        dt.setData("text/html", plainTextToPasteHtml(text));
+        dt.setData(
+          "text/html",
+          htmlOverride != null && htmlOverride !== "" ? htmlOverride : plainTextToPasteHtml(text)
+        );
         target.dispatchEvent(
           new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: dt })
         );
@@ -884,7 +1249,72 @@
       dispatchInputEvents(target, text);
     };
 
+    const applyPasteHtml = () => {
+      target.innerHTML = plainTextToPasteHtml(text);
+      // `normal` collapses literal newlines in text nodes; host composers often need pre-wrap
+      // so pasted/improved prompts keep paragraph structure until ProseMirror normalizes.
+      target.style.whiteSpace = "pre-wrap";
+      dispatchInputEvents(target, text);
+    };
+
     clearSelection();
+
+    // ProseMirror-style composers: insertText chunks almost always collapse `\n\n` after a failed
+    // synthetic-paste match. Never use insertInChunks when the model output has structural newlines.
+    const hasStructuralNewlines = /\n/.test(text);
+    if (hasStructuralNewlines) {
+      let pasteHtml = "";
+      try {
+        pasteHtml = plainTextToPasteHtml(text);
+      } catch (_e) {
+        pasteHtml = "";
+      }
+
+      const applyPasteHtmlFrom = (html) => {
+        if (!html) {
+          return;
+        }
+        target.innerHTML = html;
+        target.style.whiteSpace = "pre-wrap";
+        dispatchInputEvents(target, text);
+      };
+
+      try {
+        applyPasteHtmlFrom(pasteHtml);
+      } catch (_e) {
+        ensureContentEditablePlainNewlines(target);
+      }
+
+      if (surfaceMatchesDesired()) {
+        ensureContentEditablePlainNewlines(target);
+        return;
+      }
+
+      trySyntheticPaste(pasteHtml);
+      dispatchInputEvents(target, text);
+
+      if (!surfaceMatchesDesired()) {
+        if (expected > 200 && readSurfacePlainLength() < expected * 0.92) {
+          target.textContent = text;
+          target.style.whiteSpace = "pre-wrap";
+          dispatchInputEvents(target, text);
+        } else if (expected > 80) {
+          target.textContent = text;
+          target.style.whiteSpace = "pre-wrap";
+          dispatchInputEvents(target, text);
+        }
+      }
+
+      ensureContentEditablePlainNewlines(target);
+      if (!surfaceMatchesDesired()) {
+        try {
+          applyPasteHtmlFrom(pasteHtml);
+        } catch (_e2) {
+          ensureContentEditablePlainNewlines(target);
+        }
+      }
+      return;
+    }
 
     if (text.length > 400) {
       trySyntheticPaste();
@@ -907,19 +1337,17 @@
 
     if (!surfaceMatchesDesired()) {
       try {
-        target.innerHTML = plainTextToPasteHtml(text);
-        // `normal` collapses literal newlines in text nodes; host composers often need pre-wrap
-        // so pasted/improved prompts keep paragraph structure until ProseMirror normalizes.
-        target.style.whiteSpace = "pre-wrap";
-        dispatchInputEvents(target, text);
+        applyPasteHtml();
       } catch (_e) {
         ensureContentEditablePlainNewlines(target);
       }
     }
   }
 
-  function replaceTargetText(target, text) {
-    if (!target || !adapters.isEditable(target)) {
+  function replaceTargetText(target, text, opts = {}) {
+    const relaxed = opts.relaxedComposer === true;
+    const writable = relaxed ? isLikelyWritableComposer(target) : adapters.isEditable(target);
+    if (!target || !writable) {
       return;
     }
     if (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) {
@@ -1012,6 +1440,8 @@
     promptLifecycleState.improveMutedByCompose = false;
     promptLifecycleState.lockedSuggestions = null;
     promptLifecycleState.appliedSuggestionKeys = new Set();
+    promptLifecycleState.furtherImproveChoices = null;
+    promptLifecycleState.appliedFurtherImproveIds = new Set();
   }
 
   function markProgrammaticPromptText(nextText) {
@@ -1052,16 +1482,23 @@
     }
   }
 
-  function appendDirectiveToTarget(target, directive) {
-    if (!target || !adapters.isEditable(target)) {
-      return "";
+  /** Appends snippet line (including <<…>>) to the host composer with a blank paragraph before it when there is prior text. */
+  function applyFurtherImproveSnippet(host, snippetRaw) {
+    const block = String(snippetRaw || "").trim();
+    if (!host || !block || !isLikelyWritableComposer(host)) {
+      return false;
     }
-    const previousText = getPromptText(target);
-    const separator = previousText.trim() && !/\s$/.test(previousText) ? "\n\n" : "";
-    const nextText = `${previousText}${separator}${directive}`;
-    // Use the same robust full-replacement path as AI rewrite for site compatibility.
-    replaceTargetText(target, nextText);
-    return nextText;
+    const before = String(readPromptPlainForVerify(host) || "").replace(/\u00a0/g, " ");
+    const trimmedEnd = before.trimEnd();
+    const fullText = trimmedEnd.length === 0 ? block : `${trimmedEnd}\n\n${block}`;
+    markProgrammaticPromptText(fullText);
+    replaceTargetText(host, fullText);
+    let after = String(readPromptPlainForVerify(host) || "").replace(/\u00a0/g, " ");
+    if (after.trimEnd().length <= trimmedEnd.length) {
+      replaceTargetText(host, fullText, { relaxedComposer: true });
+      after = String(readPromptPlainForVerify(host) || "").replace(/\u00a0/g, " ");
+    }
+    return after.trimEnd().length > trimmedEnd.length;
   }
 
   const SUGGESTION_DEFINITIONS = [
@@ -1639,6 +2076,23 @@
     const strengthPercent = computePromptStrengthPercent(promptText);
     const autoAdjustSuffix = "";
 
+    const showFurtherImproveGrid =
+      !!promptLifecycleState.hasPromptlyRewrite &&
+      !promptLifecycleState.composePromptWritten &&
+      !promptLifecycleState.improveMutedByCompose &&
+      !promptLifecycleState.hideImprovePromptSection &&
+      Array.isArray(promptLifecycleState.furtherImproveChoices) &&
+      promptLifecycleState.furtherImproveChoices.length > 0;
+
+    const furtherImproveButtons = showFurtherImproveGrid
+      ? promptLifecycleState.furtherImproveChoices.map((opt) => ({
+          id: opt.id,
+          label: opt.label,
+          snippet: opt.snippet,
+          applied: promptLifecycleState.appliedFurtherImproveIds.has(opt.id)
+        }))
+      : [];
+
     return {
       wordCount: context.wordCount,
       strengthPercent,
@@ -1649,9 +2103,31 @@
       composePromptWritten: promptLifecycleState.composePromptWritten,
       hideImprovePromptSection: promptLifecycleState.hideImprovePromptSection,
       improveMutedByCompose: promptLifecycleState.improveMutedByCompose,
+      showFurtherImproveGrid,
+      furtherImproveButtons,
       suggestions: [],
       suggestionNotice: ""
     };
+  }
+
+  function refreshOpenPopupFromHost(host) {
+    if (!isOpen) {
+      return;
+    }
+    let t = "";
+    if (host) {
+      t = getPromptText(host);
+      if (!t) {
+        t = readPromptPlainForVerify(host);
+      }
+    }
+    if (!t && currentTarget) {
+      t = getPromptText(currentTarget);
+      if (!t) {
+        t = readPromptPlainForVerify(currentTarget);
+      }
+    }
+    ui.setContent(analyzePrompt(t));
   }
 
   function parseColorChannels(colorText) {
@@ -1696,11 +2172,20 @@
     if (!target || !adapters.isEditable(target) || !target.isConnected) {
       return false;
     }
-    const rect = target.getBoundingClientRect();
-    if (rect.width < 120 || rect.height < 24) {
+    const rect =
+      typeof adapters.getPromptSurfaceRect === "function"
+        ? adapters.getPromptSurfaceRect(target)
+        : null;
+    const effective = rect || target.getBoundingClientRect();
+    if (effective.width < 120 || effective.height < 24) {
       return false;
     }
-    if (rect.bottom < 0 || rect.top > window.innerHeight || rect.right < 0 || rect.left > window.innerWidth) {
+    if (
+      effective.bottom < 0 ||
+      effective.top > window.innerHeight ||
+      effective.right < 0 ||
+      effective.left > window.innerWidth
+    ) {
       return false;
     }
     return true;
@@ -1751,7 +2236,11 @@
 
     const currentPromptText = getPromptText(currentTarget);
     syncPromptLifecycleState(currentPromptText);
-    const rect = getAnchorRectForTarget(currentTarget);
+    const anchorRect = getAnchorRectForTarget(currentTarget);
+    const rect =
+      site === "claude"
+        ? { ...anchorRect, top: anchorRect.top + CLAUDE_PLACEMENT_TOP_OFFSET_PX }
+        : anchorRect;
     ui.setTheme(inferThemeFromTarget(currentTarget));
     if (isOpen) {
       ui.setContent(analyzePrompt(currentPromptText));
@@ -1777,6 +2266,7 @@
   }
 
   function closePopup() {
+    clearComposePopupAutoCloseTimer();
     if (!isOpen) {
       return;
     }
@@ -2011,6 +2501,7 @@
 
   function destroy() {
     destroyed = true;
+    clearComposePopupAutoCloseTimer();
     document.querySelectorAll("[data-promptly-improve-flash='true']").forEach((node) => node.remove());
     window.clearTimeout(visibilityCreditsRefreshTimer);
     visibilityCreditsRefreshTimer = null;

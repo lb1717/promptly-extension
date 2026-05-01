@@ -129,11 +129,13 @@
       onVisualColorChange,
       onDragStart,
       onDragMove,
-      onDragEnd
+      onDragEnd,
+      onFurtherImproveAppend
     }) {
       this.onToggle = onToggle;
       this.onSuggestionClick = onSuggestionClick;
       this.onAutoAdjust = onAutoAdjust;
+      this.onFurtherImproveAppend = onFurtherImproveAppend;
       this.onLayoutChange = onLayoutChange;
       this.onToggleAutoSend = onToggleAutoSend;
       this.onSignIn = onSignIn;
@@ -171,6 +173,7 @@
 
       this.root = document.createElement("div");
       this.root.className = "promptly-root";
+      this.root.dataset.promptlyUi = "true";
       this.root.dataset.theme = "light";
 
       // Use a non-button container to avoid nested interactive elements inside a <button>,
@@ -430,6 +433,11 @@
         },
         () => {
           this.showRepositionHint({ force: true });
+        },
+        (payload) => {
+          if (typeof this.onFurtherImproveAppend === "function") {
+            this.onFurtherImproveAppend(payload);
+          }
         }
       );
       this.popupMask = document.createElement("div");
@@ -629,7 +637,21 @@
     }
 
     containsNode(node) {
-      return this.host === node || this.host.contains(node);
+      if (!node) {
+        return false;
+      }
+      if (this.host === node) {
+        return true;
+      }
+      try {
+        const innerRoot = typeof node.getRootNode === "function" ? node.getRootNode({ composed: false }) : null;
+        if (innerRoot === this.shadowRoot) {
+          return true;
+        }
+      } catch (_err) {
+        // Fall through to legacy contains().
+      }
+      return typeof this.host.contains === "function" && this.host.contains(node);
     }
 
     setVisible(visible) {

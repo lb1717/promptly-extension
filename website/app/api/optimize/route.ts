@@ -81,6 +81,9 @@ export async function POST(request: Request) {
     }
 
     const optimized = await optimizePrompt(prompt, userInstruction, optimizeMode, { forceConfigRefresh: true });
+    const fallbackText = (prompt || userInstruction).trim();
+    const optimizedText = String(optimized?.optimized_prompt ?? "").trim();
+    const optimized_prompt = optimizedText || fallbackText;
     const providerUsagePrompt = Math.max(0, Number(optimized?.usage?.prompt_tokens || 0));
     const providerUsageCompletion = Math.max(0, Number(optimized?.usage?.completion_tokens || 0));
     const providerUsageTotalRaw = Math.max(0, Number(optimized?.usage?.total_tokens || 0));
@@ -112,7 +115,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json(
       {
-        optimized_prompt: optimized.optimized_prompt,
+        optimized_prompt,
         clarifying_questions: [],
         assumptions: [],
         usage: optimized.usage || null,

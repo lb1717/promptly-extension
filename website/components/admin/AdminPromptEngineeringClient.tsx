@@ -159,12 +159,10 @@ export function AdminPromptEngineeringClient() {
             <span className="text-violet-100">generate</span> (legacy <span className="font-mono">request_mode</span> is
             still accepted). Each mode uses one template string below plus runtime limits and models. The token{" "}
             <span className="font-mono text-amber-200">{token}</span> must appear{" "}
-            <span className="text-violet-100">exactly once</span>. Text before and after the token is sent as the{" "}
-            <span className="font-mono text-violet-100">first user</span> message (meta instructions). A second{" "}
-            <span className="font-mono text-violet-100">user</span> message carries a fixed &quot;rewrite / generate from
-            this&quot; wrapper plus the user&apos;s text. OpenAI Chat Completions and the Responses API both receive
-            that two-turn user sequence (Responses maps roles the same way). If the extension proxy points at a separate
-            worker host, that host may use its own built-in prompts unless it forwards to this API.
+            <span className="text-violet-100">exactly once</span>. At request time the user&apos;s text replaces that
+            token and the whole template is sent as <span className="font-mono text-violet-100">one user</span> message to
+            the model (Chat Completions or Responses API). If the extension proxy points at a separate worker host, that
+            host may use its own built-in prompts unless it forwards to this API.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -205,8 +203,8 @@ export function AdminPromptEngineeringClient() {
             </h2>
             <p className="mb-3 text-xs text-violet-200/70">
               Used when the user has Auto enabled and sends from the chat box (<span className="font-mono">auto</span>
-              ). Put your framework around the token; the user&apos;s input arrives in the second user message with an
-              auto-style task line. Output cap uses the lower of &quot;Max completion tokens&quot; and &quot;Auto hard
+              ). Put your framework around the token; the user&apos;s input is substituted for the token in one message.
+              Output cap uses the lower of &quot;Max completion tokens&quot; and &quot;Auto hard
               cap&quot; below.
             </p>
             <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -269,8 +267,7 @@ export function AdminPromptEngineeringClient() {
             </h2>
             <p className="mb-3 text-xs text-violet-200/70">
               Used for explicit Improve (<span className="font-mono">improve</span>) from the tab or extension. Same
-              split: framework around the token, then a second user message with an improve-style task line and the
-              user&apos;s prompt.
+              template shape: framework around the token; the user&apos;s prompt replaces the token in one message.
             </p>
             <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
               <label className="flex flex-col gap-1 text-xs text-violet-200/80">
@@ -419,8 +416,8 @@ export function AdminPromptEngineeringClient() {
               </label>
             </div>
             <p className="mb-3 text-xs text-violet-200/70">
-              The description is not spliced into the policy string; it is sent only in the second user message. Keep
-              the token once so your before/after text can reference “the next user message.”
+              The user&apos;s short description replaces the token inside this template (one message). Keep the token
+              exactly once; do not mention a &quot;second user message&quot; in the template text.
             </p>
             <textarea
               value={composeT}

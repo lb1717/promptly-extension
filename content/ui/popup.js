@@ -5,7 +5,8 @@
       onSuggestionClick,
       onAutoAdjustClick,
       onLayoutHintChange,
-      onRepositionHintTest
+      onRepositionHintTest,
+      onFurtherImproveAppend
     ) {
       this.rootNode = rootNode;
       this.doc = rootNode.ownerDocument || document;
@@ -13,6 +14,9 @@
       this.onAutoAdjustClick = onAutoAdjustClick;
       this.onLayoutHintChange = onLayoutHintChange;
       this.onRepositionHintTest = onRepositionHintTest;
+      this.onFurtherImproveAppend =
+        typeof onFurtherImproveAppend === "function" ? onFurtherImproveAppend : null;
+      this.furtherImproveGridVisible = false;
       this.root = this.doc.createElement("section");
       this.root.className = "promptly-popup";
       this.root.setAttribute("aria-hidden", "true");
@@ -72,7 +76,7 @@
 
       this.strengthInlineLabel = this.doc.createElement("span");
       this.strengthInlineLabel.className = "promptly-strength-inline-label";
-      this.strengthInlineLabel.textContent = "strength";
+      this.strengthInlineLabel.textContent = "Strength";
 
       this.wordCountLabel = this.doc.createElement("span");
       this.wordCountLabel.className = "promptly-word-count-label";
@@ -134,6 +138,23 @@
       this.rewriteInstructionInput.wrap = "soft";
       this.rewriteInstructionInput.className = "promptly-rewrite-input";
       this.rewriteInstructionInput.placeholder = "Describe what the prompt should accomplish…";
+      // Host apps (e.g. Claude TipTap) listen on document/window; keep compose keystrokes inside Promptly.
+      const stopBubbleToHostPage = (event) => {
+        event.stopPropagation();
+      };
+      for (const type of [
+        "keydown",
+        "keypress",
+        "beforeinput",
+        "input",
+        "paste",
+        "cut",
+        "compositionstart",
+        "compositionupdate",
+        "compositionend"
+      ]) {
+        this.rewriteInstructionInput.addEventListener(type, stopBubbleToHostPage, true);
+      }
       this.rewriteInstructionInput.addEventListener("focus", () => {
         // Only arm the clear once per successful generate — not on every refocus (that caused
         // every keystroke after the first to wipe the field again).
@@ -264,7 +285,69 @@
         }
       });
       this.rewriteSendRow.append(this.rewriteSendButton);
-      this.rewriteInputWrap.append(this.rewriteInstructionInput, this.rewriteSendRow);
+
+      this.furtherImproveGrid = this.doc.createElement("div");
+      this.furtherImproveGrid.className = "promptly-further-improve-grid";
+      this.furtherImproveGrid.setAttribute("aria-label", "Improve prompt further");
+      this.furtherImproveGrid.hidden = true;
+      this.furtherImproveMetaById = new Map();
+      this.furtherImproveGrid.addEventListener(
+        "pointerdown",
+        (event) => {
+          if (!this.furtherImproveGridVisible || event.button !== 0 || event.ctrlKey || event.metaKey) {
+            return;
+          }
+          const chip = event.target.closest?.(".promptly-further-improve-chip");
+          if (!chip || !this.furtherImproveGrid.contains(chip)) {
+            return;
+          }
+          if (chip.getAttribute("aria-disabled") === "true") {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          if (typeof event.stopImmediatePropagation === "function") {
+            event.stopImmediatePropagation();
+          }
+          const fid = String(chip.getAttribute("data-fi-id") || "").trim();
+          if (!fid || typeof this.onFurtherImproveAppend !== "function") {
+            return;
+          }
+          const meta = this.furtherImproveMetaById.get(fid);
+          if (!meta) {
+            return;
+          }
+          this.onFurtherImproveAppend({
+            id: fid,
+            label: meta.label,
+            snippet: meta.snippet
+          });
+        },
+        true
+      );
+      this.furtherImproveGrid.addEventListener(
+        "keydown",
+        (event) => {
+          if (event.key !== "Enter" && event.key !== " ") {
+            return;
+          }
+          const chip = event.target.closest?.(".promptly-further-improve-chip");
+          if (!chip || !this.furtherImproveGrid.contains(chip) || chip.getAttribute("aria-disabled") === "true") {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          const fid = String(chip.getAttribute("data-fi-id") || "").trim();
+          const meta = this.furtherImproveMetaById.get(fid);
+          if (!fid || !meta || typeof this.onFurtherImproveAppend !== "function") {
+            return;
+          }
+          this.onFurtherImproveAppend({ id: fid, label: meta.label, snippet: meta.snippet });
+        },
+        true
+      );
+
+      this.rewriteInputWrap.append(this.rewriteInstructionInput, this.rewriteSendRow, this.furtherImproveGrid);
 
       this.suggestions = this.doc.createElement("div");
       this.suggestions.className = "promptly-suggestion-row";
@@ -301,6 +384,10 @@
     }
 
     updateComposeFocusMode(forceValue = null) {
+      if (this.furtherImproveGridVisible) {
+        this.root.classList.remove("promptly-compose-focus-mode");
+        return;
+      }
       const hasText = String(this.rewriteInstructionInput?.value || "").trim().length > 0;
       const isComposeBusy =
         !!this.rewriteSendButton?.disabled ||
@@ -950,6 +1037,50 @@
         }
       }
       this.updateComposeFocusMode();
+
+      this.furtherImproveGridVisible = !!model.showFurtherImproveGrid;
+      this.root.classList.toggle("promptly-further-improve-mode", this.furtherImproveGridVisible);
+      this.suggestionTitle.textContent = this.furtherImproveGridVisible
+        ? "Improve prompt further"
+        : "Advanced Prompt Builder";
+      this.rewriteInputWrap.classList.toggle(
+        "promptly-show-further-improve",
+        this.furtherImproveGridVisible
+      );
+      if (this.furtherImproveGrid) {
+        this.furtherImproveGrid.hidden = !this.furtherImproveGridVisible;
+        this.furtherImproveGrid.innerHTML = "";
+        this.furtherImproveMetaById.clear();
+        if (
+          this.furtherImproveGridVisible &&
+          Array.isArray(model.furtherImproveButtons) &&
+          model.furtherImproveButtons.length > 0
+        ) {
+          for (const btn of model.furtherImproveButtons) {
+            const id = String(btn.id || "").trim();
+            if (!id) {
+              continue;
+            }
+            this.furtherImproveMetaById.set(id, {
+              label: String(btn.label || ""),
+              snippet: String(btn.snippet || "")
+            });
+            const el = this.doc.createElement("div");
+            el.className = "promptly-further-improve-chip";
+            el.setAttribute("role", "button");
+            el.tabIndex = btn.applied ? -1 : 0;
+            el.setAttribute("data-fi-id", id);
+            el.setAttribute("aria-disabled", btn.applied ? "true" : "false");
+            if (btn.applied) {
+              el.classList.add("is-applied");
+            }
+            el.textContent = btn.applied ? `${btn.label} ✓` : btn.label;
+            el.title = String(btn.snippet || "").trim();
+            this.furtherImproveGrid.appendChild(el);
+          }
+        }
+      }
+
       this.root.classList.toggle("promptly-hide-improve-section", !!model.hideImprovePromptSection);
       if (!this.rewriteSendButton.classList.contains("is-working")) {
         const hasText = String(this.rewriteInstructionInput?.value || "").trim().length > 0;
