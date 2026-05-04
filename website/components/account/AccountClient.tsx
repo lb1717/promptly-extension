@@ -4,6 +4,8 @@ import { getFirebaseAuth, getFirebaseDb, getGoogleProvider } from "@/lib/firebas
 import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
+  reload,
+  sendEmailVerification,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
@@ -235,6 +237,15 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
         emailAuthEmail.trim(),
         emailAuthPassword
       );
+      await reload(cred.user);
+      if (!cred.user.emailVerified) {
+        await sendEmailVerification(cred.user);
+        await signOut(auth);
+        setEmailAuthPassword("");
+        setEmailAuthPassword2("");
+        setAccountNotice("Verify your email before signing in. We sent a new verification link.");
+        return;
+      }
       await syncUserToFirestore(cred.user);
       setEmailAuthPassword("");
       setEmailAuthPassword2("");
@@ -264,7 +275,10 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
         emailAuthEmail.trim(),
         emailAuthPassword
       );
-      await syncUserToFirestore(cred.user);
+      await sendEmailVerification(cred.user);
+      await signOut(auth);
+      setEmailAuthMode("signin");
+      setAccountNotice("Account created. Verify your email first, then sign in.");
       setEmailAuthPassword("");
       setEmailAuthPassword2("");
     } catch (e) {
@@ -285,11 +299,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
     setBusy(true);
     try {
       const auth = getFirebaseAuth();
-      const origin = typeof window !== "undefined" ? window.location.origin : "";
-      await sendPasswordResetEmail(auth, em, {
-        url: `${origin}/account`,
-        handleCodeInApp: false
-      });
+      await sendPasswordResetEmail(auth, em);
       setAccountNotice("If an account exists for that email, a reset link was sent.");
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));

@@ -1,7 +1,7 @@
 "use client";
 
 import type { FormEvent } from "react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 type Props = {
   apiKey: string;
@@ -70,7 +70,7 @@ async function identitySignUp(apiKey: string, email: string, password: string) {
   };
 }
 
-async function identitySendPasswordReset(apiKey: string, email: string, continueUrl: string) {
+async function identitySendPasswordReset(apiKey: string, email: string) {
   const res = await fetch(
     `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${encodeURIComponent(apiKey)}`,
     {
@@ -78,8 +78,7 @@ async function identitySendPasswordReset(apiKey: string, email: string, continue
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         requestType: "PASSWORD_RESET",
-        email: email.trim(),
-        continueUrl
+        email: email.trim()
       })
     }
   );
@@ -87,6 +86,43 @@ async function identitySendPasswordReset(apiKey: string, email: string, continue
   if (!res.ok) {
     throw new Error(String(body?.error?.message || body?.error || "Could not send reset email"));
   }
+}
+
+async function identitySendVerifyEmail(apiKey: string, idToken: string) {
+  const res = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${encodeURIComponent(apiKey)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        requestType: "VERIFY_EMAIL",
+        idToken: idToken.trim()
+      })
+    }
+  );
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(String(body?.error?.message || body?.error || "Could not send verification email"));
+  }
+}
+
+async function identityLookup(apiKey: string, idToken: string) {
+  const res = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(apiKey)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idToken: idToken.trim() })
+    }
+  );
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(String(body?.error?.message || body?.error || "Could not verify account state"));
+  }
+  const firstUser = Array.isArray(body?.users) ? body.users[0] : null;
+  return {
+    emailVerified: !!firstUser?.emailVerified
+  };
 }
 
 function sendSessionToExtension(
@@ -135,20 +171,24 @@ export function ExtensionEmailAuthPanel({ apiKey, extensionId, signinCsrf, disab
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-
-  const resetContinueUrl = useMemo(() => {
-    if (typeof window === "undefined") return "https://promptly-labs.com/account";
-    return `${window.location.origin}/account`;
-  }, []);
+  const [needsEmailVerification, setNeedsEmailVerification] = useState(false);
 
   async function onSubmitSignIn(e: FormEvent) {
     e.preventDefault();
     setError("");
     setMessage("");
+    setNeedsEmailVerification(false);
     if (disabled || !apiKey || !extensionId || !signinCsrf) return;
     setBusy(true);
     try {
       const body = await identitySignInWithPassword(apiKey, email, password);
+      const lookup = await identityLookup(apiKey, body.idToken);
+      if (!lookup.emailVerified) {
+        await identitySendVerifyEmail(apiKey, body.idToken);
+        setNeedsEmailVerification(true);
+        setMessage("Verify your email to finish sign-in. We sent a verification link.");
+        return;
+      }
       const nowSec = Math.floor(Date.now() / 1000);
       const expiresIn = Math.max(300, Number(body.expiresIn) || 3600);
       await sendSessionToExtension(extensionId, {
@@ -176,6 +216,7 @@ export function ExtensionEmailAuthPanel({ apiKey, extensionId, signinCsrf, disab
     e.preventDefault();
     setError("");
     setMessage("");
+    setNeedsEmailVerification(false);
     if (disabled || !apiKey || !extensionId || !signinCsrf) return;
     if (password !== password2) {
       setError("Passwords do not match.");
@@ -188,22 +229,12 @@ export function ExtensionEmailAuthPanel({ apiKey, extensionId, signinCsrf, disab
     setBusy(true);
     try {
       const body = await identitySignUp(apiKey, email, password);
-      const nowSec = Math.floor(Date.now() / 1000);
-      const expiresIn = Math.max(300, Number(body.expiresIn) || 3600);
-      await sendSessionToExtension(extensionId, {
-        signin_csrf: signinCsrf,
-        idToken: body.idToken,
-        refreshToken: body.refreshToken,
-        email: String(body.email || email).trim().toLowerCase(),
-        uid: String(body.localId || "").trim(),
-        expiresAtSec: nowSec + expiresIn
-      });
-      setMessage("Account created. You can close this window.");
-      try {
-        window.close();
-      } catch {
-        /* ignore */
-      }
+      await identitySendVerifyEmail(apiKey, body.idToken);
+      setNeedsEmailVerification(true);
+      setMode("signin");
+      setPassword("");
+      setPassword2("");
+      setMessage("Account created. Verify your email first, then sign in.");
     } catch (err) {
       setError(String(err instanceof Error ? err.message : err));
     } finally {
@@ -222,7 +253,7 @@ export function ExtensionEmailAuthPanel({ apiKey, extensionId, signinCsrf, disab
     }
     setBusy(true);
     try {
-      await identitySendPasswordReset(apiKey, em, resetContinueUrl);
+      await identitySendPasswordReset(apiKey, em);
       setMessage("If an account exists for that email, a reset link was sent.");
     } catch (err) {
       setError(String(err instanceof Error ? err.message : err));
@@ -242,6 +273,7 @@ export function ExtensionEmailAuthPanel({ apiKey, extensionId, signinCsrf, disab
             setMode("signin");
             setError("");
             setMessage("");
+            setNeedsEmailVerification(false);
           }}
         >
           Sign in
@@ -253,6 +285,7 @@ export function ExtensionEmailAuthPanel({ apiKey, extensionId, signinCsrf, disab
             setMode("register");
             setError("");
             setMessage("");
+            setNeedsEmailVerification(false);
           }}
         >
           Create account
@@ -317,6 +350,11 @@ export function ExtensionEmailAuthPanel({ apiKey, extensionId, signinCsrf, disab
         >
           Forgot password?
         </button>
+      ) : null}
+      {mode === "signin" && needsEmailVerification ? (
+        <p className="mt-2 text-center text-[11px] text-amber-200/90 leading-snug">
+          Email must be verified before this account can be used.
+        </p>
       ) : null}
       {error ? <p className="mt-2 text-center text-[11px] text-red-300/95 leading-snug">{error}</p> : null}
       {message ? <p className="mt-2 text-center text-[11px] text-emerald-200/90 leading-snug">{message}</p> : null}

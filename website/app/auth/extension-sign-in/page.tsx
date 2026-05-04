@@ -98,15 +98,6 @@ function ExtensionSignInContent() {
               You’ll finish on Google, then return here to complete sign-in.
             </p>
 
-            <div className="relative my-6">
-              <div className="absolute inset-0 flex items-center" aria-hidden="true">
-                <div className="w-full border-t border-white/10" />
-              </div>
-              <div className="relative flex justify-center text-[11px] font-semibold uppercase tracking-wide">
-                <span className="bg-white/[0.06] px-3 text-ink/50">Or</span>
-              </div>
-            </div>
-
             {extensionId && signinCsrf && firebaseApiKey ? (
               <ExtensionEmailAuthPanel
                 apiKey={firebaseApiKey}
