@@ -3,8 +3,9 @@
     constructor(options = {}) {
       this.margin = options.margin ?? 8;
       // Horizontal controls:
-      // 1) Move Promptly bar center left/right (px).
-      this.promptlyCenterOffsetX = options.promptlyCenterOffsetX ?? 20;
+      // 1) Move Promptly bar center left/right (px). Positive = right of composer center.
+      //    First-install default is a modest right bias (saved offset overrides when present).
+      this.promptlyCenterOffsetX = options.promptlyCenterOffsetX ?? 50;
       // 2) Promptly bar width (px).
       this.promptlyBoxWidth = options.promptlyBoxWidth ?? 175;
       // 3) Context window width (px).

@@ -1,7 +1,15 @@
 "use client";
 
 import { getFirebaseAuth, getFirebaseDb, getGoogleProvider } from "@/lib/firebaseClient";
-import { onAuthStateChanged, signInWithPopup, signOut, User } from "firebase/auth";
+import {
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  signOut,
+  User
+} from "firebase/auth";
 import { doc, serverTimestamp, setDoc } from "firebase/firestore";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -22,6 +30,13 @@ function formatJoinDate(user: User | null): string {
   } catch {
     return "—";
   }
+}
+
+function inferAuthProvider(user: User): string {
+  const ids = (user.providerData || []).map((p) => p.providerId).filter(Boolean);
+  if (ids.includes("password")) return "password";
+  if (ids.includes("google.com")) return "google";
+  return ids[0] || "unknown";
 }
 
 function tierLabel(tier: string): string {
@@ -119,6 +134,11 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
   const [portalBusy, setPortalBusy] = useState(false);
   const [checkoutBusyTier, setCheckoutBusyTier] = useState<"pro" | "student" | "enterprise" | null>(null);
   const [showBillingDetails, setShowBillingDetails] = useState(false);
+  const [accountNotice, setAccountNotice] = useState("");
+  const [emailAuthEmail, setEmailAuthEmail] = useState("");
+  const [emailAuthPassword, setEmailAuthPassword] = useState("");
+  const [emailAuthPassword2, setEmailAuthPassword2] = useState("");
+  const [emailAuthMode, setEmailAuthMode] = useState<"signin" | "register">("signin");
 
   const loadBilling = useCallback(async (current: User) => {
     setBillingLoading(true);
@@ -180,7 +200,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
         email: currentUser.email || null,
         displayName: currentUser.displayName || null,
         photoURL: currentUser.photoURL || null,
-        provider: "google",
+        provider: inferAuthProvider(currentUser),
         updatedAt: serverTimestamp(),
         plan: "free",
         subscriptionTier: "free"
@@ -191,11 +211,86 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
 
   async function handleGoogleSignIn() {
     setError("");
+    setAccountNotice("");
     setBusy(true);
     try {
       const auth = getFirebaseAuth();
       const result = await signInWithPopup(auth, getGoogleProvider());
       await syncUserToFirestore(result.user);
+    } catch (e) {
+      setError(String(e instanceof Error ? e.message : e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleEmailPasswordSignIn() {
+    setError("");
+    setAccountNotice("");
+    setBusy(true);
+    try {
+      const auth = getFirebaseAuth();
+      const cred = await signInWithEmailAndPassword(
+        auth,
+        emailAuthEmail.trim(),
+        emailAuthPassword
+      );
+      await syncUserToFirestore(cred.user);
+      setEmailAuthPassword("");
+      setEmailAuthPassword2("");
+    } catch (e) {
+      setError(String(e instanceof Error ? e.message : e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleEmailRegister() {
+    setError("");
+    setAccountNotice("");
+    if (emailAuthPassword !== emailAuthPassword2) {
+      setError("Passwords do not match.");
+      return;
+    }
+    if (emailAuthPassword.length < 8) {
+      setError("Use at least 8 characters for your password.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const auth = getFirebaseAuth();
+      const cred = await createUserWithEmailAndPassword(
+        auth,
+        emailAuthEmail.trim(),
+        emailAuthPassword
+      );
+      await syncUserToFirestore(cred.user);
+      setEmailAuthPassword("");
+      setEmailAuthPassword2("");
+    } catch (e) {
+      setError(String(e instanceof Error ? e.message : e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSendPasswordReset() {
+    setError("");
+    setAccountNotice("");
+    const em = emailAuthEmail.trim();
+    if (!em) {
+      setError("Enter your email to receive a reset link.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const auth = getFirebaseAuth();
+      const origin = typeof window !== "undefined" ? window.location.origin : "";
+      await sendPasswordResetEmail(auth, em, {
+        url: `${origin}/account`,
+        handleCodeInApp: false
+      });
+      setAccountNotice("If an account exists for that email, a reset link was sent.");
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));
     } finally {
@@ -274,16 +369,96 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
             Profile, plan, and billing — powered by Firebase. Paid plans use Stripe Checkout and the billing portal.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex w-full flex-col gap-4 sm:w-auto sm:max-w-sm">
           {!user ? (
-            <button
-              type="button"
-              onClick={handleGoogleSignIn}
-              disabled={busy || loading}
-              className="rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-500 disabled:opacity-60"
-            >
-              {busy ? "Signing in…" : "Sign in with Google"}
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={handleGoogleSignIn}
+                disabled={busy || loading}
+                className="rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-500 disabled:opacity-60"
+              >
+                {busy ? "Signing in…" : "Sign in with Google"}
+              </button>
+              <div className="rounded-xl border border-white/10 bg-white/[0.04] p-4 backdrop-blur-md">
+                <p className="text-center text-[11px] font-semibold uppercase tracking-wide text-violet-200/70">
+                  Or email &amp; password
+                </p>
+                <div className="mt-3 flex justify-center gap-2 text-xs">
+                  <button
+                    type="button"
+                    className={`rounded-lg px-2 py-1 ${emailAuthMode === "signin" ? "bg-violet-600/40 text-white" : "text-violet-200/80 hover:text-white"}`}
+                    onClick={() => {
+                      setEmailAuthMode("signin");
+                      setError("");
+                      setAccountNotice("");
+                    }}
+                  >
+                    Sign in
+                  </button>
+                  <button
+                    type="button"
+                    className={`rounded-lg px-2 py-1 ${emailAuthMode === "register" ? "bg-violet-600/40 text-white" : "text-violet-200/80 hover:text-white"}`}
+                    onClick={() => {
+                      setEmailAuthMode("register");
+                      setError("");
+                      setAccountNotice("");
+                    }}
+                  >
+                    Create account
+                  </button>
+                </div>
+                <div className="mt-3 space-y-2">
+                  <input
+                    type="email"
+                    autoComplete="email"
+                    placeholder="Email"
+                    value={emailAuthEmail}
+                    onChange={(e) => setEmailAuthEmail(e.target.value)}
+                    disabled={busy || loading}
+                    className="w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-sm text-white placeholder:text-violet-200/40 outline-none focus:border-violet-400/50"
+                  />
+                  <input
+                    type="password"
+                    autoComplete={emailAuthMode === "signin" ? "current-password" : "new-password"}
+                    placeholder="Password"
+                    value={emailAuthPassword}
+                    onChange={(e) => setEmailAuthPassword(e.target.value)}
+                    disabled={busy || loading}
+                    className="w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-sm text-white placeholder:text-violet-200/40 outline-none focus:border-violet-400/50"
+                  />
+                  {emailAuthMode === "register" ? (
+                    <input
+                      type="password"
+                      autoComplete="new-password"
+                      placeholder="Confirm password"
+                      value={emailAuthPassword2}
+                      onChange={(e) => setEmailAuthPassword2(e.target.value)}
+                      disabled={busy || loading}
+                      className="w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-sm text-white placeholder:text-violet-200/40 outline-none focus:border-violet-400/50"
+                    />
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={emailAuthMode === "signin" ? handleEmailPasswordSignIn : handleEmailRegister}
+                    disabled={busy || loading}
+                    className="w-full rounded-lg bg-white/10 py-2 text-sm font-semibold text-white hover:bg-white/15 disabled:opacity-60"
+                  >
+                    {busy ? "Working…" : emailAuthMode === "signin" ? "Sign in with email" : "Create account"}
+                  </button>
+                  {emailAuthMode === "signin" ? (
+                    <button
+                      type="button"
+                      onClick={handleSendPasswordReset}
+                      disabled={busy || loading}
+                      className="w-full text-center text-[11px] text-violet-200/90 hover:text-white disabled:opacity-60"
+                    >
+                      Forgot password?
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            </>
           ) : (
             <>
               <button
@@ -318,6 +493,11 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
       {error ? (
         <div className="mb-6 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
           {error}
+        </div>
+      ) : null}
+      {accountNotice ? (
+        <div className="mb-6 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+          {accountNotice}
         </div>
       ) : null}
 

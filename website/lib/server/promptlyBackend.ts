@@ -721,7 +721,7 @@ async function resolvePromptlyUserFromGoogleAccessToken(request: Request) {
   const hintedEmail = normalizeUserEmail(readUserEmailHeader(request));
   if (cached && cached.expiresAt > Date.now()) {
     if (hintedEmail && cached.email && hintedEmail !== cached.email) {
-      throw new Error("Google account email does not match signed-in Chrome Gmail");
+      throw new Error("Google account email does not match signed-in Chrome profile");
     }
     if (cached.email) {
       const canonicalUid = await resolveCanonicalUidForEmail(cached.email, `google_${cached.sub}`);
@@ -751,7 +751,7 @@ async function resolvePromptlyUserFromGoogleAccessToken(request: Request) {
     throw new Error("Google user info missing subject");
   }
   if (hintedEmail && email && hintedEmail !== email) {
-    throw new Error("Google account email does not match signed-in Chrome Gmail");
+    throw new Error("Google account email does not match signed-in Chrome profile");
   }
   googleAccessTokenCache.set(accessToken, {
     expiresAt: Date.now() + GOOGLE_ACCESS_TOKEN_CACHE_TTL_MS,
@@ -784,11 +784,15 @@ export async function requirePromptlyUser(request: Request): Promise<{
 
   const rawToken = readFirebaseToken(request);
   if (rawToken) {
-    const decoded = await getFirebaseAdminAuth().verifyIdToken(rawToken);
+    const decoded = await getFirebaseAdminAuth().verifyIdToken(rawToken, true);
     const email = normalizeUserEmail(decoded.email);
     const canonicalUid = email ? await resolveCanonicalUidForEmail(email, decoded.uid) : decoded.uid;
+    const signInProvider = String(
+      (decoded as { firebase?: { sign_in_provider?: string } }).firebase?.sign_in_provider || ""
+    ).trim();
     const user = await upsertPromptlyUser(canonicalUid, email, {
-      provider: "firebase"
+      provider: "firebase",
+      ...(signInProvider ? { signInProvider } : {})
     });
     return { ok: true, user };
   }
@@ -810,11 +814,15 @@ export async function requireWebFirebaseUser(request: Request): Promise<{
   if (!rawToken) {
     throw new Error("Missing Firebase auth token");
   }
-  const decoded = await getFirebaseAdminAuth().verifyIdToken(rawToken);
+  const decoded = await getFirebaseAdminAuth().verifyIdToken(rawToken, true);
   const email = normalizeUserEmail(decoded.email);
   const canonicalUid = email ? await resolveCanonicalUidForEmail(email, decoded.uid) : decoded.uid;
+  const signInProvider = String(
+    (decoded as { firebase?: { sign_in_provider?: string } }).firebase?.sign_in_provider || ""
+  ).trim();
   const promptlyUser = await upsertPromptlyUser(canonicalUid, email, {
-    provider: "firebase"
+    provider: "firebase",
+    ...(signInProvider ? { signInProvider } : {})
   });
   return { ok: true, user: promptlyUser };
 }

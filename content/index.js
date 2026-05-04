@@ -47,6 +47,9 @@
   let dragStartOffsetX = 0;
   let composeWidthExpanded = false;
   let composePopupAutoCloseTimer = null;
+  /** While > Date.now(), `sync` skips `ui.setContent` so further-improve chip curtain animation is not torn down. */
+  let suppressOpenPopupSetContentUntilMs = 0;
+  const FURTHER_IMPROVE_CURTAIN_MS = 300;
 
   function clearComposePopupAutoCloseTimer() {
     if (composePopupAutoCloseTimer != null) {
@@ -592,6 +595,30 @@
     onManageAccount: async () => {
       window.open(await getPromptlyAccountUrl(), "_blank");
     },
+    onPromptlySignOut: async () => {
+      try {
+        await new Promise((resolve, reject) => {
+          chrome.runtime.sendMessage({ type: "PROMPTLY_CLEAR_SESSION" }, (response) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+              return;
+            }
+            if (!response || !response.ok) {
+              reject(new Error(String(response?.error || "Sign out failed")));
+              return;
+            }
+            resolve();
+          });
+        });
+        ui.setSignedOut(true);
+        ui.setSettingsAccountEmail("Not signed in");
+        ui.setSettingsTierBadge("free");
+        observers.scheduleUpdate();
+        ui.showToast("Signed out of Promptly.", { tone: "info", durationMs: 2200 });
+      } catch (error) {
+        ui.showErrorToast(String(error?.message || error));
+      }
+    },
     onVisualStyleChange: (style) => {
       const nextStyle =
         style === "midnight" ? "midnight" : style === "minimalistic" ? "minimalistic" : "default";
@@ -617,14 +644,14 @@
       const fid = String(id || "").trim();
       const snip = String(snippet || "").trim();
       if (!fid || !snip) {
-        return;
+        return false;
       }
       if (promptLifecycleState.appliedFurtherImproveIds.has(fid)) {
-        return;
+        return false;
       }
       const host = resolveFurtherImproveHost();
       if (!host) {
-        return;
+        return false;
       }
       try {
         host.focus({ preventScroll: true });
@@ -638,12 +665,26 @@
       const ok = applyFurtherImproveSnippet(host, snip);
       if (!ok) {
         observers.scheduleUpdate();
-        return;
+        return false;
       }
+      scrollPromptComposerToBottom(host);
       promptLifecycleState.appliedFurtherImproveIds.add(fid);
       hintedTarget = host;
-      refreshOpenPopupFromHost(host);
-      observers.scheduleUpdate();
+      const reduceMotion =
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (reduceMotion) {
+        refreshOpenPopupFromHost(host);
+        observers.scheduleUpdate();
+        return true;
+      }
+      suppressOpenPopupSetContentUntilMs = Date.now() + FURTHER_IMPROVE_CURTAIN_MS;
+      window.setTimeout(() => {
+        suppressOpenPopupSetContentUntilMs = 0;
+        refreshOpenPopupFromHost(host);
+        observers.scheduleUpdate();
+      }, FURTHER_IMPROVE_CURTAIN_MS);
+      return true;
     },
     onAutoAdjust: async (payload = {}) => {
       clearComposePopupAutoCloseTimer();
@@ -703,7 +744,7 @@
       let didApplyOptimizedPrompt = false;
       try {
         // Improve: require visible service sign-in + optional page email match. Generate Prompt only
-        // needs Chrome Gmail (checked in the background on optimize); skip the stricter page gate.
+        // needs Chrome Google sign-in (checked in the background on optimize); skip the stricter page gate.
         if (!isComposeMode) {
           await verifyCurrentUserSession();
         }
@@ -944,10 +985,23 @@
     const msg = String(message || "").trim();
     const lowered = msg.toLowerCase();
     if (!msg) return "Something went wrong.";
-    if (lowered.includes("sign in to chrome")) return "Sign in to Chrome (Gmail) to use Promptly.";
-    if (lowered.includes("only gmail chrome profiles")) return "Use a Chrome profile signed into Gmail.";
+    if (lowered.includes("sign in to chrome")) return "Sign in to Chrome with your Google account to use Promptly.";
+    if (lowered.includes("only gmail chrome profiles")) return "Use a Chrome profile signed into Google.";
+    if (lowered.includes("only gmail accounts are allowed")) return "Sign in with Google (any verified Google account).";
+    if (lowered.includes("only gmail users are allowed")) return "Sign in with Google (any verified Google account).";
+    if (lowered.includes("service account email does not match")) {
+      return "Account mismatch: use the same Google account in Chrome as on this site.";
+    }
+    if (lowered.includes("does not match your chrome profile")) {
+      return "Account mismatch: use the same Google account in Chrome as on this site.";
+    }
+    if (lowered.includes("signed-in account on this page does not match")) {
+      return "Account mismatch: use the same account on this site as in Promptly / Chrome.";
+    }
+    if (lowered.includes("sign in to promptly first")) {
+      return "Sign in to Promptly first — use the Sign in button on the tab.";
+    }
     if (lowered.includes("not signed in on this ai service page")) return "Sign in on this AI site, then try again.";
-    if (lowered.includes("service account email does not match")) return "Account mismatch: switch to your Chrome Gmail.";
     if (lowered.includes("daily api token limit reached")) return "Daily token limit reached. Try again tomorrow.";
     if (lowered.includes("not enough api tokens")) return "Not enough tokens left for this prompt.";
     if (lowered.includes("timeout")) return "Request timed out. Try again.";
@@ -1480,6 +1534,54 @@
       promptLifecycleState.lockedSuggestions = null;
       promptLifecycleState.appliedSuggestionKeys = new Set();
     }
+  }
+
+  /** Scroll host composer so newly appended text (usually at the end) is visible — textarea or nested scroll shells (ChatGPT / Claude / Gemini). */
+  function scrollPromptComposerToBottom(host) {
+    if (!host || !host.isConnected) {
+      return;
+    }
+    const surface =
+      typeof adapters.getPromptWriteSurface === "function"
+        ? adapters.getPromptWriteSurface(host)
+        : host;
+    const inner = surface && surface.isConnected ? surface : host;
+    const bump = () => {
+      if (inner instanceof HTMLTextAreaElement || inner instanceof HTMLInputElement) {
+        try {
+          inner.scrollTop = inner.scrollHeight;
+        } catch (_e) {
+          // ignore
+        }
+        return;
+      }
+      const nodes = [];
+      for (let n = inner, i = 0; n && n instanceof Element && i < 28; n = n.parentElement, i++) {
+        const sh = n.scrollHeight;
+        const ch = n.clientHeight;
+        if (sh <= ch + 1) {
+          continue;
+        }
+        const oy = window.getComputedStyle(n).overflowY;
+        if (n === inner || oy === "auto" || oy === "scroll" || oy === "overlay") {
+          nodes.push(n);
+        }
+      }
+      for (const n of nodes) {
+        try {
+          n.scrollTop = n.scrollHeight;
+        } catch (_e) {
+          // ignore
+        }
+      }
+    };
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        bump();
+        window.setTimeout(bump, 0);
+        window.setTimeout(bump, 48);
+      });
+    });
   }
 
   /** Appends snippet line (including <<…>>) to the host composer with a blank paragraph before it when there is prior text. */
@@ -2242,7 +2344,7 @@
         ? { ...anchorRect, top: anchorRect.top + CLAUDE_PLACEMENT_TOP_OFFSET_PX }
         : anchorRect;
     ui.setTheme(inferThemeFromTarget(currentTarget));
-    if (isOpen) {
+    if (isOpen && Date.now() >= suppressOpenPopupSetContentUntilMs) {
       ui.setContent(analyzePrompt(currentPromptText));
     }
 
@@ -2267,6 +2369,7 @@
 
   function closePopup() {
     clearComposePopupAutoCloseTimer();
+    suppressOpenPopupSetContentUntilMs = 0;
     if (!isOpen) {
       return;
     }

@@ -125,6 +125,7 @@
       onSignIn,
       onLoadSettingsAccount,
       onManageAccount,
+      onPromptlySignOut,
       onVisualStyleChange,
       onVisualColorChange,
       onDragStart,
@@ -141,6 +142,8 @@
       this.onSignIn = onSignIn;
       this.onLoadSettingsAccount = onLoadSettingsAccount;
       this.onManageAccount = onManageAccount;
+      this.onPromptlySignOut =
+        typeof onPromptlySignOut === "function" ? onPromptlySignOut : null;
       this.onVisualStyleChange = onVisualStyleChange;
       this.onVisualColorChange = onVisualColorChange;
       this.onDragStart = onDragStart;
@@ -436,8 +439,9 @@
         },
         (payload) => {
           if (typeof this.onFurtherImproveAppend === "function") {
-            this.onFurtherImproveAppend(payload);
+            return this.onFurtherImproveAppend(payload);
           }
+          return false;
         }
       );
       this.popupMask = document.createElement("div");
@@ -470,7 +474,10 @@
         "<div class='promptly-settings-account-row'>" +
         "<div class='promptly-settings-email'>Not signed in</div>" +
         "<div class='promptly-settings-tier-badge' hidden>Free</div>" +
+        "</div>" +
+        "<div class='promptly-settings-account-actions'>" +
         "<button type='button' class='promptly-settings-account-btn'>Manage account / subscription</button>" +
+        "<button type='button' class='promptly-settings-sign-out-btn' aria-label='Sign out of Promptly'>Sign out</button>" +
         "</div>" +
         "</div>" +
         "<div class='promptly-settings-section promptly-settings-section-account-sliders'>" +
@@ -514,6 +521,7 @@
       this.settingsEmailEl = this.settingsPanel.querySelector(".promptly-settings-email");
       this.settingsTierEl = this.settingsPanel.querySelector(".promptly-settings-tier-badge");
       this.settingsAccountBtn = this.settingsPanel.querySelector(".promptly-settings-account-btn");
+      this.settingsSignOutBtn = this.settingsPanel.querySelector(".promptly-settings-sign-out-btn");
       this.settingsCloseBtn = this.settingsPanel.querySelector(".promptly-settings-close");
       this.settingsTitleIcon = this.settingsPanel.querySelector(".promptly-settings-title-icon");
       this.settingsStyleToggle = this.settingsPanel.querySelector(".promptly-settings-toggle");
@@ -572,6 +580,15 @@
           this.onManageAccount();
         }
       });
+      if (this.settingsSignOutBtn) {
+        this.settingsSignOutBtn.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (typeof this.onPromptlySignOut === "function") {
+            this.onPromptlySignOut();
+          }
+        });
+      }
       this.settingsStyleToggle.addEventListener("click", () => {
         const isThin = this.root.dataset.visualStyle === "minimalistic";
         const next = isThin ? "default" : "minimalistic";

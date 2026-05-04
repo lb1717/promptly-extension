@@ -480,6 +480,14 @@
   line-height: 1.1;
 }
 
+.promptly-settings-account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 .promptly-settings-account-btn {
   all: unset;
   display: block;
@@ -496,6 +504,27 @@
   text-align: center;
   white-space: nowrap;
   padding: 7px 9px;
+}
+
+.promptly-settings-sign-out-btn {
+  all: unset;
+  display: block;
+  box-sizing: border-box;
+  cursor: pointer;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: rgba(15, 23, 42, 0.35);
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  white-space: nowrap;
+  padding: 7px 9px;
+}
+
+.promptly-settings-sign-out-btn:hover {
+  border-color: rgba(248, 113, 113, 0.55);
+  color: #fecaca;
 }
 
 .promptly-settings-sliders {
@@ -1263,11 +1292,11 @@
 /* Gap must live on this rule too — some engines drop row/column gap when `display` comes from a weaker rule. */
 .promptly-rewrite-input-wrap.promptly-show-further-improve .promptly-further-improve-grid:not([hidden]) {
   display: grid;
-  row-gap: 4px;
+  row-gap: 3px;
   column-gap: 8px;
-  grid-row-gap: 4px;
+  grid-row-gap: 3px;
   grid-column-gap: 8px;
-  gap: 4px 8px;
+  gap: 3px 8px;
 }
 
 .promptly-rewrite-input-wrap .promptly-further-improve-grid[hidden] {
@@ -1278,6 +1307,7 @@
   all: unset;
   box-sizing: border-box;
   display: block;
+  position: relative;
   width: 100%;
   min-width: 0;
   margin: 0;
@@ -1288,11 +1318,10 @@
   touch-action: manipulation;
   -webkit-user-select: none;
   user-select: none;
-  border-radius: 8px;
-  /* White ring so focus/active never read as harsh black on green */
-  border: 1px solid rgba(255, 255, 255, 0.72);
-  background: rgba(34, 197, 94, 0.11);
-  color: #166534;
+  border-radius: 6px;
+  border: 1px solid var(--promptly-chip-border);
+  background: var(--promptly-chip-bg);
+  color: var(--promptly-chip-text);
   font-size: 9px;
   font-weight: 700;
   line-height: 10px;
@@ -1301,44 +1330,89 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.55) inset,
-    0 1px 2px rgba(22, 101, 52, 0.06);
   transition:
     transform 0.26s cubic-bezier(0.34, 1.2, 0.64, 1),
-    background 0.24s ease,
-    border-color 0.24s ease,
-    box-shadow 0.24s ease,
+    background 0.22s ease,
+    border-color 0.22s ease,
     color 0.2s ease,
-    filter 0.2s ease;
+    filter 0.2s ease,
+    box-shadow 0.22s ease;
+}
+
+.promptly-further-improve-chip .promptly-fi-chip-text {
+  position: relative;
+  z-index: 1;
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes promptly-fi-curtain-reveal {
+  from {
+    clip-path: inset(50% 50% 50% 50%);
+    -webkit-clip-path: inset(50% 50% 50% 50%);
+  }
+  to {
+    clip-path: inset(0% 0% 0% 0%);
+    -webkit-clip-path: inset(0% 0% 0% 0%);
+  }
+}
+
+.promptly-further-improve-chip.promptly-fi-curtain-animating::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  z-index: 0;
+  pointer-events: none;
+  background: rgba(22, 163, 74, 0.28);
+  animation: promptly-fi-curtain-reveal 0.26s cubic-bezier(0.33, 0.86, 0.32, 1) forwards;
+}
+
+.promptly-root[data-theme="dark"] .promptly-further-improve-chip.promptly-fi-curtain-animating::before {
+  background: rgba(34, 197, 94, 0.22);
+}
+
+.promptly-further-improve-chip.promptly-fi-busy {
+  pointer-events: none;
+  cursor: default;
+}
+
+.promptly-further-improve-chip.promptly-fi-busy:active {
+  transform: none;
+  filter: none;
+  transition-duration: 0.08s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .promptly-further-improve-chip.promptly-fi-curtain-animating::before {
+    animation: none;
+    clip-path: inset(0 0 0 0);
+    -webkit-clip-path: inset(0 0 0 0);
+  }
 }
 
 .promptly-further-improve-chip:hover:not(.is-applied):not([aria-disabled="true"]) {
-  filter: none;
-  background: rgba(34, 197, 94, 0.17);
-  border-color: rgba(255, 255, 255, 0.88);
-  box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.65) inset,
-    0 2px 6px rgba(22, 101, 52, 0.08);
+  filter: brightness(0.98);
 }
 
 .promptly-further-improve-chip:focus-visible {
-  outline: 2px solid rgba(255, 255, 255, 0.95);
+  outline: 2px solid var(--promptly-chip-border);
   outline-offset: 1px;
 }
 
 .promptly-further-improve-chip:active:not(.is-applied):not([aria-disabled="true"]) {
   transform: scale(0.965);
   transition-duration: 0.12s;
-  transition-timing-function: cubic-bezier(0.33, 1, 0.68, 1);
-  box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.4) inset,
-    inset 0 2px 8px rgba(22, 101, 52, 0.12);
+  filter: brightness(0.96);
 }
 
 .promptly-further-improve-chip.is-applied,
 .promptly-further-improve-chip[aria-disabled="true"] {
   cursor: default;
+  filter: none;
   background: rgba(22, 163, 74, 0.28);
   border-color: rgba(255, 255, 255, 0.8);
   color: #f0fdf4;
@@ -1346,20 +1420,6 @@
     0 1px 0 rgba(255, 255, 255, 0.35) inset,
     0 1px 3px rgba(0, 0, 0, 0.06);
   transform: none;
-}
-
-.promptly-root[data-theme="dark"] .promptly-further-improve-chip {
-  border-color: rgba(255, 255, 255, 0.38);
-  background: rgba(74, 222, 128, 0.1);
-  color: #bbf7d0;
-  box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.12) inset,
-    0 1px 2px rgba(0, 0, 0, 0.2);
-}
-
-.promptly-root[data-theme="dark"] .promptly-further-improve-chip:hover:not(.is-applied):not([aria-disabled="true"]) {
-  background: rgba(74, 222, 128, 0.16);
-  border-color: rgba(255, 255, 255, 0.5);
 }
 
 .promptly-root[data-theme="dark"] .promptly-further-improve-chip.is-applied,

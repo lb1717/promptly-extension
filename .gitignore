@@ -22,8 +22,11 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-### Chrome Web Store build artifact (regenerate with scripts/package-extension-for-store.sh)
+### Chrome Web Store build artifacts (regenerate: bash scripts/package-extension-for-store.sh)
 promptly-extension-store.zip
+promptly-extension-store-*.zip
+promptly-chrome-store-UPLOAD.zip
+promptly-chrome-store-v*.zip
 
 ### OS / editor
 .DS_Store

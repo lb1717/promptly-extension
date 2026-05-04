@@ -459,17 +459,9 @@
     return null;
   }
 
-  function pageEmailHintForSessionVerify(site) {
+  function pageEmailHintForSessionVerify(_site) {
     const raw = getPageEmailHint();
     if (!raw) {
-      return null;
-    }
-    // Avoid matching support/legal copy on Google surfaces; extension only allows Gmail anyway.
-    if (
-      (site === "gemini" || site === "chatgpt") &&
-      !raw.endsWith("@gmail.com") &&
-      !raw.endsWith("@googlemail.com")
-    ) {
       return null;
     }
     return raw;

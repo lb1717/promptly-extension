@@ -317,11 +317,7 @@
           if (!meta) {
             return;
           }
-          this.onFurtherImproveAppend({
-            id: fid,
-            label: meta.label,
-            snippet: meta.snippet
-          });
+          this.activateFurtherImproveChip(chip, meta);
         },
         true
       );
@@ -342,7 +338,7 @@
           if (!fid || !meta || typeof this.onFurtherImproveAppend !== "function") {
             return;
           }
-          this.onFurtherImproveAppend({ id: fid, label: meta.label, snippet: meta.snippet });
+          this.activateFurtherImproveChip(chip, meta);
         },
         true
       );
@@ -1074,7 +1070,10 @@
             if (btn.applied) {
               el.classList.add("is-applied");
             }
-            el.textContent = btn.applied ? `${btn.label} ✓` : btn.label;
+            const textSpan = this.doc.createElement("span");
+            textSpan.className = "promptly-fi-chip-text";
+            textSpan.textContent = btn.applied ? `${btn.label} ✓` : btn.label;
+            el.appendChild(textSpan);
             el.title = String(btn.snippet || "").trim();
             this.furtherImproveGrid.appendChild(el);
           }
@@ -1140,6 +1139,63 @@
 
     getHeight() {
       return 150;
+    }
+
+    activateFurtherImproveChip(chip, meta) {
+      if (!chip || !meta || typeof this.onFurtherImproveAppend !== "function") {
+        return;
+      }
+      const fid = String(chip.getAttribute("data-fi-id") || "").trim();
+      if (!fid) {
+        return;
+      }
+      const reduceMotion =
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (reduceMotion) {
+        this.onFurtherImproveAppend({ id: fid, label: meta.label, snippet: meta.snippet });
+        return;
+      }
+      chip.classList.add("promptly-fi-busy", "promptly-fi-curtain-animating");
+      const ok = this.onFurtherImproveAppend({ id: fid, label: meta.label, snippet: meta.snippet });
+      if (!ok) {
+        chip.classList.remove("promptly-fi-busy", "promptly-fi-curtain-animating");
+        return;
+      }
+      const finalize = () => {
+        if (!chip.isConnected) {
+          return;
+        }
+        chip.classList.remove("promptly-fi-curtain-animating", "promptly-fi-busy");
+        chip.classList.add("is-applied");
+        chip.setAttribute("aria-disabled", "true");
+        chip.tabIndex = -1;
+        const span = chip.querySelector(".promptly-fi-chip-text");
+        const done = `${meta.label} ✓`;
+        if (span) {
+          span.textContent = done;
+        } else {
+          chip.textContent = done;
+        }
+      };
+      const onEnd = (ev) => {
+        if (ev.target !== chip) {
+          return;
+        }
+        const names = String(ev.animationName || "");
+        if (!names.includes("promptly-fi-curtain-reveal")) {
+          return;
+        }
+        chip.removeEventListener("animationend", onEnd);
+        finalize();
+      };
+      chip.addEventListener("animationend", onEnd);
+      window.setTimeout(() => {
+        chip.removeEventListener("animationend", onEnd);
+        if (chip.classList.contains("promptly-fi-curtain-animating")) {
+          finalize();
+        }
+      }, 420);
     }
 
     fitToBounds(width, height) {

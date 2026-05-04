@@ -2,6 +2,7 @@
 
 import { Suspense, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
+import { ExtensionEmailAuthPanel } from "./ExtensionEmailAuthPanel";
 
 const CALLBACK_PATH = "/auth/extension-google-oauth";
 
@@ -53,6 +54,11 @@ function ExtensionSignInContent() {
   const redirectUri = searchParams.get("redirect_uri")?.trim() || "";
   const state = searchParams.get("state")?.trim() || "";
   const nonce = searchParams.get("nonce")?.trim() || "";
+  const extensionId = searchParams.get("extension_id")?.trim() || "";
+  const signinCsrf = searchParams.get("signin_csrf")?.trim() || "";
+  const firebaseApiKey =
+    searchParams.get("firebase_api_key")?.trim() ||
+    String(process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "").trim();
 
   const { error, googleUrl } = useMemo(() => {
     if (!clientId || !redirectUri || !state || !nonce) {
@@ -88,9 +94,36 @@ function ExtensionSignInContent() {
               <GoogleMark />
               Continue with Google
             </a>
-            <p className="text-[11px] text-ink/45 text-center mt-6 leading-snug">
+            <p className="text-[11px] text-ink/45 text-center mt-4 leading-snug">
               You’ll finish on Google, then return here to complete sign-in.
             </p>
+
+            <div className="relative my-6">
+              <div className="absolute inset-0 flex items-center" aria-hidden="true">
+                <div className="w-full border-t border-white/10" />
+              </div>
+              <div className="relative flex justify-center text-[11px] font-semibold uppercase tracking-wide">
+                <span className="bg-white/[0.06] px-3 text-ink/50">Or</span>
+              </div>
+            </div>
+
+            {extensionId && signinCsrf && firebaseApiKey ? (
+              <ExtensionEmailAuthPanel
+                apiKey={firebaseApiKey}
+                extensionId={extensionId}
+                signinCsrf={signinCsrf}
+                disabled={false}
+              />
+            ) : (
+              <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-3 text-center">
+                <p className="text-[12px] font-semibold text-amber-100/95">Email sign-in unavailable</p>
+                <p className="mt-1 text-[11px] text-ink/60 leading-snug">
+                  {!extensionId || !signinCsrf
+                    ? "Update the Promptly extension so the sign-in window includes extension parameters, then try again."
+                    : "Missing Firebase Web API key. Add NEXT_PUBLIC_FIREBASE_API_KEY to the site env, or ensure the extension passes firebase_api_key in this URL."}
+                </p>
+              </div>
+            )}
           </>
         )}
       </div>

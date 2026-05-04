@@ -138,9 +138,6 @@ async function resolveUserIdentityFromGoogleIdToken(request, env, googleIdToken,
   if (!email || !emailVerified) {
     return { ok: false, code: 403, error: "Google account email missing or not verified" };
   }
-  if (!email.endsWith("@gmail.com") && !email.endsWith("@googlemail.com")) {
-    return { ok: false, code: 403, error: "Only Gmail users are allowed" };
-  }
   const headerEmail = String(request.headers.get("x-promptly-user-email") || "")
     .trim()
     .toLowerCase();
@@ -182,9 +179,6 @@ async function resolveUserIdentityFromGoogleAccessToken(request, env, googleAcce
   if (!email || !verifiedEmail) {
     return { ok: false, code: 403, error: "Google account email missing or not verified" };
   }
-  if (!email.endsWith("@gmail.com") && !email.endsWith("@googlemail.com")) {
-    return { ok: false, code: 403, error: "Only Gmail users are allowed" };
-  }
 
   const headerEmail = String(request.headers.get("x-promptly-user-email") || "")
     .trim()
@@ -214,9 +208,6 @@ async function resolveUserIdentityFromFirebaseToken(request, env, firebaseToken,
   }
   if (!verified.email || !verified.emailVerified) {
     return { ok: false, code: 403, error: "Firebase account email is missing or not verified" };
-  }
-  if (!verified.email.endsWith("@gmail.com") && !verified.email.endsWith("@googlemail.com")) {
-    return { ok: false, code: 403, error: "Only Gmail users are allowed" };
   }
 
   const headerEmail = String(request.headers.get("x-promptly-user-email") || "")
@@ -266,9 +257,6 @@ async function resolveUserIdentityLegacyEmail(request, env) {
     .toLowerCase();
   if (!email) {
     return { ok: false, code: 401, error: "Missing signed-in user identity" };
-  }
-  if (!email.endsWith("@gmail.com") && !email.endsWith("@googlemail.com")) {
-    return { ok: false, code: 403, error: "Only Gmail users are allowed" };
   }
   const salt = String(env.USER_ID_SALT || env.USER_KEY_SALT || "").trim();
   if (!salt) {
