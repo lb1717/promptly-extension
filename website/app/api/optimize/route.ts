@@ -10,6 +10,7 @@ import {
   getCreditsForUser,
   getUtcDay,
   handlePromptlyPreflight,
+  normalizePromptlyService,
   optimizePrompt,
   requirePromptlyUser
 } from "@/lib/server/promptlyBackend";
@@ -80,7 +81,10 @@ export async function POST(request: Request) {
       );
     }
 
+    const service = normalizePromptlyService(request.headers.get("x-promptly-service"));
+    const optimizeStartedAt = Date.now();
     const optimized = await optimizePrompt(prompt, userInstruction, optimizeMode, { forceConfigRefresh: true });
+    const optimizeElapsedMs = Math.max(0, Date.now() - optimizeStartedAt);
     const fallbackText = (prompt || userInstruction).trim();
     const optimizedText = String(optimized?.optimized_prompt ?? "").trim();
     const optimized_prompt = optimizedText || fallbackText;
@@ -100,7 +104,9 @@ export async function POST(request: Request) {
       user: auth.user,
       optimizeMode,
       day: getUtcDay(),
-      tokenCost
+      tokenCost,
+      service,
+      responseTimeMs: optimizeElapsedMs
     });
 
     if (!usageResult.ok) {

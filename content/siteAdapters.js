@@ -397,6 +397,36 @@
       target.closest('[data-testid="chat-input"]') ||
       (target.getAttribute("data-testid") === "chat-input" ? target : null);
     if (input) {
+      const inputRect = input.getBoundingClientRect();
+      const ancestors = [];
+      for (
+        let node = input.parentElement, depth = 0;
+        node && depth < 16 && node !== document.body;
+        node = node.parentElement, depth += 1
+      ) {
+        if (typeof node.getBoundingClientRect !== "function") {
+          continue;
+        }
+        const rect = node.getBoundingClientRect();
+        if (rect.width < 120 || rect.height < 20) {
+          continue;
+        }
+        // Keep candidates close to the input geometry so we avoid huge page wrappers.
+        const widthCloseToInput = rect.width >= inputRect.width * 0.85 && rect.width <= inputRect.width + 220;
+        const bottomNearInput = rect.bottom >= inputRect.bottom - 12 && rect.bottom <= inputRect.bottom + 96;
+        const topNotFarAbove = rect.top <= inputRect.top + 8 && rect.top >= inputRect.top - 220;
+        if (widthCloseToInput && bottomNearInput && topNotFarAbove) {
+          ancestors.push({ node, rect });
+        }
+        if (node.tagName === "FORM") {
+          break;
+        }
+      }
+      if (ancestors.length > 0) {
+        ancestors.sort((a, b) => (a.rect.top === b.rect.top ? a.rect.height - b.rect.height : a.rect.top - b.rect.top));
+        return ancestors[0].node;
+      }
+
       const shell =
         input.closest("[class*='max-h-96']") ||
         input.closest(".overflow-y-auto") ||

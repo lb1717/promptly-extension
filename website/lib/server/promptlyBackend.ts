@@ -54,6 +54,8 @@ type PromptlyUser = {
   allTimeMaxDailyTokenUsage: number;
 };
 
+export type PromptlyService = "chatgpt" | "claude" | "gemini" | "unknown";
+
 type DailyUsage = {
   day: string;
   uid: string;
@@ -63,6 +65,12 @@ type DailyUsage = {
   auto: number;
   manual: number;
   generated: number;
+  chatgpt: number;
+  claude: number;
+  gemini: number;
+  unknown: number;
+  responseTimeTotalMs: number;
+  responseTimeCount: number;
   limit: number;
 };
 
@@ -175,9 +183,17 @@ function getDateDaysAgo(daysAgo: number) {
   return date.toISOString().slice(0, 10);
 }
 
-function getRecentDays(days: number) {
+export function getRecentDays(days: number) {
   const count = Math.max(1, Math.floor(days));
   return Array.from({ length: count }, (_, idx) => getDateDaysAgo(count - idx - 1));
+}
+
+export function normalizePromptlyService(rawValue: unknown): PromptlyService {
+  const value = String(rawValue || "").trim().toLowerCase();
+  if (value === "chatgpt" || value === "claude" || value === "gemini") {
+    return value;
+  }
+  return "unknown";
 }
 
 export type TierTokenLimits = {
@@ -558,6 +574,24 @@ async function mergeDuplicateUsageIntoCanonical(canonicalUid: string, duplicateU
         generated:
           Math.max(0, Math.floor(Number(existing.generated || 0) || 0)) +
           Math.max(0, Math.floor(Number(raw.generated || 0) || 0)),
+        chatgpt:
+          Math.max(0, Math.floor(Number(existing.chatgpt || 0) || 0)) +
+          Math.max(0, Math.floor(Number(raw.chatgpt || 0) || 0)),
+        claude:
+          Math.max(0, Math.floor(Number(existing.claude || 0) || 0)) +
+          Math.max(0, Math.floor(Number(raw.claude || 0) || 0)),
+        gemini:
+          Math.max(0, Math.floor(Number(existing.gemini || 0) || 0)) +
+          Math.max(0, Math.floor(Number(raw.gemini || 0) || 0)),
+        unknown:
+          Math.max(0, Math.floor(Number(existing.unknown || 0) || 0)) +
+          Math.max(0, Math.floor(Number(raw.unknown || 0) || 0)),
+        responseTimeTotalMs:
+          Math.max(0, Math.floor(Number(existing.responseTimeTotalMs || 0) || 0)) +
+          Math.max(0, Math.floor(Number(raw.responseTimeTotalMs || 0) || 0)),
+        responseTimeCount:
+          Math.max(0, Math.floor(Number(existing.responseTimeCount || 0) || 0)) +
+          Math.max(0, Math.floor(Number(raw.responseTimeCount || 0) || 0)),
         limit: Math.max(1, Math.floor(Number(existing.limit || 0) || 0), Math.floor(Number(raw.limit || 0) || 0)),
         updatedAt: FieldValue.serverTimestamp(),
         createdAt: canonicalSnap.exists ? existing.createdAt || FieldValue.serverTimestamp() : FieldValue.serverTimestamp()
@@ -790,8 +824,10 @@ export async function requirePromptlyUser(request: Request): Promise<{
     const signInProvider = String(
       (decoded as { firebase?: { sign_in_provider?: string } }).firebase?.sign_in_provider || ""
     ).trim();
+    const displayName = String((decoded as { name?: string }).name || "").trim();
     const user = await upsertPromptlyUser(canonicalUid, email, {
       provider: "firebase",
+      ...(displayName ? { displayName } : {}),
       ...(signInProvider ? { signInProvider } : {})
     });
     return { ok: true, user };
@@ -820,8 +856,10 @@ export async function requireWebFirebaseUser(request: Request): Promise<{
   const signInProvider = String(
     (decoded as { firebase?: { sign_in_provider?: string } }).firebase?.sign_in_provider || ""
   ).trim();
+  const displayName = String((decoded as { name?: string }).name || "").trim();
   const promptlyUser = await upsertPromptlyUser(canonicalUid, email, {
     provider: "firebase",
+    ...(displayName ? { displayName } : {}),
     ...(signInProvider ? { signInProvider } : {})
   });
   return { ok: true, user: promptlyUser };
@@ -839,6 +877,12 @@ async function getDailyUsage(uid: string, day: string, limit: number): Promise<D
     auto: Math.max(0, Math.floor(Number(raw.auto || 0) || 0)),
     manual: Math.max(0, Math.floor(Number(raw.manual || 0) || 0)),
     generated: Math.max(0, Math.floor(Number(raw.generated || 0) || 0)),
+    chatgpt: Math.max(0, Math.floor(Number(raw.chatgpt || 0) || 0)),
+    claude: Math.max(0, Math.floor(Number(raw.claude || 0) || 0)),
+    gemini: Math.max(0, Math.floor(Number(raw.gemini || 0) || 0)),
+    unknown: Math.max(0, Math.floor(Number(raw.unknown || 0) || 0)),
+    responseTimeTotalMs: Math.max(0, Math.floor(Number(raw.responseTimeTotalMs || 0) || 0)),
+    responseTimeCount: Math.max(0, Math.floor(Number(raw.responseTimeCount || 0) || 0)),
     limit
   };
 }
@@ -2034,6 +2078,8 @@ export async function consumeDailyUsage(params: {
   optimizeMode: OptimizeEngineMode;
   day: string;
   tokenCost: number;
+  service: PromptlyService;
+  responseTimeMs?: number;
 }): Promise<{ ok: true; usage: DailyUsage } | { ok: false; usage: DailyUsage }> {
   const db = getFirebaseAdminDb();
   const usageRef = db.collection(DAILY_USAGE_COLLECTION).doc(`${params.user.uid}_${params.day}`);
@@ -2048,7 +2094,15 @@ export async function consumeDailyUsage(params: {
     const currentAuto = Math.max(0, Math.floor(Number(usageRaw.auto || 0) || 0));
     const currentManual = Math.max(0, Math.floor(Number(usageRaw.manual || 0) || 0));
     const currentGenerated = Math.max(0, Math.floor(Number(usageRaw.generated || 0) || 0));
+    const currentChatgpt = Math.max(0, Math.floor(Number(usageRaw.chatgpt || 0) || 0));
+    const currentClaude = Math.max(0, Math.floor(Number(usageRaw.claude || 0) || 0));
+    const currentGemini = Math.max(0, Math.floor(Number(usageRaw.gemini || 0) || 0));
+    const currentUnknown = Math.max(0, Math.floor(Number(usageRaw.unknown || 0) || 0));
+    const currentResponseTimeTotalMs = Math.max(0, Math.floor(Number(usageRaw.responseTimeTotalMs || 0) || 0));
+    const currentResponseTimeCount = Math.max(0, Math.floor(Number(usageRaw.responseTimeCount || 0) || 0));
     const nextUsedRaw = currentUsed + params.tokenCost;
+    const responseTimeMs = Math.max(0, Math.floor(Number(params.responseTimeMs || 0) || 0));
+    const countsTowardResponseAverage = responseTimeMs > 0;
 
     const snapshotUsage: DailyUsage = {
       uid: params.user.uid,
@@ -2059,6 +2113,12 @@ export async function consumeDailyUsage(params: {
       auto: currentAuto,
       manual: currentManual,
       generated: currentGenerated,
+      chatgpt: currentChatgpt,
+      claude: currentClaude,
+      gemini: currentGemini,
+      unknown: currentUnknown,
+      responseTimeTotalMs: currentResponseTimeTotalMs,
+      responseTimeCount: currentResponseTimeCount,
       limit: dailyLimit
     };
 
@@ -2073,7 +2133,13 @@ export async function consumeDailyUsage(params: {
       promptsImproved: currentPrompts + 1,
       auto: currentAuto,
       manual: currentManual,
-      generated: currentGenerated + (params.optimizeMode === "generate" ? 1 : 0)
+      generated: currentGenerated + (params.optimizeMode === "generate" ? 1 : 0),
+      chatgpt: currentChatgpt + (params.service === "chatgpt" ? 1 : 0),
+      claude: currentClaude + (params.service === "claude" ? 1 : 0),
+      gemini: currentGemini + (params.service === "gemini" ? 1 : 0),
+      unknown: currentUnknown + (params.service === "unknown" ? 1 : 0),
+      responseTimeTotalMs: currentResponseTimeTotalMs + (countsTowardResponseAverage ? responseTimeMs : 0),
+      responseTimeCount: currentResponseTimeCount + (countsTowardResponseAverage ? 1 : 0)
     };
     if (params.optimizeMode === "auto") {
       nextUsage.auto = currentAuto + 1;
@@ -2091,6 +2157,12 @@ export async function consumeDailyUsage(params: {
         auto: nextUsage.auto,
         manual: nextUsage.manual,
         generated: nextUsage.generated,
+        chatgpt: nextUsage.chatgpt,
+        claude: nextUsage.claude,
+        gemini: nextUsage.gemini,
+        unknown: nextUsage.unknown,
+        responseTimeTotalMs: nextUsage.responseTimeTotalMs,
+        responseTimeCount: nextUsage.responseTimeCount,
         limit: dailyLimit,
         updatedAt: FieldValue.serverTimestamp(),
         createdAt: usageSnap.exists ? usageRaw.createdAt || FieldValue.serverTimestamp() : FieldValue.serverTimestamp()
@@ -2226,6 +2298,79 @@ export async function getCreditsForUser(user: PromptlyUser, request: Request) {
     day,
     usage,
     credits: buildCreditsEnvelope(usage, user.dailyTokenLimit, { estimatedInputTokens })
+  };
+}
+
+export async function getAccountUsageStats(user: PromptlyUser, days: number) {
+  const rangeDays = Math.max(1, Math.min(60, Math.floor(days || 14)));
+  const recentDays = getRecentDays(rangeDays);
+  const usageRows = await Promise.all(recentDays.map((day) => getDailyUsage(user.uid, day, user.dailyTokenLimit)));
+
+  let totalPrompts = 0;
+  let totalTokens = 0;
+  let autoPrompts = 0;
+  let manualPrompts = 0;
+  let generatedPrompts = 0;
+  let chatgptPrompts = 0;
+  let claudePrompts = 0;
+  let geminiPrompts = 0;
+  let unknownPrompts = 0;
+  let responseTimeTotalMs = 0;
+  let responseTimeCount = 0;
+
+  const timeline = usageRows.map((row) => {
+    totalPrompts += row.promptsImproved;
+    totalTokens += row.used;
+    autoPrompts += row.auto;
+    manualPrompts += row.manual;
+    generatedPrompts += row.generated;
+    chatgptPrompts += row.chatgpt;
+    claudePrompts += row.claude;
+    geminiPrompts += row.gemini;
+    unknownPrompts += row.unknown;
+    responseTimeTotalMs += row.responseTimeTotalMs;
+    responseTimeCount += row.responseTimeCount;
+    return {
+      day: row.day,
+      prompts: row.promptsImproved,
+      tokens: row.used
+    };
+  });
+
+  const activeDays = usageRows.filter((row) => row.promptsImproved > 0).length;
+  const avgPromptsPerActiveDay = activeDays > 0 ? totalPrompts / activeDays : 0;
+  const avgTokensPerPrompt = totalPrompts > 0 ? totalTokens / totalPrompts : 0;
+  const averageResponseTimeMs = responseTimeCount > 0 ? responseTimeTotalMs / responseTimeCount : 0;
+
+  const busiest = [...usageRows].sort((a, b) => (b.promptsImproved === a.promptsImproved ? b.used - a.used : b.promptsImproved - a.promptsImproved))[0];
+
+  return {
+    ok: true as const,
+    range_days: rangeDays,
+    totals: {
+      prompts: totalPrompts,
+      tokens: totalTokens,
+      auto_prompts: autoPrompts,
+      manual_prompts: manualPrompts,
+      generated_prompts: generatedPrompts
+    },
+    service_breakdown: {
+      chatgpt: chatgptPrompts,
+      claude: claudePrompts,
+      gemini: geminiPrompts,
+      unknown: unknownPrompts
+    },
+    averages: {
+      prompts_per_active_day: Number(avgPromptsPerActiveDay.toFixed(2)),
+      tokens_per_prompt: Number(avgTokensPerPrompt.toFixed(2)),
+      response_time_ms: Math.round(averageResponseTimeMs)
+    },
+    streaks: {
+      active_days: activeDays,
+      busiest_day: busiest?.day || null,
+      busiest_day_prompts: busiest?.promptsImproved || 0
+    },
+    timeline
   };
 }
 

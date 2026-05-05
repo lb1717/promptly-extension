@@ -529,6 +529,14 @@ async function launchGoogleWebAuthFlow(clientId) {
           return;
         }
         createdWindowId = win.id;
+        // Best-effort: keep the sign-in popup surfaced above the current browsing flow.
+        // Chrome does not expose a true cross-platform always-on-top flag for extension popups.
+        chrome.windows.update(createdWindowId, { focused: true, drawAttention: true }).catch(() => {});
+        globalThis.setTimeout(() => {
+          if (createdWindowId != null && !done) {
+            chrome.windows.update(createdWindowId, { focused: true }).catch(() => {});
+          }
+        }, 250);
       });
     };
 
@@ -613,6 +621,38 @@ function buildApiUrl(baseUrl, path) {
     p = `/${p.slice(5)}`;
   }
   return `${normalizedBase}${p}`;
+}
+
+async function buildManageAccountUrl() {
+  const baseUrl = await getManagedProxyBaseUrl();
+  const accountUrl = `${baseUrl.replace(/\/$/, "")}/account`;
+  try {
+    const identity = await getFirebaseIdentityForApi(false);
+    const idToken = String(identity?.idToken || "").trim();
+    if (!idToken) {
+      return accountUrl;
+    }
+    const response = await fetch(buildApiUrl(baseUrl, "/api/account/extension-auth-link"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-promptly-client": "promptly-extension",
+        Authorization: `Bearer ${idToken}`
+      },
+      body: "{}"
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return accountUrl;
+    }
+    const customToken = String(body?.customToken || "").trim();
+    if (!customToken) {
+      return accountUrl;
+    }
+    return `${accountUrl}#promptly_ext_custom_token=${encodeURIComponent(customToken)}`;
+  } catch (_error) {
+    return accountUrl;
+  }
 }
 
 function buildFirebaseRequestUri(authDomain) {
@@ -823,13 +863,16 @@ async function readPersistedFirebaseIdentityEmail() {
 }
 
 async function readPersistedSignInState() {
-  const cached = await chrome.storage.local.get(["promptlyFirebaseIdentity"]);
-  const identity = cached?.promptlyFirebaseIdentity || null;
-  if (!identity || !String(identity.refreshToken || "").trim()) {
+  const firebaseEmail = await readPersistedFirebaseIdentityEmail();
+  if (firebaseEmail) {
+    return { chromeEmail: firebaseEmail, authProvider: "firebase_email" };
+  }
+  try {
+    const chromeEmail = await getEffectiveSignedInEmail({ interactive: false });
+    return { chromeEmail: String(chromeEmail || "").trim().toLowerCase() || null, authProvider: "google" };
+  } catch (_error) {
     return null;
   }
-  const email = String(identity.email || "").trim().toLowerCase();
-  return { chromeEmail: email || null };
 }
 
 chrome.runtime.onInstalled.addListener(async () => {
@@ -881,6 +924,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       "PROMPTLY_CHECK_CHROME_SIGNIN",
       "PROMPTLY_ENSURE_CHROME_SIGNIN",
       "PROMPTLY_GET_ACCOUNT_STATUS",
+      "PROMPTLY_GET_MANAGE_ACCOUNT_URL",
       "PROMPTLY_CLEAR_SESSION"
     ].includes(message.type)
   ) {
@@ -897,17 +941,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
 
       if (message.type === "PROMPTLY_CHECK_CHROME_SIGNIN") {
-        try {
-          const chromeEmail = await getEffectiveSignedInEmail({ interactive: false });
-          sendResponse({ ok: true, data: { chromeEmail } });
-        } catch (error) {
-          const persisted = await readPersistedSignInState();
-          if (persisted) {
-            sendResponse({ ok: true, data: persisted });
-            return;
-          }
-          sendResponse({ ok: false, error: String(error?.message || error) });
+        const persisted = await readPersistedSignInState();
+        if (persisted) {
+          sendResponse({ ok: true, data: persisted });
+          return;
         }
+        sendResponse({ ok: false, error: "Not signed in" });
         return;
       }
 
@@ -936,12 +975,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
       if (message.type === "PROMPTLY_GET_ACCOUNT_STATUS") {
         let chromeEmail = "";
-        try {
-          chromeEmail = await getEffectiveSignedInEmail({ interactive: false });
-        } catch (_error) {
-          const persisted = await readPersistedSignInState();
-          chromeEmail = String(persisted?.chromeEmail || "").trim();
-        }
+        const persisted = await readPersistedSignInState();
+        chromeEmail = String(persisted?.chromeEmail || "").trim();
         let subscriptionTier = "";
         try {
           const identity = await getFirebaseIdentityForApi(false);
@@ -969,40 +1004,44 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         return;
       }
 
+      if (message.type === "PROMPTLY_GET_MANAGE_ACCOUNT_URL") {
+        const url = await buildManageAccountUrl();
+        sendResponse({ ok: true, data: { url } });
+        return;
+      }
+
       if (message.type === "PROMPTLY_VERIFY_USER_SESSION") {
-        let chromeEmail = "";
-        try {
-          chromeEmail = await getEffectiveSignedInEmail({ interactive: false });
-        } catch (_e) {
-          chromeEmail = "";
-        }
         const firebaseEmail = await readPersistedFirebaseIdentityEmail();
-        const sessionEmails = new Set(
-          [String(chromeEmail || "").trim().toLowerCase(), String(firebaseEmail || "").trim().toLowerCase()].filter(
-            Boolean
-          )
-        );
+        let sessionEmail = String(firebaseEmail || "").trim().toLowerCase();
+        if (!sessionEmail) {
+          try {
+            sessionEmail = String(await getEffectiveSignedInEmail({ interactive: false }))
+              .trim()
+              .toLowerCase();
+          } catch (_e) {
+            sessionEmail = "";
+          }
+        }
         const pageEmailHint = String(message.pageEmailHint || "").trim().toLowerCase();
         const hasAuthenticatedUi = !!message.hasAuthenticatedUi;
         if (!hasAuthenticatedUi) {
           sendResponse({ ok: false, error: "Not signed in on this AI service page" });
           return;
         }
-        if (sessionEmails.size === 0) {
+        if (!sessionEmail) {
           sendResponse({ ok: false, error: "Sign in to Promptly first — use the Sign in button on the tab." });
           return;
         }
-        if (pageEmailHint && !sessionEmails.has(pageEmailHint)) {
+        if (pageEmailHint && pageEmailHint !== sessionEmail) {
           sendResponse({
             ok: false,
-            error: "Signed-in account on this page does not match your Promptly or Chrome Google sign-in"
+            error: "Signed-in account on this page does not match your Promptly sign-in session"
           });
           return;
         }
-        const displayEmail = firebaseEmail || chromeEmail || "";
         sendResponse({
           ok: true,
-          data: { chromeEmail: displayEmail || chromeEmail || null, pageEmailHint: pageEmailHint || null }
+          data: { chromeEmail: sessionEmail || null, pageEmailHint: pageEmailHint || null }
         });
         return;
       }
@@ -1040,6 +1079,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const userInstruction = String(message.userInstruction || "").trim();
       const rawMode = String(message.optimizeMode || "improve").trim().toLowerCase() || "improve";
       const optimizeMode = ["auto", "improve", "generate"].includes(rawMode) ? rawMode : "improve";
+      const rawService = String(message.site || message.service || "").trim().toLowerCase();
+      const service = ["chatgpt", "claude", "gemini"].includes(rawService) ? rawService : "unknown";
 
       if (!baseUrl) {
         sendResponse({
@@ -1088,6 +1129,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         headers: {
           "Content-Type": "application/json",
           "x-promptly-live-config": "1",
+          "x-promptly-service": service,
           ...apiAuthHeaders
         },
         body: JSON.stringify({

@@ -70,6 +70,25 @@ async function identitySignUp(apiKey: string, email: string, password: string) {
   };
 }
 
+async function identityUpdateProfile(apiKey: string, idToken: string, displayName: string) {
+  const res = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:update?key=${encodeURIComponent(apiKey)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        idToken: idToken.trim(),
+        displayName: displayName.trim(),
+        returnSecureToken: true
+      })
+    }
+  );
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(String(body?.error?.message || body?.error || "Could not save profile name"));
+  }
+}
+
 async function identitySendPasswordReset(apiKey: string, email: string) {
   const res = await fetch(
     `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${encodeURIComponent(apiKey)}`,
@@ -168,6 +187,7 @@ export function ExtensionEmailAuthPanel({ apiKey, extensionId, signinCsrf, disab
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [password2, setPassword2] = useState("");
+  const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -226,14 +246,21 @@ export function ExtensionEmailAuthPanel({ apiKey, extensionId, signinCsrf, disab
       setError("Use at least 8 characters for your password.");
       return;
     }
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setError("Enter your name.");
+      return;
+    }
     setBusy(true);
     try {
       const body = await identitySignUp(apiKey, email, password);
+      await identityUpdateProfile(apiKey, body.idToken, trimmedName);
       await identitySendVerifyEmail(apiKey, body.idToken);
       setNeedsEmailVerification(true);
       setMode("signin");
       setPassword("");
       setPassword2("");
+      setName("");
       setMessage("Account created. Verify your email first, then sign in.");
     } catch (err) {
       setError(String(err instanceof Error ? err.message : err));
@@ -264,7 +291,9 @@ export function ExtensionEmailAuthPanel({ apiKey, extensionId, signinCsrf, disab
 
   return (
     <div className="mt-6 border-t border-white/10 pt-6">
-      <p className="text-[12px] font-semibold text-ink/70 text-center mb-3">Email &amp; password</p>
+      <div className="mb-3 flex w-full items-center justify-center rounded-xl border border-white/15 bg-white/[0.08] px-4 py-2.5 text-sm font-semibold text-white/90 shadow-lg">
+        Email &amp; Password
+      </div>
       <div className="flex justify-center gap-2 text-[11px] mb-3">
         <button
           type="button"
@@ -305,6 +334,21 @@ export function ExtensionEmailAuthPanel({ apiKey, extensionId, signinCsrf, disab
             className="w-full rounded-lg border border-white/15 bg-black/25 px-3 py-2 text-sm text-white placeholder:text-ink/40 outline-none focus:border-violet-400/60"
           />
         </label>
+        {mode === "register" ? (
+          <label className="block">
+            <span className="sr-only">Full name</span>
+            <input
+              type="text"
+              autoComplete="name"
+              required
+              value={name}
+              onChange={(ev) => setName(ev.target.value)}
+              disabled={disabled || busy}
+              placeholder="Full name"
+              className="w-full rounded-lg border border-white/15 bg-black/25 px-3 py-2 text-sm text-white placeholder:text-ink/40 outline-none focus:border-violet-400/60"
+            />
+          </label>
+        ) : null}
         <label className="block">
           <span className="sr-only">Password</span>
           <input

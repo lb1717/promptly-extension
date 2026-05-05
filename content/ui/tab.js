@@ -245,9 +245,14 @@
           });
       }
       this.creditUsageMeter = this.tabButton.querySelector(".promptly-tab-credit-meter");
+      this.creditUsageWrap = this.tabButton.querySelector(".promptly-tab-credit-wrap");
       this.creditUsageTooltip = this.tabButton.querySelector(".promptly-tab-credit-tooltip");
       if (this.creditUsageMeter) {
         this.creditUsageMeter.style.setProperty("--promptly-credit-progress", "2%");
+      }
+      if (this.creditUsageWrap) {
+        this.creditUsageWrap.style.setProperty("--promptly-credit-progress", "2%");
+        this.creditUsageWrap.style.setProperty("--promptly-credit-progress-deg", "7.2deg");
       }
       if (this.creditUsageTooltip) {
         this.creditUsageTooltip.innerHTML =
@@ -474,10 +479,7 @@
         "<div class='promptly-settings-account-row'>" +
         "<div class='promptly-settings-email'>Not signed in</div>" +
         "<div class='promptly-settings-tier-badge' hidden>Free</div>" +
-        "</div>" +
-        "<div class='promptly-settings-account-actions'>" +
-        "<button type='button' class='promptly-settings-account-btn'>Manage account / subscription</button>" +
-        "<button type='button' class='promptly-settings-sign-out-btn' aria-label='Sign out of Promptly'>Sign out</button>" +
+        "<button type='button' class='promptly-settings-account-btn'>Manage subscription</button>" +
         "</div>" +
         "</div>" +
         "<div class='promptly-settings-section promptly-settings-section-account-sliders'>" +
@@ -522,6 +524,7 @@
       this.settingsTierEl = this.settingsPanel.querySelector(".promptly-settings-tier-badge");
       this.settingsAccountBtn = this.settingsPanel.querySelector(".promptly-settings-account-btn");
       this.settingsSignOutBtn = this.settingsPanel.querySelector(".promptly-settings-sign-out-btn");
+      this.settingsEmailTapTimes = [];
       this.settingsCloseBtn = this.settingsPanel.querySelector(".promptly-settings-close");
       this.settingsTitleIcon = this.settingsPanel.querySelector(".promptly-settings-title-icon");
       this.settingsStyleToggle = this.settingsPanel.querySelector(".promptly-settings-toggle");
@@ -585,6 +588,27 @@
           event.preventDefault();
           event.stopPropagation();
           if (typeof this.onPromptlySignOut === "function") {
+            this.onPromptlySignOut();
+          }
+        });
+      }
+      if (this.settingsEmailEl) {
+        this.settingsEmailEl.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (typeof this.onPromptlySignOut !== "function") {
+            return;
+          }
+          const emailText = String(this.settingsEmailEl.textContent || "").trim().toLowerCase();
+          if (!emailText || emailText === "not signed in") {
+            this.settingsEmailTapTimes = [];
+            return;
+          }
+          const now = Date.now();
+          this.settingsEmailTapTimes = this.settingsEmailTapTimes.filter((ts) => now - ts <= 900);
+          this.settingsEmailTapTimes.push(now);
+          if (this.settingsEmailTapTimes.length >= 3) {
+            this.settingsEmailTapTimes = [];
             this.onPromptlySignOut();
           }
         });
@@ -959,7 +983,12 @@
       const used = Math.min(max, Math.max(0, Number(credits.used || 0)));
       const usedPercent = Math.max(0, Math.min(100, Math.round((used / max) * 100)));
       const displayPercent = Math.max(2, usedPercent);
+      const displayDeg = Math.max(0, Math.min(360, (displayPercent / 100) * 360));
       this.creditUsageMeter.style.setProperty("--promptly-credit-progress", `${displayPercent}%`);
+      if (this.creditUsageWrap) {
+        this.creditUsageWrap.style.setProperty("--promptly-credit-progress", `${displayPercent}%`);
+        this.creditUsageWrap.style.setProperty("--promptly-credit-progress-deg", `${displayDeg}deg`);
+      }
       const maxStr = fmt(max);
       this.creditUsageTooltip.innerHTML =
         `<span class="promptly-credit-line promptly-credit-line-strong">${usedPercent}% of Daily Limit used</span>` +

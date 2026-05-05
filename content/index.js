@@ -17,7 +17,9 @@
   const BASE_CONTEXT_WINDOW_WIDTH = 330;
   const EXPANDED_CONTEXT_WINDOW_MULTIPLIER = 1.5;
   /** Claude-only: nudge anchor top upward so the tab sits flush on the prompt shell (px). */
-  const CLAUDE_PLACEMENT_TOP_OFFSET_PX = -14;
+  const CLAUDE_PLACEMENT_TOP_OFFSET_PX = 24;
+  /** Gemini-only: nudge anchor top downward slightly for better chatbox alignment (px). */
+  const GEMINI_PLACEMENT_TOP_OFFSET_PX = 1;
   /** After Generate Prompt succeeds with the panel open, collapse back to tab-only (ms). */
   const COMPOSE_SUCCESS_PANEL_AUTO_CLOSE_MS = 2000;
 
@@ -361,9 +363,29 @@
   }
 
   async function getPromptlyAccountUrl() {
-    const values = await chrome.storage.sync.get(["proxyBaseUrl"]);
-    const baseUrl = normalizeProxyBaseUrl(values.proxyBaseUrl);
-    return `${baseUrl.replace(/\/$/, "")}/account`;
+    const fallback = async () => {
+      const values = await chrome.storage.sync.get(["proxyBaseUrl"]);
+      const baseUrl = normalizeProxyBaseUrl(values.proxyBaseUrl);
+      return `${baseUrl.replace(/\/$/, "")}/account`;
+    };
+    try {
+      const response = await new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage({ type: "PROMPTLY_GET_MANAGE_ACCOUNT_URL" }, (resp) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+          resolve(resp || {});
+        });
+      });
+      const url = String(response?.data?.url || "").trim();
+      if (url) {
+        return url;
+      }
+    } catch (_error) {
+      // Fall back to plain account page URL.
+    }
+    return fallback();
   }
 
   const positionManager = new PositionManager();
@@ -1074,7 +1096,8 @@
           type: "PROMPTLY_OPTIMIZE_PROMPT",
           prompt,
           userInstruction: String(userInstruction || "").trim(),
-          optimizeMode
+          optimizeMode,
+          service: site
         },
         (response) => {
           try {
@@ -2342,7 +2365,9 @@
     const rect =
       site === "claude"
         ? { ...anchorRect, top: anchorRect.top + CLAUDE_PLACEMENT_TOP_OFFSET_PX }
-        : anchorRect;
+        : site === "gemini"
+          ? { ...anchorRect, top: anchorRect.top + GEMINI_PLACEMENT_TOP_OFFSET_PX }
+          : anchorRect;
     ui.setTheme(inferThemeFromTarget(currentTarget));
     if (isOpen && Date.now() >= suppressOpenPopupSetContentUntilMs) {
       ui.setContent(analyzePrompt(currentPromptText));

@@ -7,9 +7,11 @@ import {
   reload,
   sendEmailVerification,
   sendPasswordResetEmail,
+  signInWithCustomToken,
   signInWithEmailAndPassword,
   signInWithPopup,
   signOut,
+  updateProfile,
   User
 } from "firebase/auth";
 import { doc, serverTimestamp, setDoc } from "firebase/firestore";
@@ -50,6 +52,15 @@ function tierLabel(tier: string): string {
   return t ? t.charAt(0).toUpperCase() + t.slice(1) : "Free";
 }
 
+function formatDurationMs(value: number): string {
+  const ms = Math.max(0, Math.floor(Number(value) || 0));
+  if (ms < 1000) return `${ms} ms`;
+  const seconds = ms / 1000;
+  if (seconds < 10) return `${seconds.toFixed(2)} s`;
+  if (seconds < 60) return `${seconds.toFixed(1)} s`;
+  return `${(seconds / 60).toFixed(1)} min`;
+}
+
 type BillingPayment = {
   id?: string;
   date?: string;
@@ -69,6 +80,39 @@ type BillingPayload = {
   payments: BillingPayment[];
   stripeConfigured: boolean;
   billingPortalAvailable: boolean;
+};
+
+type AccountUsageStatsPayload = {
+  ok: true;
+  range_days: number;
+  totals: {
+    prompts: number;
+    tokens: number;
+    auto_prompts: number;
+    manual_prompts: number;
+    generated_prompts: number;
+  };
+  service_breakdown: {
+    chatgpt: number;
+    claude: number;
+    gemini: number;
+    unknown: number;
+  };
+  averages: {
+    prompts_per_active_day: number;
+    tokens_per_prompt: number;
+    response_time_ms: number;
+  };
+  streaks: {
+    active_days: number;
+    busiest_day: string | null;
+    busiest_day_prompts: number;
+  };
+  timeline: Array<{
+    day: string;
+    prompts: number;
+    tokens: number;
+  }>;
 };
 
 const ACCOUNT_PLANS = [
@@ -133,6 +177,9 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
   const [billing, setBilling] = useState<BillingPayload | null>(null);
   const [billingLoading, setBillingLoading] = useState(false);
   const [billingError, setBillingError] = useState("");
+  const [accountStats, setAccountStats] = useState<AccountUsageStatsPayload | null>(null);
+  const [accountStatsLoading, setAccountStatsLoading] = useState(false);
+  const [accountStatsError, setAccountStatsError] = useState("");
   const [portalBusy, setPortalBusy] = useState(false);
   const [checkoutBusyTier, setCheckoutBusyTier] = useState<"pro" | "student" | "enterprise" | null>(null);
   const [showBillingDetails, setShowBillingDetails] = useState(false);
@@ -140,7 +187,38 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
   const [emailAuthEmail, setEmailAuthEmail] = useState("");
   const [emailAuthPassword, setEmailAuthPassword] = useState("");
   const [emailAuthPassword2, setEmailAuthPassword2] = useState("");
+  const [emailAuthName, setEmailAuthName] = useState("");
   const [emailAuthMode, setEmailAuthMode] = useState<"signin" | "register">("signin");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const rawHash = String(window.location.hash || "").replace(/^#/, "");
+    if (!rawHash) return;
+    const hashParams = new URLSearchParams(rawHash);
+    const customToken = String(hashParams.get("promptly_ext_custom_token") || "").trim();
+    if (!customToken) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        await signInWithCustomToken(getFirebaseAuth(), customToken);
+        if (!cancelled) {
+          setAccountNotice("Signed in from extension session.");
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setError(String(e instanceof Error ? e.message : e));
+        }
+      } finally {
+        hashParams.delete("promptly_ext_custom_token");
+        const nextHash = hashParams.toString();
+        const nextUrl = `${window.location.pathname}${window.location.search}${nextHash ? `#${nextHash}` : ""}`;
+        window.history.replaceState({}, "", nextUrl);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const loadBilling = useCallback(async (current: User) => {
     setBillingLoading(true);
@@ -165,6 +243,27 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
     }
   }, []);
 
+  const loadAccountStats = useCallback(async (current: User) => {
+    setAccountStatsLoading(true);
+    setAccountStatsError("");
+    try {
+      const token = await current.getIdToken();
+      const res = await fetch("/api/account/stats?days=14", {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error || `Request failed (${res.status})`);
+      }
+      setAccountStats(data as AccountUsageStatsPayload);
+    } catch (e) {
+      setAccountStats(null);
+      setAccountStatsError(String(e instanceof Error ? e.message : e));
+    } finally {
+      setAccountStatsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     const auth = getFirebaseAuth();
     const unsub = onAuthStateChanged(auth, async (nextUser) => {
@@ -172,12 +271,14 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
       setLoading(false);
       if (nextUser) {
         await loadBilling(nextUser);
+        await loadAccountStats(nextUser);
       } else {
         setBilling(null);
+        setAccountStats(null);
       }
     });
     return () => unsub();
-  }, [loadBilling]);
+  }, [loadBilling, loadAccountStats]);
 
   const accountStatus = useMemo(() => {
     if (!user) return "Not signed in";
@@ -191,6 +292,24 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
     if (raw === "student") return "student";
     return "free";
   }, [billing?.subscriptionTier]);
+
+  const serviceBars = useMemo(() => {
+    const breakdown = accountStats?.service_breakdown;
+    if (!breakdown) {
+      return [];
+    }
+    const items = [
+      { key: "chatgpt", label: "ChatGPT", value: Math.max(0, Number(breakdown.chatgpt || 0)) },
+      { key: "claude", label: "Claude", value: Math.max(0, Number(breakdown.claude || 0)) },
+      { key: "gemini", label: "Gemini", value: Math.max(0, Number(breakdown.gemini || 0)) },
+      { key: "unknown", label: "Other", value: Math.max(0, Number(breakdown.unknown || 0)) }
+    ];
+    const max = Math.max(1, ...items.map((item) => item.value));
+    return items.map((item) => ({
+      ...item,
+      widthPct: Math.max(0, Math.min(100, (item.value / max) * 100))
+    }));
+  }, [accountStats]);
 
   async function syncUserToFirestore(currentUser: User) {
     const db = getFirebaseDb();
@@ -267,6 +386,11 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
       setError("Use at least 8 characters for your password.");
       return;
     }
+    const trimmedName = emailAuthName.trim();
+    if (!trimmedName) {
+      setError("Enter your name.");
+      return;
+    }
     setBusy(true);
     try {
       const auth = getFirebaseAuth();
@@ -275,12 +399,15 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
         emailAuthEmail.trim(),
         emailAuthPassword
       );
+      await updateProfile(cred.user, { displayName: trimmedName });
+      await syncUserToFirestore(cred.user);
       await sendEmailVerification(cred.user);
       await signOut(auth);
       setEmailAuthMode("signin");
       setAccountNotice("Account created. Verify your email first, then sign in.");
       setEmailAuthPassword("");
       setEmailAuthPassword2("");
+      setEmailAuthName("");
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));
     } finally {
@@ -361,6 +488,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
     try {
       await signOut(getFirebaseAuth());
       setBilling(null);
+      setAccountStats(null);
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));
     } finally {
@@ -428,6 +556,17 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                     disabled={busy || loading}
                     className="w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-sm text-white placeholder:text-violet-200/40 outline-none focus:border-violet-400/50"
                   />
+                  {emailAuthMode === "register" ? (
+                    <input
+                      type="text"
+                      autoComplete="name"
+                      placeholder="Full name"
+                      value={emailAuthName}
+                      onChange={(e) => setEmailAuthName(e.target.value)}
+                      disabled={busy || loading}
+                      className="w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-sm text-white placeholder:text-violet-200/40 outline-none focus:border-violet-400/50"
+                    />
+                  ) : null}
                   <input
                     type="password"
                     autoComplete={emailAuthMode === "signin" ? "current-password" : "new-password"}
@@ -473,11 +612,13 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
             <>
               <button
                 type="button"
-                onClick={() => loadBilling(user)}
-                disabled={billingLoading}
+                onClick={async () => {
+                  await Promise.all([loadBilling(user), loadAccountStats(user)]);
+                }}
+                disabled={billingLoading || accountStatsLoading}
                 className="rounded-xl border border-violet-500/40 px-4 py-2.5 text-sm text-violet-100 hover:bg-violet-500/10 disabled:opacity-60"
               >
-                {billingLoading ? "Refreshing…" : "Refresh billing"}
+                {billingLoading || accountStatsLoading ? "Refreshing…" : "Refresh account data"}
               </button>
               <button
                 type="button"
@@ -558,6 +699,95 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                 </div>
               </div>
             </div>
+          </section>
+
+          <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-md sm:p-8">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <h2 className="text-sm font-semibold uppercase tracking-[0.15em] text-violet-200/80">Prompt stats</h2>
+              <p className="text-xs text-violet-200/65">Last 14 days</p>
+            </div>
+
+            {accountStatsError ? (
+              <p className="mt-4 text-sm text-amber-200/90">{accountStatsError}</p>
+            ) : accountStatsLoading && !accountStats ? (
+              <p className="mt-4 text-sm text-violet-200/70">Loading usage stats…</p>
+            ) : accountStats ? (
+              <>
+                <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="rounded-xl border border-white/10 bg-black/25 p-4">
+                    <p className="text-xs uppercase tracking-wider text-violet-300/80">Prompts sent</p>
+                    <p className="mt-2 text-2xl font-semibold text-white">{accountStats.totals.prompts.toLocaleString()}</p>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-black/25 p-4">
+                    <p className="text-xs uppercase tracking-wider text-violet-300/80">Avg response time</p>
+                    <p className="mt-2 text-2xl font-semibold text-white">
+                      {formatDurationMs(accountStats.averages.response_time_ms)}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-black/25 p-4">
+                    <p className="text-xs uppercase tracking-wider text-violet-300/80">Active days</p>
+                    <p className="mt-2 text-2xl font-semibold text-white">{accountStats.streaks.active_days}</p>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-black/25 p-4">
+                    <p className="text-xs uppercase tracking-wider text-violet-300/80">Busiest day</p>
+                    <p className="mt-2 text-base font-semibold text-white">
+                      {accountStats.streaks.busiest_day || "—"}
+                    </p>
+                    <p className="mt-1 text-xs text-violet-200/70">
+                      {accountStats.streaks.busiest_day_prompts.toLocaleString()} prompts
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-6 grid gap-6 lg:grid-cols-2">
+                  <div className="rounded-xl border border-white/10 bg-black/25 p-4">
+                    <p className="text-xs uppercase tracking-wider text-violet-300/80">By AI service</p>
+                    <div className="mt-4 space-y-3">
+                      {serviceBars.map((item) => (
+                        <div key={item.key}>
+                          <div className="mb-1 flex items-center justify-between text-xs text-violet-100/90">
+                            <span>{item.label}</span>
+                            <span>{item.value.toLocaleString()}</span>
+                          </div>
+                          <div className="h-2 w-full rounded-full bg-white/10">
+                            <div
+                              className="h-2 rounded-full bg-violet-400/90 transition-all"
+                              style={{ width: `${item.widthPct}%` }}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-white/10 bg-black/25 p-4">
+                    <p className="text-xs uppercase tracking-wider text-violet-300/80">Daily prompt volume</p>
+                    <div className="mt-4 flex h-28 items-end gap-1.5">
+                      {(() => {
+                        const maxPrompts = Math.max(1, ...accountStats.timeline.map((d) => d.prompts));
+                        return accountStats.timeline.map((day) => (
+                          <div key={day.day} className="group flex-1">
+                            <div
+                              className="w-full rounded-t-sm bg-violet-400/80 transition-all hover:bg-violet-300"
+                              style={{ height: `${Math.max(8, (day.prompts / maxPrompts) * 100)}%` }}
+                              title={`${day.day}: ${day.prompts} prompts`}
+                            />
+                          </div>
+                        ));
+                      })()}
+                    </div>
+                    <p className="mt-2 text-xs text-violet-200/65">
+                      Avg prompts/active day: {accountStats.averages.prompts_per_active_day}
+                    </p>
+                    <p className="mt-1 text-xs text-violet-200/65">
+                      Avg tokens/prompt: {accountStats.averages.tokens_per_prompt}
+                    </p>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <p className="mt-4 text-sm text-violet-200/70">No usage stats yet.</p>
+            )}
           </section>
 
           <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-md sm:p-8">

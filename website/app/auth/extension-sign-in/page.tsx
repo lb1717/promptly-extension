@@ -94,9 +94,6 @@ function ExtensionSignInContent() {
               <GoogleMark />
               Continue with Google
             </a>
-            <p className="text-[11px] text-ink/45 text-center mt-4 leading-snug">
-              You’ll finish on Google, then return here to complete sign-in.
-            </p>
 
             {extensionId && signinCsrf && firebaseApiKey ? (
               <ExtensionEmailAuthPanel
