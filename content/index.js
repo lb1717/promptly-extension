@@ -48,6 +48,8 @@
   let bypassNextAutoSendInterception = false;
   let dragStartOffsetX = 0;
   let composeWidthExpanded = false;
+  /** Teardown for passive host-site send/latency telemetry (runs even when Promptly optimize is unused). */
+  let stopHostPassiveListener = null;
   let composePopupAutoCloseTimer = null;
   /** While > Date.now(), `sync` skips `ui.setContent` so further-improve chip curtain animation is not torn down. */
   let suppressOpenPopupSetContentUntilMs = 0;
@@ -1090,6 +1092,13 @@
 
   async function optimizePromptViaProxy(prompt, userInstruction = "", options = {}) {
     const optimizeMode = options.optimizeMode || (options.compose ? "generate" : "improve");
+    let telemetry =
+      typeof window.PromptlyHostTelemetry?.collectForOptimize === "function"
+        ? window.PromptlyHostTelemetry.collectForOptimize(site, prompt, userInstruction)
+        : null;
+    if (!telemetry || typeof telemetry !== "object") {
+      telemetry = undefined;
+    }
     return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage(
         {
@@ -1097,7 +1106,8 @@
           prompt,
           userInstruction: String(userInstruction || "").trim(),
           optimizeMode,
-          service: site
+          service: site,
+          ...(telemetry ? { telemetry } : {})
         },
         (response) => {
           try {
@@ -2641,6 +2651,10 @@
     window.removeEventListener("keydown", handleKeyDown, true);
     document.removeEventListener("visibilitychange", scheduleCreditsRefreshWhenVisible);
     window.removeEventListener("pagehide", destroy, true);
+    if (typeof stopHostPassiveListener === "function") {
+      stopHostPassiveListener();
+      stopHostPassiveListener = null;
+    }
     ui.destroy();
   }
 
@@ -2661,6 +2675,36 @@
     ui.setSettingsOpen(true);
     observers.scheduleUpdate();
   });
+  if (typeof window.PromptlyHostActivityListener?.install === "function") {
+    stopHostPassiveListener = window.PromptlyHostActivityListener.install({
+      site,
+      getPromptTarget: () => currentTarget,
+      readComposer: () => {
+        const gather = (el) => {
+          if (!el || !el.isConnected) {
+            return "";
+          }
+          return String(getPromptText(el) || "").trim();
+        };
+        let chunk = gather(currentTarget);
+        if (chunk.length) {
+          return getPromptText(currentTarget);
+        }
+        try {
+          if (typeof adapters.getPromptElement === "function") {
+            const hinted = adapters.getPromptElement(currentTarget || null);
+            chunk = gather(hinted);
+            if (chunk.length && hinted) {
+              return getPromptText(hinted);
+            }
+          }
+        } catch (_e) {
+          /* ignore */
+        }
+        return "";
+      }
+    });
+  }
   document.addEventListener("pointerdown", handlePointerDown, true);
   document.addEventListener("click", handleDocumentClick, true);
   document.addEventListener("submit", handleDocumentSubmit, true);

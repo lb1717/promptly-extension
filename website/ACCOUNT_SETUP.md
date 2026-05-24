@@ -93,6 +93,8 @@ The important runtime routes are:
 - `POST /api/optimize`
 - `GET /api/admin/stats`
 - `GET /api/admin/users`
+- `GET /api/account/stats` (compact summary shown on `/account`)
+- `GET /api/account/stats/extended` (event-backed series for `/account/statistics`)
 
 ## 6) Extension auth setup
 
@@ -122,5 +124,35 @@ Use Firebase Console:
 - **Authentication > Users** for Promptly accounts
 - **Firestore > users** for plan and usage metadata
 - **Firestore > promptly_usage_daily** for per-day token usage and mode counts
+- **Firestore > promptly_optimize_events** for per-optimize analytics rows when `/api/optimize` succeeds
+- **Firestore > promptly_host_llm_events** for passive extension listener rows (logged sends while chatting on ChatGPT / Claude / Gemini, even without running Improve)
 
 The website admin dashboard now reads from Firestore-backed website routes instead of Worker KV.
+
+## 8) Prompt statistics collection & Firestore indexes
+
+Each successful **`POST /api/optimize`** still updates **`promptly_usage_daily`** (authoritative quotas). It also writes an append‑only analytics row under **`promptly_optimize_events`** with:
+
+- `billedPromptlyTokens` — Promptly’s OpenAI bill for that optimize round (what limits enforce)
+- `optimizeLatencyMs`
+- Extension telemetry (best-effort): composer character/word estimates and a **scraped host UI model label** from ChatGPT / Claude / Gemini (may be empty or wrong after host UI changes)
+
+Independently of optimize, authenticated extensions periodically **`POST /api/telemetry/host-activity`** (batched) to append **`promptly_host_llm_events`** describing observed native sends:
+
+- Composer length & word hints only (**no prompt body** stored)
+- Best-effort model picker label scrape at send time
+- Heuristic **`hostResponseLatencyMs`** inferred from DOM streaming cues (approximate — not vendor-official timings)
+
+Deploy the composite indexes from the repo root before `/api/account/stats/extended` can query events (field order must match Firebase):
+
+- File: [`firestore.indexes.json`](../firestore.indexes.json)
+- **`promptly_optimize_events`** and **`promptly_host_llm_events`**, each composite: **`uid` ASC**, **`utcDay` ASC**, **`__name__` ASC**
+
+If you see `FAILED_PRECONDITION`/“requires an index”, use the link from the error or deploy with:
+
+```bash
+firebase deploy --only firestore:indexes
+```
+
+**Important:** “Host composer chars” / “detected model” / “passive host latency” are **hints for dashboards only**. They do **not** represent ChatGPT, Claude, or Gemini subscription metering and can diverge materially from exact vendor timings or token totals.
+

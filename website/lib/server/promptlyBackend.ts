@@ -1,4 +1,4 @@
-import { FieldValue, Timestamp } from "firebase-admin/firestore";
+import { FieldValue, Timestamp, type DocumentData, type QueryDocumentSnapshot } from "firebase-admin/firestore";
 import { getFirebaseAdminAuth, getFirebaseAdminDb } from "@/lib/server/firebaseAdmin";
 import { PROMPTLY_USER_CONTENT_TOKEN } from "./promptEngineeringConstants";
 import {
@@ -42,6 +42,14 @@ const DEFAULT_OPENAI_REWRITE_MODEL = "gpt-5-nano";
 const DEFAULT_OPENAI_CREATE_MODEL = "gpt-5-nano";
 const USER_COLLECTION = "users";
 const DAILY_USAGE_COLLECTION = "promptly_usage_daily";
+/** Append-only optimize events for extended analytics (indexed by uid + utcDay). */
+const OPTIMIZE_EVENTS_COLLECTION = "promptly_optimize_events";
+export const OPTIMIZE_EVENTS_QUERY_LIMIT = 5000;
+/** Passive listener sends on ChatGPT / Claude / Gemini (no Promptly optimize required). Indexed by uid + utcDay like optimize events. */
+const HOST_LLM_EVENTS_COLLECTION = "promptly_host_llm_events";
+export const HOST_LLM_EVENTS_QUERY_LIMIT = 5000;
+/** Max telemetry text length from browser (host model picker label scrape). */
+const TELEMETRY_HOST_MODEL_MAX_CHARS = 120;
 const GOOGLE_ACCESS_TOKEN_CACHE_TTL_MS = 45 * 60 * 1000;
 const googleAccessTokenCache = new Map<string, { expiresAt: number; email: string | null; sub: string }>();
 
@@ -194,6 +202,621 @@ export function normalizePromptlyService(rawValue: unknown): PromptlyService {
     return value;
   }
   return "unknown";
+}
+
+export type OptimizeTelemetryNormalized = {
+  composerCharEstimate: number | null;
+  composerWordEstimate: number | null;
+  /** Human-readable sanitized label shown in dashboards (often scraped from host UI). */
+  hostModelLabelSanitized: string | null;
+  /** Lowercase slug for grouping chart series. */
+  hostModelBucket: string;
+};
+
+function slugHostModelBucketFromLabel(raw: string): string {
+  const s = raw
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+  return s || "unknown";
+}
+
+/**
+ * Validates optional extension JSON `telemetry` on /api/optimize. Never persists prompt bodies.
+ */
+export function parseOptimizeTelemetryFromPayload(payload: Record<string, unknown> | null): OptimizeTelemetryNormalized {
+  const defaults: OptimizeTelemetryNormalized = {
+    composerCharEstimate: null,
+    composerWordEstimate: null,
+    hostModelLabelSanitized: null,
+    hostModelBucket: "unknown"
+  };
+  if (!payload?.telemetry || typeof payload.telemetry !== "object") {
+    return defaults;
+  }
+  const t = payload.telemetry as Record<string, unknown>;
+
+  let composerCharEstimate: number | null = null;
+  if (typeof t.composer_char_estimate === "number" && Number.isFinite(t.composer_char_estimate)) {
+    composerCharEstimate = Math.min(
+      CREDIT_MAX_PROMPT_CHARS,
+      Math.max(0, Math.floor(t.composer_char_estimate))
+    );
+  }
+
+  let composerWordEstimate: number | null = null;
+  if (typeof t.composer_word_estimate === "number" && Number.isFinite(t.composer_word_estimate)) {
+    composerWordEstimate = Math.min(12000, Math.max(0, Math.floor(t.composer_word_estimate)));
+  }
+
+  let hostModelLabelSanitized: string | null = null;
+  if (typeof t.host_model_label === "string") {
+    let label = String(t.host_model_label)
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, TELEMETRY_HOST_MODEL_MAX_CHARS);
+    if (/https?:\/\//i.test(label)) {
+      label = "";
+    }
+    if (label) {
+      hostModelLabelSanitized = label;
+    }
+  }
+
+  let hostModelBucket = "unknown";
+  if (hostModelLabelSanitized && typeof t.host_model_bucket === "string" && String(t.host_model_bucket).trim()) {
+    const custom = slugHostModelBucketFromLabel(String(t.host_model_bucket).trim());
+    if (custom && custom !== "unknown") {
+      hostModelBucket = custom.slice(0, 48);
+    }
+  }
+  if (hostModelBucket === "unknown" && hostModelLabelSanitized) {
+    hostModelBucket = slugHostModelBucketFromLabel(hostModelLabelSanitized);
+  }
+
+  return {
+    composerCharEstimate,
+    composerWordEstimate,
+    hostModelLabelSanitized,
+    hostModelBucket
+  };
+}
+
+async function persistOptimizeTelemetryEvent(params: {
+  user: PromptlyUser;
+  service: PromptlyService;
+  optimizeMode: OptimizeEngineMode;
+  utcDay: string;
+  billedPromptlyTokens: number;
+  optimizeLatencyMs: number;
+  billingBasis?: string;
+  telemetry: OptimizeTelemetryNormalized;
+}): Promise<void> {
+  const db = getFirebaseAdminDb();
+  await db.collection(OPTIMIZE_EVENTS_COLLECTION).add({
+    telemetrySchemaVersion: 1,
+    uid: params.user.uid,
+    email: params.user.email || null,
+    utcDay: params.utcDay,
+    occurredAt: FieldValue.serverTimestamp(),
+    service: params.service,
+    optimizeMode: params.optimizeMode,
+    billedPromptlyTokens: Math.max(0, Math.floor(params.billedPromptlyTokens || 0)),
+    optimizeLatencyMs: Math.max(0, Math.floor(params.optimizeLatencyMs || 0)),
+    billingBasis: params.billingBasis || null,
+    composerCharEstimate: params.telemetry.composerCharEstimate,
+    composerWordEstimate: params.telemetry.composerWordEstimate,
+    hostModelLabelSanitized: params.telemetry.hostModelLabelSanitized,
+    hostModelBucket: params.telemetry.hostModelBucket
+  });
+}
+
+/** Fire-and-forget from /api/optimize: failure does not affect user response. */
+export function recordOptimizeTelemetryEventSafe(params: {
+  user: PromptlyUser;
+  service: PromptlyService;
+  optimizeMode: OptimizeEngineMode;
+  utcDay: string;
+  billedPromptlyTokens: number;
+  optimizeLatencyMs: number;
+  billingBasis?: string;
+  telemetry: OptimizeTelemetryNormalized;
+}): void {
+  persistOptimizeTelemetryEvent(params).catch((err) => {
+    console.error("[promptly] persistOptimizeTelemetryEvent failed:", String(err instanceof Error ? err.message : err));
+  });
+}
+
+export type HostLlmActivityEventInput = {
+  service: PromptlyService;
+  composerCharEstimate: number | null;
+  composerWordEstimate: number | null;
+  hostModelLabelSanitized: string | null;
+  hostModelBucket: string;
+  hostResponseLatencyMs: number | null;
+  /** Client Date.now() when send was observed (sets utcDay for bucketing). */
+  clientOccurredMs: number;
+};
+
+function utcDayFromMs(ms: number): string {
+  const t = Math.max(0, Math.floor(Number(ms) || 0));
+  return new Date(t).toISOString().slice(0, 10);
+}
+
+/**
+ * Validates one row from the extension passive listener. Never accepts prompt text.
+ */
+export function normalizeHostLlmActivityEventInput(raw: Record<string, unknown>): HostLlmActivityEventInput | null {
+  const svc = normalizePromptlyService(raw.service);
+  let composerCharEstimate: number | null = null;
+  if (typeof raw.composer_char_estimate === "number" && Number.isFinite(raw.composer_char_estimate)) {
+    composerCharEstimate = Math.min(
+      CREDIT_MAX_PROMPT_CHARS,
+      Math.max(0, Math.floor(raw.composer_char_estimate))
+    );
+  }
+  if (!composerCharEstimate || composerCharEstimate < 1) {
+    return null;
+  }
+
+  let composerWordEstimate: number | null = null;
+  if (typeof raw.composer_word_estimate === "number" && Number.isFinite(raw.composer_word_estimate)) {
+    composerWordEstimate = Math.min(12000, Math.max(0, Math.floor(raw.composer_word_estimate)));
+  }
+
+  let hostModelLabelSanitized: string | null = null;
+  if (typeof raw.host_model_label === "string") {
+    let label = String(raw.host_model_label)
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, TELEMETRY_HOST_MODEL_MAX_CHARS);
+    if (/https?:\/\//i.test(label)) label = "";
+    if (label) hostModelLabelSanitized = label;
+  }
+
+  let hostModelBucket = "unknown";
+  if (typeof raw.host_model_bucket === "string" && String(raw.host_model_bucket).trim()) {
+    const b = slugHostModelBucketFromLabel(String(raw.host_model_bucket).trim());
+    if (b && b !== "unknown") {
+      hostModelBucket = b.slice(0, 48);
+    }
+  }
+  if (hostModelBucket === "unknown" && hostModelLabelSanitized) {
+    hostModelBucket = slugHostModelBucketFromLabel(hostModelLabelSanitized);
+  }
+  hostModelBucket = hostModelBucket.slice(0, 48) || "unknown";
+
+  let hostResponseLatencyMs: number | null = null;
+  if (raw.host_response_latency_ms === null || raw.host_response_latency_ms === undefined) {
+    hostResponseLatencyMs = null;
+  } else if (typeof raw.host_response_latency_ms === "number" && Number.isFinite(raw.host_response_latency_ms)) {
+    const v = Math.max(0, Math.floor(raw.host_response_latency_ms));
+    hostResponseLatencyMs = v <= 720_000 ? v : null;
+  }
+
+  let clientOccurredMs = Date.now();
+  if (typeof raw.client_occurred_ms === "number" && Number.isFinite(raw.client_occurred_ms)) {
+    clientOccurredMs = Math.max(0, Math.floor(raw.client_occurred_ms));
+  }
+
+  return {
+    service: svc,
+    composerCharEstimate,
+    composerWordEstimate,
+    hostModelLabelSanitized,
+    hostModelBucket,
+    hostResponseLatencyMs,
+    clientOccurredMs
+  };
+}
+
+export async function persistHostLlmActivityEvents(user: PromptlyUser, rows: HostLlmActivityEventInput[]): Promise<number> {
+  if (!rows.length) return 0;
+  const db = getFirebaseAdminDb();
+  const writer = db.bulkWriter();
+  let queued = 0;
+  const now = Date.now();
+  for (const row of rows) {
+    if (row.clientOccurredMs <= 0 || row.clientOccurredMs > now + 2 * 86400000 || row.clientOccurredMs < now - 400 * 86400000) {
+      continue;
+    }
+    const utcDay = utcDayFromMs(row.clientOccurredMs);
+    const ref = db.collection(HOST_LLM_EVENTS_COLLECTION).doc();
+    writer.set(ref, {
+      telemetrySchemaVersion: 1,
+      uid: user.uid,
+      email: user.email || null,
+      utcDay,
+      occurredAt: FieldValue.serverTimestamp(),
+      source: "passive_listener",
+      service: row.service,
+      composerCharEstimate: row.composerCharEstimate,
+      composerWordEstimate: row.composerWordEstimate,
+      hostModelLabelSanitized: row.hostModelLabelSanitized,
+      hostModelBucket: row.hostModelBucket,
+      hostResponseLatencyMs: row.hostResponseLatencyMs,
+      clientOccurredMs: row.clientOccurredMs
+    });
+    queued += 1;
+  }
+  await writer.close();
+  return queued;
+}
+
+export type AccountStatsExtendedGranularity = "day" | "week";
+
+function isoWeekMondayUtcDay(utcYmd: string): string {
+  const parts = utcYmd.split("-").map((x) => Number(x));
+  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) {
+    return utcYmd;
+  }
+  const [y, mo, d] = parts as [number, number, number];
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  const dow = dt.getUTCDay();
+  const mondayOffset = (dow + 6) % 7;
+  dt.setUTCDate(dt.getUTCDate() - mondayOffset);
+  return dt.toISOString().slice(0, 10);
+}
+
+type TimelineBucketAgg = {
+  bucket_day: string;
+  prompts: number;
+  billed_promptly_tokens: number;
+  composer_char_sum: number;
+  composer_char_samples: number;
+  latency_sum_ms: number;
+  latency_samples: number;
+};
+
+type HostPassiveBucketAgg = {
+  bucket_day: string;
+  sends: number;
+  composer_char_sum: number;
+  composer_char_samples: number;
+  host_latency_sum_ms: number;
+  host_latency_samples: number;
+};
+
+export async function getAccountUsageStatsExtended(
+  user: PromptlyUser,
+  days: number,
+  granularity: AccountStatsExtendedGranularity = "day"
+) {
+  const rangeDays = Math.max(1, Math.min(90, Math.floor(days || 14)));
+  const recentDays = getRecentDays(rangeDays);
+  const startDay = recentDays[0];
+  const endDay = recentDays[recentDays.length - 1];
+
+  const db = getFirebaseAdminDb();
+
+  const queryEventsIndexed = async (
+    collectionPath: string,
+    limit: number
+  ): Promise<{ docs: QueryDocumentSnapshot<DocumentData>[]; indexMissing: boolean }> => {
+    try {
+      const snap = await db
+        .collection(collectionPath)
+        .where("uid", "==", user.uid)
+        .where("utcDay", ">=", startDay)
+        .where("utcDay", "<=", endDay)
+        .orderBy("utcDay", "asc")
+        .limit(limit)
+        .get();
+      return { docs: snap.docs, indexMissing: false };
+    } catch (err) {
+      const message = String(err instanceof Error ? err.message : err);
+      if (/FAILED_PRECONDITION|requires an index|9 FAILED_PRECONDITION/i.test(message)) {
+        console.warn(`[getAccountUsageStatsExtended] ${collectionPath} query skipped:`, message.slice(0, 220));
+        return { docs: [], indexMissing: true };
+      }
+      throw err;
+    }
+  };
+
+  /** Parallel rollup + optimize events + passive host listener events */
+  const [rollupBaseline, eventsResult, hostPassiveResult] = await Promise.all([
+    getAccountUsageStats(user, rangeDays),
+    queryEventsIndexed(OPTIMIZE_EVENTS_COLLECTION, OPTIMIZE_EVENTS_QUERY_LIMIT),
+    queryEventsIndexed(HOST_LLM_EVENTS_COLLECTION, HOST_LLM_EVENTS_QUERY_LIMIT)
+  ]);
+
+  type DayScratch = TimelineBucketAgg;
+  const byDayScratch = new Map<string, DayScratch>();
+  for (const d of recentDays) {
+    byDayScratch.set(d, {
+      bucket_day: d,
+      prompts: 0,
+      billed_promptly_tokens: 0,
+      composer_char_sum: 0,
+      composer_char_samples: 0,
+      latency_sum_ms: 0,
+      latency_samples: 0
+    });
+  }
+
+  const hostByDayScratch = new Map<string, HostPassiveBucketAgg>();
+  for (const d of recentDays) {
+    hostByDayScratch.set(d, {
+      bucket_day: d,
+      sends: 0,
+      composer_char_sum: 0,
+      composer_char_samples: 0,
+      host_latency_sum_ms: 0,
+      host_latency_samples: 0
+    });
+  }
+
+  const serviceTotals: Record<PromptlyService, number> = {
+    chatgpt: 0,
+    claude: 0,
+    gemini: 0,
+    unknown: 0
+  };
+  const modeTotals = { auto: 0, improve: 0, generate: 0 };
+  /** bucket -> prompts + exemplar label */
+  const modelBucketAgg = new Map<string, { prompts: number; label: string | null }>();
+
+  for (const doc of eventsResult.docs) {
+    const raw = doc.data() as Record<string, unknown>;
+    const utcDay = String(raw.utcDay || "");
+    if (!byDayScratch.has(utcDay)) {
+      continue;
+    }
+    const row = byDayScratch.get(utcDay)!;
+    row.prompts += 1;
+
+    const billed = Math.max(0, Math.floor(Number(raw.billedPromptlyTokens || 0)));
+    row.billed_promptly_tokens += billed;
+
+    const cc = raw.composerCharEstimate;
+    if (typeof cc === "number" && Number.isFinite(cc) && cc > 0) {
+      row.composer_char_samples += 1;
+      row.composer_char_sum += Math.min(CREDIT_MAX_PROMPT_CHARS, Math.floor(cc));
+    }
+
+    const lat = Number(raw.optimizeLatencyMs || 0);
+    if (Number.isFinite(lat) && lat > 0) {
+      row.latency_samples += 1;
+      row.latency_sum_ms += Math.floor(lat);
+    }
+
+    const svc = normalizePromptlyService(raw.service);
+    serviceTotals[svc] += 1;
+
+    const mode = String(raw.optimizeMode || "").toLowerCase();
+    if (mode === "auto") modeTotals.auto += 1;
+    else if (mode === "generate") modeTotals.generate += 1;
+    else modeTotals.improve += 1;
+
+    const mb = String(raw.hostModelBucket || "unknown").slice(0, 48) || "unknown";
+    const label =
+      typeof raw.hostModelLabelSanitized === "string" && raw.hostModelLabelSanitized.trim()
+        ? String(raw.hostModelLabelSanitized).trim()
+        : null;
+    const prev = modelBucketAgg.get(mb) || { prompts: 0, label: null };
+    prev.prompts += 1;
+    if (!prev.label && label) {
+      prev.label = label.slice(0, TELEMETRY_HOST_MODEL_MAX_CHARS);
+    }
+    modelBucketAgg.set(mb, prev);
+  }
+
+  const hostServiceTotals: Record<PromptlyService, number> = {
+    chatgpt: 0,
+    claude: 0,
+    gemini: 0,
+    unknown: 0
+  };
+  const hostModelBucketAgg = new Map<string, { sends: number; label: string | null }>();
+
+  for (const doc of hostPassiveResult.docs) {
+    const raw = doc.data() as Record<string, unknown>;
+    const utcDay = String(raw.utcDay || "");
+    if (!hostByDayScratch.has(utcDay)) {
+      continue;
+    }
+    const row = hostByDayScratch.get(utcDay)!;
+    row.sends += 1;
+
+    const cc = raw.composerCharEstimate;
+    if (typeof cc === "number" && Number.isFinite(cc) && cc > 0) {
+      row.composer_char_samples += 1;
+      row.composer_char_sum += Math.min(CREDIT_MAX_PROMPT_CHARS, Math.floor(cc));
+    }
+
+    const hl = raw.hostResponseLatencyMs;
+    if (typeof hl === "number" && Number.isFinite(hl) && hl > 0) {
+      row.host_latency_samples += 1;
+      row.host_latency_sum_ms += Math.floor(hl);
+    }
+
+    const svc = normalizePromptlyService(raw.service);
+    hostServiceTotals[svc] += 1;
+
+    const mb = String(raw.hostModelBucket || "unknown").slice(0, 48) || "unknown";
+    const label =
+      typeof raw.hostModelLabelSanitized === "string" && raw.hostModelLabelSanitized.trim()
+        ? String(raw.hostModelLabelSanitized).trim()
+        : null;
+    const prevH = hostModelBucketAgg.get(mb) || { sends: 0, label: null };
+    prevH.sends += 1;
+    if (!prevH.label && label) {
+      prevH.label = label.slice(0, TELEMETRY_HOST_MODEL_MAX_CHARS);
+    }
+    hostModelBucketAgg.set(mb, prevH);
+  }
+
+  /** Merge daily scratch into timeline rows with optional ISO-week bucketing */
+  let timelineFlat: TimelineBucketAgg[];
+  if (granularity === "week") {
+    const byWeek = new Map<string, TimelineBucketAgg>();
+    for (const d of recentDays) {
+      const wk = isoWeekMondayUtcDay(d);
+      if (!byWeek.has(wk)) {
+        byWeek.set(wk, {
+          bucket_day: wk,
+          prompts: 0,
+          billed_promptly_tokens: 0,
+          composer_char_sum: 0,
+          composer_char_samples: 0,
+          latency_sum_ms: 0,
+          latency_samples: 0
+        });
+      }
+    }
+    for (const d of recentDays) {
+      const wk = isoWeekMondayUtcDay(d);
+      const src = byDayScratch.get(d)!;
+      const dst = byWeek.get(wk)!;
+      dst.prompts += src.prompts;
+      dst.billed_promptly_tokens += src.billed_promptly_tokens;
+      dst.composer_char_sum += src.composer_char_sum;
+      dst.composer_char_samples += src.composer_char_samples;
+      dst.latency_sum_ms += src.latency_sum_ms;
+      dst.latency_samples += src.latency_samples;
+    }
+    timelineFlat = [...byWeek.entries()]
+      .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+      .map(([, v]) => v);
+  } else {
+    timelineFlat = recentDays.map((d) => byDayScratch.get(d)!);
+  }
+
+  const timeline = timelineFlat.map((t) => ({
+    bucket: t.bucket_day,
+    prompts: t.prompts,
+    billed_promptly_tokens: t.billed_promptly_tokens,
+    avg_composer_chars:
+      t.composer_char_samples > 0
+        ? Math.round((t.composer_char_sum / t.composer_char_samples) * 10) / 10
+        : null,
+    host_composer_chars_equiv_tokens_estimate:
+      t.composer_char_samples > 0
+        ? Math.round(
+            estimateTokensFromChars(Math.round(t.composer_char_sum / t.composer_char_samples)) * 10
+          ) / 10
+        : null,
+    avg_optimize_latency_ms:
+      t.latency_samples > 0 ? Math.round(t.latency_sum_ms / t.latency_samples) : null
+  }));
+
+  let hostPassiveTimelineFlat: HostPassiveBucketAgg[];
+  if (granularity === "week") {
+    const hostByWeek = new Map<string, HostPassiveBucketAgg>();
+    for (const d of recentDays) {
+      const wk = isoWeekMondayUtcDay(d);
+      if (!hostByWeek.has(wk)) {
+        hostByWeek.set(wk, {
+          bucket_day: wk,
+          sends: 0,
+          composer_char_sum: 0,
+          composer_char_samples: 0,
+          host_latency_sum_ms: 0,
+          host_latency_samples: 0
+        });
+      }
+    }
+    for (const d of recentDays) {
+      const wk = isoWeekMondayUtcDay(d);
+      const src = hostByDayScratch.get(d)!;
+      const dst = hostByWeek.get(wk)!;
+      dst.sends += src.sends;
+      dst.composer_char_sum += src.composer_char_sum;
+      dst.composer_char_samples += src.composer_char_samples;
+      dst.host_latency_sum_ms += src.host_latency_sum_ms;
+      dst.host_latency_samples += src.host_latency_samples;
+    }
+    hostPassiveTimelineFlat = [...hostByWeek.entries()]
+      .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+      .map(([, v]) => v);
+  } else {
+    hostPassiveTimelineFlat = recentDays.map((d) => hostByDayScratch.get(d)!);
+  }
+
+  const host_passive_timeline = hostPassiveTimelineFlat.map((t) => ({
+    bucket: t.bucket_day,
+    sends: t.sends,
+    avg_composer_chars:
+      t.composer_char_samples > 0
+        ? Math.round((t.composer_char_sum / t.composer_char_samples) * 10) / 10
+        : null,
+    avg_host_response_latency_ms:
+      t.host_latency_samples > 0 ? Math.round(t.host_latency_sum_ms / t.host_latency_samples) : null
+  }));
+
+  const model_buckets = [...modelBucketAgg.entries()]
+    .sort((a, b) => b[1].prompts - a[1].prompts)
+    .map(([bucket, v]) => ({
+      bucket,
+      exemplar_label: v.label,
+      prompts: v.prompts
+    }));
+
+  const eventPromptsSum = [...byDayScratch.values()].reduce((s, x) => s + x.prompts, 0);
+  const eventCountReturned = eventsResult.docs.length;
+  const events_truncated =
+    eventCountReturned >= OPTIMIZE_EVENTS_QUERY_LIMIT && eventPromptsSum < rollupBaseline.totals.prompts;
+
+  const hostSendsReturned = [...hostByDayScratch.values()].reduce((s, x) => s + x.sends, 0);
+  const hostPassiveEventRows = hostPassiveResult.docs.length;
+  const host_events_likely_truncated = hostPassiveEventRows >= HOST_LLM_EVENTS_QUERY_LIMIT;
+
+  const footnotes = [
+    "Passive “AI site” metrics count sends detected in the browser (no Promptly optimize required); prompt bodies are never stored.",
+    "Host response latency uses stop/streaming cues and DOM stability—it is approximate and breaks when ChatGPT / Claude / Gemini change their UI.",
+    "Promptly billed tokens measure your Promptly rewrite API usage (OpenAI), not quotas on the AI site you chat with.",
+    "Composer lengths and scraped model picker labels are best-effort hints from each site’s frontend."
+  ];
+  if (eventsResult.indexMissing) {
+    footnotes.unshift(
+      "Promptly optimize charts may be empty until the Firestore composite index on promptly_optimize_events (uid + utcDay + __name__) exists — firebase deploy --only firestore:indexes."
+    );
+  }
+  if (hostPassiveResult.indexMissing) {
+    footnotes.unshift(
+      "Passive AI-site charts may be empty until the Firestore index on promptly_host_llm_events (same field order as optimize events) finishes building."
+    );
+  }
+
+  return {
+    ok: true as const,
+    range_days: rangeDays,
+    granularity,
+    events_in_range: eventCountReturned,
+    events_index_missing: eventsResult.indexMissing,
+    /** True when prompt count from daily rollup exceeds what event query could return */
+    likely_truncated: events_truncated,
+    rollup_daily: {
+      totals: rollupBaseline.totals,
+      service_breakdown: rollupBaseline.service_breakdown,
+      averages: rollupBaseline.averages
+    },
+    timeline,
+    breakdowns_from_events: {
+      service: serviceTotals,
+      mode: modeTotals,
+      model_buckets
+    },
+    host_passive_listener: {
+      /** Raw Firestore documents returned (bounded by HOST_LLM_EVENTS_QUERY_LIMIT). */
+      events_docs_in_query: hostPassiveEventRows,
+      sends_attributed_in_range: hostSendsReturned,
+      index_missing: hostPassiveResult.indexMissing,
+      likely_truncated: host_events_likely_truncated,
+      timeline: host_passive_timeline,
+      breakdown_service: hostServiceTotals,
+      model_buckets: [...hostModelBucketAgg.entries()]
+        .sort((a, b) => b[1].sends - a[1].sends)
+        .map(([bucket, v]) => ({
+          bucket,
+          exemplar_label: v.label,
+          sends: v.sends
+        }))
+    },
+    footnotes
+  };
 }
 
 export type TierTokenLimits = {

@@ -12,6 +12,8 @@ import {
   handlePromptlyPreflight,
   normalizePromptlyService,
   optimizePrompt,
+  parseOptimizeTelemetryFromPayload,
+  recordOptimizeTelemetryEventSafe,
   requirePromptlyUser
 } from "@/lib/server/promptlyBackend";
 import { resolveOptimizeEngineMode } from "@/lib/server/promptOptimizeEngine";
@@ -37,6 +39,7 @@ export async function POST(request: Request) {
     const prompt = typeof payload.prompt === "string" ? payload.prompt.trim() : "";
     const userInstruction =
       typeof payload.user_instruction === "string" ? payload.user_instruction.trim() : "";
+    const telemetrySnapshot = parseOptimizeTelemetryFromPayload(payload as Record<string, unknown>);
     const optimizeMode = resolveOptimizeEngineMode({
       optimize_mode: (payload as Record<string, unknown>).optimize_mode,
       request_mode: (payload as Record<string, unknown>).request_mode,
@@ -118,6 +121,17 @@ export async function POST(request: Request) {
         { status: 429, headers: buildPromptlyCorsHeaders(origin) }
       );
     }
+
+    recordOptimizeTelemetryEventSafe({
+      user: auth.user,
+      service,
+      optimizeMode,
+      utcDay: getUtcDay(),
+      billedPromptlyTokens: tokenCost,
+      optimizeLatencyMs: optimizeElapsedMs,
+      billingBasis,
+      telemetry: telemetrySnapshot
+    });
 
     return NextResponse.json(
       {

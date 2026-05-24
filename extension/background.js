@@ -9,6 +9,37 @@ const DEFAULT_FIREBASE_WEB_OAUTH_CLIENT_ID = "913040005574-npbiuat4hl1d3icqoe5lm
 const OPTIMIZE_REWRITE_TIMEOUT_MS = 120000;
 const OPTIMIZE_CREATE_TIMEOUT_MS = 180000;
 
+function sanitizeOptimizeTelemetryEnvelope(raw) {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const out = {};
+  const c = raw.composer_char_estimate;
+  if (typeof c === "number" && Number.isFinite(c)) {
+    out.composer_char_estimate = Math.max(0, Math.min(12000, Math.floor(c)));
+  }
+  const w = raw.composer_word_estimate;
+  if (typeof w === "number" && Number.isFinite(w)) {
+    out.composer_word_estimate = Math.max(0, Math.min(12000, Math.floor(w)));
+  }
+  if (typeof raw.host_model_label === "string") {
+    let label = String(raw.host_model_label)
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 120);
+    if (label && !/https?:\/\//i.test(label)) {
+      out.host_model_label = label;
+    }
+  }
+  if (typeof raw.host_model_bucket === "string") {
+    const b = raw.host_model_bucket.trim().slice(0, 48);
+    if (b) {
+      out.host_model_bucket = b;
+    }
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 /** Web-auth flow does not always populate chrome.identity.getAuthToken cache — persist token for this session. */
 const SESSION_WEB_AUTH_TOKEN = "promptlyWebAuthAccessToken";
 const SESSION_WEB_AUTH_EXPIRES_AT = "promptlyWebAuthExpiresAt";
@@ -919,6 +950,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     !message ||
     ![
       "PROMPTLY_OPTIMIZE_PROMPT",
+      "PROMPTLY_HOST_ACTIVITY_BATCH",
       "PROMPTLY_VERIFY_USER_SESSION",
       "PROMPTLY_GET_CREDITS",
       "PROMPTLY_CHECK_CHROME_SIGNIN",
@@ -1118,12 +1150,52 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         return;
       }
 
+      if (message.type === "PROMPTLY_HOST_ACTIVITY_BATCH") {
+        const events = Array.isArray(message.events) ? message.events.slice(0, 25) : [];
+        if (!events.length) {
+          sendResponse({ ok: true, data: { written: 0 } });
+          return;
+        }
+        const response = await fetchWithTimeout(
+          buildApiUrl(baseUrl, "/api/telemetry/host-activity"),
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-promptly-live-config": "1",
+              ...apiAuthHeaders
+            },
+            body: JSON.stringify({ events })
+          },
+          20000
+        );
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          sendResponse({
+            ok: false,
+            error: body.error || `Host telemetry error (${response.status})`
+          });
+          return;
+        }
+        sendResponse({ ok: true, data: { written: body.written ?? 0 } });
+        return;
+      }
+
       if (!prompt && !userInstruction) {
         sendResponse({ ok: false, error: "Prompt and instruction are empty" });
         return;
       }
 
       const optimizeUrl = buildApiUrl(baseUrl, "/api/optimize");
+      const telemetryPayload = sanitizeOptimizeTelemetryEnvelope(message.telemetry);
+      const optimizeBodyObj = {
+        prompt,
+        user_instruction: userInstruction,
+        optimize_mode: optimizeMode
+      };
+      if (telemetryPayload) {
+        optimizeBodyObj.telemetry = telemetryPayload;
+      }
       const optimizeInit = {
         method: "POST",
         headers: {
@@ -1132,11 +1204,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           "x-promptly-service": service,
           ...apiAuthHeaders
         },
-        body: JSON.stringify({
-          prompt,
-          user_instruction: userInstruction,
-          optimize_mode: optimizeMode
-        })
+        body: JSON.stringify(optimizeBodyObj)
       };
       const optimizeTimeoutMs =
         optimizeMode === "generate" ? OPTIMIZE_CREATE_TIMEOUT_MS : OPTIMIZE_REWRITE_TIMEOUT_MS;

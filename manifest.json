@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Promptly",
-  "version": "1.0.5",
+  "version": "1.0.8",
   "description": "Prompt assistance tab anchored to AI prompt inputs on ChatGPT, Claude, and Gemini.",
   "permissions": [
     "storage",
@@ -52,6 +52,8 @@
       ],
       "js": [
         "content/siteAdapters.js",
+        "content/hostTelemetry.js",
+        "content/hostActivityListener.js",
         "content/positionManager.js",
         "content/observers.js",
         "content/ui/popup.js",
