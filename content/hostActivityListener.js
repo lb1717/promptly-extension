@@ -442,7 +442,8 @@
 
   /** @param {{ site: string, getPromptTarget: () => Element|null, readComposer: () => string }} configuration */
   function install(configuration) {
-    if (installedHere || window.self !== window.top || typeof configuration.readComposer !== "function") {
+    // Runs in whichever frame Promptly mounts (often top; some surfaces embed the composer in a same-origin iframe).
+    if (installedHere || typeof configuration.readComposer !== "function") {
       return () => {};
     }
     installedHere = true;

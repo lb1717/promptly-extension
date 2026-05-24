@@ -682,8 +682,9 @@ export function StatisticsClient() {
               <section className="mb-10 rounded-2xl border border-emerald-500/35 bg-emerald-950/[0.12] p-6 backdrop-blur-md">
                 <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-100/95">Composer typing, sends &amp; reply feel</h2>
                 <p className="mt-1 text-xs text-emerald-100/70">
-                  Stacked bars: debounced samples while you type in the native prompt box plus confirmed sends. The line is average time until the
-                  assistant area looks “done” (stop button + stable text—rough, not official API latency).
+                  Stacked bars: debounced samples while you type in the native prompt box, confirmed sends sniffed from the page, and each successful
+                  Promptly Improve/Generate mirrored from our API into this feed. The line is average time until replies look idle on native sends (
+                  Optimize-mirror rows contribute Promptly API completion time instead).
                 </p>
                 <div className="mt-4 h-80 w-full">
                   <ResponsiveContainer width="100%" height="100%">
@@ -723,7 +724,7 @@ export function StatisticsClient() {
                         yAxisId="count"
                         stackId="activity"
                         dataKey="sends_plot"
-                        name="Sends"
+                        name="Sends (+ Improve mirrored)"
                         fill="rgba(16,185,129,0.9)"
                         maxBarSize={40}
                       />

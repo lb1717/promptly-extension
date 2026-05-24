@@ -311,6 +311,47 @@ async function persistOptimizeTelemetryEvent(params: {
     hostModelLabelSanitized: params.telemetry.hostModelLabelSanitized,
     hostModelBucket: params.telemetry.hostModelBucket
   });
+
+  /** So `/account/statistics` passive charts are not blank when DOM send sniffing misses (iframes / synthetic sends). */
+  try {
+    await persistOptimizeMirrorHostActivity(params);
+  } catch (err) {
+    console.error("[promptly] persistOptimizeMirrorHostActivity failed:", String(err instanceof Error ? err.message : err));
+  }
+}
+
+/**
+ * Mirrors a successful Optimize/Generate/API call into `promptly_host_llm_events` with the same auth uid as passive rows.
+ */
+async function persistOptimizeMirrorHostActivity(params: {
+  user: PromptlyUser;
+  service: PromptlyService;
+  optimizeMode: OptimizeEngineMode;
+  optimizeLatencyMs: number;
+  telemetry: OptimizeTelemetryNormalized;
+}): Promise<void> {
+  const cc = params.telemetry.composerCharEstimate;
+  if (typeof cc !== "number" || !Number.isFinite(cc) || cc < 1) {
+    return;
+  }
+  const lat = Number(params.optimizeLatencyMs || 0);
+  await persistHostLlmActivityEvents(params.user, [
+    {
+      service: params.service,
+      composerCharEstimate: Math.min(CREDIT_MAX_PROMPT_CHARS, Math.floor(cc)),
+      composerWordEstimate: params.telemetry.composerWordEstimate,
+      hostModelLabelSanitized: params.telemetry.hostModelLabelSanitized,
+      hostModelBucket: params.telemetry.hostModelBucket.slice(0, 48),
+      hostResponseLatencyMs: Number.isFinite(lat) && lat > 0 ? Math.min(720_000, Math.floor(lat)) : null,
+      interactionKind: "promptly_optimize",
+      assistantOutputCharEstimate: null,
+      timeToFirstStreamActivityMs: null,
+      streamVisualActiveMs: null,
+      clientOccurredMs: Date.now(),
+      ingestSource: "optimize_api",
+      optimizeEngineMode: params.optimizeMode
+    }
+  ]);
 }
 
 /** Fire-and-forget from /api/optimize: failure does not affect user response. */
@@ -329,7 +370,7 @@ export function recordOptimizeTelemetryEventSafe(params: {
   });
 }
 
-export type HostLlmInteractionKind = "send" | "composer_input";
+export type HostLlmInteractionKind = "send" | "composer_input" | "promptly_optimize";
 
 export type HostLlmActivityEventInput = {
   service: PromptlyService;
@@ -346,6 +387,10 @@ export type HostLlmActivityEventInput = {
   streamVisualActiveMs: number | null;
   /** Client Date.now() when send was observed (sets utcDay for bucketing). */
   clientOccurredMs: number;
+  /** Stored as top-level Firestore field `source` (passive batch vs mirrored optimize). */
+  ingestSource?: "passive_listener" | "optimize_api";
+  /** Present when ingestSource === optimize_api. */
+  optimizeEngineMode?: OptimizeEngineMode;
 };
 
 function utcDayFromMs(ms: number): string {
@@ -416,6 +461,10 @@ export function normalizeHostLlmActivityEventInput(raw: Record<string, unknown>)
     if (k === "composer_input" || k === "compose" || k === "typing") {
       interactionKind = "composer_input";
     }
+    /** Only created server-side via optimize mirror — extension submissions treat as ordinary send if spoofed. */
+    if (k === "promptly_optimize") {
+      interactionKind = "send";
+    }
   }
 
   let assistantOutputCharEstimate: number | null = null;
@@ -477,7 +526,7 @@ export async function persistHostLlmActivityEvents(user: PromptlyUser, rows: Hos
       email: user.email || null,
       utcDay,
       occurredAt: FieldValue.serverTimestamp(),
-      source: "passive_listener",
+      source: row.ingestSource === "optimize_api" ? "optimize_api" : "passive_listener",
       interactionKind: row.interactionKind,
       service: row.service,
       composerCharEstimate: row.composerCharEstimate,
@@ -488,7 +537,8 @@ export async function persistHostLlmActivityEvents(user: PromptlyUser, rows: Hos
       assistantOutputCharEstimate: row.assistantOutputCharEstimate,
       timeToFirstStreamActivityMs: row.timeToFirstStreamActivityMs,
       streamVisualActiveMs: row.streamVisualActiveMs,
-      clientOccurredMs: row.clientOccurredMs
+      clientOccurredMs: row.clientOccurredMs,
+      ...(row.optimizeEngineMode ? { optimizeEngineMode: row.optimizeEngineMode } : {})
     });
     queued += 1;
   }
@@ -854,9 +904,9 @@ export async function getAccountUsageStatsExtended(
   const host_events_likely_truncated = hostPassiveEventRows >= HOST_LLM_EVENTS_QUERY_LIMIT;
 
   const footnotes = [
-    "Passive events include composer typing snapshots (slowed/debounced) and confirmed sends — never full prompt bodies.",
-    "Assistant “visible chars” and stream timing are scraped from DOM growth/stop cues, not ChatGPT / Claude vendor APIs.",
-    "Host response latency approximates settle time until the reply UI looks idle; Promptly billed tokens are separate.",
+    "Passive activity includes composer typing snapshots, native sends detected in-page, plus each successful Promptly Improve/Generate mirrored from the API (when prompt length telemetry is present) — never full prompt bodies.",
+    "Assistant “visible chars” and stream timing come from scraped DOM cues on sends; Optimize-mirrored rows only carry Promptly API latency.",
+    "Host-side “reply settle” latency is approximate idle detection on the assistant UI; Optimize rows use billed rewrite completion time.",
   ];
   if (eventsResult.indexMissing) {
     footnotes.unshift(
