@@ -94,7 +94,7 @@ The important runtime routes are:
 - `GET /api/admin/stats`
 - `GET /api/admin/users`
 - `GET /api/account/stats` (compact summary shown on `/account`)
-- `GET /api/account/stats/extended` (event-backed series for `/account/statistics`)
+- `GET /api/account/stats/extended` (`/account/statistics` unified overview: merged per-AI prompt stacks, Promptly-vs-native latency, illustrative token/typing narratives)
 
 ## 6) Extension auth setup
 
@@ -149,7 +149,8 @@ Independently, authenticated extensions periodically **`POST /api/telemetry/host
 `POST /api/telemetry/host-activity` replies with **`received`**, **`written`**, and **`invalid_skipped`** to debug malformed batches client-side without logging prompt bodies.
 
 - File: [`firestore.indexes.json`](../firestore.indexes.json)
-- **`promptly_optimize_events`** and **`promptly_host_llm_events`**, each composite: **`uid` ASC**, **`utcDay` ASC**, **`__name__` ASC**
+- **`promptly_optimize_events`**: **`uid` ASC**, **`utcDay` ASC**, **`__name__` ASC** (Optimize event timeline)
+- **`promptly_host_llm_events`**: **`uid` ASC**, **`utcDay` ASC**, **`__name__` ASC** (legacy / other reads) **and** **`uid` ASC**, **`utcDay` DESC**, **`__name__` DESC** (statistics API loads newest rows first so passive charts stay accurate under the server document cap)
 
 If you see `FAILED_PRECONDITION`/“requires an index”, use the link from the error or deploy with:
 

@@ -9,40 +9,87 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
-  ComposedChart,
   Legend,
-  Line,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
-  Cell,
-  Pie,
-  PieChart
+  Cell
 } from "recharts";
 
-type HostPassivePayload = {
+/** OpenAI system green (distinct from Gemini blue). ChatGPT visuals often skew turquoise but this reads clearly on dark UI. */
+const COLOR_CHATGPT = "#10a37f";
+/** Anthropic Claude accent (warm coral-orange). */
+const COLOR_CLAUDE = "#cc785c";
+/** Google Gemini / primary blue reference. */
+const COLOR_GEMINI = "#4285f4";
+const COLOR_UNKNOWN = "#64748b";
+/** Promptly accent for “Improve / rewrite” bars. */
+const COLOR_PROMPTLY = "#ab68ff";
+const COLOR_NATIVE_WEB = "#22d3ee";
+
+type PromptlySvc = "chatgpt" | "claude" | "gemini" | "unknown";
+
+type HostPassiveLite = {
   events_docs_in_query: number;
+  native_web_sends: number;
+  mirror_rows_synced_from_optimize: number;
+  composer_snapshots: number;
   sends_attributed_in_range: number;
-  composer_snapshots_attributed_in_range: number;
   index_missing: boolean;
+  query_newest_first?: boolean;
   likely_truncated: boolean;
-  timeline: Array<{
-    bucket: string;
-    sends: number;
-    composer_input_events: number;
-    passive_activity_total: number;
-    avg_composer_chars: number | null;
-    avg_host_response_latency_ms: number | null;
-    avg_assistant_reply_chars_visible: number | null;
-  }>;
-  breakdown_service: {
-    chatgpt: number;
-    claude: number;
-    gemini: number;
-    unknown: number;
-  };
-  model_buckets: Array<{ bucket: string; exemplar_label: string | null; events: number }>;
+};
+
+type CombinedTotals = {
+  prompts_estimate: number;
+  prompts_native_only_observed_sends: number;
+  prompts_with_promptly_optimize_events: number;
+  prompts_chatgpt_surface: number;
+  prompts_claude_surface: number;
+  prompts_gemini_surface: number;
+  prompts_unknown_surface: number;
+  mirror_rows_synced_to_host_telemetry: number;
+  promptly_share_of_estimated_prompts_percent: number | null;
+};
+
+type CombinedPromptBucket = {
+  bucket: string;
+  prompts_chatgpt: number;
+  prompts_claude: number;
+  prompts_gemini: number;
+  prompts_unknown: number;
+  prompts_total_bucket: number;
+  prompts_native_only_chatgpt: number;
+  prompts_native_only_claude: number;
+  prompts_native_only_gemini: number;
+  prompts_native_only_unknown: number;
+  prompts_with_promptly_chatgpt: number;
+  prompts_with_promptly_claude: number;
+  prompts_with_promptly_gemini: number;
+  prompts_with_promptly_unknown: number;
+};
+
+type LatencyAiRow = {
+  service_key: PromptlySvc;
+  prompted_promptly_avg_rewrite_ms: number | null;
+  native_avg_host_roundtrip_ms: number | null;
+  promptly_samples: number;
+  native_latency_samples: number;
+  prompts_with_promptly: number;
+  prompts_native_web: number;
+};
+
+type ValueInsights = {
+  billed_promptly_tokens_sum_events: number;
+  rollup_daily_prompts_hint: number;
+  optimize_avg_composer_chars: number | null;
+  native_web_send_avg_composer_chars: number | null;
+  composer_snapshot_count_illustrative: number;
+  estimated_drafting_active_minutes_illustrative: number;
+  heuristic_native_input_tokens_approx_from_telemetry_chars: number | null;
+  native_web_sends: number;
+  optimize_events_queried: number;
 };
 
 type ExtendedStatsPayload = {
@@ -51,7 +98,6 @@ type ExtendedStatsPayload = {
   granularity: "day" | "week";
   events_in_range: number;
   likely_truncated: boolean;
-  /** True when Firestore events query skipped (typically missing composite index still building). */
   events_index_missing?: boolean;
   rollup_daily: {
     totals: {
@@ -81,17 +127,18 @@ type ExtendedStatsPayload = {
     host_composer_chars_equiv_tokens_estimate: number | null;
     avg_optimize_latency_ms: number | null;
   }>;
+  combined_prompt_timeline: CombinedPromptBucket[];
+  combined_totals: CombinedTotals;
+  latency_comparison_ai: LatencyAiRow[];
+  value_insights: ValueInsights;
   breakdowns_from_events: {
-    service: { chatgpt: number; claude: number; gemini: number; unknown: number };
+    service: Record<PromptlySvc, number>;
     mode: { auto: number; improve: number; generate: number };
     model_buckets: Array<{ bucket: string; exemplar_label: string | null; prompts: number }>;
   };
-  /** Passive extension telemetry on ChatGPT / Claude / Gemini: typing snapshots in the native composer plus sends (independent of Promptly optimize). */
-  host_passive_listener?: HostPassivePayload;
+  host_passive_listener: HostPassiveLite;
   footnotes: string[];
 };
-
-const PIE_COLORS = ["#8b5cf6", "#6366f1", "#06b6d4", "#94a3b8"];
 
 function getRecentDaysClient(count: number): string[] {
   const n = Math.max(1, Math.min(90, Math.floor(count)));
@@ -116,12 +163,46 @@ function isoWeekMondayUtcDayClient(utcYmd: string): string {
   return dt.toISOString().slice(0, 10);
 }
 
+function emptyCombinedBucket(bucket: string): CombinedPromptBucket {
+  return {
+    bucket,
+    prompts_chatgpt: 0,
+    prompts_claude: 0,
+    prompts_gemini: 0,
+    prompts_unknown: 0,
+    prompts_total_bucket: 0,
+    prompts_native_only_chatgpt: 0,
+    prompts_native_only_claude: 0,
+    prompts_native_only_gemini: 0,
+    prompts_native_only_unknown: 0,
+    prompts_with_promptly_chatgpt: 0,
+    prompts_with_promptly_claude: 0,
+    prompts_with_promptly_gemini: 0,
+    prompts_with_promptly_unknown: 0
+  };
+}
+
+function emptyHostPassive(): HostPassiveLite {
+  return {
+    events_docs_in_query: 0,
+    native_web_sends: 0,
+    mirror_rows_synced_from_optimize: 0,
+    composer_snapshots: 0,
+    sends_attributed_in_range: 0,
+    index_missing: false,
+    query_newest_first: false,
+    likely_truncated: false
+  };
+}
+
 function buildPlaceholderExtendedStats(days: number, granularity: "day" | "week"): ExtendedStatsPayload {
   const range_days = Math.max(1, Math.min(90, Math.floor(days)));
   const recentDays = getRecentDaysClient(range_days);
-  let timeline: ExtendedStatsPayload["timeline"];
+  let tl: ExtendedStatsPayload["timeline"];
+  let cpt: CombinedPromptBucket[];
   if (granularity === "week") {
-    const weeks = new Map<string, ExtendedStatsPayload["timeline"][number]>();
+    const weeks = new Map<string, (typeof tl)[number]>();
+    const cweek = new Map<string, CombinedPromptBucket>();
     for (const d of recentDays) {
       const wk = isoWeekMondayUtcDayClient(d);
       if (!weeks.has(wk)) {
@@ -134,10 +215,15 @@ function buildPlaceholderExtendedStats(days: number, granularity: "day" | "week"
           avg_optimize_latency_ms: null
         });
       }
+      if (!cweek.has(wk)) {
+        const z = emptyCombinedBucket(wk);
+        cweek.set(wk, z);
+      }
     }
-    timeline = [...weeks.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([, row]) => row);
+    tl = [...weeks.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([, row]) => row);
+    cpt = [...cweek.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([, row]) => row);
   } else {
-    timeline = recentDays.map((bucket) => ({
+    tl = recentDays.map((bucket) => ({
       bucket,
       prompts: 0,
       billed_promptly_tokens: 0,
@@ -145,25 +231,9 @@ function buildPlaceholderExtendedStats(days: number, granularity: "day" | "week"
       host_composer_chars_equiv_tokens_estimate: null,
       avg_optimize_latency_ms: null
     }));
+    cpt = recentDays.map((bucket) => emptyCombinedBucket(bucket));
   }
-  const emptyHostPassive: HostPassivePayload = {
-    events_docs_in_query: 0,
-    sends_attributed_in_range: 0,
-    composer_snapshots_attributed_in_range: 0,
-    index_missing: false,
-    likely_truncated: false,
-    timeline: timeline.map((row) => ({
-      bucket: row.bucket,
-      sends: 0,
-      composer_input_events: 0,
-      passive_activity_total: 0,
-      avg_composer_chars: null,
-      avg_host_response_latency_ms: null,
-      avg_assistant_reply_chars_visible: null
-    })),
-    breakdown_service: { chatgpt: 0, claude: 0, gemini: 0, unknown: 0 },
-    model_buckets: []
-  };
+
   return {
     ok: true,
     range_days,
@@ -180,23 +250,48 @@ function buildPlaceholderExtendedStats(days: number, granularity: "day" | "week"
         generated_prompts: 0
       },
       service_breakdown: { chatgpt: 0, claude: 0, gemini: 0, unknown: 0 },
-      averages: {
-        prompts_per_active_day: 0,
-        tokens_per_prompt: 0,
-        response_time_ms: 0
-      }
+      averages: { prompts_per_active_day: 0, tokens_per_prompt: 0, response_time_ms: 0 }
     },
-    timeline,
+    timeline: tl,
+    combined_prompt_timeline: cpt,
+    combined_totals: {
+      prompts_estimate: 0,
+      prompts_native_only_observed_sends: 0,
+      prompts_with_promptly_optimize_events: 0,
+      prompts_chatgpt_surface: 0,
+      prompts_claude_surface: 0,
+      prompts_gemini_surface: 0,
+      prompts_unknown_surface: 0,
+      mirror_rows_synced_to_host_telemetry: 0,
+      promptly_share_of_estimated_prompts_percent: null
+    },
+    latency_comparison_ai: (["chatgpt", "claude", "gemini", "unknown"] as const).map((service_key) => ({
+      service_key,
+      prompted_promptly_avg_rewrite_ms: null,
+      native_avg_host_roundtrip_ms: null,
+      promptly_samples: 0,
+      native_latency_samples: 0,
+      prompts_with_promptly: 0,
+      prompts_native_web: 0
+    })),
+    value_insights: {
+      billed_promptly_tokens_sum_events: 0,
+      rollup_daily_prompts_hint: 0,
+      optimize_avg_composer_chars: null,
+      native_web_send_avg_composer_chars: null,
+      composer_snapshot_count_illustrative: 0,
+      estimated_drafting_active_minutes_illustrative: 0,
+      heuristic_native_input_tokens_approx_from_telemetry_chars: null,
+      native_web_sends: 0,
+      optimize_events_queried: 0
+    },
     breakdowns_from_events: {
       service: { chatgpt: 0, claude: 0, gemini: 0, unknown: 0 },
       mode: { auto: 0, improve: 0, generate: 0 },
       model_buckets: []
     },
-    host_passive_listener: emptyHostPassive,
-    footnotes: [
-      "Charts populate after you optimize prompts while signed into Promptly.",
-      "KPI totals here come from authoritative daily rollup once you have recorded usage."
-    ]
+    host_passive_listener: emptyHostPassive(),
+    footnotes: []
   };
 }
 
@@ -208,80 +303,34 @@ function formatShortDay(isoYmd: string) {
   return tail.replace("-", "/");
 }
 
-function ModeChart({ modes }: { modes: ExtendedStatsPayload["breakdowns_from_events"]["mode"] }) {
+function svcLabel(key: PromptlySvc): string {
+  if (key === "chatgpt") return "ChatGPT";
+  if (key === "claude") return "Claude";
+  if (key === "gemini") return "Gemini";
+  return "Other / unknown UI";
+}
+
+function ModeMiniChart({
+  modes
+}: {
+  modes: ExtendedStatsPayload["breakdowns_from_events"]["mode"];
+}) {
   const data = [
     { name: "Auto", prompts: modes.auto },
     { name: "Improve", prompts: modes.improve },
     { name: "Generate", prompts: modes.generate }
   ];
   return (
-    <div className="h-72 w-full">
+    <div className="h-56 w-full">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} layout="vertical" margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
           <XAxis type="number" stroke="#c4b5fd" />
-          <YAxis dataKey="name" type="category" width={92} stroke="#c4b5fd" tick={{ fill: "#e9e5ff" }} />
-          <Tooltip contentStyle={{ background: "#18122b", border: "1px solid rgba(139,92,246,0.35)" }} />
-          <Bar dataKey="prompts" name="Optimize events" fill="#a78bfa" radius={[0, 6, 6, 0]} />
+          <YAxis dataKey="name" type="category" width={92} stroke="#c4b5fd" tick={{ fill: "#e9e5ff", fontSize: 11 }} />
+          <Tooltip contentStyle={{ background: "#161018", border: "1px solid rgba(139,92,246,0.4)" }} />
+          <Bar dataKey="prompts" name="Runs" radius={[0, 6, 6, 0]} fill="#a78bfa" />
         </BarChart>
       </ResponsiveContainer>
-    </div>
-  );
-}
-
-function ServicePie({
-  service,
-  idleLabel = "No optimize events tied to ChatGPT / Claude / Gemini labels in this window."
-}: {
-  service: ExtendedStatsPayload["breakdowns_from_events"]["service"];
-  idleLabel?: string;
-}) {
-  const breakdown = [
-    { name: "ChatGPT", value: service.chatgpt },
-    { name: "Claude", value: service.claude },
-    { name: "Gemini", value: service.gemini },
-    { name: "Unknown", value: service.unknown }
-  ];
-  const total = breakdown.reduce((s, x) => s + x.value, 0);
-  const pieData =
-    total <= 0
-      ? [{ name: "No activity yet", value: 1, empty: true }]
-      : breakdown.filter((d) => d.value > 0).map((d) => ({ ...d, empty: false }));
-
-  return (
-    <div className="relative h-72 w-full">
-      <ResponsiveContainer width="100%" height="100%">
-        <PieChart margin={{ top: 8, bottom: 8 }}>
-          <Pie
-            data={pieData}
-            dataKey="value"
-            nameKey="name"
-            cx="50%"
-            cy="50%"
-            innerRadius={0}
-            outerRadius={88}
-            label={
-              pieData.every((row) => (row as { empty?: boolean }).empty)
-                ? false
-                : ({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`
-            }
-          >
-            {pieData.map((cell, i) => (
-              <Cell
-                key={i}
-                fill={(cell as { empty?: boolean }).empty ? "rgba(148,163,184,0.25)" : PIE_COLORS[i % PIE_COLORS.length]}
-              />
-            ))}
-          </Pie>
-          <Tooltip contentStyle={{ background: "#18122b", border: "1px solid rgba(139,92,246,0.35)" }} />
-          <Legend />
-        </PieChart>
-      </ResponsiveContainer>
-      {total <= 0 ? (
-        <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-center text-[11px] text-violet-100/85">
-          {idleLabel}
-        </p>
-      ) : null}
     </div>
   );
 }
@@ -339,56 +388,93 @@ export function StatisticsClient() {
     void loadExtended(user, days, granularity);
   }, [user, loading, days, granularity, loadExtended]);
 
-  const trendData = useMemo(() => {
-    if (!displayStats?.timeline) return [];
-    return displayStats.timeline.map((row) => ({
-      ...row,
-      label:
-        displayStats.granularity === "week" ? `wk ${formatShortDay(row.bucket)}` : formatShortDay(row.bucket)
-    }));
-  }, [displayStats]);
-
-  const hostTrendData = useMemo(() => {
-    if (!displayStats?.host_passive_listener?.timeline) return [];
+  const stackedTimeline = useMemo(() => {
+    if (!displayStats?.combined_prompt_timeline) return [];
     const g = displayStats.granularity;
-    return displayStats.host_passive_listener.timeline.map((row) => ({
+    return displayStats.combined_prompt_timeline.map((row) => ({
       ...row,
       label: g === "week" ? `wk ${formatShortDay(row.bucket)}` : formatShortDay(row.bucket)
     }));
   }, [displayStats]);
 
-  const composerChartData = useMemo(
-    () =>
-      trendData.map((row) => ({
-        ...row,
-        avg_composer_chars_plot: row.avg_composer_chars ?? 0,
-        host_composer_chars_equiv_tokens_plot: row.host_composer_chars_equiv_tokens_estimate ?? 0
-      })),
-    [trendData]
-  );
+  const latencyChartRows = useMemo(() => {
+    if (!displayStats?.latency_comparison_ai) return [];
+    return displayStats.latency_comparison_ai
+      .filter(
+        (r) =>
+          r.service_key !== "unknown" ||
+          r.promptly_samples > 0 ||
+          r.native_latency_samples > 0 ||
+          r.prompts_native_web > 0 ||
+          r.prompts_with_promptly > 0
+      )
+      .map((r) => ({
+        ai: svcLabel(r.service_key),
+        key: r.service_key,
+        promptly_rewrite_s:
+          typeof r.prompted_promptly_avg_rewrite_ms === "number"
+            ? Math.round((r.prompted_promptly_avg_rewrite_ms / 1000) * 10) / 10
+            : 0,
+        native_roundtrip_s:
+          typeof r.native_avg_host_roundtrip_ms === "number"
+            ? Math.round((r.native_avg_host_roundtrip_ms / 1000) * 10) / 10
+            : 0,
+        promptly_missing: !(typeof r.prompted_promptly_avg_rewrite_ms === "number"),
+        native_missing: !(typeof r.native_avg_host_roundtrip_ms === "number")
+      }));
+  }, [displayStats]);
 
-  const hostPassiveChartPlot = useMemo(
-    () =>
-      hostTrendData.map((row) => ({
-        ...row,
-        sends_plot: row.sends ?? 0,
-        compose_snapshots_plot: row.composer_input_events ?? 0,
-        avg_host_latency_plot: row.avg_host_response_latency_ms ?? 0,
-        avg_assistant_visible_plot: row.avg_assistant_reply_chars_visible ?? 0
-      })),
-    [hostTrendData]
-  );
+  const pathwayCompareData = useMemo(() => {
+    if (!displayStats) return [];
+    const rows = [
+      {
+        pathway: "With Promptly (Improve / Generate)",
+        ChatGPT: displayStats.latency_comparison_ai.find((x) => x.service_key === "chatgpt")?.prompts_with_promptly ?? 0,
+        Claude: displayStats.latency_comparison_ai.find((x) => x.service_key === "claude")?.prompts_with_promptly ?? 0,
+        Gemini: displayStats.latency_comparison_ai.find((x) => x.service_key === "gemini")?.prompts_with_promptly ?? 0
+      },
+      {
+        pathway: "Native web send only",
+        ChatGPT: displayStats.latency_comparison_ai.find((x) => x.service_key === "chatgpt")?.prompts_native_web ?? 0,
+        Claude: displayStats.latency_comparison_ai.find((x) => x.service_key === "claude")?.prompts_native_web ?? 0,
+        Gemini: displayStats.latency_comparison_ai.find((x) => x.service_key === "gemini")?.prompts_native_web ?? 0
+      }
+    ];
+    const nonZero =
+      rows[0].ChatGPT +
+        rows[0].Claude +
+        rows[0].Gemini +
+        rows[1].ChatGPT +
+        rows[1].Claude +
+        rows[1].Gemini >
+      0;
+    return nonZero ? rows : [];
+  }, [displayStats]);
+
+  const composerCompareData = useMemo(() => {
+    if (!displayStats?.value_insights) return [];
+    const p = displayStats.value_insights.optimize_avg_composer_chars;
+    const n = displayStats.value_insights.native_web_send_avg_composer_chars;
+    if (p === null && n === null) return [];
+    return [
+      {
+        label: "Observed drafts (Improve path)",
+        chars: typeof p === "number" ? p : 0,
+        muted: !(typeof p === "number")
+      },
+      { label: "Observed drafts (native send)", chars: typeof n === "number" ? n : 0, muted: !(typeof n === "number") }
+    ];
+  }, [displayStats]);
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-10 pb-24">
-      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div className="mb-10 flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="text-xs uppercase tracking-[0.2em] text-violet-300/75">Reporting</p>
+          <p className="text-xs uppercase tracking-[0.2em] text-violet-300/75">Your usage snapshot</p>
           <h1 className="mt-1 text-3xl font-semibold text-white">Prompt statistics</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-violet-200/70">
-            Two timelines: Promptly billed rewrites versus passive listening on ChatGPT / Claude / Gemini — sends, coarse prompt
-            length, scraped model picker labels, and estimated host turnaround time whenever you chat while signed into Promptly,
-            including when you never tap Improve.
+          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-violet-200/72">
+            A single storyline: prompts you routed through Promptly&nbsp;Improve or Generate versus everything you typed and sent straight in
+            ChatGPT, Claude, or Gemini. Nothing here stores full prompts—only aggregates and scraped UI hints.
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:items-end">
@@ -424,9 +510,7 @@ export function StatisticsClient() {
         <>
           <div className="mb-6 flex flex-col gap-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-md sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-wrap gap-2">
-              <span className="mr-2 self-center text-xs font-semibold uppercase tracking-wider text-violet-300/80">
-                Range
-              </span>
+              <span className="mr-2 self-center text-xs font-semibold uppercase tracking-wider text-violet-300/80">Range</span>
               {([7, 14, 30, 90] as const).map((d) => (
                 <button
                   key={d}
@@ -461,7 +545,7 @@ export function StatisticsClient() {
                 {statsLoading ? "Refreshing…" : "Refresh"}
               </button>
               {statsLoading ? (
-                <span className="self-center text-xs text-violet-400/95">Applying latest server data…</span>
+                <span className="self-center text-xs text-violet-400/95">Pulling aggregates…</span>
               ) : null}
             </div>
           </div>
@@ -470,426 +554,323 @@ export function StatisticsClient() {
             <div className="mb-6 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">{statsError}</div>
           ) : null}
 
-          <>
-            {displayStats.events_index_missing ? (
-              <div className="mb-6 rounded-xl border border-sky-500/35 bg-sky-500/[0.12] px-4 py-3 text-xs leading-relaxed text-sky-50/95">
-                Event charts read from <code className="rounded bg-black/35 px-1 text-[10px]">promptly_optimize_events</code> and need
-                the Firestore composite index <code className="rounded bg-black/35 px-1 text-[10px]">uid</code>,{" "}
-                <code className="rounded bg-black/35 px-1 text-[10px]">utcDay</code>,{" "}
-                <code className="rounded bg-black/35 px-1 text-[10px]">__name__</code>. Run{" "}
-                <code className="rounded bg-black/35 px-1 text-[10px]">firebase deploy --only firestore:indexes</code> using the repo
-                file <code className="rounded bg-black/35 px-1 text-[10px]">firestore.indexes.json</code>, wait until the Firebase
-                console shows the index as enabled, then click Refresh above. KPI totals below still reflect daily rollup data.
-              </div>
-            ) : null}
+          {displayStats.events_index_missing ? (
+            <div className="mb-6 rounded-xl border border-sky-500/35 bg-sky-500/[0.12] px-4 py-3 text-xs leading-relaxed text-sky-50/95">
+              Promptly Optimize analytics need the composite index on <code className="rounded bg-black/35 px-1 text-[10px]">promptly_optimize_events</code>{" "}
+              (<code className="text-[10px]">uid</code>, <code className="text-[10px]">utcDay</code>,{" "}
+              <code className="text-[10px]">__name__</code>). Deploy <code className="text-[10px]">firestore.indexes.json</code> and refresh—the overview will
+              still show native-send estimates when passive telemetry succeeds.
+            </div>
+          ) : null}
 
-            {displayStats.host_passive_listener?.index_missing ? (
-              <div className="mb-6 rounded-xl border border-sky-500/35 bg-sky-500/[0.12] px-4 py-3 text-xs leading-relaxed text-sky-50/95">
-                Passive AI-site charts read from <code className="rounded bg-black/35 px-1 text-[10px]">promptly_host_llm_events</code>{" "}
-                and need the composite index (<code className="rounded bg-black/35 px-1 text-[10px]">uid</code>,{" "}
-                <code className="rounded bg-black/35 px-1 text-[10px]">utcDay</code>,{" "}
-                <code className="rounded bg-black/35 px-1 text-[10px]">__name__</code>) deployed from{" "}
-                <code className="rounded bg-black/35 px-1 text-[10px]">firestore.indexes.json</code>. Wait until Firebase marks it enabled,
-                then refresh.
-              </div>
-            ) : null}
+          {displayStats.host_passive_listener.index_missing ? (
+            <div className="mb-6 rounded-xl border border-sky-500/35 bg-sky-500/[0.12] px-4 py-3 text-xs leading-relaxed text-sky-50/95">
+              Native chat totals need composites on{" "}
+              <code className="rounded bg-black/35 px-1 text-[10px]">promptly_host_llm_events</code>. Deploy Firebase indexes before deduplicated summaries
+              can load.
+            </div>
+          ) : null}
 
-            {(displayStats.host_passive_listener?.likely_truncated ?? false) && (
-              <div className="mb-6 rounded-xl border border-amber-400/35 bg-amber-500/[0.08] px-4 py-3 text-xs leading-relaxed text-amber-100/95">
-                Some older passive-send rows may have been clipped (
-                {(displayStats.host_passive_listener?.events_docs_in_query ?? 0).toLocaleString()} documents returned at the Firestore{" "}
-                query cap). Narrow the date window if you want day-level fidelity for very heavy usage.
-              </div>
-            )}
+          {displayStats.host_passive_listener &&
+          !displayStats.host_passive_listener.index_missing &&
+          displayStats.host_passive_listener.query_newest_first === false ? (
+            <div className="mb-6 rounded-xl border border-amber-500/30 bg-amber-500/[0.12] px-4 py-3 text-xs leading-relaxed text-amber-50/95">
+              Host telemetry defaults to ascending Firestore pagination—high-volume histories may truncate the freshest days unless the descending index
+              in <code className="text-[10px]">firestore.indexes.json</code> is deployed.
+            </div>
+          ) : null}
 
-            {(displayStats.events_in_range >= 4900 || displayStats.likely_truncated) && (
-              <div className="mb-6 rounded-xl border border-amber-400/35 bg-amber-500/[0.08] px-4 py-3 text-xs leading-relaxed text-amber-100/95">
-                Optimize event queries may omit older rows ({displayStats.events_in_range.toLocaleString()} rows loaded inside the Firestore{" "}
-                cap). KPI totals remain driven by authoritative daily rollups—chart lines may prioritize recent Promptly reruns only.
-              </div>
-            )}
+          {(displayStats.likely_truncated || displayStats.host_passive_listener.likely_truncated) && (
+            <div className="mb-6 rounded-xl border border-amber-400/35 bg-amber-500/[0.08] px-4 py-3 text-xs leading-relaxed text-amber-50/95">
+              Some aggregates may omit early rows ({displayStats.events_in_range.toLocaleString()} Optimize events +{" "}
+              {displayStats.host_passive_listener.events_docs_in_query.toLocaleString()} host docs loaded). Narrow the date range when you near the 5&nbsp;000
+              document cap each query.
+            </div>
+          )}
 
-              <div className="mb-6 grid gap-4 md:grid-cols-4 lg:grid-cols-7">
-                <div className="rounded-xl border border-white/10 bg-black/35 p-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-violet-300/80">
-                    Promptly prompts (rollup)
-                  </p>
-                  <p className="mt-2 text-2xl font-semibold text-white">{displayStats.rollup_daily.totals.prompts.toLocaleString()}</p>
-                </div>
-                <div className="rounded-xl border border-white/10 bg-black/35 p-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-violet-300/80">Billed Promptly tokens</p>
-                  <p className="mt-2 text-2xl font-semibold text-white">{displayStats.rollup_daily.totals.tokens.toLocaleString()}</p>
-                </div>
-                <div className="rounded-xl border border-white/10 bg-black/35 p-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-violet-300/80">Avg optimize latency</p>
-                  <p className="mt-2 text-2xl font-semibold text-white">
-                    {displayStats.rollup_daily.averages.response_time_ms > 0
-                      ? `${(displayStats.rollup_daily.averages.response_time_ms / 1000).toFixed(2)} s`
-                      : "—"}
-                  </p>
-                </div>
-                <div className="rounded-xl border border-white/10 bg-black/35 p-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-violet-300/80">Optimize events queried</p>
-                  <p className="mt-2 text-2xl font-semibold text-white">{displayStats.events_in_range.toLocaleString()}</p>
-                </div>
-                <div className="rounded-xl border border-emerald-500/35 bg-black/35 p-4 lg:col-span-1">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-200/85">Typing snapshots</p>
-                  <p className="mt-2 text-2xl font-semibold text-white">
-                    {(displayStats.host_passive_listener?.composer_snapshots_attributed_in_range ?? 0).toLocaleString()}
-                  </p>
-                </div>
-                <div className="rounded-xl border border-emerald-500/25 bg-black/35 p-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-200/85">Passive rows loaded</p>
-                  <p className="mt-2 text-2xl font-semibold text-white">
-                    {(displayStats.host_passive_listener?.events_docs_in_query ?? 0).toLocaleString()}
-                  </p>
-                </div>
-              </div>
-
-              <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-violet-200/90">Promptly optimize</div>
-
-              <section className="mb-10 rounded-2xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-md">
-                <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-violet-200/85">Tokens &amp; event volume</h2>
-                <p className="mt-1 text-xs text-violet-300/65">
-                  Left axis: Promptly billed tokens per bucket. Right axis: number of optimize events (may differ slightly from rollup
-                  if events were capped).
+          {/* Hero overview */}
+          <section className="mb-12 rounded-[28px] border border-white/[0.1] bg-gradient-to-br from-violet-950/40 via-slate-950/40 to-cyan-950/30 p-8 backdrop-blur-md">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-violet-200/85">Estimated prompt volume</p>
+            <div className="mt-6 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <p className="text-sm text-white/70">Tracked actions • last {displayStats.range_days} UTC days · {displayStats.granularity} buckets</p>
+                <p className="mt-2 text-5xl font-semibold tracking-tight text-white">
+                  {displayStats.combined_totals.prompts_estimate.toLocaleString()}
                 </p>
-                <div className="mt-4 h-80 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={trendData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
-                      <XAxis dataKey="label" stroke="#bdb4fe" tick={{ fill: "#c4c0ff", fontSize: 11 }} />
-                      <YAxis yAxisId="left" stroke="#a78bfa" tickFormatter={(v) => `${Math.round(Number(v))}`} />
-                      <YAxis
-                        yAxisId="right"
-                        orientation="right"
-                        stroke="#7dd3fc"
-                        tickFormatter={(v) => `${Math.round(Number(v))}`}
-                      />
-                      <Tooltip contentStyle={{ background: "#161018", border: "1px solid rgba(139,92,246,0.4)" }} />
-                      <Legend />
-                      <Bar
-                        yAxisId="left"
-                        dataKey="billed_promptly_tokens"
-                        name="Billed Promptly tokens"
-                        fill="#8b5cf6"
-                        opacity={0.9}
-                      />
-                      <Line
-                        yAxisId="right"
-                        type="monotone"
-                        dataKey="prompts"
-                        name="Optimize events"
-                        stroke="#bae6fd"
-                        dot={false}
-                        strokeWidth={2}
-                      />
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                </div>
-
-                <div className="mt-8 h-72 w-full">
-                  <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-violet-300/75">
-                    Host composer size (estimated)
+                <p className="mt-2 max-w-xl text-xs leading-relaxed text-violet-100/75">
+                  Adds Improve/Generate runs (counted once) plus native sends observed without double-counting the mirrored Optimize rows streamed into
+                  host telemetry.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
+                <div className="rounded-2xl border border-white/[0.12] bg-black/35 px-4 py-3">
+                  <p className="text-[10px] uppercase tracking-[0.16em]" style={{ color: COLOR_CHATGPT }}>
+                    ChatGPT
                   </p>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={composerChartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
-                      <XAxis dataKey="label" stroke="#bdb4fe" tick={{ fill: "#c4c0ff", fontSize: 11 }} />
-                      <YAxis stroke="#fcd34d" />
-                      <Tooltip contentStyle={{ background: "#161018", border: "1px solid rgba(250,204,21,0.35)" }} />
-                      <Legend />
-                      <Line
-                        type="monotone"
-                        dataKey="avg_composer_chars_plot"
-                        name="Avg composer chars/event"
-                        stroke="#fbbf24"
-                        strokeWidth={2}
-                        dot={false}
-                      />
-                      <Bar
-                        dataKey="host_composer_chars_equiv_tokens_plot"
-                        name="Heuristic chars→tok (÷4 avg)"
-                        fill="rgba(245,158,11,0.45)"
-                        maxBarSize={28}
-                      />
-                    </ComposedChart>
-                  </ResponsiveContainer>
+                  <p className="mt-2 text-xl font-semibold text-white">{displayStats.combined_totals.prompts_chatgpt_surface.toLocaleString()}</p>
                 </div>
-              </section>
+                <div className="rounded-2xl border border-white/[0.12] bg-black/35 px-4 py-3">
+                  <p className="text-[10px] uppercase tracking-[0.16em]" style={{ color: COLOR_CLAUDE }}>
+                    Claude
+                  </p>
+                  <p className="mt-2 text-xl font-semibold text-white">{displayStats.combined_totals.prompts_claude_surface.toLocaleString()}</p>
+                </div>
+                <div className="rounded-2xl border border-white/[0.12] bg-black/35 px-4 py-3">
+                  <p className="text-[10px] uppercase tracking-[0.16em]" style={{ color: COLOR_GEMINI }}>
+                    Gemini
+                  </p>
+                  <p className="mt-2 text-xl font-semibold text-white">{displayStats.combined_totals.prompts_gemini_surface.toLocaleString()}</p>
+                </div>
+                <div className="rounded-2xl border border-white/[0.12] bg-black/35 px-4 py-3">
+                  <p className="text-[10px] uppercase tracking-[0.16em] text-slate-300">Promptly assist</p>
+                  <p className="mt-2 text-xl font-semibold text-white">
+                    {displayStats.combined_totals.promptly_share_of_estimated_prompts_percent != null ? (
+                      <>{`${displayStats.combined_totals.promptly_share_of_estimated_prompts_percent}%`}</>
+                    ) : (
+                      "—"
+                    )}
+                  </p>
+                  <p className="text-[10px] text-white/50">share of totals</p>
+                </div>
+              </div>
+            </div>
 
-              <div className="mb-10 grid gap-8 lg:grid-cols-2">
-                <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-md">
-                  <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-violet-200/85">By host site</h2>
-                  <p className="mt-1 text-xs text-violet-300/65">Measured from prompts where you ran Promptly in this browser window.</p>
-                  <ServicePie
-                    service={displayStats.breakdowns_from_events.service}
-                    idleLabel="No optimize events yet where Promptly could tag the host site."
+            <div className="mt-10 h-96 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={stackedTimeline} margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                  <XAxis dataKey="label" stroke="#dbd4ff" tick={{ fill: "#e9e7ff", fontSize: 10 }} />
+                  <YAxis stroke="#c4b5fd" allowDecimals={false} />
+                  <Tooltip
+                    contentStyle={{ background: "#0c0618", border: "1px solid rgba(148,163,253,0.35)" }}
+                    cursor={{ fill: "rgba(255,255,255,0.04)" }}
                   />
-                </section>
-                <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-md">
-                  <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-violet-200/85">By optimize mode</h2>
-                  <p className="mt-1 text-xs text-violet-300/65">
-                    Improve vs Auto vs Compose reflects how Promptly was invoked inside the extension.
-                  </p>
-                  <ModeChart modes={displayStats.breakdowns_from_events.mode} />
-                </section>
-              </div>
+                  <Legend />
+                  <Bar dataKey="prompts_gemini" name="Gemini prompts" stackId="stack" fill={COLOR_GEMINI} radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="prompts_claude" name="Claude prompts" stackId="stack" fill={COLOR_CLAUDE} />
+                  <Bar dataKey="prompts_chatgpt" name="ChatGPT prompts" stackId="stack" fill={COLOR_CHATGPT} />
+                  <Bar dataKey="prompts_unknown" name="Other / tagging gap" stackId="stack" fill={COLOR_UNKNOWN} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
 
-              <section className="mb-10 rounded-2xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-md">
-                <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-violet-200/85">Detected UI model labels</h2>
-                <p className="mt-2 text-xs text-violet-200/65">
-                  Labels are scraped cautiously when available; grouping uses a normalized bucket. They can be wrong whenever the AI
-                  site refreshes markup.
+            <p className="mt-6 text-[11px] leading-relaxed text-white/55">
+              Colors cue the host surface: Gemini blue (#4285F4 · Google brand reference), Claude coral (#CC785C · Anthropic-adjacent), ChatGPT teal (#10A37F
+              · OpenAI brand reference).
+            </p>
+          </section>
+
+          {/* Value story */}
+          <section className="mb-12">
+            <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-violet-200/90">What Promptly is doing</h2>
+            <p className="mt-1 text-xs text-violet-200/65">
+              Token math is illustrative; billing truth remains your Promptly quotas and daily rollups—not third-party metering.
+            </p>
+            <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-2xl border border-violet-500/25 bg-violet-500/[0.08] px-5 py-4">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-violet-100/85">Billing tokens routed through Promptly</p>
+                <p className="mt-3 text-2xl font-semibold text-white">{displayStats.value_insights.billed_promptly_tokens_sum_events.toLocaleString()}</p>
+                <p className="mt-2 text-[11px] text-violet-50/65">Measured on Improve/Generate events (OpenAI-backed rewrites).</p>
+              </div>
+              <div className="rounded-2xl border border-cyan-500/25 bg-cyan-500/[0.07] px-5 py-4">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-cyan-100/85">Heuristic tokens you typed native</p>
+                <p className="mt-3 text-2xl font-semibold text-white">
+                  {displayStats.value_insights.heuristic_native_input_tokens_approx_from_telemetry_chars != null
+                    ? `${displayStats.value_insights.heuristic_native_input_tokens_approx_from_telemetry_chars.toLocaleString()} Σ`
+                    : "—"}
                 </p>
-                <div className="mt-4 overflow-x-auto rounded-xl border border-white/10">
-                  <table className="min-w-[520px] w-full border-collapse text-left text-sm">
-                    <thead className="border-b border-white/10 text-xs uppercase tracking-wide text-violet-200/85">
-                      <tr>
-                        <th className="px-4 py-3 font-semibold">Bucket</th>
-                        <th className="px-4 py-3 font-semibold">Example label</th>
-                        <th className="px-4 py-3 font-semibold">Events</th>
+                <p className="mt-2 text-[11px] text-cyan-50/65">
+                  Sum of scraped composer telemetry on native sends (÷4 chars/token heuristic)—not Gemini/Claude/ChatGPT billed usage.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-purple-400/35 bg-purple-500/[0.08] px-5 py-4">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-purple-50/95">Typing engagement (estimated)</p>
+                <p className="mt-3 text-2xl font-semibold text-white">
+                  ~{displayStats.value_insights.estimated_drafting_active_minutes_illustrative.toLocaleString()} min
+                </p>
+                <p className="mt-2 text-[11px] text-purple-100/65">
+                  {displayStats.value_insights.composer_snapshot_count_illustrative.toLocaleString()} snapshots × ~12s illustrative cadence drawn from Promptly&apos;s composer debounce knobs.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-emerald-500/25 bg-emerald-950/30 px-5 py-4">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-emerald-100/85">Authoritative rollup hint</p>
+                <p className="mt-3 text-2xl font-semibold text-white">
+                  {displayStats.value_insights.rollup_daily_prompts_hint.toLocaleString()}
+                </p>
+                <p className="mt-2 text-[11px] text-emerald-50/65">Recorded Improve runs (may differ slightly from queried events).</p>
+              </div>
+            </div>
+          </section>
+
+          {/*Latency */}
+          <section className="mb-12 rounded-2xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-md">
+            <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-violet-200/95">Rewrite vs native turnaround time</h2>
+            <p className="mt-2 text-xs text-violet-200/65">
+              Promptly bar = billed rewrite turnaround from the sidebar. Native bar ≈ scraped “reply settles” cues on unattended sends —
+              heuristic, not authoritative vendor latency.
+            </p>
+            <div className="mt-6 h-96 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={latencyChartRows} margin={{ top: 8, right: 12, bottom: 56, left: 8 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                  <XAxis dataKey="ai" stroke="#c4c5fc" tick={{ fill: "#e9e7ff", fontSize: 11 }} />
+                  <YAxis stroke="#c4c5fc" tick={{ fill: "#e9e7ff" }} label={{ value: "Seconds (avg)", angle: -90, position: "insideLeft", fill: "#bfb7ff" }} />
+                  <Tooltip contentStyle={{ background: "#090514", border: "1px solid rgba(148,163,253,0.35)" }} />
+                  <Legend />
+                  <Bar dataKey="promptly_rewrite_s" name="Promptly rewrite (avg s)" radius={[8, 8, 0, 0]} fill={COLOR_PROMPTLY}>
+                    {latencyChartRows.map((entry, idx) => (
+                      <Cell key={`p-${idx}`} fillOpacity={entry.promptly_missing ? 0.2 : 0.95} />
+                    ))}
+                  </Bar>
+                  <Bar dataKey="native_roundtrip_s" name="Native host UI (avg s)" radius={[8, 8, 0, 0]} fill={COLOR_NATIVE_WEB}>
+                    {latencyChartRows.map((entry, idx) => (
+                      <Cell key={`n-${idx}`} fillOpacity={entry.native_missing ? 0.2 : 0.95} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </section>
+
+          {/* Composer length */}
+          {composerCompareData.length ? (
+            <section className="mb-12 rounded-2xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-md">
+              <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-violet-200/95">Draft verbosity</h2>
+              <p className="mt-2 text-xs text-violet-200/65">
+                Telemetry-only averages pulled from scraped composer snapshots—helps explain why rewriting with Promptly can reduce upstream token stress.
+              </p>
+              <div className="mt-6 h-64 w-full max-w-xl">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={composerCompareData} layout="vertical" margin={{ left: 32, top: 8 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                    <XAxis type="number" stroke="#c4c5fc" />
+                    <YAxis dataKey="label" type="category" width={148} stroke="#c4c5fc" tick={{ fill: "#f5f4ff", fontSize: 10 }} />
+                    <Tooltip contentStyle={{ background: "#090514", border: "1px solid rgba(236,232,255,0.2)" }} />
+                    <Bar dataKey="chars" radius={[0, 6, 6, 0]} fill="#c084fc">
+                      {composerCompareData.map((c, idx) => (
+                        <Cell key={idx} fillOpacity={c.muted ? 0.35 : 0.95} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </section>
+          ) : null}
+
+          {/* Promptly pathway compare */}
+          {pathwayCompareData.length ? (
+            <section className="mb-12 rounded-2xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-md">
+              <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-violet-200/95">Pathway breakdown</h2>
+              <p className="mt-2 text-xs text-violet-200/65">Stack Promptly-mediated runs against native submits for ChatGPT vs Claude vs Gemini.</p>
+              <div className="mt-6 h-80 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={pathwayCompareData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                    <XAxis dataKey="pathway" stroke="#bfb7ff" tick={{ fill: "#f9f8ff", fontSize: 10 }} />
+                    <YAxis stroke="#bfb7ff" allowDecimals={false} />
+                    <Tooltip contentStyle={{ background: "#070212", border: "1px solid rgba(251,251,254,0.12)" }} />
+                    <Legend />
+                    <Bar dataKey="Gemini" name="Gemini" stackId="a" fill={COLOR_GEMINI} />
+                    <Bar dataKey="Claude" name="Claude" stackId="a" fill={COLOR_CLAUDE} />
+                    <Bar dataKey="ChatGPT" name="ChatGPT" stackId="a" fill={COLOR_CHATGPT} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </section>
+          ) : null}
+
+          {/* Supporting technical */}
+          <section className="mb-12 grid gap-10 lg:grid-cols-2">
+            <div className="rounded-2xl border border-white/[0.1] bg-black/35 p-6">
+              <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-200/95">Improve mode mixes</h3>
+              <p className="mt-1 text-[11px] text-violet-200/62">Shows how Promptly was invoked whenever telemetry tagged the Optimize path.</p>
+              <ModeMiniChart modes={displayStats.breakdowns_from_events.mode} />
+            </div>
+            <div className="rounded-2xl border border-white/[0.1] bg-black/35 p-6">
+              <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-200/95">Billed Promptly tokens (bucket-level)</h3>
+              <p className="mt-1 text-[11px] text-violet-200/62">Roughly parallels how expensive each Improve window was—not host AI metering.</p>
+              <div className="mt-4 h-64 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={displayStats.timeline.map((row) => ({
+                      ...row,
+                      label: displayStats.granularity === "week" ? `wk ${formatShortDay(row.bucket)}` : formatShortDay(row.bucket)
+                    }))}
+                    margin={{ bottom: 8 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                    <XAxis dataKey="label" stroke="#c4c5fc" tick={{ fill: "#f4f4ff", fontSize: 10 }} />
+                    <YAxis stroke="#c4c5fc" />
+                    <Tooltip contentStyle={{ background: "#06030f", border: "1px solid rgba(196,181,253,0.35)" }} />
+                    <Bar dataKey="billed_promptly_tokens" fill="#9333ea" name="Promptly billed tokens / bucket" radius={[4, 4, 0, 0]} maxBarSize={32} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </section>
+
+          <section className="mb-12 rounded-2xl border border-white/[0.1] bg-black/35 p-6">
+            <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-200/95">Scraped model buckets (Improve path)</h3>
+            <p className="mt-2 text-[11px] text-violet-200/62">
+              Host UI labels when available—can drift whenever chat providers redesign their pickers.
+            </p>
+            <div className="mt-4 overflow-x-auto rounded-xl border border-white/10">
+              <table className="min-w-[520px] w-full border-collapse text-left text-sm">
+                <thead className="border-b border-white/10 text-[10px] uppercase tracking-wide text-violet-100/85">
+                  <tr>
+                    <th className="px-4 py-2 font-semibold">Bucket</th>
+                    <th className="px-4 py-2 font-semibold">Example label</th>
+                    <th className="px-4 py-2 font-semibold">Events</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {displayStats.breakdowns_from_events.model_buckets.length ? (
+                    displayStats.breakdowns_from_events.model_buckets.map((row) => (
+                      <tr key={row.bucket} className="border-b border-white/[0.06] text-violet-50/95">
+                        <td className="px-4 py-2 font-mono text-xs text-violet-200">{row.bucket}</td>
+                        <td className="px-4 py-2 text-xs">{row.exemplar_label || "—"}</td>
+                        <td className="px-4 py-2 tabular-nums">{row.prompts.toLocaleString()}</td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {displayStats.breakdowns_from_events.model_buckets.length ? (
-                        displayStats.breakdowns_from_events.model_buckets.map((row) => (
-                          <tr key={row.bucket} className="border-b border-white/[0.06] text-violet-50/95">
-                            <td className="px-4 py-2 font-mono text-xs text-violet-200">{row.bucket}</td>
-                            <td className="px-4 py-2 text-xs text-violet-100/95">{row.exemplar_label || "—"}</td>
-                            <td className="px-4 py-2 tabular-nums">{row.prompts.toLocaleString()}</td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr className="text-violet-100/85">
-                          <td className="border-b border-white/[0.06] px-4 py-3 font-mono text-xs text-violet-300">unknown</td>
-                          <td className="border-b border-white/[0.06] px-4 py-3 text-xs text-violet-200/80">
-                            Nothing recorded yet — after you optimize with the extension, detected host labels appear here when the site
-                            exposes them.
-                          </td>
-                          <td className="border-b border-white/[0.06] px-4 py-3 tabular-nums text-violet-200/85">0</td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
+                    ))
+                  ) : (
+                    <tr className="text-violet-50/85">
+                      <td colSpan={3} className="px-4 py-3 text-xs italic">
+                        After you Optimize with Promptly attached, detected host labels accumulate here whenever the picker exposes readable text.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
 
-              <div className="mb-3 mt-14 text-[11px] font-semibold uppercase tracking-[0.22em] text-emerald-200/90">
-                AI site activity (passive listener)
-              </div>
-
-              <div className="mb-6 rounded-xl border border-white/[0.12] bg-black/30 px-4 py-3 text-xs leading-relaxed text-violet-100/92">
-                <p className="font-semibold text-emerald-100/95">Verify passive prompt counts</p>
-                <ul className="mt-2 list-disc space-y-2 pl-5 text-violet-200/[0.92]">
-                  <li>
-                    <strong className="text-violet-100/95">Extension app URL:</strong> in Promptly Options, the backend URL must match this site&apos;s host
-                    (e.g. <code className="text-[10px] text-emerald-200/90">https://…”your-project”.vercel.app</code>). The extension only allows prompts-labs, localhost,
-                    and <span className="whitespace-nowrap">*.vercel.app</span> — mismatched deployments show empty stats until the URL aligns.
-                  </li>
-                  <li>
-                    <strong className="text-violet-100/95">Same account:</strong> sign into Promptly from the sidebar on ChatGPT / Claude / Gemini using the{" "}
-                    <em>same</em> identity you use on this statistics page (<code className="text-[10px]">uid</code> must match in Firestore).
-                  </li>
-                  <li>
-                    <strong className="text-violet-100/95">Indexes:</strong> clear the yellow/blue banners above (
-                    <code className="text-[10px]">promptly_host_llm_events</code> composite) — otherwise passive queries return zero documents.
-                  </li>
-                  <li>
-                    <strong className="text-violet-100/95">Smoke test:</strong> run one <strong className="text-violet-100/95">Improve</strong>; each successful optimize mirrors a row (
-                    <code className="text-[10px]">source optimize_api</code>) into passive totals even when the page never emits a sniffed “send.”
-                  </li>
-                  <li>
-                    <strong className="text-violet-100/95">Native sends (without Improve):</strong> use the chat host&apos;s Send control or plain Enter (
-                    Promptly&nbsp;Improve/Auto is separate). Reload the extension after updates; if counts stay at zero open the service-worker inspect
-                    tool and retry a send — look for <code className="text-[10px]">PROMPTLY_HOST_ACTIVITY_BATCH</code> errors.
-                  </li>
-                </ul>
-              </div>
-
-              <section className="mb-10 rounded-2xl border border-emerald-500/35 bg-emerald-950/[0.12] p-6 backdrop-blur-md">
-                <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-100/95">Composer typing, sends &amp; reply feel</h2>
-                <p className="mt-1 text-xs text-emerald-100/70">
-                  Stacked bars debounce typing snapshots in the real composer plus every native Send/Enter observation and Promptly Improve/Generate mirrors.
-                  Passive sends enqueue as soon as you submit (they do not wait for the assistant to finish streaming), so totals track real prompt volume.
-                  Yellow latency / reply-size extras still depend on streamed DOM scrapes — mostly populated on Optimize mirrors or experimental paths.
-                </p>
-                <div className="mt-4 h-80 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={hostPassiveChartPlot}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
-                      <XAxis dataKey="label" stroke="#a7f3d0" tick={{ fill: "#d1fae5", fontSize: 11 }} />
-                      <YAxis
-                        yAxisId="count"
-                        stroke="#34d399"
-                        tickFormatter={(v) => `${Math.round(Number(v))}`}
-                      />
-                      <YAxis
-                        yAxisId="ms"
-                        orientation="right"
-                        stroke="#6ee7b7"
-                        tickFormatter={(v) => `${(Number(v) / 1000).toFixed(1)}s`}
-                      />
-                      <Tooltip
-                        contentStyle={{ background: "#052e1b", border: "1px solid rgba(52,211,153,0.45)" }}
-                        formatter={(value, name) => {
-                          const n = Number(value);
-                          const nm = String(name);
-                          if (nm.includes("reply settle")) return [`${Math.round(n / 100) / 10}s`, name];
-                          return [n, name];
-                        }}
-                      />
-                      <Legend />
-                      <Bar
-                        yAxisId="count"
-                        stackId="activity"
-                        dataKey="compose_snapshots_plot"
-                        name="Typing samples"
-                        fill="rgba(110,231,183,0.55)"
-                        maxBarSize={40}
-                      />
-                      <Bar
-                        yAxisId="count"
-                        stackId="activity"
-                        dataKey="sends_plot"
-                        name="Sends (+ Improve mirrored)"
-                        fill="rgba(16,185,129,0.9)"
-                        maxBarSize={40}
-                      />
-                      <Line
-                        yAxisId="ms"
-                        type="monotone"
-                        dataKey="avg_host_latency_plot"
-                        name="Avg reply settle (ms)"
-                        stroke="#fef08a"
-                        dot={false}
-                        strokeWidth={2}
-                      />
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                </div>
-
-                <div className="mt-8 h-64 w-full">
-                  <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-emerald-100/85">
-                    Avg visible assistant reply size (chars) per send event
-                  </p>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={hostPassiveChartPlot}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
-                      <XAxis dataKey="label" stroke="#a7f3d0" tick={{ fill: "#d1fae5", fontSize: 10 }} />
-                      <YAxis stroke="#fde68a" tickFormatter={(v) => `${Math.round(Number(v))}`} />
-                      <Tooltip contentStyle={{ background: "#052e1b", border: "1px solid rgba(52,211,153,0.45)" }} />
-                      <Legend />
-                      <Line
-                        type="monotone"
-                        dataKey="avg_assistant_visible_plot"
-                        name="Avg reply chars (DOM scrape)"
-                        stroke="#fde047"
-                        strokeWidth={2}
-                        dot={false}
-                      />
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                </div>
-
-                <div className="mt-8 h-72 w-full">
-                  <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-emerald-100/85">
-                    Average composer length across all passive samples (typing + sends)
-                  </p>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={hostTrendData.map((row) => ({
-                        label: row.label,
-                        chars: Math.round(Number(row.avg_composer_chars ?? 0) * 10) / 10
-                      }))}
-                      margin={{ top: 8, right: 12, bottom: 8, left: 4 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                      <XAxis dataKey="label" stroke="#a7f3d0" tick={{ fill: "#d1fae5", fontSize: 10 }} />
-                      <YAxis stroke="#34d399" />
-                      <Tooltip contentStyle={{ background: "#052e1b", border: "1px solid rgba(52,211,153,0.45)" }} />
-                      <Legend />
-                      <Bar dataKey="chars" name="Avg chars / sample" fill="rgba(45,212,191,0.55)" radius={[4, 4, 0, 0]} maxBarSize={32} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </section>
-
-              <div className="mb-10 grid gap-8 lg:grid-cols-2">
-                <section className="rounded-2xl border border-emerald-500/30 bg-white/[0.04] p-6 backdrop-blur-md">
-                  <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-100/90">Passive activity by site</h2>
-                  <p className="mt-1 text-xs text-violet-300/65">
-                    Counts composer typing snapshots plus sends while you browse each host with Promptly signed in.
-                  </p>
-                  <ServicePie
-                    service={
-                      displayStats.host_passive_listener?.breakdown_service ?? {
-                        chatgpt: 0,
-                        claude: 0,
-                        gemini: 0,
-                        unknown: 0
-                      }
-                    }
-                    idleLabel="No passive activity yet — type or send while signed into Promptly on ChatGPT / Claude / Gemini."
-                  />
-                </section>
-                <section className="rounded-2xl border border-emerald-500/25 bg-black/35 p-6 backdrop-blur-md">
-                  <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-100/85">Passive notes</h2>
-                  <p className="mt-3 text-xs leading-relaxed text-violet-100/85">
-                    Listener samples trusted typing in the real composer and confirmed sends—no prompt bodies uploaded. Events batch out roughly every
-                    few seconds while you are signed into Promptly on a supported chat host. Streams are inferred from the DOM: latency settles when
-                    streaming controls disappear and assistant text briefly stops growing.
-                  </p>
-                </section>
-              </div>
-
-              <section className="mb-10 rounded-2xl border border-emerald-500/30 bg-white/[0.04] p-6 backdrop-blur-md">
-                <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-100/90">Model labels on passive activity</h2>
-                <p className="mt-2 text-xs text-violet-200/65">
-                  Scraped picker labels from the optimize path, attributed to whichever activity row carried them (mostly sends—typing snapshots omit
-                  the label when nothing new was scraped).
-                </p>
-                <div className="mt-4 overflow-x-auto rounded-xl border border-white/10">
-                  <table className="min-w-[520px] w-full border-collapse text-left text-sm">
-                    <thead className="border-b border-white/10 text-xs uppercase tracking-wide text-emerald-100/85">
-                      <tr>
-                        <th className="px-4 py-3 font-semibold">Bucket</th>
-                        <th className="px-4 py-3 font-semibold">Example label</th>
-                        <th className="px-4 py-3 font-semibold">Events</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(displayStats.host_passive_listener?.model_buckets ?? []).length ? (
-                        displayStats.host_passive_listener!.model_buckets.map((row) => (
-                          <tr key={row.bucket} className="border-b border-white/[0.06] text-violet-50/95">
-                            <td className="px-4 py-2 font-mono text-xs text-emerald-200">{row.bucket}</td>
-                            <td className="px-4 py-2 text-xs text-violet-100/95">{row.exemplar_label || "—"}</td>
-                            <td className="px-4 py-2 tabular-nums">{row.events.toLocaleString()}</td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr className="text-violet-100/85">
-                          <td className="border-b border-white/[0.06] px-4 py-3 font-mono text-xs text-violet-300">unknown</td>
-                          <td className="border-b border-white/[0.06] px-4 py-3 text-xs text-violet-200/80">
-                            Passive rows will populate after you chat on a supported site—model labels mirror what the picker shows when Promptly sees
-                            a send attempt.
-                          </td>
-                          <td className="border-b border-white/[0.06] px-4 py-3 tabular-nums text-violet-200/85">0</td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-
-              <section className="rounded-2xl border border-white/[0.08] bg-black/30 p-5 text-xs leading-relaxed text-violet-200/65">
-                <ul className="list-disc space-y-2 pl-5">
-                  {displayStats.footnotes.map((line) => (
-                    <li key={line}>{line}</li>
-                  ))}
-                </ul>
-              </section>
-            </>
+          <footer className="rounded-2xl border border-white/[0.06] bg-black/25 p-5 text-[11px] leading-relaxed text-violet-200/70">
+            <div className="grid gap-2 sm:grid-cols-2">
+              <p>
+                <span className="font-semibold text-white/90">Native sends:</span>{" "}
+                {displayStats.value_insights.native_web_sends.toLocaleString()}
+              </p>
+              <p>
+                <span className="font-semibold text-white/90">Optimize events queried:</span>{" "}
+                {displayStats.value_insights.optimize_events_queried.toLocaleString()}
+              </p>
+              <p>
+                <span className="font-semibold text-white/90">Mirror rows synced:</span>{" "}
+                {displayStats.combined_totals.mirror_rows_synced_to_host_telemetry.toLocaleString()}
+              </p>
+              <p>
+                <span className="font-semibold text-white/90">Authoritative rollup tokens:</span>{" "}
+                {displayStats.rollup_daily.totals.tokens.toLocaleString()}
+              </p>
+            </div>
+            {displayStats.footnotes.length ? (
+              <ul className="mt-4 list-disc space-y-2 pl-5">
+                {displayStats.footnotes.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            ) : null}
+          </footer>
         </>
       ) : null}
     </div>

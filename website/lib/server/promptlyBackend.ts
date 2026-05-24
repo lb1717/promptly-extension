@@ -1,4 +1,10 @@
-import { FieldValue, Timestamp, type DocumentData, type QueryDocumentSnapshot } from "firebase-admin/firestore";
+import {
+  FieldPath,
+  FieldValue,
+  Timestamp,
+  type DocumentData,
+  type QueryDocumentSnapshot
+} from "firebase-admin/firestore";
 import { getFirebaseAdminAuth, getFirebaseAdminDb } from "@/lib/server/firebaseAdmin";
 import { PROMPTLY_USER_CONTENT_TOKEN } from "./promptEngineeringConstants";
 import {
@@ -202,6 +208,29 @@ export function normalizePromptlyService(rawValue: unknown): PromptlyService {
     return value;
   }
   return "unknown";
+}
+
+/** Normalize `utcDay` from Firestore (string vs Timestamp vs snake_case) for analytics bucketing. */
+function readAnalyticsUtcDay(raw: Record<string, unknown>): string | null {
+  const v = raw.utcDay ?? raw.utc_day;
+  if (typeof v === "string") {
+    const s = v.trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+      return s.slice(0, 10);
+    }
+    return null;
+  }
+  if (v instanceof Timestamp) {
+    return v.toDate().toISOString().slice(0, 10);
+  }
+  if (v && typeof v === "object" && "toDate" in v && typeof (v as { toDate?: unknown }).toDate === "function") {
+    try {
+      return (v as { toDate: () => Date }).toDate().toISOString().slice(0, 10);
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }
 
 export type OptimizeTelemetryNormalized = {
@@ -618,9 +647,24 @@ function isoWeekMondayUtcDay(utcYmd: string): string {
   return dt.toISOString().slice(0, 10);
 }
 
+type ServicePromptCounts = Record<PromptlyService, number>;
+
+function emptyServicePromptCounts(): ServicePromptCounts {
+  return { chatgpt: 0, claude: 0, gemini: 0, unknown: 0 };
+}
+
+function addServicePromptCounts(dst: ServicePromptCounts, src: ServicePromptCounts) {
+  dst.chatgpt += src.chatgpt;
+  dst.claude += src.claude;
+  dst.gemini += src.gemini;
+  dst.unknown += src.unknown;
+}
+
 type TimelineBucketAgg = {
   bucket_day: string;
   prompts: number;
+  /** Optimize / Improve / Generate telemetry rows grouped by scraped host surface. */
+  optimize_by_service: ServicePromptCounts;
   billed_promptly_tokens: number;
   composer_char_sum: number;
   composer_char_samples: number;
@@ -634,12 +678,19 @@ type HostPassiveBucketAgg = {
   sends: number;
   /** interactionKind === composer_input */
   composer_input_events: number;
+  /** Native sends only (source passive_listener) — excludes optimize_api mirrors. */
+  native_send_by_service: ServicePromptCounts;
+  /** Sends mirrored from /api/optimize success into host telemetry. */
+  mirror_send_by_service: ServicePromptCounts;
   composer_char_sum: number;
   composer_char_samples: number;
   host_latency_sum_ms: number;
   host_latency_samples: number;
   assistant_reply_char_sum: number;
   assistant_reply_char_samples: number;
+  /** Native round-trip sums per assistant surface when host latency telemetry exists */
+  native_host_latency_sum_svc: ServicePromptCounts;
+  native_host_latency_samples_svc: ServicePromptCounts;
 };
 
 export async function getAccountUsageStatsExtended(
@@ -678,11 +729,67 @@ export async function getAccountUsageStatsExtended(
     }
   };
 
+  /**
+   * Newest-first so the row cap still covers recent days when a user has > limit events in-range
+   * (ascending + limit would only return the oldest slice and charts look empty).
+   */
+  const queryHostPassiveEventsIndexed = async (): Promise<{
+    docs: QueryDocumentSnapshot<DocumentData>[];
+    indexMissing: boolean;
+    used_desc_index: boolean;
+  }> => {
+    const runDesc = () =>
+      db
+        .collection(HOST_LLM_EVENTS_COLLECTION)
+        .where("uid", "==", user.uid)
+        .where("utcDay", ">=", startDay)
+        .where("utcDay", "<=", endDay)
+        .orderBy("utcDay", "desc")
+        .orderBy(FieldPath.documentId(), "desc")
+        .limit(HOST_LLM_EVENTS_QUERY_LIMIT)
+        .get();
+
+    const runAsc = () =>
+      db
+        .collection(HOST_LLM_EVENTS_COLLECTION)
+        .where("uid", "==", user.uid)
+        .where("utcDay", ">=", startDay)
+        .where("utcDay", "<=", endDay)
+        .orderBy("utcDay", "asc")
+        .limit(HOST_LLM_EVENTS_QUERY_LIMIT)
+        .get();
+
+    try {
+      const snap = await runDesc();
+      return { docs: snap.docs, indexMissing: false, used_desc_index: true };
+    } catch (err) {
+      const message = String(err instanceof Error ? err.message : err);
+      if (/FAILED_PRECONDITION|requires an index|9 FAILED_PRECONDITION/i.test(message)) {
+        console.warn(
+          `[getAccountUsageStatsExtended] ${HOST_LLM_EVENTS_COLLECTION} desc query missing index; trying asc:`,
+          message.slice(0, 220)
+        );
+        try {
+          const snap = await runAsc();
+          return { docs: snap.docs, indexMissing: false, used_desc_index: false };
+        } catch (err2) {
+          const m2 = String(err2 instanceof Error ? err2.message : err2);
+          if (/FAILED_PRECONDITION|requires an index|9 FAILED_PRECONDITION/i.test(m2)) {
+            console.warn(`[getAccountUsageStatsExtended] ${HOST_LLM_EVENTS_COLLECTION} asc query skipped:`, m2.slice(0, 220));
+            return { docs: [], indexMissing: true, used_desc_index: false };
+          }
+          throw err2;
+        }
+      }
+      throw err;
+    }
+  };
+
   /** Parallel rollup + optimize events + passive host listener events */
   const [rollupBaseline, eventsResult, hostPassiveResult] = await Promise.all([
     getAccountUsageStats(user, rangeDays),
     queryEventsIndexed(OPTIMIZE_EVENTS_COLLECTION, OPTIMIZE_EVENTS_QUERY_LIMIT),
-    queryEventsIndexed(HOST_LLM_EVENTS_COLLECTION, HOST_LLM_EVENTS_QUERY_LIMIT)
+    queryHostPassiveEventsIndexed()
   ]);
 
   type DayScratch = TimelineBucketAgg;
@@ -691,6 +798,7 @@ export async function getAccountUsageStatsExtended(
     byDayScratch.set(d, {
       bucket_day: d,
       prompts: 0,
+      optimize_by_service: emptyServicePromptCounts(),
       billed_promptly_tokens: 0,
       composer_char_sum: 0,
       composer_char_samples: 0,
@@ -705,12 +813,16 @@ export async function getAccountUsageStatsExtended(
       bucket_day: d,
       sends: 0,
       composer_input_events: 0,
+      native_send_by_service: emptyServicePromptCounts(),
+      mirror_send_by_service: emptyServicePromptCounts(),
       composer_char_sum: 0,
       composer_char_samples: 0,
       host_latency_sum_ms: 0,
       host_latency_samples: 0,
       assistant_reply_char_sum: 0,
-      assistant_reply_char_samples: 0
+      assistant_reply_char_samples: 0,
+      native_host_latency_sum_svc: emptyServicePromptCounts(),
+      native_host_latency_samples_svc: emptyServicePromptCounts()
     });
   }
 
@@ -724,14 +836,26 @@ export async function getAccountUsageStatsExtended(
   /** bucket -> prompts + exemplar label */
   const modelBucketAgg = new Map<string, { prompts: number; label: string | null }>();
 
+  const optimizeLatencySvc = {
+    sum: emptyServicePromptCounts(),
+    samples: emptyServicePromptCounts()
+  };
+
+  /** Composer length on passive_listener native sends — contrast with Improve path. */
+  let nativeComposerOnSendSamples = 0;
+  let nativeComposerOnSendChars = 0;
+
   for (const doc of eventsResult.docs) {
     const raw = doc.data() as Record<string, unknown>;
-    const utcDay = String(raw.utcDay || "");
-    if (!byDayScratch.has(utcDay)) {
+    const utcDay = readAnalyticsUtcDay(raw);
+    if (!utcDay || !byDayScratch.has(utcDay)) {
       continue;
     }
     const row = byDayScratch.get(utcDay)!;
     row.prompts += 1;
+
+    const svcDoc = normalizePromptlyService(raw.service);
+    row.optimize_by_service[svcDoc] += 1;
 
     const billed = Math.max(0, Math.floor(Number(raw.billedPromptlyTokens || 0)));
     row.billed_promptly_tokens += billed;
@@ -744,11 +868,14 @@ export async function getAccountUsageStatsExtended(
 
     const lat = Number(raw.optimizeLatencyMs || 0);
     if (Number.isFinite(lat) && lat > 0) {
+      const latMs = Math.floor(lat);
       row.latency_samples += 1;
-      row.latency_sum_ms += Math.floor(lat);
+      row.latency_sum_ms += latMs;
+      optimizeLatencySvc.sum[svcDoc] += latMs;
+      optimizeLatencySvc.samples[svcDoc] += 1;
     }
 
-    const svc = normalizePromptlyService(raw.service);
+    const svc = svcDoc;
     serviceTotals[svc] += 1;
 
     const mode = String(raw.optimizeMode || "").toLowerCase();
@@ -769,40 +896,57 @@ export async function getAccountUsageStatsExtended(
     modelBucketAgg.set(mb, prev);
   }
 
-  const hostServiceTotals: Record<PromptlyService, number> = {
-    chatgpt: 0,
-    claude: 0,
-    gemini: 0,
-    unknown: 0
-  };
-  const hostModelBucketAgg = new Map<string, { sends: number; label: string | null }>();
-
   for (const doc of hostPassiveResult.docs) {
     const raw = doc.data() as Record<string, unknown>;
-    const utcDay = String(raw.utcDay || "");
-    if (!hostByDayScratch.has(utcDay)) {
+    const utcDay = readAnalyticsUtcDay(raw);
+    if (!utcDay || !hostByDayScratch.has(utcDay)) {
       continue;
     }
     const row = hostByDayScratch.get(utcDay)!;
     const ik = String(raw.interactionKind ?? raw.interaction_kind ?? "send").toLowerCase();
     const isComposer = ik === "composer_input" || ik === "compose" || ik === "typing";
 
+    const sourceRaw = String(raw.source ?? raw.ingest_source ?? "passive_listener");
+    const isMirror = sourceRaw === "optimize_api";
+
+    const cc =
+      typeof raw.composerCharEstimate === "number" && Number.isFinite(raw.composerCharEstimate)
+        ? raw.composerCharEstimate
+        : typeof raw.composer_char_estimate === "number" && Number.isFinite(raw.composer_char_estimate)
+          ? raw.composer_char_estimate
+          : null;
+
+    const svc = normalizePromptlyService(raw.service);
+
+    const hlRaw = raw.hostResponseLatencyMs ?? raw.host_response_latency_ms;
+    const hlMs =
+      typeof hlRaw === "number" && Number.isFinite(hlRaw) ? Math.floor(hlRaw) : null;
+
     if (isComposer) {
       row.composer_input_events += 1;
     } else {
       row.sends += 1;
+      if (isMirror) {
+        row.mirror_send_by_service[svc] += 1;
+      } else {
+        row.native_send_by_service[svc] += 1;
+        if (typeof cc === "number" && cc > 0) {
+          const fc = Math.min(CREDIT_MAX_PROMPT_CHARS, Math.floor(cc));
+          nativeComposerOnSendSamples += 1;
+          nativeComposerOnSendChars += fc;
+        }
+        if (hlMs !== null && hlMs > 0) {
+          row.native_host_latency_sum_svc[svc] += hlMs;
+          row.native_host_latency_samples_svc[svc] += 1;
+          row.host_latency_samples += 1;
+          row.host_latency_sum_ms += hlMs;
+        }
+      }
     }
 
-    const cc = raw.composerCharEstimate;
     if (typeof cc === "number" && Number.isFinite(cc) && cc > 0) {
       row.composer_char_samples += 1;
       row.composer_char_sum += Math.min(CREDIT_MAX_PROMPT_CHARS, Math.floor(cc));
-    }
-
-    const hl = raw.hostResponseLatencyMs;
-    if (!isComposer && typeof hl === "number" && Number.isFinite(hl) && hl > 0) {
-      row.host_latency_samples += 1;
-      row.host_latency_sum_ms += Math.floor(hl);
     }
 
     const assist = Number(raw.assistantOutputCharEstimate ?? raw.assistant_output_char_estimate ?? 0);
@@ -815,21 +959,6 @@ export async function getAccountUsageStatsExtended(
       row.assistant_reply_char_samples += 1;
       row.assistant_reply_char_sum += Math.min(400000, Math.floor(assist));
     }
-
-    const svc = normalizePromptlyService(raw.service);
-    hostServiceTotals[svc] += 1;
-
-    const mb = String(raw.hostModelBucket || "unknown").slice(0, 48) || "unknown";
-    const label =
-      typeof raw.hostModelLabelSanitized === "string" && raw.hostModelLabelSanitized.trim()
-        ? String(raw.hostModelLabelSanitized).trim()
-        : null;
-    const prevH = hostModelBucketAgg.get(mb) || { sends: 0, label: null };
-    prevH.sends += 1;
-    if (!prevH.label && label) {
-      prevH.label = label.slice(0, TELEMETRY_HOST_MODEL_MAX_CHARS);
-    }
-    hostModelBucketAgg.set(mb, prevH);
   }
 
   /** Merge daily scratch into timeline rows with optional ISO-week bucketing */
@@ -842,6 +971,7 @@ export async function getAccountUsageStatsExtended(
         byWeek.set(wk, {
           bucket_day: wk,
           prompts: 0,
+          optimize_by_service: emptyServicePromptCounts(),
           billed_promptly_tokens: 0,
           composer_char_sum: 0,
           composer_char_samples: 0,
@@ -855,6 +985,7 @@ export async function getAccountUsageStatsExtended(
       const src = byDayScratch.get(d)!;
       const dst = byWeek.get(wk)!;
       dst.prompts += src.prompts;
+      addServicePromptCounts(dst.optimize_by_service, src.optimize_by_service);
       dst.billed_promptly_tokens += src.billed_promptly_tokens;
       dst.composer_char_sum += src.composer_char_sum;
       dst.composer_char_samples += src.composer_char_samples;
@@ -896,12 +1027,16 @@ export async function getAccountUsageStatsExtended(
           bucket_day: wk,
           sends: 0,
           composer_input_events: 0,
+          native_send_by_service: emptyServicePromptCounts(),
+          mirror_send_by_service: emptyServicePromptCounts(),
           composer_char_sum: 0,
           composer_char_samples: 0,
           host_latency_sum_ms: 0,
           host_latency_samples: 0,
           assistant_reply_char_sum: 0,
-          assistant_reply_char_samples: 0
+          assistant_reply_char_samples: 0,
+          native_host_latency_sum_svc: emptyServicePromptCounts(),
+          native_host_latency_samples_svc: emptyServicePromptCounts()
         });
       }
     }
@@ -911,12 +1046,16 @@ export async function getAccountUsageStatsExtended(
       const dst = hostByWeek.get(wk)!;
       dst.sends += src.sends;
       dst.composer_input_events += src.composer_input_events;
+      addServicePromptCounts(dst.native_send_by_service, src.native_send_by_service);
+      addServicePromptCounts(dst.mirror_send_by_service, src.mirror_send_by_service);
       dst.composer_char_sum += src.composer_char_sum;
       dst.composer_char_samples += src.composer_char_samples;
       dst.host_latency_sum_ms += src.host_latency_sum_ms;
       dst.host_latency_samples += src.host_latency_samples;
       dst.assistant_reply_char_sum += src.assistant_reply_char_sum;
       dst.assistant_reply_char_samples += src.assistant_reply_char_samples;
+      addServicePromptCounts(dst.native_host_latency_sum_svc, src.native_host_latency_sum_svc);
+      addServicePromptCounts(dst.native_host_latency_samples_svc, src.native_host_latency_samples_svc);
     }
     hostPassiveTimelineFlat = [...hostByWeek.entries()]
       .sort((a, b) => (a[0] < b[0] ? -1 : 1))
@@ -925,22 +1064,138 @@ export async function getAccountUsageStatsExtended(
     hostPassiveTimelineFlat = recentDays.map((d) => hostByDayScratch.get(d)!);
   }
 
-  const host_passive_timeline = hostPassiveTimelineFlat.map((t) => ({
-    bucket: t.bucket_day,
-    sends: t.sends,
-    composer_input_events: t.composer_input_events,
-    passive_activity_total: t.sends + t.composer_input_events,
-    avg_composer_chars:
-      t.composer_char_samples > 0
-        ? Math.round((t.composer_char_sum / t.composer_char_samples) * 10) / 10
+  const hostPassiveByBucket = new Map(hostPassiveTimelineFlat.map((row) => [row.bucket_day, row]));
+
+  const combined_prompt_timeline = timelineFlat.map((t) => {
+    const hp = hostPassiveByBucket.get(t.bucket_day);
+    const passiveNative = hp?.native_send_by_service ?? emptyServicePromptCounts();
+    const cq = passiveNative.chatgpt + t.optimize_by_service.chatgpt;
+    const cu = passiveNative.claude + t.optimize_by_service.claude;
+    const cg = passiveNative.gemini + t.optimize_by_service.gemini;
+    const cun = passiveNative.unknown + t.optimize_by_service.unknown;
+    const totalBucket = cq + cu + cg + cun;
+    return {
+      bucket: t.bucket_day,
+      prompts_chatgpt: cq,
+      prompts_claude: cu,
+      prompts_gemini: cg,
+      prompts_unknown: cun,
+      prompts_total_bucket: totalBucket,
+      prompts_native_only_chatgpt: passiveNative.chatgpt,
+      prompts_native_only_claude: passiveNative.claude,
+      prompts_native_only_gemini: passiveNative.gemini,
+      prompts_native_only_unknown: passiveNative.unknown,
+      prompts_with_promptly_chatgpt: t.optimize_by_service.chatgpt,
+      prompts_with_promptly_claude: t.optimize_by_service.claude,
+      prompts_with_promptly_gemini: t.optimize_by_service.gemini,
+      prompts_with_promptly_unknown: t.optimize_by_service.unknown
+    };
+  });
+
+  const mergedOptimizeSvc = [...byDayScratch.values()].reduce(
+    (acc, day) => {
+      addServicePromptCounts(acc, day.optimize_by_service);
+      return acc;
+    },
+    emptyServicePromptCounts()
+  );
+  const mergedNativeSvc = [...hostByDayScratch.values()].reduce(
+    (acc, day) => {
+      addServicePromptCounts(acc, day.native_send_by_service);
+      return acc;
+    },
+    emptyServicePromptCounts()
+  );
+  const mergedMirrorSvc = [...hostByDayScratch.values()].reduce(
+    (acc, day) => {
+      addServicePromptCounts(acc, day.mirror_send_by_service);
+      return acc;
+    },
+    emptyServicePromptCounts()
+  );
+
+  const sumSvcCounts = (c: ServicePromptCounts) =>
+    c.chatgpt + c.claude + c.gemini + c.unknown;
+
+  const combined_totals_prompts_native = sumSvcCounts(mergedNativeSvc);
+  const combined_totals_prompts_optimize = sumSvcCounts(mergedOptimizeSvc);
+  /** Dedup-friendly prompt actions ≈ Improve/Generate telemetry runs + sends observed without invoking Improve mirrors. Mirrors are excluded from natives. */
+  const combined_totals_prompts_estimate = combined_totals_prompts_optimize + combined_totals_prompts_native;
+  const combined_totals_by_ai = {
+    chatgpt: mergedNativeSvc.chatgpt + mergedOptimizeSvc.chatgpt,
+    claude: mergedNativeSvc.claude + mergedOptimizeSvc.claude,
+    gemini: mergedNativeSvc.gemini + mergedOptimizeSvc.gemini,
+    unknown: mergedNativeSvc.unknown + mergedOptimizeSvc.unknown
+  };
+
+  const hostPassiveSendsOnly = [...hostByDayScratch.values()].reduce((s, x) => s + x.sends, 0);
+  const hostComposerSnapshotsOnly = [...hostByDayScratch.values()].reduce((s, x) => s + x.composer_input_events, 0);
+  const hostPassiveEventRows = hostPassiveResult.docs.length;
+  const host_events_likely_truncated = hostPassiveEventRows >= HOST_LLM_EVENTS_QUERY_LIMIT;
+
+  const nativeLatencyTotals = {
+    sum: emptyServicePromptCounts(),
+    samples: emptyServicePromptCounts()
+  };
+  for (const day of hostByDayScratch.values()) {
+    (Object.keys(nativeLatencyTotals.sum) as PromptlyService[]).forEach((svc) => {
+      nativeLatencyTotals.sum[svc] += day.native_host_latency_sum_svc[svc];
+      nativeLatencyTotals.samples[svc] += day.native_host_latency_samples_svc[svc];
+    });
+  }
+
+  /** Grouped averages for dashboards */
+  function avgOrNull(sum: number, samples: number): number | null {
+    if (!(samples > 0)) return null;
+    return Math.round(sum / samples);
+  }
+
+  const latency_comparison_ai = (["chatgpt", "claude", "gemini", "unknown"] as const).map((svcKey) => ({
+    service_key: svcKey,
+    prompted_promptly_avg_rewrite_ms:
+      optimizeLatencySvc.samples[svcKey] > 0
+        ? avgOrNull(optimizeLatencySvc.sum[svcKey], optimizeLatencySvc.samples[svcKey])
         : null,
-    avg_host_response_latency_ms:
-      t.host_latency_samples > 0 ? Math.round(t.host_latency_sum_ms / t.host_latency_samples) : null,
-    avg_assistant_reply_chars_visible:
-      t.assistant_reply_char_samples > 0
-        ? Math.round((t.assistant_reply_char_sum / t.assistant_reply_char_samples) * 10) / 10
-        : null
+    native_avg_host_roundtrip_ms:
+      nativeLatencyTotals.samples[svcKey] > 0
+        ? avgOrNull(nativeLatencyTotals.sum[svcKey], nativeLatencyTotals.samples[svcKey])
+        : null,
+    promptly_samples: optimizeLatencySvc.samples[svcKey],
+    native_latency_samples: nativeLatencyTotals.samples[svcKey],
+    prompts_with_promptly: mergedOptimizeSvc[svcKey],
+    prompts_native_web: mergedNativeSvc[svcKey]
   }));
+
+  const billed_promptly_tokens_sum_events = [...byDayScratch.values()].reduce(
+    (s, day) => s + day.billed_promptly_tokens,
+    0
+  );
+  const optimizeComposerAgg = [...byDayScratch.values()].reduce(
+    (agg, day) => {
+      agg.chars += day.composer_char_sum;
+      agg.samples += day.composer_char_samples;
+      return agg;
+    },
+    { chars: 0, samples: 0 }
+  );
+
+  /** ~12 seconds per snapshot midpoint between Promptly throttle + debounce knobs in the extension composer listener. Illustrative only. */
+  const TYPING_SNAPSHOT_APPROX_SECONDS = 12;
+  const estimated_typing_engagement_minutes =
+    Math.round(((hostComposerSnapshotsOnly * TYPING_SNAPSHOT_APPROX_SECONDS) / 60) * 10) / 10;
+
+  const optimize_avg_comp =
+    optimizeComposerAgg.samples > 0
+      ? Math.round((optimizeComposerAgg.chars / optimizeComposerAgg.samples) * 10) / 10
+      : null;
+  const native_avg_comp =
+    nativeComposerOnSendSamples > 0
+      ? Math.round((nativeComposerOnSendChars / nativeComposerOnSendSamples) * 10) / 10
+      : null;
+
+  /** Heuristic illustrative “would-be” host input tokens from summed telemetry chars (~4 chars per token heuristic). Not vendor metering. */
+  const heuristic_native_prompt_tokens_approx_total =
+    nativeComposerOnSendChars > 0 ? Math.round(estimateTokensFromChars(nativeComposerOnSendChars) * 10) / 10 : null;
 
   const model_buckets = [...modelBucketAgg.entries()]
     .sort((a, b) => b[1].prompts - a[1].prompts)
@@ -950,20 +1205,25 @@ export async function getAccountUsageStatsExtended(
       prompts: v.prompts
     }));
 
+  const mirror_writes_total = sumSvcCounts(mergedMirrorSvc);
+
   const eventPromptsSum = [...byDayScratch.values()].reduce((s, x) => s + x.prompts, 0);
   const eventCountReturned = eventsResult.docs.length;
   const events_truncated =
     eventCountReturned >= OPTIMIZE_EVENTS_QUERY_LIMIT && eventPromptsSum < rollupBaseline.totals.prompts;
 
-  const hostPassiveSendsOnly = [...hostByDayScratch.values()].reduce((s, x) => s + x.sends, 0);
-  const hostComposerSnapshotsOnly = [...hostByDayScratch.values()].reduce((s, x) => s + x.composer_input_events, 0);
-  const hostPassiveEventRows = hostPassiveResult.docs.length;
-  const host_events_likely_truncated = hostPassiveEventRows >= HOST_LLM_EVENTS_QUERY_LIMIT;
+  const promptly_share_pct =
+    combined_totals_prompts_estimate > 0 && combined_totals_prompts_optimize >= 0
+      ? Math.min(
+          100,
+          Math.round((combined_totals_prompts_optimize / combined_totals_prompts_estimate) * 1000) / 10
+        )
+      : null;
 
   const footnotes = [
-    "Passive activity includes composer typing snapshots, native sends detected in-page, plus each successful Promptly Improve/Generate mirrored from the API (when prompt length telemetry is present) — never full prompt bodies.",
-    "Assistant “visible chars” and stream timing come from scraped DOM cues on sends; Optimize-mirrored rows only carry Promptly API latency.",
-    "Host-side “reply settle” latency is approximate idle detection on the assistant UI; Optimize rows use billed rewrite completion time.",
+    "Combined totals = Improve / Generate telemetry plus native chat sends observed by Promptly — Improve rows mirrored into host telemetry intentionally avoid double-counting.",
+    '“Typing time” is illustrative: composer snapshots throttle around a few-second debounce and a ~7s minimum gap — never exact wall-clock time.',
+    '"Native host reply" averages only include latency telemetry on passive_listener sends; Promptly averages use billed rewrite turnaround from your extension.',
   ];
   if (eventsResult.indexMissing) {
     footnotes.unshift(
@@ -972,7 +1232,12 @@ export async function getAccountUsageStatsExtended(
   }
   if (hostPassiveResult.indexMissing) {
     footnotes.unshift(
-      "Passive AI-site charts may be empty until the Firestore index on promptly_host_llm_events (same field order as optimize events) finishes building."
+      "Passive AI-site charts may be empty until Firestore composites on promptly_host_llm_events are enabled — deploy firestore.indexes.json (firebase deploy --only firestore:indexes); at minimum uid ASC, utcDay ASC, __name__ ASC."
+    );
+  }
+  if (!hostPassiveResult.indexMissing && !hostPassiveResult.used_desc_index) {
+    footnotes.unshift(
+      "Deploy promptly_host_llm_events (uid ASC, utcDay DESC, __name__ DESC) from firestore.indexes.json — without descending order, passive graphs may still omit the most recent UTC days once your doc count exceeds the server query cap."
     );
   }
 
@@ -990,27 +1255,44 @@ export async function getAccountUsageStatsExtended(
       averages: rollupBaseline.averages
     },
     timeline,
+    combined_prompt_timeline,
+    combined_totals: {
+      prompts_estimate: combined_totals_prompts_estimate,
+      prompts_native_only_observed_sends: combined_totals_prompts_native,
+      prompts_with_promptly_optimize_events: combined_totals_prompts_optimize,
+      prompts_chatgpt_surface: combined_totals_by_ai.chatgpt,
+      prompts_claude_surface: combined_totals_by_ai.claude,
+      prompts_gemini_surface: combined_totals_by_ai.gemini,
+      prompts_unknown_surface: combined_totals_by_ai.unknown,
+      mirror_rows_synced_to_host_telemetry: mirror_writes_total,
+      promptly_share_of_estimated_prompts_percent: promptly_share_pct
+    },
+    latency_comparison_ai,
+    value_insights: {
+      billed_promptly_tokens_sum_events,
+      rollup_daily_prompts_hint: rollupBaseline.totals.prompts,
+      optimize_avg_composer_chars: optimize_avg_comp,
+      native_web_send_avg_composer_chars: native_avg_comp,
+      composer_snapshot_count_illustrative: hostComposerSnapshotsOnly,
+      estimated_drafting_active_minutes_illustrative: estimated_typing_engagement_minutes,
+      heuristic_native_input_tokens_approx_from_telemetry_chars: heuristic_native_prompt_tokens_approx_total,
+      native_web_sends: combined_totals_prompts_native,
+      optimize_events_queried: eventCountReturned
+    },
     breakdowns_from_events: {
       service: serviceTotals,
       mode: modeTotals,
       model_buckets
     },
     host_passive_listener: {
-      /** Raw Firestore documents returned (bounded by HOST_LLM_EVENTS_QUERY_LIMIT). */
       events_docs_in_query: hostPassiveEventRows,
+      native_web_sends: combined_totals_prompts_native,
+      mirror_rows_synced_from_optimize: mirror_writes_total,
+      composer_snapshots: hostComposerSnapshotsOnly,
       sends_attributed_in_range: hostPassiveSendsOnly,
-      composer_snapshots_attributed_in_range: hostComposerSnapshotsOnly,
       index_missing: hostPassiveResult.indexMissing,
-      likely_truncated: host_events_likely_truncated,
-      timeline: host_passive_timeline,
-      breakdown_service: hostServiceTotals,
-      model_buckets: [...hostModelBucketAgg.entries()]
-        .sort((a, b) => b[1].sends - a[1].sends)
-        .map(([bucket, v]) => ({
-          bucket,
-          exemplar_label: v.label,
-          events: v.sends
-        }))
+      query_newest_first: hostPassiveResult.used_desc_index,
+      likely_truncated: host_events_likely_truncated
     },
     footnotes
   };
