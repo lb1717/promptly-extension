@@ -700,8 +700,9 @@ export function StatisticsClient() {
                     <code className="text-[10px]">source optimize_api</code>) into passive totals even when the page never emits a sniffed “send.”
                   </li>
                   <li>
-                    <strong className="text-violet-100/95">Native chats only:</strong> trusted typing or send in the real composer increments counts; reload the extension
-                    after updates (manifest version bumped).
+                    <strong className="text-violet-100/95">Native sends (without Improve):</strong> use the chat host&apos;s Send control or plain Enter (
+                    Promptly&nbsp;Improve/Auto is separate). Reload the extension after updates; if counts stay at zero open the service-worker inspect
+                    tool and retry a send — look for <code className="text-[10px]">PROMPTLY_HOST_ACTIVITY_BATCH</code> errors.
                   </li>
                 </ul>
               </div>
@@ -709,9 +710,9 @@ export function StatisticsClient() {
               <section className="mb-10 rounded-2xl border border-emerald-500/35 bg-emerald-950/[0.12] p-6 backdrop-blur-md">
                 <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-100/95">Composer typing, sends &amp; reply feel</h2>
                 <p className="mt-1 text-xs text-emerald-100/70">
-                  Stacked bars: debounced samples while you type in the native prompt box, confirmed sends sniffed from the page, and each successful
-                  Promptly Improve/Generate mirrored from our API into this feed. The line is average time until replies look idle on native sends (
-                  Optimize-mirror rows contribute Promptly API completion time instead).
+                  Stacked bars debounce typing snapshots in the real composer plus every native Send/Enter observation and Promptly Improve/Generate mirrors.
+                  Passive sends enqueue as soon as you submit (they do not wait for the assistant to finish streaming), so totals track real prompt volume.
+                  Yellow latency / reply-size extras still depend on streamed DOM scrapes — mostly populated on Optimize mirrors or experimental paths.
                 </p>
                 <div className="mt-4 h-80 w-full">
                   <ResponsiveContainer width="100%" height="100%">

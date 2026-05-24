@@ -2680,22 +2680,32 @@
       site,
       getPromptTarget: () => currentTarget,
       readComposer: () => {
-        const gather = (el) => {
+        const readEditable = (el) => {
           if (!el || !el.isConnected) {
             return "";
           }
-          return String(getPromptText(el) || "").trim();
+          try {
+            const surfaced =
+              typeof adapters.getPromptWriteSurface === "function" ? adapters.getPromptWriteSurface(el) : el;
+            const leaf = surfaced && adapters.isEditable(surfaced) ? surfaced : el;
+            if (!leaf || !adapters.isEditable(leaf)) {
+              return "";
+            }
+            return String(getPromptText(leaf) || "").trim();
+          } catch (_e) {
+            return "";
+          }
         };
-        let chunk = gather(currentTarget);
+        let chunk = readEditable(currentTarget);
         if (chunk.length) {
-          return getPromptText(currentTarget);
+          return chunk;
         }
         try {
           if (typeof adapters.getPromptElement === "function") {
-            const hinted = adapters.getPromptElement(currentTarget || null);
-            chunk = gather(hinted);
-            if (chunk.length && hinted) {
-              return getPromptText(hinted);
+            const hinted = adapters.getPromptElement(currentTarget ?? null);
+            chunk = readEditable(hinted);
+            if (chunk.length) {
+              return chunk;
             }
           }
         } catch (_e) {
