@@ -24,13 +24,17 @@ import {
 type HostPassivePayload = {
   events_docs_in_query: number;
   sends_attributed_in_range: number;
+  composer_snapshots_attributed_in_range: number;
   index_missing: boolean;
   likely_truncated: boolean;
   timeline: Array<{
     bucket: string;
     sends: number;
+    composer_input_events: number;
+    passive_activity_total: number;
     avg_composer_chars: number | null;
     avg_host_response_latency_ms: number | null;
+    avg_assistant_reply_chars_visible: number | null;
   }>;
   breakdown_service: {
     chatgpt: number;
@@ -38,7 +42,7 @@ type HostPassivePayload = {
     gemini: number;
     unknown: number;
   };
-  model_buckets: Array<{ bucket: string; exemplar_label: string | null; sends: number }>;
+  model_buckets: Array<{ bucket: string; exemplar_label: string | null; events: number }>;
 };
 
 type ExtendedStatsPayload = {
@@ -82,7 +86,7 @@ type ExtendedStatsPayload = {
     mode: { auto: number; improve: number; generate: number };
     model_buckets: Array<{ bucket: string; exemplar_label: string | null; prompts: number }>;
   };
-  /** Sends observed on ChatGPT / Claude / Gemini by the extension listener (independent of Promptly optimize). */
+  /** Passive extension telemetry on ChatGPT / Claude / Gemini: typing snapshots in the native composer plus sends (independent of Promptly optimize). */
   host_passive_listener?: HostPassivePayload;
   footnotes: string[];
 };
@@ -145,13 +149,17 @@ function buildPlaceholderExtendedStats(days: number, granularity: "day" | "week"
   const emptyHostPassive: HostPassivePayload = {
     events_docs_in_query: 0,
     sends_attributed_in_range: 0,
+    composer_snapshots_attributed_in_range: 0,
     index_missing: false,
     likely_truncated: false,
     timeline: timeline.map((row) => ({
       bucket: row.bucket,
       sends: 0,
+      composer_input_events: 0,
+      passive_activity_total: 0,
       avg_composer_chars: null,
-      avg_host_response_latency_ms: null
+      avg_host_response_latency_ms: null,
+      avg_assistant_reply_chars_visible: null
     })),
     breakdown_service: { chatgpt: 0, claude: 0, gemini: 0, unknown: 0 },
     model_buckets: []
@@ -363,8 +371,10 @@ export function StatisticsClient() {
     () =>
       hostTrendData.map((row) => ({
         ...row,
-        sends_plot: row.sends,
-        avg_host_latency_plot: row.avg_host_response_latency_ms ?? 0
+        sends_plot: row.sends ?? 0,
+        compose_snapshots_plot: row.composer_input_events ?? 0,
+        avg_host_latency_plot: row.avg_host_response_latency_ms ?? 0,
+        avg_assistant_visible_plot: row.avg_assistant_reply_chars_visible ?? 0
       })),
     [hostTrendData]
   );
@@ -499,7 +509,7 @@ export function StatisticsClient() {
               </div>
             )}
 
-              <div className="mb-6 grid gap-4 md:grid-cols-3 lg:grid-cols-6">
+              <div className="mb-6 grid gap-4 md:grid-cols-4 lg:grid-cols-7">
                 <div className="rounded-xl border border-white/10 bg-black/35 p-4">
                   <p className="text-[11px] font-semibold uppercase tracking-wider text-violet-300/80">
                     Promptly prompts (rollup)
@@ -522,10 +532,10 @@ export function StatisticsClient() {
                   <p className="text-[11px] font-semibold uppercase tracking-wider text-violet-300/80">Optimize events queried</p>
                   <p className="mt-2 text-2xl font-semibold text-white">{displayStats.events_in_range.toLocaleString()}</p>
                 </div>
-                <div className="rounded-xl border border-emerald-500/35 bg-black/35 p-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-200/85">Passive sends attributed</p>
+                <div className="rounded-xl border border-emerald-500/35 bg-black/35 p-4 lg:col-span-1">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-200/85">Typing snapshots</p>
                   <p className="mt-2 text-2xl font-semibold text-white">
-                    {(displayStats.host_passive_listener?.sends_attributed_in_range ?? 0).toLocaleString()}
+                    {(displayStats.host_passive_listener?.composer_snapshots_attributed_in_range ?? 0).toLocaleString()}
                   </p>
                 </div>
                 <div className="rounded-xl border border-emerald-500/25 bg-black/35 p-4">
@@ -670,19 +680,23 @@ export function StatisticsClient() {
               </div>
 
               <section className="mb-10 rounded-2xl border border-emerald-500/35 bg-emerald-950/[0.12] p-6 backdrop-blur-md">
-                <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-100/95">Sends &amp; estimated host turnaround</h2>
+                <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-100/95">Composer typing, sends &amp; reply feel</h2>
                 <p className="mt-1 text-xs text-emerald-100/70">
-                  Left axis counts sends the extension observes on the native composer. Right axis plots average heuristic latency per bucket when
-                  the stop/streaming hints allow a measurement (thin or zero when the UI changed mid-response).
+                  Stacked bars: debounced samples while you type in the native prompt box plus confirmed sends. The line is average time until the
+                  assistant area looks “done” (stop button + stable text—rough, not official API latency).
                 </p>
                 <div className="mt-4 h-80 w-full">
                   <ResponsiveContainer width="100%" height="100%">
                     <ComposedChart data={hostPassiveChartPlot}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
                       <XAxis dataKey="label" stroke="#a7f3d0" tick={{ fill: "#d1fae5", fontSize: 11 }} />
-                      <YAxis yAxisId="left" stroke="#34d399" tickFormatter={(v) => `${Math.round(Number(v))}`} />
                       <YAxis
-                        yAxisId="right"
+                        yAxisId="count"
+                        stroke="#34d399"
+                        tickFormatter={(v) => `${Math.round(Number(v))}`}
+                      />
+                      <YAxis
+                        yAxisId="ms"
                         orientation="right"
                         stroke="#6ee7b7"
                         tickFormatter={(v) => `${(Number(v) / 1000).toFixed(1)}s`}
@@ -691,24 +705,34 @@ export function StatisticsClient() {
                         contentStyle={{ background: "#052e1b", border: "1px solid rgba(52,211,153,0.45)" }}
                         formatter={(value, name) => {
                           const n = Number(value);
-                          if (name === "Avg host latency (ms)") return [`${Math.round(n / 100) / 10}s`, name];
+                          const nm = String(name);
+                          if (nm.includes("reply settle")) return [`${Math.round(n / 100) / 10}s`, name];
                           return [n, name];
                         }}
                       />
                       <Legend />
                       <Bar
-                        yAxisId="left"
+                        yAxisId="count"
+                        stackId="activity"
+                        dataKey="compose_snapshots_plot"
+                        name="Typing samples"
+                        fill="rgba(110,231,183,0.55)"
+                        maxBarSize={40}
+                      />
+                      <Bar
+                        yAxisId="count"
+                        stackId="activity"
                         dataKey="sends_plot"
-                        name="Passive sends"
-                        fill="rgba(16,185,129,0.65)"
-                        maxBarSize={36}
+                        name="Sends"
+                        fill="rgba(16,185,129,0.9)"
+                        maxBarSize={40}
                       />
                       <Line
-                        yAxisId="right"
+                        yAxisId="ms"
                         type="monotone"
                         dataKey="avg_host_latency_plot"
-                        name="Avg host latency (ms)"
-                        stroke="#a7f3d0"
+                        name="Avg reply settle (ms)"
+                        stroke="#fef08a"
                         dot={false}
                         strokeWidth={2}
                       />
@@ -716,9 +740,32 @@ export function StatisticsClient() {
                   </ResponsiveContainer>
                 </div>
 
+                <div className="mt-8 h-64 w-full">
+                  <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-emerald-100/85">
+                    Avg visible assistant reply size (chars) per send event
+                  </p>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={hostPassiveChartPlot}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                      <XAxis dataKey="label" stroke="#a7f3d0" tick={{ fill: "#d1fae5", fontSize: 10 }} />
+                      <YAxis stroke="#fde68a" tickFormatter={(v) => `${Math.round(Number(v))}`} />
+                      <Tooltip contentStyle={{ background: "#052e1b", border: "1px solid rgba(52,211,153,0.45)" }} />
+                      <Legend />
+                      <Line
+                        type="monotone"
+                        dataKey="avg_assistant_visible_plot"
+                        name="Avg reply chars (DOM scrape)"
+                        stroke="#fde047"
+                        strokeWidth={2}
+                        dot={false}
+                      />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+
                 <div className="mt-8 h-72 w-full">
                   <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-emerald-100/85">
-                    Average composer chars per passive send
+                    Average composer length across all passive samples (typing + sends)
                   </p>
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
@@ -733,7 +780,7 @@ export function StatisticsClient() {
                       <YAxis stroke="#34d399" />
                       <Tooltip contentStyle={{ background: "#052e1b", border: "1px solid rgba(52,211,153,0.45)" }} />
                       <Legend />
-                      <Bar dataKey="chars" name="Avg chars / send" fill="rgba(45,212,191,0.55)" radius={[4, 4, 0, 0]} maxBarSize={32} />
+                      <Bar dataKey="chars" name="Avg chars / sample" fill="rgba(45,212,191,0.55)" radius={[4, 4, 0, 0]} maxBarSize={32} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -741,9 +788,9 @@ export function StatisticsClient() {
 
               <div className="mb-10 grid gap-8 lg:grid-cols-2">
                 <section className="rounded-2xl border border-emerald-500/30 bg-white/[0.04] p-6 backdrop-blur-md">
-                  <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-100/90">Passive sends by site</h2>
+                  <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-100/90">Passive activity by site</h2>
                   <p className="mt-1 text-xs text-violet-300/65">
-                    Distribution of observed sends attributed to whichever chat surface you used while signed into Promptly.
+                    Counts composer typing snapshots plus sends while you browse each host with Promptly signed in.
                   </p>
                   <ServicePie
                     service={
@@ -754,22 +801,24 @@ export function StatisticsClient() {
                         unknown: 0
                       }
                     }
-                    idleLabel="No passive sends yet—keep the extension enabled and chat normally after signing in."
+                    idleLabel="No passive activity yet — type or send while signed into Promptly on ChatGPT / Claude / Gemini."
                   />
                 </section>
                 <section className="rounded-2xl border border-emerald-500/25 bg-black/35 p-6 backdrop-blur-md">
                   <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-100/85">Passive notes</h2>
                   <p className="mt-3 text-xs leading-relaxed text-violet-100/85">
-                    Listener skips synthetic/programmatic clicks, never uploads prompts, batches uploads (~4&nbsp;s), and may miss sends if Chrome
-                    is signed out from Promptly. Latency settles only when streaming controls disappear and assistant text briefly stops growing.
+                    Listener samples trusted typing in the real composer and confirmed sends—no prompt bodies uploaded. Events batch out roughly every
+                    few seconds while you are signed into Promptly on a supported chat host. Streams are inferred from the DOM: latency settles when
+                    streaming controls disappear and assistant text briefly stops growing.
                   </p>
                 </section>
               </div>
 
               <section className="mb-10 rounded-2xl border border-emerald-500/30 bg-white/[0.04] p-6 backdrop-blur-md">
-                <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-100/90">Model labels captured on send (passive)</h2>
+                <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-100/90">Model labels on passive activity</h2>
                 <p className="mt-2 text-xs text-violet-200/65">
-                  Same scraped picker labels as the optimize path—now tied to passive sends whenever the picker is visible above the transcript.
+                  Scraped picker labels from the optimize path, attributed to whichever activity row carried them (mostly sends—typing snapshots omit
+                  the label when nothing new was scraped).
                 </p>
                 <div className="mt-4 overflow-x-auto rounded-xl border border-white/10">
                   <table className="min-w-[520px] w-full border-collapse text-left text-sm">
@@ -777,7 +826,7 @@ export function StatisticsClient() {
                       <tr>
                         <th className="px-4 py-3 font-semibold">Bucket</th>
                         <th className="px-4 py-3 font-semibold">Example label</th>
-                        <th className="px-4 py-3 font-semibold">Sends</th>
+                        <th className="px-4 py-3 font-semibold">Events</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -786,7 +835,7 @@ export function StatisticsClient() {
                           <tr key={row.bucket} className="border-b border-white/[0.06] text-violet-50/95">
                             <td className="px-4 py-2 font-mono text-xs text-emerald-200">{row.bucket}</td>
                             <td className="px-4 py-2 text-xs text-violet-100/95">{row.exemplar_label || "—"}</td>
-                            <td className="px-4 py-2 tabular-nums">{row.sends.toLocaleString()}</td>
+                            <td className="px-4 py-2 tabular-nums">{row.events.toLocaleString()}</td>
                           </tr>
                         ))
                       ) : (

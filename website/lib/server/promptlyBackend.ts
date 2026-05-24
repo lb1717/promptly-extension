@@ -329,6 +329,8 @@ export function recordOptimizeTelemetryEventSafe(params: {
   });
 }
 
+export type HostLlmInteractionKind = "send" | "composer_input";
+
 export type HostLlmActivityEventInput = {
   service: PromptlyService;
   composerCharEstimate: number | null;
@@ -336,6 +338,12 @@ export type HostLlmActivityEventInput = {
   hostModelLabelSanitized: string | null;
   hostModelBucket: string;
   hostResponseLatencyMs: number | null;
+  interactionKind: HostLlmInteractionKind;
+  assistantOutputCharEstimate: number | null;
+  /** Ms from send-watch start until DOM suggests streaming/output growth. */
+  timeToFirstStreamActivityMs: number | null;
+  /** Ms between first streaming cue and finalized assistant text (approx). */
+  streamVisualActiveMs: number | null;
   /** Client Date.now() when send was observed (sets utcDay for bucketing). */
   clientOccurredMs: number;
 };
@@ -401,6 +409,41 @@ export function normalizeHostLlmActivityEventInput(raw: Record<string, unknown>)
     clientOccurredMs = Math.max(0, Math.floor(raw.client_occurred_ms));
   }
 
+  let interactionKind: HostLlmInteractionKind = "send";
+  const rawKind = raw.interaction_kind ?? raw.interactionKind;
+  if (typeof rawKind === "string") {
+    const k = rawKind.trim().toLowerCase();
+    if (k === "composer_input" || k === "compose" || k === "typing") {
+      interactionKind = "composer_input";
+    }
+  }
+
+  let assistantOutputCharEstimate: number | null = null;
+  const ao =
+    typeof raw.assistant_output_char_estimate === "number"
+      ? raw.assistant_output_char_estimate
+      : typeof raw.assistantOutputCharEstimate === "number"
+        ? raw.assistantOutputCharEstimate
+        : null;
+  if (typeof ao === "number" && Number.isFinite(ao)) {
+    const v = Math.max(0, Math.floor(ao));
+    assistantOutputCharEstimate = Math.min(400_000, v);
+  }
+
+  let timeToFirstStreamActivityMs: number | null = null;
+  const tt = raw.time_to_first_stream_activity_ms ?? raw.timeToFirstStreamActivityMs;
+  if (typeof tt === "number" && Number.isFinite(tt)) {
+    const v = Math.max(0, Math.floor(tt));
+    timeToFirstStreamActivityMs = v <= 600_000 ? v : null;
+  }
+
+  let streamVisualActiveMs: number | null = null;
+  const sv = raw.stream_visual_active_ms ?? raw.streamVisualActiveMs;
+  if (typeof sv === "number" && Number.isFinite(sv)) {
+    const v = Math.max(0, Math.floor(sv));
+    streamVisualActiveMs = v <= 600_000 ? v : null;
+  }
+
   return {
     service: svc,
     composerCharEstimate,
@@ -408,6 +451,10 @@ export function normalizeHostLlmActivityEventInput(raw: Record<string, unknown>)
     hostModelLabelSanitized,
     hostModelBucket,
     hostResponseLatencyMs,
+    interactionKind,
+    assistantOutputCharEstimate,
+    timeToFirstStreamActivityMs,
+    streamVisualActiveMs,
     clientOccurredMs
   };
 }
@@ -425,18 +472,22 @@ export async function persistHostLlmActivityEvents(user: PromptlyUser, rows: Hos
     const utcDay = utcDayFromMs(row.clientOccurredMs);
     const ref = db.collection(HOST_LLM_EVENTS_COLLECTION).doc();
     writer.set(ref, {
-      telemetrySchemaVersion: 1,
+      telemetrySchemaVersion: 2,
       uid: user.uid,
       email: user.email || null,
       utcDay,
       occurredAt: FieldValue.serverTimestamp(),
       source: "passive_listener",
+      interactionKind: row.interactionKind,
       service: row.service,
       composerCharEstimate: row.composerCharEstimate,
       composerWordEstimate: row.composerWordEstimate,
       hostModelLabelSanitized: row.hostModelLabelSanitized,
       hostModelBucket: row.hostModelBucket,
       hostResponseLatencyMs: row.hostResponseLatencyMs,
+      assistantOutputCharEstimate: row.assistantOutputCharEstimate,
+      timeToFirstStreamActivityMs: row.timeToFirstStreamActivityMs,
+      streamVisualActiveMs: row.streamVisualActiveMs,
       clientOccurredMs: row.clientOccurredMs
     });
     queued += 1;
@@ -472,11 +523,16 @@ type TimelineBucketAgg = {
 
 type HostPassiveBucketAgg = {
   bucket_day: string;
+  /** interactionKind === send */
   sends: number;
+  /** interactionKind === composer_input */
+  composer_input_events: number;
   composer_char_sum: number;
   composer_char_samples: number;
   host_latency_sum_ms: number;
   host_latency_samples: number;
+  assistant_reply_char_sum: number;
+  assistant_reply_char_samples: number;
 };
 
 export async function getAccountUsageStatsExtended(
@@ -541,10 +597,13 @@ export async function getAccountUsageStatsExtended(
     hostByDayScratch.set(d, {
       bucket_day: d,
       sends: 0,
+      composer_input_events: 0,
       composer_char_sum: 0,
       composer_char_samples: 0,
       host_latency_sum_ms: 0,
-      host_latency_samples: 0
+      host_latency_samples: 0,
+      assistant_reply_char_sum: 0,
+      assistant_reply_char_samples: 0
     });
   }
 
@@ -618,7 +677,14 @@ export async function getAccountUsageStatsExtended(
       continue;
     }
     const row = hostByDayScratch.get(utcDay)!;
-    row.sends += 1;
+    const ik = String(raw.interactionKind ?? raw.interaction_kind ?? "send").toLowerCase();
+    const isComposer = ik === "composer_input" || ik === "compose" || ik === "typing";
+
+    if (isComposer) {
+      row.composer_input_events += 1;
+    } else {
+      row.sends += 1;
+    }
 
     const cc = raw.composerCharEstimate;
     if (typeof cc === "number" && Number.isFinite(cc) && cc > 0) {
@@ -627,9 +693,20 @@ export async function getAccountUsageStatsExtended(
     }
 
     const hl = raw.hostResponseLatencyMs;
-    if (typeof hl === "number" && Number.isFinite(hl) && hl > 0) {
+    if (!isComposer && typeof hl === "number" && Number.isFinite(hl) && hl > 0) {
       row.host_latency_samples += 1;
       row.host_latency_sum_ms += Math.floor(hl);
+    }
+
+    const assist = Number(raw.assistantOutputCharEstimate ?? raw.assistant_output_char_estimate ?? 0);
+    if (
+      !isComposer &&
+      typeof assist === "number" &&
+      Number.isFinite(assist) &&
+      assist > 10
+    ) {
+      row.assistant_reply_char_samples += 1;
+      row.assistant_reply_char_sum += Math.min(400000, Math.floor(assist));
     }
 
     const svc = normalizePromptlyService(raw.service);
@@ -711,10 +788,13 @@ export async function getAccountUsageStatsExtended(
         hostByWeek.set(wk, {
           bucket_day: wk,
           sends: 0,
+          composer_input_events: 0,
           composer_char_sum: 0,
           composer_char_samples: 0,
           host_latency_sum_ms: 0,
-          host_latency_samples: 0
+          host_latency_samples: 0,
+          assistant_reply_char_sum: 0,
+          assistant_reply_char_samples: 0
         });
       }
     }
@@ -723,10 +803,13 @@ export async function getAccountUsageStatsExtended(
       const src = hostByDayScratch.get(d)!;
       const dst = hostByWeek.get(wk)!;
       dst.sends += src.sends;
+      dst.composer_input_events += src.composer_input_events;
       dst.composer_char_sum += src.composer_char_sum;
       dst.composer_char_samples += src.composer_char_samples;
       dst.host_latency_sum_ms += src.host_latency_sum_ms;
       dst.host_latency_samples += src.host_latency_samples;
+      dst.assistant_reply_char_sum += src.assistant_reply_char_sum;
+      dst.assistant_reply_char_samples += src.assistant_reply_char_samples;
     }
     hostPassiveTimelineFlat = [...hostByWeek.entries()]
       .sort((a, b) => (a[0] < b[0] ? -1 : 1))
@@ -738,12 +821,18 @@ export async function getAccountUsageStatsExtended(
   const host_passive_timeline = hostPassiveTimelineFlat.map((t) => ({
     bucket: t.bucket_day,
     sends: t.sends,
+    composer_input_events: t.composer_input_events,
+    passive_activity_total: t.sends + t.composer_input_events,
     avg_composer_chars:
       t.composer_char_samples > 0
         ? Math.round((t.composer_char_sum / t.composer_char_samples) * 10) / 10
         : null,
     avg_host_response_latency_ms:
-      t.host_latency_samples > 0 ? Math.round(t.host_latency_sum_ms / t.host_latency_samples) : null
+      t.host_latency_samples > 0 ? Math.round(t.host_latency_sum_ms / t.host_latency_samples) : null,
+    avg_assistant_reply_chars_visible:
+      t.assistant_reply_char_samples > 0
+        ? Math.round((t.assistant_reply_char_sum / t.assistant_reply_char_samples) * 10) / 10
+        : null
   }));
 
   const model_buckets = [...modelBucketAgg.entries()]
@@ -759,15 +848,15 @@ export async function getAccountUsageStatsExtended(
   const events_truncated =
     eventCountReturned >= OPTIMIZE_EVENTS_QUERY_LIMIT && eventPromptsSum < rollupBaseline.totals.prompts;
 
-  const hostSendsReturned = [...hostByDayScratch.values()].reduce((s, x) => s + x.sends, 0);
+  const hostPassiveSendsOnly = [...hostByDayScratch.values()].reduce((s, x) => s + x.sends, 0);
+  const hostComposerSnapshotsOnly = [...hostByDayScratch.values()].reduce((s, x) => s + x.composer_input_events, 0);
   const hostPassiveEventRows = hostPassiveResult.docs.length;
   const host_events_likely_truncated = hostPassiveEventRows >= HOST_LLM_EVENTS_QUERY_LIMIT;
 
   const footnotes = [
-    "Passive “AI site” metrics count sends detected in the browser (no Promptly optimize required); prompt bodies are never stored.",
-    "Host response latency uses stop/streaming cues and DOM stability—it is approximate and breaks when ChatGPT / Claude / Gemini change their UI.",
-    "Promptly billed tokens measure your Promptly rewrite API usage (OpenAI), not quotas on the AI site you chat with.",
-    "Composer lengths and scraped model picker labels are best-effort hints from each site’s frontend."
+    "Passive events include composer typing snapshots (slowed/debounced) and confirmed sends — never full prompt bodies.",
+    "Assistant “visible chars” and stream timing are scraped from DOM growth/stop cues, not ChatGPT / Claude vendor APIs.",
+    "Host response latency approximates settle time until the reply UI looks idle; Promptly billed tokens are separate.",
   ];
   if (eventsResult.indexMissing) {
     footnotes.unshift(
@@ -802,7 +891,8 @@ export async function getAccountUsageStatsExtended(
     host_passive_listener: {
       /** Raw Firestore documents returned (bounded by HOST_LLM_EVENTS_QUERY_LIMIT). */
       events_docs_in_query: hostPassiveEventRows,
-      sends_attributed_in_range: hostSendsReturned,
+      sends_attributed_in_range: hostPassiveSendsOnly,
+      composer_snapshots_attributed_in_range: hostComposerSnapshotsOnly,
       index_missing: hostPassiveResult.indexMissing,
       likely_truncated: host_events_likely_truncated,
       timeline: host_passive_timeline,
@@ -812,7 +902,7 @@ export async function getAccountUsageStatsExtended(
         .map(([bucket, v]) => ({
           bucket,
           exemplar_label: v.label,
-          sends: v.sends
+          events: v.sends
         }))
     },
     footnotes
