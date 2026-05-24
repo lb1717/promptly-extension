@@ -130,7 +130,8 @@ export async function POST(request: Request) {
       billedPromptlyTokens: tokenCost,
       optimizeLatencyMs: optimizeElapsedMs,
       billingBasis,
-      telemetry: telemetrySnapshot
+      telemetry: telemetrySnapshot,
+      serverComposerCharTotal: Math.min(CREDIT_MAX_PROMPT_CHARS, prompt.length + userInstruction.length)
     });
 
     return NextResponse.json(

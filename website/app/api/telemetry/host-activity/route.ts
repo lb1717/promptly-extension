@@ -38,17 +38,23 @@ export async function POST(request: Request) {
       );
     }
 
+    let invalid = 0;
     const rows = [];
     for (const entry of rawEvents) {
       if (!entry || typeof entry !== "object") continue;
       const normalized = normalizeHostLlmActivityEventInput(entry as Record<string, unknown>);
       if (normalized) {
         rows.push(normalized);
+      } else {
+        invalid += 1;
       }
     }
 
     const written = await persistHostLlmActivityEvents(user, rows);
-    return NextResponse.json({ ok: true, written }, { status: 200, headers: buildPromptlyCorsHeaders(origin) });
+    return NextResponse.json(
+      { ok: true, written, received: rawEvents.length, invalid_skipped: invalid },
+      { status: 200, headers: buildPromptlyCorsHeaders(origin) }
+    );
   } catch (error) {
     return NextResponse.json(
       { error: String(error instanceof Error ? error.message : error) },

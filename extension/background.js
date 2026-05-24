@@ -14,11 +14,11 @@ function sanitizeOptimizeTelemetryEnvelope(raw) {
     return null;
   }
   const out = {};
-  const c = raw.composer_char_estimate;
+  const c = raw.composer_char_estimate ?? raw.composerCharEstimate;
   if (typeof c === "number" && Number.isFinite(c)) {
     out.composer_char_estimate = Math.max(0, Math.min(12000, Math.floor(c)));
   }
-  const w = raw.composer_word_estimate;
+  const w = raw.composer_word_estimate ?? raw.composerWordEstimate;
   if (typeof w === "number" && Number.isFinite(w)) {
     out.composer_word_estimate = Math.max(0, Math.min(12000, Math.floor(w)));
   }
@@ -601,6 +601,10 @@ function isAllowedManagedHost(normalizedBase) {
       return true;
     }
     if (host === "localhost" || host === "127.0.0.1") {
+      return true;
+    }
+    /** Preview deploys (`*.vercel.app`) must be allowed — otherwise telemetry silently rewrote URL to prod and dashboards looked empty vs that site login. */
+    if (host === "vercel.app" || host.endsWith(".vercel.app")) {
       return true;
     }
     return false;

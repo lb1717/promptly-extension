@@ -239,16 +239,28 @@ export function parseOptimizeTelemetryFromPayload(payload: Record<string, unknow
   const t = payload.telemetry as Record<string, unknown>;
 
   let composerCharEstimate: number | null = null;
-  if (typeof t.composer_char_estimate === "number" && Number.isFinite(t.composer_char_estimate)) {
+  const ccRaw =
+    typeof t.composer_char_estimate === "number" && Number.isFinite(t.composer_char_estimate)
+      ? t.composer_char_estimate
+      : typeof t.composerCharEstimate === "number" && Number.isFinite(t.composerCharEstimate)
+        ? t.composerCharEstimate
+        : null;
+  if (ccRaw !== null && typeof ccRaw === "number") {
     composerCharEstimate = Math.min(
       CREDIT_MAX_PROMPT_CHARS,
-      Math.max(0, Math.floor(t.composer_char_estimate))
+      Math.max(0, Math.floor(ccRaw))
     );
   }
 
   let composerWordEstimate: number | null = null;
-  if (typeof t.composer_word_estimate === "number" && Number.isFinite(t.composer_word_estimate)) {
-    composerWordEstimate = Math.min(12000, Math.max(0, Math.floor(t.composer_word_estimate)));
+  const wwRaw =
+    typeof t.composer_word_estimate === "number" && Number.isFinite(t.composer_word_estimate)
+      ? t.composer_word_estimate
+      : typeof t.composerWordEstimate === "number" && Number.isFinite(t.composerWordEstimate)
+        ? t.composerWordEstimate
+        : null;
+  if (wwRaw !== null && typeof wwRaw === "number") {
+    composerWordEstimate = Math.min(12000, Math.max(0, Math.floor(wwRaw)));
   }
 
   let hostModelLabelSanitized: string | null = null;
@@ -266,8 +278,14 @@ export function parseOptimizeTelemetryFromPayload(payload: Record<string, unknow
   }
 
   let hostModelBucket = "unknown";
-  if (hostModelLabelSanitized && typeof t.host_model_bucket === "string" && String(t.host_model_bucket).trim()) {
-    const custom = slugHostModelBucketFromLabel(String(t.host_model_bucket).trim());
+  const bucketRaw =
+    typeof t.host_model_bucket === "string"
+      ? t.host_model_bucket
+      : typeof t.hostModelBucket === "string"
+        ? t.hostModelBucket
+        : "";
+  if (hostModelLabelSanitized && String(bucketRaw).trim()) {
+    const custom = slugHostModelBucketFromLabel(String(bucketRaw).trim());
     if (custom && custom !== "unknown") {
       hostModelBucket = custom.slice(0, 48);
     }
@@ -293,6 +311,8 @@ async function persistOptimizeTelemetryEvent(params: {
   optimizeLatencyMs: number;
   billingBasis?: string;
   telemetry: OptimizeTelemetryNormalized;
+  /** Min(cap, prompt+instruction chars) — ensures mirror survives missing client telemetry. */
+  serverComposerCharTotal: number;
 }): Promise<void> {
   const db = getFirebaseAdminDb();
   await db.collection(OPTIMIZE_EVENTS_COLLECTION).add({
@@ -329,16 +349,25 @@ async function persistOptimizeMirrorHostActivity(params: {
   optimizeMode: OptimizeEngineMode;
   optimizeLatencyMs: number;
   telemetry: OptimizeTelemetryNormalized;
+  serverComposerCharTotal: number;
 }): Promise<void> {
-  const cc = params.telemetry.composerCharEstimate;
-  if (typeof cc !== "number" || !Number.isFinite(cc) || cc < 1) {
-    return;
+  const rawClient = params.telemetry.composerCharEstimate;
+  const clientCc = typeof rawClient === "number" && Number.isFinite(rawClient) ? rawClient : 0;
+  const cappedServer = Math.min(
+    CREDIT_MAX_PROMPT_CHARS,
+    Math.max(0, Math.floor(Number(params.serverComposerCharTotal)))
+  );
+  let cc = Math.max(clientCc, cappedServer);
+  if (!Number.isFinite(cc) || cc < 1) {
+    cc = 1;
   }
+  cc = Math.min(CREDIT_MAX_PROMPT_CHARS, Math.floor(cc));
+
   const lat = Number(params.optimizeLatencyMs || 0);
   await persistHostLlmActivityEvents(params.user, [
     {
       service: params.service,
-      composerCharEstimate: Math.min(CREDIT_MAX_PROMPT_CHARS, Math.floor(cc)),
+      composerCharEstimate: cc,
       composerWordEstimate: params.telemetry.composerWordEstimate,
       hostModelLabelSanitized: params.telemetry.hostModelLabelSanitized,
       hostModelBucket: params.telemetry.hostModelBucket.slice(0, 48),
@@ -364,6 +393,7 @@ export function recordOptimizeTelemetryEventSafe(params: {
   optimizeLatencyMs: number;
   billingBasis?: string;
   telemetry: OptimizeTelemetryNormalized;
+  serverComposerCharTotal: number;
 }): void {
   persistOptimizeTelemetryEvent(params).catch((err) => {
     console.error("[promptly] persistOptimizeTelemetryEvent failed:", String(err instanceof Error ? err.message : err));
@@ -403,25 +433,57 @@ function utcDayFromMs(ms: number): string {
  */
 export function normalizeHostLlmActivityEventInput(raw: Record<string, unknown>): HostLlmActivityEventInput | null {
   const svc = normalizePromptlyService(raw.service);
+
+  let interactionKind: HostLlmInteractionKind = "send";
+  const rawKind = raw.interaction_kind ?? raw.interactionKind ?? "send";
+  if (typeof rawKind === "string") {
+    const k = rawKind.trim().toLowerCase();
+    if (k === "composer_input" || k === "compose" || k === "typing") {
+      interactionKind = "composer_input";
+    }
+    /** Only created server-side via optimize mirror — extension submissions treat as ordinary send if spoofed. */
+    if (k === "promptly_optimize") {
+      interactionKind = "send";
+    }
+  }
+
   let composerCharEstimate: number | null = null;
-  if (typeof raw.composer_char_estimate === "number" && Number.isFinite(raw.composer_char_estimate)) {
+  const rawCcNum =
+    typeof raw.composer_char_estimate === "number" && Number.isFinite(raw.composer_char_estimate)
+      ? raw.composer_char_estimate
+      : typeof raw.composerCharEstimate === "number" && Number.isFinite(raw.composerCharEstimate)
+        ? raw.composerCharEstimate
+        : null;
+  if (rawCcNum !== null) {
     composerCharEstimate = Math.min(
       CREDIT_MAX_PROMPT_CHARS,
-      Math.max(0, Math.floor(raw.composer_char_estimate))
+      Math.max(0, Math.floor(Number(rawCcNum)))
     );
   }
+  /** Count-only fallback: prompts we could not measure still record as cardinality (length = 1, not the real prompt). */
   if (!composerCharEstimate || composerCharEstimate < 1) {
-    return null;
+    if (interactionKind === "composer_input" || interactionKind === "send") {
+      composerCharEstimate = 1;
+    } else {
+      return null;
+    }
   }
 
   let composerWordEstimate: number | null = null;
-  if (typeof raw.composer_word_estimate === "number" && Number.isFinite(raw.composer_word_estimate)) {
-    composerWordEstimate = Math.min(12000, Math.max(0, Math.floor(raw.composer_word_estimate)));
+  const ww =
+    typeof raw.composer_word_estimate === "number" && Number.isFinite(raw.composer_word_estimate)
+      ? raw.composer_word_estimate
+      : typeof raw.composerWordEstimate === "number" && Number.isFinite(raw.composerWordEstimate)
+        ? raw.composerWordEstimate
+        : null;
+  if (typeof ww === "number" && Number.isFinite(ww)) {
+    composerWordEstimate = Math.min(12000, Math.max(0, Math.floor(ww)));
   }
 
   let hostModelLabelSanitized: string | null = null;
-  if (typeof raw.host_model_label === "string") {
-    let label = String(raw.host_model_label)
+  const labelRaw = typeof raw.host_model_label === "string" ? raw.host_model_label : raw.hostModelLabel;
+  if (typeof labelRaw === "string") {
+    let label = String(labelRaw)
       .replace(/\s+/g, " ")
       .trim()
       .slice(0, TELEMETRY_HOST_MODEL_MAX_CHARS);
@@ -430,8 +492,14 @@ export function normalizeHostLlmActivityEventInput(raw: Record<string, unknown>)
   }
 
   let hostModelBucket = "unknown";
-  if (typeof raw.host_model_bucket === "string" && String(raw.host_model_bucket).trim()) {
-    const b = slugHostModelBucketFromLabel(String(raw.host_model_bucket).trim());
+  const bucketRaw =
+    typeof raw.host_model_bucket === "string"
+      ? raw.host_model_bucket
+      : typeof raw.hostModelBucket === "string"
+        ? raw.hostModelBucket
+        : "";
+  if (String(bucketRaw).trim()) {
+    const b = slugHostModelBucketFromLabel(String(bucketRaw).trim());
     if (b && b !== "unknown") {
       hostModelBucket = b.slice(0, 48);
     }
@@ -442,29 +510,18 @@ export function normalizeHostLlmActivityEventInput(raw: Record<string, unknown>)
   hostModelBucket = hostModelBucket.slice(0, 48) || "unknown";
 
   let hostResponseLatencyMs: number | null = null;
-  if (raw.host_response_latency_ms === null || raw.host_response_latency_ms === undefined) {
+  const hlr = raw.host_response_latency_ms ?? raw.hostResponseLatencyMs;
+  if (hlr === null || hlr === undefined) {
     hostResponseLatencyMs = null;
-  } else if (typeof raw.host_response_latency_ms === "number" && Number.isFinite(raw.host_response_latency_ms)) {
-    const v = Math.max(0, Math.floor(raw.host_response_latency_ms));
+  } else if (typeof hlr === "number" && Number.isFinite(hlr)) {
+    const v = Math.max(0, Math.floor(hlr));
     hostResponseLatencyMs = v <= 720_000 ? v : null;
   }
 
   let clientOccurredMs = Date.now();
-  if (typeof raw.client_occurred_ms === "number" && Number.isFinite(raw.client_occurred_ms)) {
-    clientOccurredMs = Math.max(0, Math.floor(raw.client_occurred_ms));
-  }
-
-  let interactionKind: HostLlmInteractionKind = "send";
-  const rawKind = raw.interaction_kind ?? raw.interactionKind;
-  if (typeof rawKind === "string") {
-    const k = rawKind.trim().toLowerCase();
-    if (k === "composer_input" || k === "compose" || k === "typing") {
-      interactionKind = "composer_input";
-    }
-    /** Only created server-side via optimize mirror — extension submissions treat as ordinary send if spoofed. */
-    if (k === "promptly_optimize") {
-      interactionKind = "send";
-    }
+  const com = raw.client_occurred_ms ?? raw.clientOccurredMs;
+  if (typeof com === "number" && Number.isFinite(com)) {
+    clientOccurredMs = Math.max(0, Math.floor(com));
   }
 
   let assistantOutputCharEstimate: number | null = null;

@@ -137,9 +137,16 @@ Each successful **`POST /api/optimize`** still updates **`promptly_usage_daily`*
 - `optimizeLatencyMs`
 - Extension telemetry (best-effort): composer character/word estimates and a **scraped host UI model label** from ChatGPT / Claude / Gemini (may be empty or wrong after host UI changes)
 
-Independently, authenticated extensions periodically **`POST /api/telemetry/host-activity`** (batched) to append **`promptly_host_llm_events`** describing observed native typing/send activity. On each successful **`POST /api/optimize`**, the backend also appends a **`source: optimize_api`** row into the same collection (when composer length telemetry exists) so dashboards show activity tied to the Promptly panel even if the page never fired a trusted DOM “send” event.
+Independently, authenticated extensions periodically **`POST /api/telemetry/host-activity`** (batched) to append **`promptly_host_llm_events`** describing observed native typing/send activity. On each successful **`POST /api/optimize`**, the backend also appends a **`source: optimize_api`** row into the same collection using the **greater of client telemetry composer length or** `prompt.length + user_instruction.length`, so dashboards show activity tied to Promptly unless both are unavailable.
 
-Deploy the composite indexes from the repo root before `/api/account/stats/extended` can query events (field order must match Firebase):
+### Passive empty but Firebase “works”?
+
+1. **`promptly_host_llm_events` index** deployed and status **enabled** in Firebase Console (queries return 0 without it).
+2. **Extension backend URL** in Options equals the hostname you browse for `/account/statistics`; custom preview hosts **`*.vercel.app`** have first-class allowance (older builds rewrote unsupported hosts → production only).
+3. **Same Promptly/Firebase user** (`uid`) on sidebar sign-in vs website session.
+4. **Smoke test**: one successful Improve should always write **`source: optimize_api`** (plus `promptly_optimize_events`).
+
+`POST /api/telemetry/host-activity` replies with **`received`**, **`written`**, and **`invalid_skipped`** to debug malformed batches client-side without logging prompt bodies.
 
 - File: [`firestore.indexes.json`](../firestore.indexes.json)
 - **`promptly_optimize_events`** and **`promptly_host_llm_events`**, each composite: **`uid` ASC**, **`utcDay` ASC**, **`__name__` ASC**

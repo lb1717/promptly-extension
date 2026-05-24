@@ -679,6 +679,33 @@ export function StatisticsClient() {
                 AI site activity (passive listener)
               </div>
 
+              <div className="mb-6 rounded-xl border border-white/[0.12] bg-black/30 px-4 py-3 text-xs leading-relaxed text-violet-100/92">
+                <p className="font-semibold text-emerald-100/95">Verify passive prompt counts</p>
+                <ul className="mt-2 list-disc space-y-2 pl-5 text-violet-200/[0.92]">
+                  <li>
+                    <strong className="text-violet-100/95">Extension app URL:</strong> in Promptly Options, the backend URL must match this site&apos;s host
+                    (e.g. <code className="text-[10px] text-emerald-200/90">https://…”your-project”.vercel.app</code>). The extension only allows prompts-labs, localhost,
+                    and <span className="whitespace-nowrap">*.vercel.app</span> — mismatched deployments show empty stats until the URL aligns.
+                  </li>
+                  <li>
+                    <strong className="text-violet-100/95">Same account:</strong> sign into Promptly from the sidebar on ChatGPT / Claude / Gemini using the{" "}
+                    <em>same</em> identity you use on this statistics page (<code className="text-[10px]">uid</code> must match in Firestore).
+                  </li>
+                  <li>
+                    <strong className="text-violet-100/95">Indexes:</strong> clear the yellow/blue banners above (
+                    <code className="text-[10px]">promptly_host_llm_events</code> composite) — otherwise passive queries return zero documents.
+                  </li>
+                  <li>
+                    <strong className="text-violet-100/95">Smoke test:</strong> run one <strong className="text-violet-100/95">Improve</strong>; each successful optimize mirrors a row (
+                    <code className="text-[10px]">source optimize_api</code>) into passive totals even when the page never emits a sniffed “send.”
+                  </li>
+                  <li>
+                    <strong className="text-violet-100/95">Native chats only:</strong> trusted typing or send in the real composer increments counts; reload the extension
+                    after updates (manifest version bumped).
+                  </li>
+                </ul>
+              </div>
+
               <section className="mb-10 rounded-2xl border border-emerald-500/35 bg-emerald-950/[0.12] p-6 backdrop-blur-md">
                 <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-100/95">Composer typing, sends &amp; reply feel</h2>
                 <p className="mt-1 text-xs text-emerald-100/70">
