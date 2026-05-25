@@ -491,6 +491,10 @@
   margin-bottom: 0;
 }
 
+.promptly-settings-block-account {
+  overflow: hidden;
+}
+
 .promptly-settings-block-account .promptly-settings-section-account {
   margin-bottom: 10px;
 }
@@ -604,6 +608,7 @@
 
 .promptly-settings-sliders-wrap {
   position: relative;
+  overflow: hidden;
 }
 
 .promptly-settings-slider-zone {
@@ -678,8 +683,8 @@
   position: absolute;
   left: 0;
   right: 0;
-  top: 16px;
-  bottom: -16px;
+  top: 18px;
+  bottom: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
