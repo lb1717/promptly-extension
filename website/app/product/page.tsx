@@ -1,34 +1,31 @@
 import type { Metadata } from "next";
 import { AmbientBackground } from "@/components/AmbientBackground";
 import { Benefits } from "@/components/Benefits";
-import { ComparisonTable } from "@/components/ComparisonTable";
 import { DemoSection } from "@/components/DemoSection";
 import { FinalCTA } from "@/components/FinalCTA";
 import { Footer } from "@/components/Footer";
 import { Hero } from "@/components/Hero";
-import { HeroStats } from "@/components/HeroStats";
 import { IntegratedWith } from "@/components/IntegratedWith";
 import { Navbar } from "@/components/Navbar";
 import { PricingSection } from "@/components/PricingSection";
 
 export const metadata: Metadata = {
-  title: "Promptly | Better prompts, better results",
-  description: "Premium landing page for the Promptly Chrome extension."
+  title: "Promptly | Better prompts for ChatGPT, Claude & Gemini",
+  description:
+    "One-click prompt improvement inside ChatGPT, Claude, and Gemini—clearer intent, structured outputs, and usage tracking."
 };
 
 export default function ProductPage() {
   return (
-    <main className="relative min-h-screen bg-black text-ink">
+    <main className="relative min-h-screen bg-page text-ink">
       <AmbientBackground />
       <div className="relative z-10">
         <Navbar />
         <Hero />
         <DemoSection />
         <IntegratedWith />
-        <HeroStats />
-        <PricingSection />
-        <ComparisonTable />
         <Benefits />
+        <PricingSection />
         <FinalCTA />
         <Footer />
       </div>

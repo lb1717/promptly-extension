@@ -513,160 +513,184 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-10 pb-24">
       {!user ? (
-        <div className="mb-8 flex w-full flex-col gap-4 sm:max-w-sm">
-          <>
-            <button
-              type="button"
-              onClick={handleGoogleSignIn}
-              disabled={busy || loading}
-              className="rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-500 disabled:opacity-60"
-            >
-              {busy ? "Signing in…" : "Sign in with Google"}
-            </button>
-            <div className="rounded-xl border border-white/10 bg-white/[0.04] p-4 backdrop-blur-md">
-              <p className="text-center text-[11px] font-semibold uppercase tracking-wide text-violet-200/70">
-                Or email &amp; password
-              </p>
-              <div className="mt-3 flex justify-center gap-2 text-xs">
-                <button
-                  type="button"
-                  className={`rounded-lg px-2 py-1 ${emailAuthMode === "signin" ? "bg-violet-600/40 text-white" : "text-violet-200/80 hover:text-white"}`}
-                  onClick={() => {
-                    setEmailAuthMode("signin");
-                    setError("");
-                    setAccountNotice("");
-                  }}
-                >
-                  Sign in
-                </button>
-                <button
-                  type="button"
-                  className={`rounded-lg px-2 py-1 ${emailAuthMode === "register" ? "bg-violet-600/40 text-white" : "text-violet-200/80 hover:text-white"}`}
-                  onClick={() => {
-                    setEmailAuthMode("register");
-                    setError("");
-                    setAccountNotice("");
-                  }}
-                >
-                  Create account
-                </button>
+        <div className="mx-auto flex min-h-[calc(100dvh-12rem)] w-full max-w-sm flex-col items-center justify-center">
+          {loading ? (
+            <p className="py-16 text-center text-sm text-muted">Loading…</p>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={handleGoogleSignIn}
+                disabled={busy || loading}
+                className="inline-flex w-full items-center justify-center gap-2.5 rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:opacity-60"
+              >
+                <span>{busy ? "Signing in…" : "Sign in with Google"}</span>
+                <img src="/images/google-logo.png" alt="" aria-hidden className="h-[18px] w-[18px] shrink-0 object-contain" />
+              </button>
+
+              <div className="my-5 flex w-full items-center gap-3">
+                <div className="h-px flex-1 bg-line" aria-hidden />
+                <span className="text-xs font-medium uppercase tracking-[0.18em] text-faint">or</span>
+                <div className="h-px flex-1 bg-line" aria-hidden />
               </div>
-              <div className="mt-3 space-y-2">
-                <input
-                  type="email"
-                  autoComplete="email"
-                  placeholder="Email"
-                  value={emailAuthEmail}
-                  onChange={(e) => setEmailAuthEmail(e.target.value)}
-                  disabled={busy || loading}
-                  className="w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-sm text-white placeholder:text-violet-200/40 outline-none focus:border-violet-400/50"
-                />
-                {emailAuthMode === "register" ? (
-                  <input
-                    type="text"
-                    autoComplete="name"
-                    placeholder="Full name"
-                    value={emailAuthName}
-                    onChange={(e) => setEmailAuthName(e.target.value)}
-                    disabled={busy || loading}
-                    className="w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-sm text-white placeholder:text-violet-200/40 outline-none focus:border-violet-400/50"
-                  />
-                ) : null}
-                <input
-                  type="password"
-                  autoComplete={emailAuthMode === "signin" ? "current-password" : "new-password"}
-                  placeholder="Password"
-                  value={emailAuthPassword}
-                  onChange={(e) => setEmailAuthPassword(e.target.value)}
-                  disabled={busy || loading}
-                  className="w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-sm text-white placeholder:text-violet-200/40 outline-none focus:border-violet-400/50"
-                />
-                {emailAuthMode === "register" ? (
-                  <input
-                    type="password"
-                    autoComplete="new-password"
-                    placeholder="Confirm password"
-                    value={emailAuthPassword2}
-                    onChange={(e) => setEmailAuthPassword2(e.target.value)}
-                    disabled={busy || loading}
-                    className="w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-sm text-white placeholder:text-violet-200/40 outline-none focus:border-violet-400/50"
-                  />
-                ) : null}
-                <button
-                  type="button"
-                  onClick={emailAuthMode === "signin" ? handleEmailPasswordSignIn : handleEmailRegister}
-                  disabled={busy || loading}
-                  className="w-full rounded-lg bg-white/10 py-2 text-sm font-semibold text-white hover:bg-white/15 disabled:opacity-60"
-                >
-                  {busy ? "Working…" : emailAuthMode === "signin" ? "Sign in with email" : "Create account"}
-                </button>
-                {emailAuthMode === "signin" ? (
+
+              <div className="w-full rounded-xl border border-line bg-cream p-5 backdrop-blur-md">
+                <h2 className="text-center text-base font-semibold text-ink">
+                  {emailAuthMode === "signin" ? "Sign in with Email" : "Create account with Email"}
+                </h2>
+                <div className="mt-4 flex justify-center gap-2 text-xs">
                   <button
                     type="button"
-                    onClick={handleSendPasswordReset}
-                    disabled={busy || loading}
-                    className="w-full text-center text-[11px] text-violet-200/90 hover:text-white disabled:opacity-60"
+                    className={`rounded-lg px-2 py-1 ${emailAuthMode === "signin" ? "bg-cream-dark text-ink" : "text-faint hover:text-ink"}`}
+                    onClick={() => {
+                      setEmailAuthMode("signin");
+                      setError("");
+                      setAccountNotice("");
+                    }}
                   >
-                    Forgot password?
+                    Sign in
                   </button>
-                ) : null}
+                  <button
+                    type="button"
+                    className={`rounded-lg px-2 py-1 ${emailAuthMode === "register" ? "bg-cream-dark text-ink" : "text-faint hover:text-ink"}`}
+                    onClick={() => {
+                      setEmailAuthMode("register");
+                      setError("");
+                      setAccountNotice("");
+                    }}
+                  >
+                    Create account
+                  </button>
+                </div>
+                <div className="mt-4 space-y-2">
+                  <input
+                    type="email"
+                    autoComplete="email"
+                    placeholder="Email"
+                    value={emailAuthEmail}
+                    onChange={(e) => setEmailAuthEmail(e.target.value)}
+                    disabled={busy || loading}
+                    className="w-full rounded-lg border border-line bg-cream-dark px-3 py-2 text-sm text-ink placeholder:text-faint/40 outline-none focus:border-line"
+                  />
+                  {emailAuthMode === "register" ? (
+                    <input
+                      type="text"
+                      autoComplete="name"
+                      placeholder="Full name"
+                      value={emailAuthName}
+                      onChange={(e) => setEmailAuthName(e.target.value)}
+                      disabled={busy || loading}
+                      className="w-full rounded-lg border border-line bg-cream-dark px-3 py-2 text-sm text-ink placeholder:text-faint/40 outline-none focus:border-line"
+                    />
+                  ) : null}
+                  <input
+                    type="password"
+                    autoComplete={emailAuthMode === "signin" ? "current-password" : "new-password"}
+                    placeholder="Password"
+                    value={emailAuthPassword}
+                    onChange={(e) => setEmailAuthPassword(e.target.value)}
+                    disabled={busy || loading}
+                    className="w-full rounded-lg border border-line bg-cream-dark px-3 py-2 text-sm text-ink placeholder:text-faint/40 outline-none focus:border-line"
+                  />
+                  {emailAuthMode === "register" ? (
+                    <input
+                      type="password"
+                      autoComplete="new-password"
+                      placeholder="Confirm password"
+                      value={emailAuthPassword2}
+                      onChange={(e) => setEmailAuthPassword2(e.target.value)}
+                      disabled={busy || loading}
+                      className="w-full rounded-lg border border-line bg-cream-dark px-3 py-2 text-sm text-ink placeholder:text-faint/40 outline-none focus:border-line"
+                    />
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={emailAuthMode === "signin" ? handleEmailPasswordSignIn : handleEmailRegister}
+                    disabled={busy || loading}
+                    className="w-full rounded-lg bg-cream-dark py-2 text-sm font-semibold text-ink hover:bg-cream-deep disabled:opacity-60"
+                  >
+                    {busy ? "Working…" : emailAuthMode === "signin" ? "Sign in with email" : "Create account"}
+                  </button>
+                  {emailAuthMode === "signin" ? (
+                    <button
+                      type="button"
+                      onClick={handleSendPasswordReset}
+                      disabled={busy || loading}
+                      className="w-full text-center text-[11px] text-faint hover:text-ink disabled:opacity-60"
+                    >
+                      Forgot password?
+                    </button>
+                  ) : null}
+                </div>
               </div>
-            </div>
-          </>
-          {extensionMode ? (
-            <Link
-              href="/account"
-              className="inline-flex items-center justify-center rounded-xl border border-violet-500/30 px-4 py-2.5 text-sm text-violet-200 hover:bg-violet-500/10"
-            >
-              Full account page
-            </Link>
-          ) : null}
+
+              {extensionMode ? (
+                <Link
+                  href="/account"
+                  className="mt-4 inline-flex w-full items-center justify-center rounded-xl border border-line px-4 py-2.5 text-sm text-faint hover:bg-cream-dark"
+                >
+                  Full account page
+                </Link>
+              ) : null}
+
+              {!user && permissionInlineMessages.length ? (
+                <p className="mt-6 w-full text-center text-[10px] leading-relaxed text-faint">
+                  {permissionInlineMessages.join(" · ")}
+                </p>
+              ) : null}
+
+              {error && !isPermissionLikeMessage(error) ? (
+                <div className="mt-4 w-full rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-700">
+                  {error}
+                </div>
+              ) : null}
+              {accountNotice ? (
+                <div className="mt-4 w-full rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-800">
+                  {accountNotice}
+                </div>
+              ) : null}
+            </>
+          )}
         </div>
       ) : null}
 
-      {!user && permissionInlineMessages.length ? (
-        <p className="mb-6 max-w-md text-[10px] leading-relaxed text-violet-400/55">
+      {user && permissionInlineMessages.length ? (
+        <p className="mb-6 max-w-md text-[10px] leading-relaxed text-faint">
           {permissionInlineMessages.join(" · ")}
         </p>
       ) : null}
 
-      {error && !isPermissionLikeMessage(error) ? (
-        <div className="mb-6 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+      {user && error && !isPermissionLikeMessage(error) ? (
+        <div className="mb-6 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-700">
           {error}
         </div>
       ) : null}
-      {accountNotice ? (
-        <div className="mb-6 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+      {user && accountNotice ? (
+        <div className="mb-6 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-800">
           {accountNotice}
-        </div>
-      ) : null}
-
-      {!user && !loading ? (
-        <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-8 text-center backdrop-blur-md">
-          <p className="text-violet-100/85">Sign in to see your profile, subscription, and payment history.</p>
         </div>
       ) : null}
 
       {user ? (
         <div className="space-y-6">
-          <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 backdrop-blur-md sm:p-5">
-            <h2 className="text-xl font-semibold tracking-tight text-white sm:text-2xl">Account</h2>
+          <section className="rounded-2xl border border-line bg-cream p-4 backdrop-blur-md sm:p-5">
+            <h2 className="text-xl font-semibold tracking-tight text-ink sm:text-2xl">Account</h2>
 
             <div className="mt-4 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] grid-rows-2 gap-x-4 gap-y-3 sm:gap-x-8 sm:gap-y-3">
               <div className="col-start-1 row-start-1 min-w-0">
-                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-violet-300/85 sm:text-sm">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-faint sm:text-sm">
                   Name
                 </p>
-                <p className="mt-1.5 truncate text-base font-semibold text-white sm:text-lg">
+                <p className="mt-1.5 truncate text-base font-semibold text-ink sm:text-lg">
                   {user.displayName || "—"}
                 </p>
               </div>
 
               <div className="col-start-2 row-start-1 min-w-0">
-                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-violet-300/85 sm:text-sm">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-faint sm:text-sm">
                   Member since
                 </p>
-                <p className="mt-1.5 text-base font-semibold text-violet-100 sm:text-lg">{formatJoinDate(user)}</p>
+                <p className="mt-1.5 text-base font-semibold text-muted sm:text-lg">{formatJoinDate(user)}</p>
               </div>
 
               <div className="col-start-3 row-span-2 row-start-1 flex min-w-[9.25rem] flex-col gap-2 self-stretch justify-self-end sm:min-w-[11rem]">
@@ -676,7 +700,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                     await Promise.all([loadBilling(user), loadAccountStats(user)]);
                   }}
                   disabled={billingLoading || accountStatsLoading}
-                  className="rounded-lg border border-violet-500/40 px-3 py-2.5 text-sm font-medium text-violet-100 hover:bg-violet-500/10 disabled:opacity-60"
+                  className="rounded-lg border border-line px-3 py-2.5 text-sm font-medium text-muted hover:bg-cream-dark disabled:opacity-60"
                 >
                   {billingLoading || accountStatsLoading ? "Refreshing…" : "Refresh account data"}
                 </button>
@@ -684,14 +708,14 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                   type="button"
                   onClick={handleSignOut}
                   disabled={busy}
-                  className="rounded-lg border border-white/15 px-3 py-2.5 text-sm font-medium text-violet-200 hover:bg-white/5 disabled:opacity-60"
+                  className="rounded-lg border border-line px-3 py-2.5 text-sm font-medium text-faint hover:bg-cream-dark disabled:opacity-60"
                 >
                   Sign out
                 </button>
                 {extensionMode ? (
                   <Link
                     href="/account"
-                    className="inline-flex items-center justify-center rounded-lg border border-violet-500/30 px-3 py-2.5 text-sm font-medium text-violet-200 hover:bg-violet-500/10"
+                    className="inline-flex items-center justify-center rounded-lg border border-line px-3 py-2.5 text-sm font-medium text-faint hover:bg-cream-dark"
                   >
                     Full account page
                   </Link>
@@ -699,8 +723,8 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
               </div>
 
               <div className="col-start-1 row-start-2 min-w-0">
-                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-violet-300/85 sm:text-sm">Email</p>
-                <p className="mt-1.5 break-all text-base text-violet-100 sm:text-lg">{user.email || "—"}</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-faint sm:text-sm">Email</p>
+                <p className="mt-1.5 break-all text-base text-muted sm:text-lg">{user.email || "—"}</p>
               </div>
 
               {/* Intentionally empty grid cell */}
@@ -708,29 +732,29 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
             </div>
 
             {permissionInlineMessages.length ? (
-              <p className="mt-3 max-w-xl text-[10px] leading-relaxed text-violet-400/55">
+              <p className="mt-3 max-w-xl text-[10px] leading-relaxed text-faint">
                 {permissionInlineMessages.join(" · ")}
               </p>
             ) : null}
           </section>
 
-          <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-md sm:p-8">
+          <section className="rounded-2xl border border-line bg-cream p-6 backdrop-blur-md sm:p-8">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <h2 className="text-sm font-semibold uppercase tracking-[0.15em] text-violet-200/80">Prompt stats</h2>
-                <p className="mt-1 text-xs text-violet-200/65">Last 14 days — summary only</p>
+                <h2 className="text-sm font-semibold uppercase tracking-[0.15em] text-faint">Prompt stats</h2>
+                <p className="mt-1 text-xs text-faint">Last 14 days — summary only</p>
               </div>
               {!extensionMode ? (
                 <Link
                   href="/account/statistics"
-                  className="inline-flex shrink-0 items-center justify-center rounded-lg border border-violet-500/40 bg-violet-600/15 px-3 py-2 text-xs font-semibold text-violet-50 hover:bg-violet-500/25"
+                  className="inline-flex shrink-0 items-center justify-center rounded-lg border border-line bg-cream-dark px-3 py-2 text-xs font-semibold text-ink hover:bg-cream-dark"
                 >
                   See full statistics
                 </Link>
               ) : (
                 <Link
                   href="/account/statistics"
-                  className="inline-flex shrink-0 items-center justify-center rounded-lg border border-white/15 px-3 py-2 text-xs font-semibold text-violet-100 hover:bg-white/[0.06]"
+                  className="inline-flex shrink-0 items-center justify-center rounded-lg border border-line px-3 py-2 text-xs font-semibold text-muted hover:bg-cream-dark"
                   target="_blank"
                   rel="noreferrer"
                 >
@@ -742,48 +766,48 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
             {accountStatsError && !isPermissionLikeMessage(accountStatsError) ? (
               <p className="mt-4 text-sm text-amber-200/90">{accountStatsError}</p>
             ) : accountStatsLoading && !accountStats ? (
-              <p className="mt-4 text-sm text-violet-200/70">Loading usage stats…</p>
+              <p className="mt-4 text-sm text-faint">Loading usage stats…</p>
             ) : accountStats ? (
               <>
                 <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  <div className="rounded-xl border border-white/10 bg-black/25 p-4">
-                    <p className="text-xs uppercase tracking-wider text-violet-300/80">Prompts sent</p>
-                    <p className="mt-2 text-2xl font-semibold text-white">{accountStats.totals.prompts.toLocaleString()}</p>
+                  <div className="rounded-xl border border-line bg-cream-dark p-4">
+                    <p className="text-xs uppercase tracking-wider text-faint">Prompts sent</p>
+                    <p className="mt-2 text-2xl font-semibold text-ink">{accountStats.totals.prompts.toLocaleString()}</p>
                   </div>
-                  <div className="rounded-xl border border-white/10 bg-black/25 p-4">
-                    <p className="text-xs uppercase tracking-wider text-violet-300/80">Avg response time</p>
-                    <p className="mt-2 text-2xl font-semibold text-white">
+                  <div className="rounded-xl border border-line bg-cream-dark p-4">
+                    <p className="text-xs uppercase tracking-wider text-faint">Avg response time</p>
+                    <p className="mt-2 text-2xl font-semibold text-ink">
                       {formatDurationMs(accountStats.averages.response_time_ms)}
                     </p>
                   </div>
-                  <div className="rounded-xl border border-white/10 bg-black/25 p-4">
-                    <p className="text-xs uppercase tracking-wider text-violet-300/80">Active days</p>
-                    <p className="mt-2 text-2xl font-semibold text-white">{accountStats.streaks.active_days}</p>
+                  <div className="rounded-xl border border-line bg-cream-dark p-4">
+                    <p className="text-xs uppercase tracking-wider text-faint">Active days</p>
+                    <p className="mt-2 text-2xl font-semibold text-ink">{accountStats.streaks.active_days}</p>
                   </div>
-                  <div className="rounded-xl border border-white/10 bg-black/25 p-4">
-                    <p className="text-xs uppercase tracking-wider text-violet-300/80">Busiest day</p>
-                    <p className="mt-2 text-base font-semibold text-white">
+                  <div className="rounded-xl border border-line bg-cream-dark p-4">
+                    <p className="text-xs uppercase tracking-wider text-faint">Busiest day</p>
+                    <p className="mt-2 text-base font-semibold text-ink">
                       {accountStats.streaks.busiest_day || "—"}
                     </p>
-                    <p className="mt-1 text-xs text-violet-200/70">
+                    <p className="mt-1 text-xs text-faint">
                       {accountStats.streaks.busiest_day_prompts.toLocaleString()} prompts
                     </p>
                   </div>
                 </div>
 
                 <div className="mt-6 grid gap-6 lg:grid-cols-2">
-                  <div className="rounded-xl border border-white/10 bg-black/25 p-4">
-                    <p className="text-xs uppercase tracking-wider text-violet-300/80">By AI service</p>
+                  <div className="rounded-xl border border-line bg-cream-dark p-4">
+                    <p className="text-xs uppercase tracking-wider text-faint">By AI service</p>
                     <div className="mt-4 space-y-3">
                       {serviceBars.map((item) => (
                         <div key={item.key}>
-                          <div className="mb-1 flex items-center justify-between text-xs text-violet-100/90">
+                          <div className="mb-1 flex items-center justify-between text-xs text-muted">
                             <span>{item.label}</span>
                             <span>{item.value.toLocaleString()}</span>
                           </div>
-                          <div className="h-2 w-full rounded-full bg-white/10">
+                          <div className="h-2 w-full rounded-full bg-cream-dark">
                             <div
-                              className="h-2 rounded-full bg-violet-400/90 transition-all"
+                              className="h-2 rounded-full bg-ink transition-all"
                               style={{ width: `${item.widthPct}%` }}
                             />
                           </div>
@@ -792,15 +816,15 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                     </div>
                   </div>
 
-                  <div className="rounded-xl border border-white/10 bg-black/25 p-4">
-                    <p className="text-xs uppercase tracking-wider text-violet-300/80">Daily prompt volume</p>
+                  <div className="rounded-xl border border-line bg-cream-dark p-4">
+                    <p className="text-xs uppercase tracking-wider text-faint">Daily prompt volume</p>
                     <div className="mt-4 flex h-28 items-end gap-1.5">
                       {(() => {
                         const maxPrompts = Math.max(1, ...accountStats.timeline.map((d) => d.prompts));
                         return accountStats.timeline.map((day) => (
                           <div key={day.day} className="group flex-1">
                             <div
-                              className="w-full rounded-t-sm bg-violet-400/80 transition-all hover:bg-violet-300"
+                              className="w-full rounded-t-sm bg-ink transition-all hover:bg-neutral-700"
                               style={{ height: `${Math.max(8, (day.prompts / maxPrompts) * 100)}%` }}
                               title={`${day.day}: ${day.prompts} prompts`}
                             />
@@ -808,23 +832,23 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                         ));
                       })()}
                     </div>
-                    <p className="mt-2 text-xs text-violet-200/65">
+                    <p className="mt-2 text-xs text-faint">
                       Avg prompts/active day: {accountStats.averages.prompts_per_active_day}
                     </p>
-                    <p className="mt-1 text-xs text-violet-200/65">
+                    <p className="mt-1 text-xs text-faint">
                       Avg tokens/prompt: {accountStats.averages.tokens_per_prompt}
                     </p>
                   </div>
                 </div>
               </>
             ) : (
-              <p className="mt-4 text-sm text-violet-200/70">No usage stats yet.</p>
+              <p className="mt-4 text-sm text-faint">No usage stats yet.</p>
             )}
           </section>
 
-          <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-md sm:p-8">
+          <section className="rounded-2xl border border-line bg-cream p-6 backdrop-blur-md sm:p-8">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <h2 className="text-sm font-semibold uppercase tracking-[0.15em] text-violet-200/80">
+              <h2 className="text-sm font-semibold uppercase tracking-[0.15em] text-faint">
                 Subscription
               </h2>
               <div className="flex flex-wrap items-center gap-2">
@@ -832,7 +856,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                   <button
                     type="button"
                     onClick={() => setShowBillingDetails((prev) => !prev)}
-                    className="inline-flex items-center justify-center rounded-xl border border-violet-400/35 px-4 py-2 text-sm font-semibold text-violet-100 hover:bg-violet-500/10"
+                    className="inline-flex items-center justify-center rounded-xl border border-line px-4 py-2 text-sm font-semibold text-muted hover:bg-cream-dark"
                   >
                     {showBillingDetails ? "Hide billing details" : "Show billing details"}
                   </button>
@@ -842,14 +866,14 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                     type="button"
                     onClick={() => user && openStripeCustomerPortal(user)}
                     disabled={portalBusy || !user}
-                    className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500 disabled:opacity-60"
+                    className="inline-flex items-center justify-center rounded-xl bg-ink px-4 py-2 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:opacity-60"
                   >
                     {portalBusy ? "Opening portal…" : "Manage subscription & cards"}
                   </button>
                 ) : null}
               </div>
             </div>
-            <p className="mt-4 text-sm text-violet-200/70">
+            <p className="mt-4 text-sm text-faint">
               Select from all available plans. Your active plan is highlighted below.
             </p>
 
@@ -865,10 +889,10 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                     key={plan.key}
                     className={`relative flex flex-col rounded-xl border p-4 ${
                       isCurrent
-                        ? "border-violet-400/60 bg-violet-500/[0.12] shadow-[0_10px_30px_rgba(124,58,237,0.18)]"
+                        ? "border-ink bg-cream-dark shadow-[0_10px_30px_rgba(124,58,237,0.18)]"
                         : isPopular
                           ? "border-amber-300/45 bg-amber-500/[0.08] shadow-[0_10px_28px_rgba(245,158,11,0.15)]"
-                          : "border-white/10 bg-black/25"
+                          : "border-line bg-cream-dark"
                     }`}
                   >
                     {isPopular ? (
@@ -877,28 +901,28 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                       </span>
                     ) : null}
                     {isCurrent ? (
-                      <span className="absolute -top-2.5 right-3 rounded-full bg-violet-500 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white">
+                      <span className="absolute -top-2.5 right-3 rounded-full bg-ink px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-cream">
                         Current plan
                       </span>
                     ) : null}
-                    <h3 className="text-lg font-semibold text-white">{plan.name}</h3>
+                    <h3 className="text-lg font-semibold text-ink">{plan.name}</h3>
                     {plan.key === "pro" || plan.key === "student" ? (
                       <p className="mt-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-300">
                         Free trial
                       </p>
                     ) : null}
-                    <p className="mt-1 text-sm font-semibold text-violet-100">{plan.price}</p>
-                    <p className="mt-2 text-xs text-violet-200/75">{plan.subtitle}</p>
-                    <ul className="mt-3 space-y-1.5 text-xs text-violet-100/85">
+                    <p className="mt-1 text-sm font-semibold text-muted">{plan.price}</p>
+                    <p className="mt-2 text-xs text-faint">{plan.subtitle}</p>
+                    <ul className="mt-3 space-y-1.5 text-xs text-muted">
                       {plan.details.map((item) => (
                         <li key={item} className="flex gap-2">
-                          <span className="text-violet-400">•</span>
+                          <span className="text-faint">•</span>
                           <span>{item}</span>
                         </li>
                       ))}
                     </ul>
-                    <p className="mt-3 text-[11px] text-violet-200/65">
-                      <span className="font-semibold text-violet-100/85">Ideal for:</span> {plan.idealFor}
+                    <p className="mt-3 text-[11px] text-faint">
+                      <span className="font-semibold text-muted">Ideal for:</span> {plan.idealFor}
                     </p>
 
                     <div className="mt-auto pt-4">
@@ -906,7 +930,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                         <button
                           type="button"
                           disabled
-                          className="inline-flex w-full items-center justify-center rounded-lg border border-violet-300/40 px-3 py-2 text-xs font-semibold text-violet-100/90 opacity-90"
+                          className="inline-flex w-full items-center justify-center rounded-lg border border-line px-3 py-2 text-xs font-semibold text-muted opacity-90"
                         >
                           Current plan
                         </button>
@@ -918,7 +942,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                             startStripeCheckoutForTier(user, plan.key as "pro" | "student" | "enterprise")
                           }
                           disabled={checkoutBusyTier !== null}
-                          className="inline-flex w-full items-center justify-center rounded-lg bg-violet-600 px-3 py-2 text-xs font-semibold text-white hover:bg-violet-500 disabled:opacity-60"
+                          className="inline-flex w-full items-center justify-center rounded-lg bg-ink px-3 py-2 text-xs font-semibold text-cream hover:bg-neutral-800 disabled:opacity-60"
                         >
                           {checkoutBusyTier === plan.key ? "Redirecting…" : `Choose ${plan.name}`}
                         </button>
@@ -927,7 +951,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                           type="button"
                           onClick={() => user && openStripeCustomerPortal(user)}
                           disabled={portalBusy}
-                          className="inline-flex w-full items-center justify-center rounded-lg border border-white/15 px-3 py-2 text-xs font-semibold text-violet-200/85 hover:bg-white/5 disabled:opacity-60"
+                          className="inline-flex w-full items-center justify-center rounded-lg border border-line px-3 py-2 text-xs font-semibold text-faint hover:bg-cream-dark disabled:opacity-60"
                         >
                           {portalBusy ? "Opening portal…" : "Downgrade in billing portal"}
                         </button>
@@ -935,14 +959,14 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                         <button
                           type="button"
                           disabled
-                          className="inline-flex w-full items-center justify-center rounded-lg border border-white/15 px-3 py-2 text-xs font-semibold text-violet-200/75"
+                          className="inline-flex w-full items-center justify-center rounded-lg border border-line px-3 py-2 text-xs font-semibold text-faint"
                         >
                           Checkout not configured
                         </button>
                       ) : (
                         <Link
                           href="/product#pricing"
-                          className="inline-flex w-full items-center justify-center rounded-lg border border-violet-400/35 px-3 py-2 text-xs font-semibold text-violet-100 hover:bg-violet-500/10"
+                          className="inline-flex w-full items-center justify-center rounded-lg border border-line px-3 py-2 text-xs font-semibold text-muted hover:bg-cream-dark"
                         >
                           View plan details
                         </Link>
@@ -956,32 +980,32 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
             {billingError && !isPermissionLikeMessage(billingError) ? (
               <p className="mt-4 text-sm text-amber-200/90">{billingError}</p>
             ) : billingLoading && !billing ? (
-              <p className="mt-4 text-sm text-violet-200/70">Loading subscription…</p>
+              <p className="mt-4 text-sm text-faint">Loading subscription…</p>
             ) : billing ? (
               <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                <div className="rounded-xl border border-white/10 bg-black/25 p-4">
-                  <p className="text-xs uppercase tracking-wider text-violet-300/80">Current plan</p>
-                  <p className="mt-2 text-xl font-semibold text-white">{tierLabel(billing.subscriptionTier)}</p>
-                  <p className="mt-1 text-xs text-violet-200/65 capitalize">
+                <div className="rounded-xl border border-line bg-cream-dark p-4">
+                  <p className="text-xs uppercase tracking-wider text-faint">Current plan</p>
+                  <p className="mt-2 text-xl font-semibold text-ink">{tierLabel(billing.subscriptionTier)}</p>
+                  <p className="mt-1 text-xs text-faint capitalize">
                     Status: {billing.subscriptionStatus.replace(/_/g, " ")}
                   </p>
                 </div>
-                <div className="rounded-xl border border-white/10 bg-black/25 p-4">
-                  <p className="text-xs uppercase tracking-wider text-violet-300/80">Billing period</p>
-                  <p className="mt-2 text-sm text-violet-100">
+                <div className="rounded-xl border border-line bg-cream-dark p-4">
+                  <p className="text-xs uppercase tracking-wider text-faint">Billing period</p>
+                  <p className="mt-2 text-sm text-muted">
                     {billing.currentPeriodEnd
                       ? `Renews or ends ${new Date(billing.currentPeriodEnd).toLocaleString()}`
                       : "—"}
                   </p>
                   {showBillingDetails && billing.nextInvoiceAmount != null ? (
-                    <p className="mt-1 text-xs text-violet-200/65">
+                    <p className="mt-1 text-xs text-faint">
                       Next invoice: {(billing.nextInvoiceAmount / 100).toFixed(2)} {billing.currency}
                     </p>
                   ) : null}
                 </div>
-                <div className="rounded-xl border border-white/10 bg-black/25 p-4 sm:col-span-2 lg:col-span-1">
-                  <p className="text-xs uppercase tracking-wider text-violet-300/80">Stripe</p>
-                  <p className="mt-2 text-xs text-violet-200/75">
+                <div className="rounded-xl border border-line bg-cream-dark p-4 sm:col-span-2 lg:col-span-1">
+                  <p className="text-xs uppercase tracking-wider text-faint">Stripe</p>
+                  <p className="mt-2 text-xs text-faint">
                     {billing.stripeConfigured
                       ? "Webhook: POST /api/webhooks/stripe — syncs subscription and invoices to Firestore."
                       : "Set STRIPE_SECRET_KEY and price IDs to enable Checkout and the customer portal."}
@@ -990,12 +1014,12 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
               </div>
             ) : null}
             {billing?.billingPortalAvailable ? (
-              <div className="mt-6 border-t border-white/10 pt-4 text-right">
+              <div className="mt-6 border-t border-line pt-4 text-right">
                 <button
                   type="button"
                   onClick={() => user && openStripeCustomerPortal(user)}
                   disabled={portalBusy}
-                  className="text-xs text-violet-300/70 underline-offset-2 hover:text-violet-200 hover:underline disabled:opacity-60"
+                  className="text-xs text-faint underline-offset-2 hover:text-faint hover:underline disabled:opacity-60"
                 >
                   Need to cancel or change renewal? Open billing portal
                 </button>
@@ -1004,18 +1028,18 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
           </section>
 
           {showBillingDetails ? (
-            <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-md sm:p-8">
-            <h2 className="text-sm font-semibold uppercase tracking-[0.15em] text-violet-200/80">Payment method</h2>
+            <section className="rounded-2xl border border-line bg-cream p-6 backdrop-blur-md sm:p-8">
+            <h2 className="text-sm font-semibold uppercase tracking-[0.15em] text-faint">Payment method</h2>
             {billing?.paymentMethod ? (
-              <div className="mt-6 flex max-w-md items-center gap-4 rounded-xl border border-white/10 bg-gradient-to-br from-slate-900/90 to-slate-950/90 p-4">
-                <div className="flex h-10 w-14 items-center justify-center rounded-md bg-white/10 text-xs font-bold text-white">
+              <div className="mt-6 flex max-w-md items-center gap-4 rounded-xl border border-line bg-gradient-to-br from-slate-900/90 to-slate-950/90 p-4">
+                <div className="flex h-10 w-14 items-center justify-center rounded-md bg-cream-dark text-xs font-bold text-ink">
                   {billing.paymentMethod.brand.slice(0, 4).toUpperCase()}
                 </div>
                 <div>
-                  <p className="font-medium text-white">
+                  <p className="font-medium text-ink">
                     {billing.paymentMethod.brand} ···· {billing.paymentMethod.last4}
                   </p>
-                  <p className="text-xs text-violet-200/70">
+                  <p className="text-xs text-faint">
                     {billing.paymentMethod.expMonth && billing.paymentMethod.expYear
                       ? `Expires ${billing.paymentMethod.expMonth}/${billing.paymentMethod.expYear}`
                       : "Card on file"}
@@ -1023,19 +1047,19 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                 </div>
               </div>
             ) : (
-              <p className="mt-4 text-sm text-violet-200/75">
+              <p className="mt-4 text-sm text-faint">
                 No card on file yet. After you complete Stripe Checkout, the default card will show here when the
                 webhook syncs payment method details.
               </p>
             )}
             {billing?.billingPortalAvailable ? (
-              <p className="mt-4 text-xs text-violet-200/60">
+              <p className="mt-4 text-xs text-faint/60">
                 Update cards in the{" "}
                 <button
                   type="button"
                   onClick={() => user && openStripeCustomerPortal(user)}
                   disabled={portalBusy}
-                  className="text-violet-300 underline-offset-2 hover:underline disabled:opacity-60"
+                  className="text-faint underline-offset-2 hover:underline disabled:opacity-60"
                 >
                   Stripe customer portal
                 </button>
@@ -1044,15 +1068,15 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
             ) : null}
             </section>
           ) : (
-            <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-md sm:p-8">
-              <h2 className="text-sm font-semibold uppercase tracking-[0.15em] text-violet-200/80">Billing details</h2>
-              <p className="mt-4 text-sm text-violet-200/75">
+            <section className="rounded-2xl border border-line bg-cream p-6 backdrop-blur-md sm:p-8">
+              <h2 className="text-sm font-semibold uppercase tracking-[0.15em] text-faint">Billing details</h2>
+              <p className="mt-4 text-sm text-faint">
                 Billing amounts, card details, and invoice history are hidden by default.
               </p>
               <button
                 type="button"
                 onClick={() => setShowBillingDetails(true)}
-                className="mt-4 inline-flex items-center justify-center rounded-xl border border-violet-400/35 px-4 py-2 text-sm font-semibold text-violet-100 hover:bg-violet-500/10"
+                className="mt-4 inline-flex items-center justify-center rounded-xl border border-line px-4 py-2 text-sm font-semibold text-muted hover:bg-cream-dark"
               >
                 Show billing details
               </button>
@@ -1060,12 +1084,12 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
           )}
 
           {showBillingDetails ? (
-            <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-md sm:p-8">
-            <h2 className="text-sm font-semibold uppercase tracking-[0.15em] text-violet-200/80">Payments</h2>
+            <section className="rounded-2xl border border-line bg-cream p-6 backdrop-blur-md sm:p-8">
+            <h2 className="text-sm font-semibold uppercase tracking-[0.15em] text-faint">Payments</h2>
             {billing && Array.isArray(billing.payments) && billing.payments.length > 0 ? (
               <div className="mt-4 overflow-x-auto">
                 <table className="w-full min-w-[520px] text-left text-sm">
-                  <thead className="border-b border-white/10 text-violet-200/80">
+                  <thead className="border-b border-line text-faint">
                     <tr>
                       <th className="pb-3 pr-4 font-medium">Date</th>
                       <th className="pb-3 pr-4 font-medium">Description</th>
@@ -1073,9 +1097,9 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                       <th className="pb-3 font-medium">Status</th>
                     </tr>
                   </thead>
-                  <tbody className="text-violet-100/90">
+                  <tbody className="text-muted">
                     {billing.payments.map((p, i) => (
-                      <tr key={p.id || i} className="border-b border-white/[0.06]">
+                      <tr key={p.id || i} className="border-b border-line">
                         <td className="py-3 pr-4">
                           {p.date ? new Date(p.date).toLocaleDateString() : "—"}
                         </td>
@@ -1092,9 +1116,9 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                 </table>
               </div>
             ) : (
-              <p className="mt-4 text-sm text-violet-200/75">
+              <p className="mt-4 text-sm text-faint">
                 No payments recorded. Webhook handlers can append rows to{" "}
-                <code className="rounded bg-black/40 px-1 text-xs text-violet-200">billingPayments</code> on your user
+                <code className="rounded bg-cream-dark px-1 text-xs text-faint">billingPayments</code> on your user
                 document.
               </p>
             )}

@@ -14,8 +14,9 @@ const notoSansMono = Noto_Sans_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Promptly | Better prompts, better results",
-  description: "Premium landing page for the Promptly Chrome extension.",
+  title: "Promptly | Better prompts for ChatGPT, Claude & Gemini",
+  description:
+    "One-click prompt improvement inside ChatGPT, Claude, and Gemini—clearer intent, structured outputs, and usage tracking.",
   icons: {
     icon: [
       { url: "/favicon.png", type: "image/png", sizes: "48x48" },
@@ -29,14 +30,14 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#0d081b",
-  colorScheme: "dark"
+  themeColor: "#fdfdfc",
+  colorScheme: "light"
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className={notoSansMono.variable}>
-      <body className="min-h-screen overflow-x-hidden bg-black font-mono antialiased">{children}</body>
+      <body className="min-h-screen overflow-x-hidden bg-page font-mono text-ink antialiased">{children}</body>
     </html>
   );
 }

@@ -49,7 +49,38 @@ OPENAI_CREATE_TIMEOUT_MS=30000
 In **Authentication > Settings > Authorized domains**, add:
 
 - `localhost`
-- your deployed website domain later (for example `promptly.ai`)
+- your deployed website domain later (for example `promptly-labs.com`)
+
+### Branded Google sign-in (“Continue to …”)
+
+Google’s account picker always shows a **domain** in “Sign in to continue to …” (it cannot show only an app name like “Promptly”). By default that domain is `{project-id}.firebaseapp.com`.
+
+To replace it with your brand:
+
+1. **OAuth consent screen (app name)** — [Google Cloud Console](https://console.cloud.google.com/apis/credentials/consent) → OAuth consent screen → set **App name** to `Promptly` and upload your logo. This updates the header of the dialog; the “continue to” line still shows a domain.
+
+2. **Custom Firebase auth domain** (recommended: `auth.promptly-labs.com`):
+   - Firebase Console → **Authentication** → **Settings** → **Authorized domains** → **Add custom domain** (or connect via **Hosting** if prompted).
+   - Add DNS records Firebase gives you (typically CNAME `auth` → `{project-id}.firebaseapp.com`).
+   - Wait for SSL provisioning (can take up to 24h).
+
+3. **Google OAuth client** (same project) → **Credentials** → open the **Web client** used by Firebase → **Authorized redirect URIs**, add:
+   - `https://auth.promptly-labs.com/__/auth/handler`
+   - Keep existing `https://{project-id}.firebaseapp.com/__/auth/handler` until cutover is verified.
+
+4. **Authorized JavaScript origins** — ensure these include:
+   - `https://promptly-labs.com`
+   - `https://www.promptly-labs.com`
+   - `http://localhost:3000` (local dev)
+   - `https://auth.promptly-labs.com` (after custom domain is live)
+
+5. **Update app config** everywhere `authDomain` is set:
+   - `website/.env.local`: `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=auth.promptly-labs.com`
+   - Vercel/production env vars (same)
+   - Extension options: **Firebase auth domain** → `auth.promptly-labs.com`
+   - Redeploy website and reload extension.
+
+After cutover, users should see **“Continue to: auth.promptly-labs.com”** (or your chosen subdomain) instead of `promptly-prod-976ef.firebaseapp.com`. Local dev can keep the default `firebaseapp.com` domain until you add localhost-compatible custom domain setup.
 
 ## 4) Verify account pages
 

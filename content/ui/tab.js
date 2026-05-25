@@ -190,7 +190,7 @@
         "<span class='promptly-tab-text-window'><span class='promptly-tab-text-track'>" +
         "<span class='promptly-tab-text-line'>Promptly</span>" +
         "<span class='promptly-tab-text-line'>Rewriting</span>" +
-        "<span class='promptly-tab-text-line'>Improved</span>" +
+        "<span class='promptly-tab-text-line'>Improved ✓</span>" +
         "<span class='promptly-tab-text-line'>Prompt Already Strong ✓</span>" +
         "<span class='promptly-tab-text-line'>Promptly</span>" +
         "</span></span>" +
@@ -739,6 +739,15 @@
     }
 
     setAutoAdjustLoading(isLoading, stageText = "", isError = false, mode = "improve") {
+      if (isError && stageText) {
+        const errMsg = String(stageText)
+          .replace(/^failed:\s*/i, "")
+          .trim();
+        if (errMsg) {
+          const durationMs = String(mode || "improve").toLowerCase() === "compose" ? 3200 : 2800;
+          this.showToast(errMsg, { tone: "error", durationMs });
+        }
+      }
       this.popup.setAutoAdjustLoading(isLoading, stageText, isError, mode);
     }
 
@@ -982,6 +991,7 @@
       const max = Math.max(1, Number(credits.max || 1));
       const used = Math.min(max, Math.max(0, Number(credits.used || 0)));
       const usedPercent = Math.max(0, Math.min(100, Math.round((used / max) * 100)));
+      const leftPercent = Math.max(0, Math.min(100, 100 - usedPercent));
       const displayPercent = Math.max(2, usedPercent);
       const displayDeg = Math.max(0, Math.min(360, (displayPercent / 100) * 360));
       this.creditUsageMeter.style.setProperty("--promptly-credit-progress", `${displayPercent}%`);
@@ -991,7 +1001,7 @@
       }
       const maxStr = fmt(max);
       this.creditUsageTooltip.innerHTML =
-        `<span class="promptly-credit-line promptly-credit-line-strong">${usedPercent}% of Daily Limit used</span>` +
+        `<span class="promptly-credit-line promptly-credit-line-strong">${leftPercent}% Daily Limit Left</span>` +
         `<span class="promptly-credit-line promptly-credit-line-muted">${fmt(used)} / ${maxStr} Tokens</span>`;
     }
 

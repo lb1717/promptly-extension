@@ -35,7 +35,7 @@ export function Hero() {
       <div className="mx-auto max-w-6xl">
         <div className="mx-auto max-w-3xl text-center">
           <div className="mb-3 flex justify-center">
-            <div className="group relative grid h-[78px] w-[78px] place-items-center rounded-2xl border border-white/70 bg-white/[0.02] p-2.5 transition-all duration-300 hover:bg-white/[0.08] hover:shadow-[0_0_28px_rgba(255,255,255,0.26)]">
+            <div className="group relative grid h-[78px] w-[78px] place-items-center rounded-2xl border border-line bg-cream p-2.5 transition-all duration-300 hover:shadow-card">
               <img
                 src="/images/promptly-product-icon.png"
                 alt="Promptly logo"
@@ -43,12 +43,12 @@ export function Hero() {
               />
             </div>
           </div>
-          <h1 className="mb-4 text-4xl font-semibold leading-tight text-white sm:text-6xl">
-            Write better prompts.
+          <h1 className="mb-4 text-4xl font-semibold leading-tight text-ink sm:text-6xl">
+            Prompts that match your intent.
           </h1>
-          <p className="mx-auto mb-5 max-w-2xl text-violet-100/80 sm:mb-6">
-            Promptly improves your prompt in one click directly inside ChatGPT, Claude, and Gemini, so you get
-            better and faster LLM outputs.
+          <p className="mx-auto mb-5 max-w-2xl text-muted sm:mb-6">
+            Promptly rewrites your prompt in one click inside ChatGPT, Claude, and Gemini—clearer structure,
+            tighter outputs, less wasted effort.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3">
             <Button

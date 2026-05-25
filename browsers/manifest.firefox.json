@@ -1,0 +1,102 @@
+{
+  "manifest_version": 3,
+  "name": "Promptly",
+  "version": "1.0.12",
+  "description": "Prompt assistance tab anchored to AI prompt inputs on ChatGPT, Claude, and Gemini.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "promptly@promptly-labs.com",
+      "strict_min_version": "109.0"
+    }
+  },
+  "permissions": [
+    "storage",
+    "identity",
+    "identity.email",
+    "windows"
+  ],
+  "externally_connectable": {
+    "matches": [
+      "https://promptly-labs.com/*",
+      "https://www.promptly-labs.com/*",
+      "http://localhost:3000/*",
+      "http://127.0.0.1:3000/*",
+      "https://*.vercel.app/*"
+    ]
+  },
+  "host_permissions": [
+    "https://chat.openai.com/*",
+    "https://chatgpt.com/*",
+    "https://claude.ai/*",
+    "https://www.claude.ai/*",
+    "https://gemini.google.com/*",
+    "https://*/*",
+    "http://127.0.0.1:8787/*",
+    "http://localhost:8787/*",
+    "http://127.0.0.1:3000/*",
+    "http://localhost:3000/*",
+    "https://identitytoolkit.googleapis.com/*",
+    "https://securetoken.googleapis.com/*",
+    "https://www.googleapis.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chat.openai.com/*",
+        "https://chatgpt.com/*",
+        "https://claude.ai/*",
+        "https://www.claude.ai/*",
+        "https://gemini.google.com/*"
+      ],
+      "js": [
+        "content/siteAdapters.js",
+        "content/hostTelemetry.js",
+        "content/hostActivityListener.js",
+        "content/positionManager.js",
+        "content/observers.js",
+        "content/ui/popup.js",
+        "content/ui/tab.js",
+        "content/index.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "content/ui/styles.css",
+        "content/ui/images/561135.png",
+        "content/ui/images/WheelWhite.png",
+        "content/ui/images/download-1.png",
+        "content/ui/images/gear.png",
+        "content/ui/images/Promptly Logo White.png",
+        "content/ui/images/Promptly%20Logo%20White.png"
+      ],
+      "matches": [
+        "https://chat.openai.com/*",
+        "https://chatgpt.com/*",
+        "https://claude.ai/*",
+        "https://www.claude.ai/*",
+        "https://gemini.google.com/*"
+      ]
+    }
+  ],
+  "icons": {
+    "16": "extension/icons/promptly-icon-16.png",
+    "32": "extension/icons/promptly-icon-32.png",
+    "48": "extension/icons/promptly-icon-48.png",
+    "128": "extension/icons/promptly-icon-128.png"
+  },
+  "action": {
+    "default_title": "Promptly",
+    "default_icon": {
+      "16": "extension/icons/promptly-icon-16.png",
+      "32": "extension/icons/promptly-icon-32.png"
+    }
+  },
+  "options_page": "extension/options.html",
+  "background": {
+    "scripts": ["extension/background.js"]
+  }
+}

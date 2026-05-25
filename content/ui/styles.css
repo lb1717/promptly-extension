@@ -936,6 +936,7 @@
   align-items: center;
   justify-content: center;
   overflow: visible;
+  transform: translateX(-2px);
 }
 
 /* Vertical connector on wrap (unmasked): 12 o'clock of ring to tooltip */
@@ -1029,9 +1030,9 @@
   z-index: 6;
   padding: 6px 8px;
   border-radius: 10px;
-  border: 1px solid rgba(220, 38, 38, 0.9);
-  background: rgba(254, 226, 226, 0.96);
-  color: rgba(153, 27, 27, 0.98);
+  border: none;
+  background: rgba(254, 226, 226, 0.72);
+  color: #dc2626;
   font-size: 10px;
   font-weight: 700;
   text-align: center;
@@ -1200,6 +1201,10 @@
   overscroll-behavior: contain;
 }
 
+.promptly-popup.promptly-further-improve-mode .promptly-section-label {
+  margin-top: -2px;
+}
+
 .promptly-popup-mask.is-open {
   pointer-events: auto;
   opacity: 1;
@@ -1349,13 +1354,15 @@
 .promptly-further-improve-chip {
   all: unset;
   box-sizing: border-box;
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   position: relative;
   width: 100%;
   min-width: 0;
   margin: 0;
   text-align: center;
-  padding: 3px 8px 4px 8px;
+  padding: 0 8px;
   cursor: pointer;
   pointer-events: auto;
   touch-action: manipulation;
@@ -1380,6 +1387,17 @@
     color 0.2s ease,
     filter 0.2s ease,
     box-shadow 0.22s ease;
+}
+
+/* Extend each chip 2px toward the column gap (inner edge only). */
+.promptly-further-improve-chip:nth-child(odd) {
+  width: calc(100% + 2px);
+  margin-right: -2px;
+}
+
+.promptly-further-improve-chip:nth-child(even) {
+  width: calc(100% + 2px);
+  margin-left: -2px;
 }
 
 .promptly-further-improve-chip .promptly-fi-chip-text {
@@ -1548,34 +1566,6 @@
 
 .promptly-rewrite-send.is-compose-text-reset .promptly-rewrite-send-text-track {
   transition: none !important;
-}
-
-.promptly-rewrite-send-error-text {
-  position: absolute;
-  left: 4px;
-  right: 4px;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 8px;
-  font-weight: 700;
-  color: #dc2626;
-  text-align: center;
-  line-height: 1.2;
-  opacity: 0;
-  pointer-events: none;
-  white-space: normal;
-  max-height: 2.6em;
-  overflow: hidden;
-  transition: opacity 140ms ease;
-  z-index: 2;
-}
-
-.promptly-rewrite-send.has-compose-inline-error .promptly-rewrite-send-text-window {
-  opacity: 0;
-}
-
-.promptly-rewrite-send.has-compose-inline-error .promptly-rewrite-send-error-text {
-  opacity: 1;
 }
 
 /* Compose generate: shine on the four thinking lines (same carousel treatment as Improve). */
@@ -1876,28 +1866,6 @@
 
 .promptly-auto-button[data-stage="strong"] .promptly-auto-text-line:nth-child(6) {
   color: var(--promptly-chip-text);
-}
-
-.promptly-auto-error-text {
-  position: absolute;
-  right: 6px;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 2;
-  font-size: 8px;
-  font-weight: 700;
-  color: #dc2626;
-  opacity: 0;
-  transition: opacity 170ms ease;
-  white-space: nowrap;
-}
-
-.promptly-auto-button.has-inline-error .promptly-auto-text-window {
-  transform: translateX(-20px);
-}
-
-.promptly-auto-button.has-inline-error .promptly-auto-error-text {
-  opacity: 1;
 }
 
 .promptly-divider {

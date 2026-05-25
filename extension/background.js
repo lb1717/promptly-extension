@@ -1,3 +1,8 @@
+/** Firefox/Safari WebExtension compatibility (Chrome alias is not always defined). */
+if (typeof globalThis.browser !== "undefined" && typeof globalThis.chrome === "undefined") {
+  globalThis.chrome = globalThis.browser;
+}
+
 const DEFAULT_PROXY_BASE_URL = "https://promptly-labs.com";
 const GOOGLE_ACCESS_TOKEN_BUFFER_SEC = 60;
 const FIREBASE_ID_TOKEN_BUFFER_SEC = 60;

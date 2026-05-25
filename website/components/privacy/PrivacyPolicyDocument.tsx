@@ -11,9 +11,9 @@ type Props = {
  */
 export function PrivacyPolicyDocument({ lastUpdated, privacyEmail }: Props) {
   return (
-    <div className="space-y-8 text-[15px] leading-relaxed text-violet-100/90">
+    <div className="space-y-8 text-[15px] leading-relaxed text-muted">
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold text-white">1. Introduction</h2>
+        <h2 className="text-lg font-semibold text-ink">1. Introduction</h2>
         <p>
           {SITE.name} (“Promptly,” “we,” “us,” or “our”) respects your privacy. This Privacy Policy explains how
           we collect, use, disclose, and safeguard information when you use our website, web applications, APIs,
@@ -29,7 +29,7 @@ export function PrivacyPolicyDocument({ lastUpdated, privacyEmail }: Props) {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold text-white">2. Who we are</h2>
+        <h2 className="text-lg font-semibold text-ink">2. Who we are</h2>
         <p>
           Promptly is operated by the entity or individual responsible for the Services and the Chrome Web Store
           listing identified as “Promptly.” The “data controller” for personal data we determine the purposes and
@@ -38,9 +38,9 @@ export function PrivacyPolicyDocument({ lastUpdated, privacyEmail }: Props) {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold text-white">3. Scope</h2>
+        <h2 className="text-lg font-semibold text-ink">3. Scope</h2>
         <p>This policy applies to:</p>
-        <ul className="list-disc space-y-2 pl-5 marker:text-violet-400">
+        <ul className="list-disc space-y-2 pl-5 marker:text-faint">
           <li>Visitors and users of our website (for example, {SITE.name.toLowerCase()}.com and related subdomains);</li>
           <li>
             Users of the Promptly Chrome extension when it runs on supported third-party AI chat websites; and
@@ -54,11 +54,11 @@ export function PrivacyPolicyDocument({ lastUpdated, privacyEmail }: Props) {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold text-white">4. Information we collect</h2>
+        <h2 className="text-lg font-semibold text-ink">4. Information we collect</h2>
         <p>We may collect the following categories of information:</p>
 
-        <h3 className="pt-2 text-base font-semibold text-white">4.1 Information you provide</h3>
-        <ul className="list-disc space-y-2 pl-5 marker:text-violet-400">
+        <h3 className="pt-2 text-base font-semibold text-ink">4.1 Information you provide</h3>
+        <ul className="list-disc space-y-2 pl-5 marker:text-faint">
           <li>
             <strong>Account data.</strong> When you create or access an account, we may collect your name, email
             address, and other identifiers depending on the sign-in method (for example, Google account
@@ -75,8 +75,8 @@ export function PrivacyPolicyDocument({ lastUpdated, privacyEmail }: Props) {
           </li>
         </ul>
 
-        <h3 className="pt-2 text-base font-semibold text-white">4.2 Information collected automatically</h3>
-        <ul className="list-disc space-y-2 pl-5 marker:text-violet-400">
+        <h3 className="pt-2 text-base font-semibold text-ink">4.2 Information collected automatically</h3>
+        <ul className="list-disc space-y-2 pl-5 marker:text-faint">
           <li>
             <strong>Device and log data.</strong> IP address, browser type, operating system, referring URLs, pages
             viewed, date/time stamps, and similar diagnostics.
@@ -92,8 +92,8 @@ export function PrivacyPolicyDocument({ lastUpdated, privacyEmail }: Props) {
           </li>
         </ul>
 
-        <h3 className="pt-2 text-base font-semibold text-white">4.3 Extension-related data</h3>
-        <ul className="list-disc space-y-2 pl-5 marker:text-violet-400">
+        <h3 className="pt-2 text-base font-semibold text-ink">4.3 Extension-related data</h3>
+        <ul className="list-disc space-y-2 pl-5 marker:text-faint">
           <li>
             <strong>Locally stored settings.</strong> The extension may store preferences (such as API base URL or UI
             options) using browser extension storage APIs on your device.
@@ -107,9 +107,9 @@ export function PrivacyPolicyDocument({ lastUpdated, privacyEmail }: Props) {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold text-white">5. How we use information</h2>
+        <h2 className="text-lg font-semibold text-ink">5. How we use information</h2>
         <p>We use information to:</p>
-        <ul className="list-disc space-y-2 pl-5 marker:text-violet-400">
+        <ul className="list-disc space-y-2 pl-5 marker:text-faint">
           <li>Provide, operate, maintain, and improve the Services;</li>
           <li>Create and manage accounts and authenticate users;</li>
           <li>Process prompts and return improved or generated text;</li>
@@ -125,9 +125,9 @@ export function PrivacyPolicyDocument({ lastUpdated, privacyEmail }: Props) {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold text-white">6. Legal bases (EEA, UK, and similar regions)</h2>
+        <h2 className="text-lg font-semibold text-ink">6. Legal bases (EEA, UK, and similar regions)</h2>
         <p>Where GDPR-style rules apply, we rely on one or more of the following:</p>
-        <ul className="list-disc space-y-2 pl-5 marker:text-violet-400">
+        <ul className="list-disc space-y-2 pl-5 marker:text-faint">
           <li>
             <strong>Contract</strong> — processing needed to provide the Services you request (for example,
             running Improve).
@@ -146,9 +146,9 @@ export function PrivacyPolicyDocument({ lastUpdated, privacyEmail }: Props) {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold text-white">7. Sharing and disclosure</h2>
+        <h2 className="text-lg font-semibold text-ink">7. Sharing and disclosure</h2>
         <p>We may share information with:</p>
-        <ul className="list-disc space-y-2 pl-5 marker:text-violet-400">
+        <ul className="list-disc space-y-2 pl-5 marker:text-faint">
           <li>
             <strong>Service providers</strong> who host infrastructure, databases, monitoring, email, analytics, or
             customer support tools;
@@ -173,7 +173,7 @@ export function PrivacyPolicyDocument({ lastUpdated, privacyEmail }: Props) {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold text-white">8. International transfers</h2>
+        <h2 className="text-lg font-semibold text-ink">8. International transfers</h2>
         <p>
           We and our providers may process data in the United States and other countries. Those countries may not
           provide the same level of protection as your home country. Where required, we use appropriate safeguards
@@ -182,7 +182,7 @@ export function PrivacyPolicyDocument({ lastUpdated, privacyEmail }: Props) {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold text-white">9. Retention</h2>
+        <h2 className="text-lg font-semibold text-ink">9. Retention</h2>
         <p>
           We retain personal information for as long as necessary to fulfill the purposes described in this policy,
           unless a longer period is required by law. Criteria include whether we have an ongoing relationship with
@@ -192,7 +192,7 @@ export function PrivacyPolicyDocument({ lastUpdated, privacyEmail }: Props) {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold text-white">10. Security</h2>
+        <h2 className="text-lg font-semibold text-ink">10. Security</h2>
         <p>
           We implement reasonable technical and organizational measures designed to protect information. No method
           of transmission or storage is completely secure. We cannot guarantee absolute security. You are
@@ -201,7 +201,7 @@ export function PrivacyPolicyDocument({ lastUpdated, privacyEmail }: Props) {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold text-white">11. Your rights and choices</h2>
+        <h2 className="text-lg font-semibold text-ink">11. Your rights and choices</h2>
         <p>
           Depending on your location, you may have rights to access, correct, delete, restrict, or object to certain
           processing, and in some cases to data portability or withdrawal of consent. You may lodge a complaint with
@@ -210,7 +210,7 @@ export function PrivacyPolicyDocument({ lastUpdated, privacyEmail }: Props) {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold text-white">12. California residents (summary)</h2>
+        <h2 className="text-lg font-semibold text-ink">12. California residents (summary)</h2>
         <p>
           If California law applies, you may have additional rights under the CCPA/CPRA, such as requesting access
           or deletion of personal information and opting out of certain sharing (we do not “sell” or “share”
@@ -221,7 +221,7 @@ export function PrivacyPolicyDocument({ lastUpdated, privacyEmail }: Props) {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold text-white">13. Children</h2>
+        <h2 className="text-lg font-semibold text-ink">13. Children</h2>
         <p>
           The Services are not directed to children under 13 (or the minimum age in your jurisdiction), and we do
           not knowingly collect personal information from children. If you believe we have collected information
@@ -230,7 +230,7 @@ export function PrivacyPolicyDocument({ lastUpdated, privacyEmail }: Props) {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold text-white">14. Changes to this policy</h2>
+        <h2 className="text-lg font-semibold text-ink">14. Changes to this policy</h2>
         <p>
           We may update this policy from time to time. We will post the updated version on this page and update the
           “Last updated” date. For material changes, we may provide additional notice (for example, a notice on the
@@ -239,12 +239,12 @@ export function PrivacyPolicyDocument({ lastUpdated, privacyEmail }: Props) {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold text-white">15. Contact</h2>
+        <h2 className="text-lg font-semibold text-ink">15. Contact</h2>
         <p>
           For privacy-related requests or questions, contact us using the email address on our{" "}
           <a
             href={SITE.chromeStoreUrl}
-            className="text-violet-200 underline decoration-violet-400/50 underline-offset-2 hover:text-white"
+            className="text-muted underline decoration-faint underline-offset-2 hover:text-ink"
           >
             Chrome Web Store
           </a>{" "}
@@ -255,7 +255,7 @@ export function PrivacyPolicyDocument({ lastUpdated, privacyEmail }: Props) {
               You may also email{" "}
               <a
                 href={`mailto:${privacyEmail}`}
-                className="text-violet-200 underline decoration-violet-400/50 underline-offset-2 hover:text-white"
+                className="text-muted underline decoration-faint underline-offset-2 hover:text-ink"
               >
                 {privacyEmail}
               </a>
@@ -263,7 +263,7 @@ export function PrivacyPolicyDocument({ lastUpdated, privacyEmail }: Props) {
             </>
           ) : null}
         </p>
-        <p className="text-sm text-violet-200/70">
+        <p className="text-sm text-faint">
           Last updated: {lastUpdated}
         </p>
       </section>

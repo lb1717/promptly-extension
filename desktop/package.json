@@ -1,0 +1,17 @@
+{
+  "name": "promptly-desktop",
+  "productName": "Promptly",
+  "version": "1.0.0",
+  "description": "Promptly desktop app — promptly-labs.com in a native window",
+  "main": "src/main.js",
+  "author": "Promptly Labs",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dev": "PROMPTLY_APP_URL=http://localhost:3000 electron ."
+  },
+  "devDependencies": {
+    "electron": "^33.2.0"
+  }
+}

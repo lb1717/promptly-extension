@@ -5,7 +5,7 @@ import { Navbar } from "@/components/Navbar";
 
 export default function AccountPage() {
   return (
-    <main className="relative min-h-screen bg-black text-ink">
+    <main className="relative min-h-screen bg-page text-ink">
       <AmbientBackground />
       <div className="relative z-10">
         <Navbar />

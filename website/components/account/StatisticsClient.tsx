@@ -325,8 +325,8 @@ function ModeMiniChart({
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} layout="vertical" margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
-          <XAxis type="number" stroke="#c4b5fd" />
-          <YAxis dataKey="name" type="category" width={92} stroke="#c4b5fd" tick={{ fill: "#e9e5ff", fontSize: 11 }} />
+          <XAxis type="number" stroke="#8A8A8A" />
+          <YAxis dataKey="name" type="category" width={92} stroke="#8A8A8A" tick={{ fill: "#5C5C5C", fontSize: 11 }} />
           <Tooltip contentStyle={{ background: "#161018", border: "1px solid rgba(139,92,246,0.4)" }} />
           <Bar dataKey="prompts" name="Runs" radius={[0, 6, 6, 0]} fill="#a78bfa" />
         </BarChart>
@@ -470,9 +470,9 @@ export function StatisticsClient() {
     <div className="mx-auto w-full max-w-6xl px-4 py-10 pb-24">
       <div className="mb-10 flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="text-xs uppercase tracking-[0.2em] text-violet-300/75">Your usage snapshot</p>
-          <h1 className="mt-1 text-3xl font-semibold text-white">Prompt statistics</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-violet-200/72">
+          <p className="text-xs uppercase tracking-[0.2em] text-faint">Your usage snapshot</p>
+          <h1 className="mt-1 text-3xl font-semibold text-ink">Prompt statistics</h1>
+          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-faint">
             A single storyline: prompts you routed through Promptly&nbsp;Improve or Generate versus everything you typed and sent straight in
             ChatGPT, Claude, or Gemini. Nothing here stores full prompts—only aggregates and scraped UI hints.
           </p>
@@ -480,14 +480,14 @@ export function StatisticsClient() {
         <div className="flex flex-col gap-2 sm:items-end">
           <Link
             href="/account"
-            className="rounded-lg border border-violet-500/40 px-4 py-2 text-sm font-medium text-violet-100 hover:bg-violet-500/10"
+            className="rounded-lg border border-line px-4 py-2 text-sm font-medium text-muted hover:bg-cream-dark"
           >
             Back to account
           </Link>
           <button
             type="button"
             onClick={() => signOut(getFirebaseAuth()).catch(() => {})}
-            className="rounded-lg border border-white/15 px-4 py-2 text-sm text-violet-200 hover:bg-white/5 sm:text-right"
+            className="rounded-lg border border-line px-4 py-2 text-sm text-faint hover:bg-cream-dark sm:text-right"
           >
             Sign out
           </button>
@@ -495,11 +495,11 @@ export function StatisticsClient() {
       </div>
 
       {!user && !loading ? (
-        <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-12 text-center backdrop-blur-md">
-          <p className="text-violet-100/90">Sign in on the account page to view statistics.</p>
+        <div className="rounded-2xl border border-line bg-cream p-12 text-center backdrop-blur-md">
+          <p className="text-muted">Sign in on the account page to view statistics.</p>
           <Link
             href="/account"
-            className="mt-4 inline-flex justify-center rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500"
+            className="mt-4 inline-flex justify-center rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-cream hover:bg-neutral-800"
           >
             Go to account
           </Link>
@@ -508,16 +508,16 @@ export function StatisticsClient() {
 
       {user && displayStats ? (
         <>
-          <div className="mb-6 flex flex-col gap-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-md sm:flex-row sm:items-center sm:justify-between">
+          <div className="mb-6 flex flex-col gap-4 rounded-2xl border border-line bg-cream-dark p-4 backdrop-blur-md sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-wrap gap-2">
-              <span className="mr-2 self-center text-xs font-semibold uppercase tracking-wider text-violet-300/80">Range</span>
+              <span className="mr-2 self-center text-xs font-semibold uppercase tracking-wider text-faint">Range</span>
               {([7, 14, 30, 90] as const).map((d) => (
                 <button
                   key={d}
                   type="button"
                   onClick={() => setDays(d)}
                   className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
-                    days === d ? "bg-violet-600 text-white" : "border border-white/15 text-violet-200 hover:bg-white/5"
+                    days === d ? "bg-ink text-cream" : "border border-line text-faint hover:bg-cream-dark"
                   }`}
                 >
                   {d}d
@@ -525,12 +525,12 @@ export function StatisticsClient() {
               ))}
             </div>
             <div className="flex flex-wrap items-center gap-3">
-              <label className="flex items-center gap-2 text-sm text-violet-200">
+              <label className="flex items-center gap-2 text-sm text-faint">
                 Buckets:
                 <select
                   value={granularity}
                   onChange={(e) => setGranularity(e.target.value === "week" ? "week" : "day")}
-                  className="rounded-lg border border-white/15 bg-black/40 px-2 py-1.5 text-sm text-white"
+                  className="rounded-lg border border-line bg-cream-dark px-2 py-1.5 text-sm text-ink"
                 >
                   <option value="day">Daily</option>
                   <option value="week">Weekly (UTC)</option>
@@ -540,12 +540,12 @@ export function StatisticsClient() {
                 type="button"
                 disabled={statsLoading || !user}
                 onClick={() => user && loadExtended(user, days, granularity)}
-                className="rounded-lg border border-violet-500/45 px-3 py-1.5 text-sm text-violet-100 hover:bg-violet-500/15 disabled:opacity-50"
+                className="rounded-lg border border-line px-3 py-1.5 text-sm text-muted hover:bg-cream-dark disabled:opacity-50"
               >
                 {statsLoading ? "Refreshing…" : "Refresh"}
               </button>
               {statsLoading ? (
-                <span className="self-center text-xs text-violet-400/95">Pulling aggregates…</span>
+                <span className="self-center text-xs text-faint">Pulling aggregates…</span>
               ) : null}
             </div>
           </div>
@@ -556,7 +556,7 @@ export function StatisticsClient() {
 
           {displayStats.events_index_missing ? (
             <div className="mb-6 rounded-xl border border-sky-500/35 bg-sky-500/[0.12] px-4 py-3 text-xs leading-relaxed text-sky-50/95">
-              Promptly Optimize analytics need the composite index on <code className="rounded bg-black/35 px-1 text-[10px]">promptly_optimize_events</code>{" "}
+              Promptly Optimize analytics need the composite index on <code className="rounded bg-cream-dark px-1 text-[10px]">promptly_optimize_events</code>{" "}
               (<code className="text-[10px]">uid</code>, <code className="text-[10px]">utcDay</code>,{" "}
               <code className="text-[10px]">__name__</code>). Deploy <code className="text-[10px]">firestore.indexes.json</code> and refresh—the overview will
               still show native-send estimates when passive telemetry succeeds.
@@ -566,7 +566,7 @@ export function StatisticsClient() {
           {displayStats.host_passive_listener.index_missing ? (
             <div className="mb-6 rounded-xl border border-sky-500/35 bg-sky-500/[0.12] px-4 py-3 text-xs leading-relaxed text-sky-50/95">
               Native chat totals need composites on{" "}
-              <code className="rounded bg-black/35 px-1 text-[10px]">promptly_host_llm_events</code>. Deploy Firebase indexes before deduplicated summaries
+              <code className="rounded bg-cream-dark px-1 text-[10px]">promptly_host_llm_events</code>. Deploy Firebase indexes before deduplicated summaries
               can load.
             </div>
           ) : null}
@@ -589,48 +589,48 @@ export function StatisticsClient() {
           )}
 
           {/* Hero overview */}
-          <section className="mb-12 rounded-[28px] border border-white/[0.1] bg-gradient-to-br from-violet-950/40 via-slate-950/40 to-cyan-950/30 p-8 backdrop-blur-md">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-violet-200/85">Estimated prompt volume</p>
+          <section className="mb-12 rounded-[28px] border border-line bg-cream p-8 shadow-card">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-faint">Estimated prompt volume</p>
             <div className="mt-6 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
               <div>
-                <p className="text-sm text-white/70">Tracked actions • last {displayStats.range_days} UTC days · {displayStats.granularity} buckets</p>
-                <p className="mt-2 text-5xl font-semibold tracking-tight text-white">
+                <p className="text-sm text-ink/70">Tracked actions • last {displayStats.range_days} UTC days · {displayStats.granularity} buckets</p>
+                <p className="mt-2 text-5xl font-semibold tracking-tight text-ink">
                   {displayStats.combined_totals.prompts_estimate.toLocaleString()}
                 </p>
-                <p className="mt-2 max-w-xl text-xs leading-relaxed text-violet-100/75">
+                <p className="mt-2 max-w-xl text-xs leading-relaxed text-muted/75">
                   Adds Improve/Generate runs (counted once) plus native sends observed without double-counting the mirrored Optimize rows streamed into
                   host telemetry.
                 </p>
               </div>
               <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
-                <div className="rounded-2xl border border-white/[0.12] bg-black/35 px-4 py-3">
+                <div className="rounded-2xl border border-line bg-cream-dark px-4 py-3">
                   <p className="text-[10px] uppercase tracking-[0.16em]" style={{ color: COLOR_CHATGPT }}>
                     ChatGPT
                   </p>
-                  <p className="mt-2 text-xl font-semibold text-white">{displayStats.combined_totals.prompts_chatgpt_surface.toLocaleString()}</p>
+                  <p className="mt-2 text-xl font-semibold text-ink">{displayStats.combined_totals.prompts_chatgpt_surface.toLocaleString()}</p>
                 </div>
-                <div className="rounded-2xl border border-white/[0.12] bg-black/35 px-4 py-3">
+                <div className="rounded-2xl border border-line bg-cream-dark px-4 py-3">
                   <p className="text-[10px] uppercase tracking-[0.16em]" style={{ color: COLOR_CLAUDE }}>
                     Claude
                   </p>
-                  <p className="mt-2 text-xl font-semibold text-white">{displayStats.combined_totals.prompts_claude_surface.toLocaleString()}</p>
+                  <p className="mt-2 text-xl font-semibold text-ink">{displayStats.combined_totals.prompts_claude_surface.toLocaleString()}</p>
                 </div>
-                <div className="rounded-2xl border border-white/[0.12] bg-black/35 px-4 py-3">
+                <div className="rounded-2xl border border-line bg-cream-dark px-4 py-3">
                   <p className="text-[10px] uppercase tracking-[0.16em]" style={{ color: COLOR_GEMINI }}>
                     Gemini
                   </p>
-                  <p className="mt-2 text-xl font-semibold text-white">{displayStats.combined_totals.prompts_gemini_surface.toLocaleString()}</p>
+                  <p className="mt-2 text-xl font-semibold text-ink">{displayStats.combined_totals.prompts_gemini_surface.toLocaleString()}</p>
                 </div>
-                <div className="rounded-2xl border border-white/[0.12] bg-black/35 px-4 py-3">
+                <div className="rounded-2xl border border-line bg-cream-dark px-4 py-3">
                   <p className="text-[10px] uppercase tracking-[0.16em] text-slate-300">Promptly assist</p>
-                  <p className="mt-2 text-xl font-semibold text-white">
+                  <p className="mt-2 text-xl font-semibold text-ink">
                     {displayStats.combined_totals.promptly_share_of_estimated_prompts_percent != null ? (
                       <>{`${displayStats.combined_totals.promptly_share_of_estimated_prompts_percent}%`}</>
                     ) : (
                       "—"
                     )}
                   </p>
-                  <p className="text-[10px] text-white/50">share of totals</p>
+                  <p className="text-[10px] text-ink/50">share of totals</p>
                 </div>
               </div>
             </div>
@@ -640,9 +640,9 @@ export function StatisticsClient() {
                 <BarChart data={stackedTimeline} margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
                   <XAxis dataKey="label" stroke="#dbd4ff" tick={{ fill: "#e9e7ff", fontSize: 10 }} />
-                  <YAxis stroke="#c4b5fd" allowDecimals={false} />
+                  <YAxis stroke="#8A8A8A" allowDecimals={false} />
                   <Tooltip
-                    contentStyle={{ background: "#0c0618", border: "1px solid rgba(148,163,253,0.35)" }}
+                    contentStyle={{ background: "#FAF8F4", border: "1px solid #E0DDD6", color: "#111111" }}
                     cursor={{ fill: "rgba(255,255,255,0.04)" }}
                   />
                   <Legend />
@@ -654,7 +654,7 @@ export function StatisticsClient() {
               </ResponsiveContainer>
             </div>
 
-            <p className="mt-6 text-[11px] leading-relaxed text-white/55">
+            <p className="mt-6 text-[11px] leading-relaxed text-ink/55">
               Colors cue the host surface: Gemini blue (#4285F4 · Google brand reference), Claude coral (#CC785C · Anthropic-adjacent), ChatGPT teal (#10A37F
               · OpenAI brand reference).
             </p>
@@ -662,19 +662,19 @@ export function StatisticsClient() {
 
           {/* Value story */}
           <section className="mb-12">
-            <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-violet-200/90">What Promptly is doing</h2>
-            <p className="mt-1 text-xs text-violet-200/65">
+            <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">What Promptly is doing</h2>
+            <p className="mt-1 text-xs text-faint">
               Token math is illustrative; billing truth remains your Promptly quotas and daily rollups—not third-party metering.
             </p>
             <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <div className="rounded-2xl border border-violet-500/25 bg-violet-500/[0.08] px-5 py-4">
-                <p className="text-[11px] uppercase tracking-[0.18em] text-violet-100/85">Billing tokens routed through Promptly</p>
-                <p className="mt-3 text-2xl font-semibold text-white">{displayStats.value_insights.billed_promptly_tokens_sum_events.toLocaleString()}</p>
-                <p className="mt-2 text-[11px] text-violet-50/65">Measured on Improve/Generate events (OpenAI-backed rewrites).</p>
+              <div className="rounded-2xl border border-line bg-cream-dark px-5 py-4">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-muted">Billing tokens routed through Promptly</p>
+                <p className="mt-3 text-2xl font-semibold text-ink">{displayStats.value_insights.billed_promptly_tokens_sum_events.toLocaleString()}</p>
+                <p className="mt-2 text-[11px] text-muted">Measured on Improve/Generate events (OpenAI-backed rewrites).</p>
               </div>
               <div className="rounded-2xl border border-cyan-500/25 bg-cyan-500/[0.07] px-5 py-4">
                 <p className="text-[11px] uppercase tracking-[0.18em] text-cyan-100/85">Heuristic tokens you typed native</p>
-                <p className="mt-3 text-2xl font-semibold text-white">
+                <p className="mt-3 text-2xl font-semibold text-ink">
                   {displayStats.value_insights.heuristic_native_input_tokens_approx_from_telemetry_chars != null
                     ? `${displayStats.value_insights.heuristic_native_input_tokens_approx_from_telemetry_chars.toLocaleString()} Σ`
                     : "—"}
@@ -683,18 +683,18 @@ export function StatisticsClient() {
                   Sum of scraped composer telemetry on native sends (÷4 chars/token heuristic)—not Gemini/Claude/ChatGPT billed usage.
                 </p>
               </div>
-              <div className="rounded-2xl border border-purple-400/35 bg-purple-500/[0.08] px-5 py-4">
-                <p className="text-[11px] uppercase tracking-[0.18em] text-purple-50/95">Typing engagement (estimated)</p>
-                <p className="mt-3 text-2xl font-semibold text-white">
+              <div className="rounded-2xl border border-line bg-cream-dark px-5 py-4">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-faint">Typing engagement (estimated)</p>
+                <p className="mt-3 text-2xl font-semibold text-ink">
                   ~{displayStats.value_insights.estimated_drafting_active_minutes_illustrative.toLocaleString()} min
                 </p>
-                <p className="mt-2 text-[11px] text-purple-100/65">
+                <p className="mt-2 text-[11px] text-muted">
                   {displayStats.value_insights.composer_snapshot_count_illustrative.toLocaleString()} snapshots × ~12s illustrative cadence drawn from Promptly&apos;s composer debounce knobs.
                 </p>
               </div>
               <div className="rounded-2xl border border-emerald-500/25 bg-emerald-950/30 px-5 py-4">
                 <p className="text-[11px] uppercase tracking-[0.18em] text-emerald-100/85">Authoritative rollup hint</p>
-                <p className="mt-3 text-2xl font-semibold text-white">
+                <p className="mt-3 text-2xl font-semibold text-ink">
                   {displayStats.value_insights.rollup_daily_prompts_hint.toLocaleString()}
                 </p>
                 <p className="mt-2 text-[11px] text-emerald-50/65">Recorded Improve runs (may differ slightly from queried events).</p>
@@ -703,9 +703,9 @@ export function StatisticsClient() {
           </section>
 
           {/*Latency */}
-          <section className="mb-12 rounded-2xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-md">
-            <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-violet-200/95">Rewrite vs native turnaround time</h2>
-            <p className="mt-2 text-xs text-violet-200/65">
+          <section className="mb-12 rounded-2xl border border-line bg-cream p-6 backdrop-blur-md">
+            <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">Rewrite vs native turnaround time</h2>
+            <p className="mt-2 text-xs text-faint">
               Promptly bar = billed rewrite turnaround from the sidebar. Native bar ≈ scraped “reply settles” cues on unattended sends —
               heuristic, not authoritative vendor latency.
             </p>
@@ -713,9 +713,9 @@ export function StatisticsClient() {
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={latencyChartRows} margin={{ top: 8, right: 12, bottom: 56, left: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
-                  <XAxis dataKey="ai" stroke="#c4c5fc" tick={{ fill: "#e9e7ff", fontSize: 11 }} />
-                  <YAxis stroke="#c4c5fc" tick={{ fill: "#e9e7ff" }} label={{ value: "Seconds (avg)", angle: -90, position: "insideLeft", fill: "#bfb7ff" }} />
-                  <Tooltip contentStyle={{ background: "#090514", border: "1px solid rgba(148,163,253,0.35)" }} />
+                  <XAxis dataKey="ai" stroke="#8A8A8A" tick={{ fill: "#5C5C5C", fontSize: 11 }} />
+                  <YAxis stroke="#8A8A8A" tick={{ fill: "#5C5C5C" }} label={{ value: "Seconds (avg)", angle: -90, position: "insideLeft", fill: "#5C5C5C" }} />
+                  <Tooltip contentStyle={{ background: "#FAF8F4", border: "1px solid #E0DDD6", color: "#111111" }} />
                   <Legend />
                   <Bar dataKey="promptly_rewrite_s" name="Promptly rewrite (avg s)" radius={[8, 8, 0, 0]} fill={COLOR_PROMPTLY}>
                     {latencyChartRows.map((entry, idx) => (
@@ -734,18 +734,18 @@ export function StatisticsClient() {
 
           {/* Composer length */}
           {composerCompareData.length ? (
-            <section className="mb-12 rounded-2xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-md">
-              <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-violet-200/95">Draft verbosity</h2>
-              <p className="mt-2 text-xs text-violet-200/65">
+            <section className="mb-12 rounded-2xl border border-line bg-cream p-6 backdrop-blur-md">
+              <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">Draft verbosity</h2>
+              <p className="mt-2 text-xs text-faint">
                 Telemetry-only averages pulled from scraped composer snapshots—helps explain why rewriting with Promptly can reduce upstream token stress.
               </p>
               <div className="mt-6 h-64 w-full max-w-xl">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={composerCompareData} layout="vertical" margin={{ left: 32, top: 8 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                    <XAxis type="number" stroke="#c4c5fc" />
-                    <YAxis dataKey="label" type="category" width={148} stroke="#c4c5fc" tick={{ fill: "#f5f4ff", fontSize: 10 }} />
-                    <Tooltip contentStyle={{ background: "#090514", border: "1px solid rgba(236,232,255,0.2)" }} />
+                    <XAxis type="number" stroke="#8A8A8A" />
+                    <YAxis dataKey="label" type="category" width={148} stroke="#8A8A8A" tick={{ fill: "#5C5C5C", fontSize: 10 }} />
+                    <Tooltip contentStyle={{ background: "#FAF8F4", border: "1px solid #E0DDD6", color: "#111111" }} />
                     <Bar dataKey="chars" radius={[0, 6, 6, 0]} fill="#c084fc">
                       {composerCompareData.map((c, idx) => (
                         <Cell key={idx} fillOpacity={c.muted ? 0.35 : 0.95} />
@@ -759,16 +759,16 @@ export function StatisticsClient() {
 
           {/* Promptly pathway compare */}
           {pathwayCompareData.length ? (
-            <section className="mb-12 rounded-2xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur-md">
-              <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-violet-200/95">Pathway breakdown</h2>
-              <p className="mt-2 text-xs text-violet-200/65">Stack Promptly-mediated runs against native submits for ChatGPT vs Claude vs Gemini.</p>
+            <section className="mb-12 rounded-2xl border border-line bg-cream p-6 backdrop-blur-md">
+              <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">Pathway breakdown</h2>
+              <p className="mt-2 text-xs text-faint">Stack Promptly-mediated runs against native submits for ChatGPT vs Claude vs Gemini.</p>
               <div className="mt-6 h-80 w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={pathwayCompareData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
                     <XAxis dataKey="pathway" stroke="#bfb7ff" tick={{ fill: "#f9f8ff", fontSize: 10 }} />
                     <YAxis stroke="#bfb7ff" allowDecimals={false} />
-                    <Tooltip contentStyle={{ background: "#070212", border: "1px solid rgba(251,251,254,0.12)" }} />
+                    <Tooltip contentStyle={{ background: "#FAF8F4", border: "1px solid #E0DDD6", color: "#111111" }} />
                     <Legend />
                     <Bar dataKey="Gemini" name="Gemini" stackId="a" fill={COLOR_GEMINI} />
                     <Bar dataKey="Claude" name="Claude" stackId="a" fill={COLOR_CLAUDE} />
@@ -781,14 +781,14 @@ export function StatisticsClient() {
 
           {/* Supporting technical */}
           <section className="mb-12 grid gap-10 lg:grid-cols-2">
-            <div className="rounded-2xl border border-white/[0.1] bg-black/35 p-6">
-              <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-200/95">Improve mode mixes</h3>
-              <p className="mt-1 text-[11px] text-violet-200/62">Shows how Promptly was invoked whenever telemetry tagged the Optimize path.</p>
+            <div className="rounded-2xl border border-line bg-cream-dark p-6">
+              <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-faint">Improve mode mixes</h3>
+              <p className="mt-1 text-[11px] text-faint">Shows how Promptly was invoked whenever telemetry tagged the Optimize path.</p>
               <ModeMiniChart modes={displayStats.breakdowns_from_events.mode} />
             </div>
-            <div className="rounded-2xl border border-white/[0.1] bg-black/35 p-6">
-              <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-200/95">Billed Promptly tokens (bucket-level)</h3>
-              <p className="mt-1 text-[11px] text-violet-200/62">Roughly parallels how expensive each Improve window was—not host AI metering.</p>
+            <div className="rounded-2xl border border-line bg-cream-dark p-6">
+              <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-faint">Billed Promptly tokens (bucket-level)</h3>
+              <p className="mt-1 text-[11px] text-faint">Roughly parallels how expensive each Improve window was—not host AI metering.</p>
               <div className="mt-4 h-64 w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
@@ -799,9 +799,9 @@ export function StatisticsClient() {
                     margin={{ bottom: 8 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
-                    <XAxis dataKey="label" stroke="#c4c5fc" tick={{ fill: "#f4f4ff", fontSize: 10 }} />
-                    <YAxis stroke="#c4c5fc" />
-                    <Tooltip contentStyle={{ background: "#06030f", border: "1px solid rgba(196,181,253,0.35)" }} />
+                    <XAxis dataKey="label" stroke="#8A8A8A" tick={{ fill: "#5C5C5C", fontSize: 10 }} />
+                    <YAxis stroke="#8A8A8A" />
+                    <Tooltip contentStyle={{ background: "#FAF8F4", border: "1px solid #E0DDD6", color: "#111111" }} />
                     <Bar dataKey="billed_promptly_tokens" fill="#9333ea" name="Promptly billed tokens / bucket" radius={[4, 4, 0, 0]} maxBarSize={32} />
                   </BarChart>
                 </ResponsiveContainer>
@@ -809,14 +809,14 @@ export function StatisticsClient() {
             </div>
           </section>
 
-          <section className="mb-12 rounded-2xl border border-white/[0.1] bg-black/35 p-6">
-            <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-200/95">Scraped model buckets (Improve path)</h3>
-            <p className="mt-2 text-[11px] text-violet-200/62">
+          <section className="mb-12 rounded-2xl border border-line bg-cream-dark p-6">
+            <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-faint">Scraped model buckets (Improve path)</h3>
+            <p className="mt-2 text-[11px] text-faint">
               Host UI labels when available—can drift whenever chat providers redesign their pickers.
             </p>
-            <div className="mt-4 overflow-x-auto rounded-xl border border-white/10">
+            <div className="mt-4 overflow-x-auto rounded-xl border border-line">
               <table className="min-w-[520px] w-full border-collapse text-left text-sm">
-                <thead className="border-b border-white/10 text-[10px] uppercase tracking-wide text-violet-100/85">
+                <thead className="border-b border-line text-[10px] uppercase tracking-wide text-muted">
                   <tr>
                     <th className="px-4 py-2 font-semibold">Bucket</th>
                     <th className="px-4 py-2 font-semibold">Example label</th>
@@ -826,14 +826,14 @@ export function StatisticsClient() {
                 <tbody>
                   {displayStats.breakdowns_from_events.model_buckets.length ? (
                     displayStats.breakdowns_from_events.model_buckets.map((row) => (
-                      <tr key={row.bucket} className="border-b border-white/[0.06] text-violet-50/95">
-                        <td className="px-4 py-2 font-mono text-xs text-violet-200">{row.bucket}</td>
+                      <tr key={row.bucket} className="border-b border-line text-ink">
+                        <td className="px-4 py-2 font-mono text-xs text-faint">{row.bucket}</td>
                         <td className="px-4 py-2 text-xs">{row.exemplar_label || "—"}</td>
                         <td className="px-4 py-2 tabular-nums">{row.prompts.toLocaleString()}</td>
                       </tr>
                     ))
                   ) : (
-                    <tr className="text-violet-50/85">
+                    <tr className="text-ink">
                       <td colSpan={3} className="px-4 py-3 text-xs italic">
                         After you Optimize with Promptly attached, detected host labels accumulate here whenever the picker exposes readable text.
                       </td>
@@ -844,22 +844,22 @@ export function StatisticsClient() {
             </div>
           </section>
 
-          <footer className="rounded-2xl border border-white/[0.06] bg-black/25 p-5 text-[11px] leading-relaxed text-violet-200/70">
+          <footer className="rounded-2xl border border-line bg-cream-dark p-5 text-[11px] leading-relaxed text-faint">
             <div className="grid gap-2 sm:grid-cols-2">
               <p>
-                <span className="font-semibold text-white/90">Native sends:</span>{" "}
+                <span className="font-semibold text-ink/90">Native sends:</span>{" "}
                 {displayStats.value_insights.native_web_sends.toLocaleString()}
               </p>
               <p>
-                <span className="font-semibold text-white/90">Optimize events queried:</span>{" "}
+                <span className="font-semibold text-ink/90">Optimize events queried:</span>{" "}
                 {displayStats.value_insights.optimize_events_queried.toLocaleString()}
               </p>
               <p>
-                <span className="font-semibold text-white/90">Mirror rows synced:</span>{" "}
+                <span className="font-semibold text-ink/90">Mirror rows synced:</span>{" "}
                 {displayStats.combined_totals.mirror_rows_synced_to_host_telemetry.toLocaleString()}
               </p>
               <p>
-                <span className="font-semibold text-white/90">Authoritative rollup tokens:</span>{" "}
+                <span className="font-semibold text-ink/90">Authoritative rollup tokens:</span>{" "}
                 {displayStats.rollup_daily.totals.tokens.toLocaleString()}
               </p>
             </div>

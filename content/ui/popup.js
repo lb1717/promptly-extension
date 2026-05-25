@@ -22,10 +22,8 @@
       this.root.setAttribute("aria-hidden", "true");
       this.root.dataset.rewriteLines = "1";
       this.lastBounds = { width: 0, height: 0 };
-      this.autoErrorResetTimer = null;
       this.autoBoxShineEndHandler = null;
       this.autoTextLoopResetTimer = null;
-      this.composeSendErrorResetTimer = null;
       this.composePromptWritten = false;
       /** After Generate Prompt: keep description visible until first edit clears it (once per generate). */
       this.scratchClearOnNextEdit = false;
@@ -104,10 +102,7 @@
         "<span class='promptly-auto-text-line'>Prompt Already Strong ✓</span>" +
         "<span class='promptly-auto-text-line'>Improve Prompt</span>";
       this.autoTextWindow.append(this.autoTextTrack);
-      this.autoAdjustErrorText = this.doc.createElement("span");
-      this.autoAdjustErrorText.className = "promptly-auto-error-text";
-      this.autoAdjustErrorText.textContent = "";
-      this.autoAdjustButton.append(this.autoTextWindow, this.autoAdjustErrorText);
+      this.autoAdjustButton.append(this.autoTextWindow);
       this.autoAdjustButton.dataset.stage = "idle";
       this.autoAdjustButton.addEventListener("click", (event) => {
         event.preventDefault();
@@ -194,12 +189,6 @@
         }
         this.updateInputLineMode();
         const hasText = String(this.rewriteInstructionInput.value || "").trim().length > 0;
-        if (this.composeSendErrorResetTimer) {
-          window.clearTimeout(this.composeSendErrorResetTimer);
-          this.composeSendErrorResetTimer = null;
-        }
-        this.rewriteSendButton.classList.remove("has-compose-inline-error");
-        this.rewriteSendErrorText.textContent = "";
         if (!this.rewriteSendButton.classList.contains("is-working")) {
           if (this.composeUseIdleLabel) {
             this.rewriteSendButton.dataset.stage = "idle";
@@ -254,10 +243,7 @@
         this.rewriteSendTextTrack.querySelectorAll(".promptly-rewrite-compose-line")
       );
       this.rewriteSendTextWindow.append(this.rewriteSendTextTrack);
-      this.rewriteSendErrorText = this.doc.createElement("span");
-      this.rewriteSendErrorText.className = "promptly-rewrite-send-error-text";
-      this.rewriteSendErrorText.textContent = "";
-      this.rewriteSendButton.append(this.rewriteSendTextWindow, this.rewriteSendErrorText);
+      this.rewriteSendButton.append(this.rewriteSendTextWindow);
       this.rewriteSendButton.dataset.stage = "idle";
       this.rewriteSendButton.addEventListener("click", (event) => {
         event.preventDefault();
@@ -288,7 +274,7 @@
 
       this.furtherImproveGrid = this.doc.createElement("div");
       this.furtherImproveGrid.className = "promptly-further-improve-grid";
-      this.furtherImproveGrid.setAttribute("aria-label", "Improve prompt further");
+      this.furtherImproveGrid.setAttribute("aria-label", "Improve Prompt Further");
       this.furtherImproveGrid.hidden = true;
       this.furtherImproveMetaById = new Map();
       this.furtherImproveGrid.addEventListener(
@@ -535,15 +521,6 @@
       return { rawLines, lineHeightPx, paddingY };
     }
 
-    truncateInlineError(message, maxLen) {
-      const msg = String(message || "").trim();
-      const max = Math.max(8, Number(maxLen) || 8);
-      if (msg.length <= max) {
-        return msg;
-      }
-      return `${msg.slice(0, max - 1).trimEnd()}…`;
-    }
-
     updateInputLineMode() {
       const input = this.rewriteInstructionInput;
       if (!input) {
@@ -783,14 +760,6 @@
     }
 
     setAutoAdjustLoading(isLoading, stageText = "", isError = false, mode = "improve") {
-      if (this.autoErrorResetTimer) {
-        window.clearTimeout(this.autoErrorResetTimer);
-        this.autoErrorResetTimer = null;
-      }
-      if (this.composeSendErrorResetTimer) {
-        window.clearTimeout(this.composeSendErrorResetTimer);
-        this.composeSendErrorResetTimer = null;
-      }
       if (this.autoTextLoopResetTimer) {
         window.clearTimeout(this.autoTextLoopResetTimer);
         this.autoTextLoopResetTimer = null;
@@ -805,8 +774,6 @@
       }
       const modeKey = String(mode || "improve").toLowerCase();
       if (modeKey === "compose") {
-        this.rewriteSendButton.classList.remove("has-compose-inline-error");
-        this.rewriteSendErrorText.textContent = "";
         this.rewriteSendButton.disabled = isLoading;
         if (isLoading || (this.composeCollapseUntilGenerated && !this.composePromptWritten)) {
           this.updateComposeFocusMode(true);
@@ -856,22 +823,6 @@
           this.stopComposeShineEnforcer();
           this.applyComposeShineHardOverride(false);
           const hasText = String(this.rewriteInstructionInput?.value || "").trim().length > 0;
-          const errMsg = String(stageText || "")
-            .replace(/^failed:\s*/i, "")
-            .trim();
-          const COMPOSE_INLINE_ERROR_MAX = 120;
-          if (errMsg) {
-            this.rewriteSendErrorText.textContent = this.truncateInlineError(
-              errMsg,
-              COMPOSE_INLINE_ERROR_MAX
-            );
-            this.rewriteSendButton.classList.add("has-compose-inline-error");
-            this.composeSendErrorResetTimer = window.setTimeout(() => {
-              this.rewriteSendButton.classList.remove("has-compose-inline-error");
-              this.rewriteSendErrorText.textContent = "";
-              this.composeSendErrorResetTimer = null;
-            }, 3200);
-          }
           this.rewriteSendButton.classList.add("is-compose-text-reset");
           this.rewriteSendButton.dataset.stage =
             this.composePromptWritten && hasText ? "further" : this.composePromptWritten ? "written" : "idle";
@@ -918,7 +869,6 @@
 
       this.autoAdjustButton.disabled = isLoading;
       this.autoAdjustButton.classList.remove("is-auto-text-reset");
-      this.autoAdjustButton.classList.remove("has-inline-error");
       if (isLoading) {
         if (this.autoBoxShineEndHandler) {
           this.autoAdjustButton.removeEventListener("animationend", this.autoBoxShineEndHandler);
@@ -935,7 +885,6 @@
         } else {
           this.autoAdjustButton.dataset.stage = "improve";
         }
-        this.autoAdjustErrorText.textContent = "";
         return;
       }
       this.autoAdjustButton.classList.remove("is-working");
@@ -957,25 +906,7 @@
         } else {
           applyImproveIdleUi();
         }
-        const errFull = String(stageText)
-          .replace(/^failed:\s*/i, "")
-          .trim();
-        const IMPROVE_INLINE_ERROR_MAX = 24;
-        this.autoAdjustErrorText.textContent = this.truncateInlineError(
-          errFull,
-          IMPROVE_INLINE_ERROR_MAX
-        );
-        this.autoAdjustButton.classList.add("has-inline-error");
-        this.autoErrorResetTimer = window.setTimeout(() => {
-          this.autoAdjustButton.classList.remove("has-inline-error");
-          this.autoAdjustErrorText.textContent = "";
-          if (!keepImprovedState) {
-            applyImproveIdleUi();
-          }
-          this.autoErrorResetTimer = null;
-        }, 2200);
       } else {
-        this.autoAdjustErrorText.textContent = "";
         applyImproveDoneMutedUi();
       }
     }
@@ -1037,7 +968,7 @@
       this.furtherImproveGridVisible = !!model.showFurtherImproveGrid;
       this.root.classList.toggle("promptly-further-improve-mode", this.furtherImproveGridVisible);
       this.suggestionTitle.textContent = this.furtherImproveGridVisible
-        ? "Improve prompt further"
+        ? "Improve Prompt Further"
         : "Advanced Prompt Builder";
       this.rewriteInputWrap.classList.toggle(
         "promptly-show-further-improve",
@@ -1091,8 +1022,7 @@
         }
       }
       if (
-        !this.autoAdjustButton.classList.contains("is-working") &&
-        !this.autoAdjustButton.classList.contains("has-inline-error")
+        !this.autoAdjustButton.classList.contains("is-working")
       ) {
         if (model.improveMutedByCompose) {
           this.autoAdjustButton.dataset.stage = "strong";

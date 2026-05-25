@@ -169,7 +169,7 @@ export function DemoSection() {
   return (
     <section id="how-it-works" className="overflow-x-hidden px-3 pb-5 pt-4 sm:px-4 sm:pb-8 sm:pt-8">
       <div className="mx-auto max-w-6xl">
-        <div className="relative mx-auto max-w-5xl rounded-2xl border border-white/10 bg-white/[0.04] px-3 pb-4 pt-14 shadow-glow backdrop-blur-md sm:rounded-3xl sm:px-8 sm:pb-8 sm:pt-20">
+        <div className="relative mx-auto max-w-5xl rounded-2xl border border-line bg-cream px-3 pb-4 pt-14 shadow-card sm:rounded-3xl sm:px-8 sm:pb-8 sm:pt-20">
           <div
             ref={promptBoxRef}
             className="relative mx-auto max-w-[980px] rounded-[18px] border border-slate-300/70 bg-white px-3 py-3 shadow-[0_12px_30px_rgba(2,6,23,0.12)] sm:rounded-[26px] sm:px-5 sm:py-4"
@@ -240,7 +240,7 @@ export function DemoSection() {
             ) : null}
 
             <motion.div
-              className="absolute -top-10 right-2 flex h-9 w-[180px] items-center gap-1.5 overflow-hidden rounded-t-lg rounded-bl-none bg-gradient-to-r from-violet-700 to-violet-600 px-2 text-[10px] text-white shadow-[0_8px_25px_rgba(124,58,237,0.45)] sm:-top-[51px] sm:right-[40px] sm:h-[49px] sm:w-[320px] sm:gap-3 sm:rounded-t-xl sm:px-4 sm:text-[14px]"
+              className="absolute -top-10 right-2 flex h-9 w-[180px] items-center gap-1.5 overflow-hidden rounded-t-lg rounded-bl-none bg-ink px-2 text-[10px] text-cream shadow-card sm:-top-[51px] sm:right-[40px] sm:h-[49px] sm:w-[320px] sm:gap-3 sm:rounded-t-xl sm:px-4 sm:text-[14px]"
             >
               {tabShineActive ? (
                 <motion.span
@@ -251,29 +251,36 @@ export function DemoSection() {
                 />
               ) : null}
               <span className="relative z-10 inline-flex h-full w-[120px] flex-none items-center overflow-hidden font-semibold leading-none sm:w-[210px]">
-                <span className="invisible whitespace-nowrap">Prompt Improved</span>
+                <span className="invisible inline-flex items-center gap-2 whitespace-nowrap">
+                  <span>Prompt Improved</span>
+                  <span className="inline-block h-3.5 w-3.5" aria-hidden />
+                </span>
                 <AnimatePresence mode="wait" initial={false}>
                   <motion.span
                     key={tabText}
-                    className="absolute inset-x-0 top-[40%] inline-flex -translate-y-1/2 items-center gap-1 whitespace-nowrap sm:top-[37%]"
+                    className="absolute inset-x-0 top-[40%] inline-flex -translate-y-1/2 items-center gap-2 whitespace-nowrap sm:top-[37%]"
                     initial={{ y: 22, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}
                     exit={{ y: -22, opacity: 0 }}
                     transition={{ duration: 0.26, ease: "easeInOut" }}
                   >
-                    <span>{tabText}</span>
                     {tabText === "Prompt Improved" ? (
-                      <img
-                        src="/images/green-check.png"
-                        alt=""
-                        aria-hidden="true"
-                        className="h-3.5 w-3.5 rounded-[3px] object-contain"
-                      />
-                    ) : null}
+                      <>
+                        <span>Prompt Improved</span>
+                        <img
+                          src="/images/green-check.png"
+                          alt=""
+                          aria-hidden="true"
+                          className="h-3.5 w-3.5 rounded-[3px] object-contain"
+                        />
+                      </>
+                    ) : (
+                      <span>{tabText}</span>
+                    )}
                   </motion.span>
                 </AnimatePresence>
               </span>
-              <span className="relative z-10 ml-auto pr-0 text-right text-white/80 sm:pr-1">Auto</span>
+              <span className="relative z-10 ml-auto pr-0 text-right text-cream/80 sm:pr-1">Auto</span>
             </motion.div>
           </div>
         </div>

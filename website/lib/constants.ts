@@ -19,30 +19,31 @@ export const DEMO_TIMING = {
 
 export const BENEFITS = [
   {
-    title: "Better outputs instantly",
-    body: "Promptly rewrites vague instructions into clear, actionable prompts before you hit send."
+    title: "Prompt intent",
+    body: "Promptly sharpens what you mean so outputs track your goal—not a vague first guess."
   },
   {
-    title: "Save time on every prompt",
-    body: "Reduce trial-and-error loops and get closer to useful output on the first response."
+    title: "Efficient prompts",
+    body: "Rewritten for clarity and structure—the format LLMs read best—so you spend less on input and retries."
   },
   {
-    title: "Works across top AI tools",
-    body: "Use one consistent prompt-quality workflow inside ChatGPT, Claude, and Gemini."
-  },
-  {
-    title: "No learning curve",
-    body: "One click improves structure, intent clarity, and output format with no setup burden."
-  },
-  {
-    title: "Consistency at scale",
-    body: "Keep team outputs aligned by standardizing prompt quality across workflows."
+    title: "Structured outputs",
+    body: "Clear output instructions steer the model toward what matters, not long unfocused text."
   },
   {
     title: "Write less, get more",
-    body: "Promptly transforms short ideas into high-quality instruction sets with better constraints."
+    body: "One click replaces minutes of manual prompt editing before every send."
+  },
+  {
+    title: "Track prompt performance",
+    body: "See prompt volume and AI use over time—for individuals and firms measuring efficiency."
   }
-];
+] as const;
+
+export type BenefitItem = {
+  title: string;
+  body: string;
+};
 
 export const COMPARISON_ROWS = [
   { feature: "Better prompt clarity", withPromptly: "yes", withoutPromptly: "partial" },

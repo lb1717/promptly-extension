@@ -75,10 +75,19 @@ undoBtn.addEventListener("click", () => {
   setStatus("Restored previous prompt.");
 });
 
+function countWords(text) {
+  const trimmed = String(text || "").trim();
+  return trimmed ? trimmed.split(/\s+/).filter(Boolean).length : 0;
+}
+
 autoAdjustBtn.addEventListener("click", async () => {
   const prompt = promptInput.value.trim();
   if (!prompt) {
     setStatus("Enter a prompt first.", true);
+    return;
+  }
+  if (countWords(prompt) < 3) {
+    setStatus("Prompt too short", true);
     return;
   }
 

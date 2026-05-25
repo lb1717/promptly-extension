@@ -286,44 +286,44 @@ export function ResearchHeuristicDemo() {
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1.02fr_1.18fr]">
-      <div className="rounded-3xl border border-white/10 bg-white/[0.045] p-6 backdrop-blur-md">
+      <div className="rounded-3xl border border-line bg-cream p-6 backdrop-blur-md">
         <div className="mb-4 flex items-center justify-between gap-3">
-          <h3 className="text-lg font-semibold text-white">Prompt input</h3>
+          <h3 className="text-lg font-semibold text-ink">Prompt input</h3>
           <div className="group relative">
-            <span className="inline-flex cursor-help items-center rounded-full border border-violet-300/25 bg-violet-500/10 px-3 py-1 text-xs font-semibold text-violet-100">
+            <span className="inline-flex cursor-help items-center rounded-full border border-line bg-cream-dark px-3 py-1 text-xs font-semibold text-muted">
               Demo mode: heuristic optimiser
             </span>
-            <div className="pointer-events-none absolute right-0 top-full z-10 mt-2 w-64 rounded-2xl border border-white/10 bg-[#120d1d] p-3 text-xs leading-relaxed text-violet-100/80 opacity-0 shadow-xl transition group-hover:opacity-100">
+            <div className="pointer-events-none absolute right-0 top-full z-10 mt-2 w-64 rounded-2xl border border-line bg-cream p-3 text-xs leading-relaxed text-muted opacity-0 shadow-xl transition group-hover:opacity-100">
               This tool is illustrative. It uses deterministic keyword heuristics and template rules rather than a live model call.
             </div>
           </div>
         </div>
-        <p className="mb-4 text-sm leading-relaxed text-violet-100/75">
+        <p className="mb-4 text-sm leading-relaxed text-muted">
           Paste a rough prompt, then run the demo pipeline to inspect the extracted contract, retrieved tags, and an
           optimised rewrite.
         </p>
-        <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-violet-300/80">
+        <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-faint">
           Raw prompt
         </label>
         <textarea
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
-          className="min-h-[300px] w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm leading-relaxed text-violet-50 outline-none transition placeholder:text-violet-200/30 focus:border-violet-300/40 focus:bg-black/45"
+          className="min-h-[300px] w-full rounded-2xl border border-line bg-cream-dark px-4 py-3 text-sm leading-relaxed text-ink outline-none transition placeholder:text-faint focus:border-line focus:bg-page"
           placeholder="Describe the task, audience, constraints, and desired output."
         />
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <button
             type="button"
             onClick={handleOptimise}
-            className="inline-flex items-center justify-center rounded-xl bg-violet-500 px-5 py-3 text-sm font-semibold text-white shadow-[0_12px_35px_rgba(139,92,246,0.45)] transition hover:bg-violet-400"
+            className="inline-flex items-center justify-center rounded-xl bg-ink px-5 py-3 text-sm font-semibold text-cream shadow-card transition hover:bg-neutral-800"
           >
             Optimise prompt
           </button>
-          <p className="text-xs text-violet-100/60">Deterministic output, no external calls, intended for product illustration.</p>
+          <p className="text-xs text-faint">Deterministic output, no external calls, intended for product illustration.</p>
         </div>
       </div>
 
-      <div className="rounded-3xl border border-white/10 bg-white/[0.045] p-6 backdrop-blur-md">
+      <div className="rounded-3xl border border-line bg-cream p-6 backdrop-blur-md">
         <div className="mb-5 flex flex-wrap gap-2">
           {TAB_OPTIONS.map((tab) => {
             const active = tab.id === activeTab;
@@ -334,8 +334,8 @@ export function ResearchHeuristicDemo() {
                 onClick={() => setActiveTab(tab.id)}
                 className={
                   active
-                    ? "rounded-full border border-violet-200/40 bg-violet-500/20 px-3 py-1.5 text-sm font-semibold text-white"
-                    : "rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-sm text-violet-100/80 transition hover:bg-white/[0.06] hover:text-white"
+                    ? "rounded-full border border-line bg-cream-dark px-3 py-1.5 text-sm font-semibold text-ink"
+                    : "rounded-full border border-line bg-cream-dark px-3 py-1.5 text-sm text-muted transition hover:bg-cream-dark hover:text-ink"
                 }
               >
                 {tab.label}
@@ -346,8 +346,8 @@ export function ResearchHeuristicDemo() {
 
         {activeTab === "analysis" ? (
           <div>
-            <p className="mb-3 text-sm text-violet-100/70">Heuristic analysis summary</p>
-            <pre className="overflow-x-auto rounded-2xl border border-white/10 bg-black/35 p-4 text-xs leading-6 text-violet-100/90">
+            <p className="mb-3 text-sm text-muted">Heuristic analysis summary</p>
+            <pre className="overflow-x-auto rounded-2xl border border-line bg-cream-dark p-4 text-xs leading-6 text-muted">
               {JSON.stringify(result.analysis, null, 2)}
             </pre>
           </div>
@@ -355,8 +355,8 @@ export function ResearchHeuristicDemo() {
 
         {activeTab === "optimised" ? (
           <div>
-            <p className="mb-3 text-sm text-violet-100/70">Optimised prompt template with explicit sections and output contract</p>
-            <pre className="overflow-x-auto whitespace-pre-wrap rounded-2xl border border-white/10 bg-black/35 p-4 text-xs leading-6 text-violet-100/90">
+            <p className="mb-3 text-sm text-muted">Optimised prompt template with explicit sections and output contract</p>
+            <pre className="overflow-x-auto whitespace-pre-wrap rounded-2xl border border-line bg-cream-dark p-4 text-xs leading-6 text-muted">
               {result.optimisedPrompt}
             </pre>
           </div>
@@ -364,12 +364,12 @@ export function ResearchHeuristicDemo() {
 
         {activeTab === "tags" ? (
           <div>
-            <p className="mb-3 text-sm text-violet-100/70">Retrieved tags and template slots</p>
+            <p className="mb-3 text-sm text-muted">Retrieved tags and template slots</p>
             <div className="mb-5 flex flex-wrap gap-2">
               {result.tags.map((tag) => (
                 <span
                   key={tag}
-                  className="rounded-full border border-violet-300/20 bg-violet-500/10 px-3 py-1 text-xs font-medium text-violet-100"
+                  className="rounded-full border border-line bg-cream-dark px-3 py-1 text-xs font-medium text-muted"
                 >
                   {tag}
                 </span>
@@ -377,7 +377,7 @@ export function ResearchHeuristicDemo() {
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               {result.template.map((item) => (
-                <div key={item} className="rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-violet-50">
+                <div key={item} className="rounded-2xl border border-line bg-cream-dark px-4 py-3 text-sm text-ink">
                   {item}
                 </div>
               ))}
@@ -387,27 +387,27 @@ export function ResearchHeuristicDemo() {
 
         {activeTab === "diff" ? (
           <div>
-            <p className="mb-3 text-sm text-violet-100/70">Side-by-side illustrative diff between the raw input and the optimised rewrite</p>
+            <p className="mb-3 text-sm text-muted">Side-by-side illustrative diff between the raw input and the optimised rewrite</p>
             <div className="grid gap-4 lg:grid-cols-2">
-              <div className="rounded-2xl border border-white/10 bg-black/30">
-                <div className="border-b border-white/10 px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-violet-300/80">
+              <div className="rounded-2xl border border-line bg-cream-dark">
+                <div className="border-b border-line px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-faint">
                   Original
                 </div>
-                <div className="max-h-[420px] overflow-auto px-4 py-3 text-xs leading-6 text-violet-100/85">
+                <div className="max-h-[420px] overflow-auto px-4 py-3 text-xs leading-6 text-muted">
                   {diffRows.map((row, index) => (
-                    <div key={`left-${index}`} className="border-b border-white/5 py-1.5">
+                    <div key={`left-${index}`} className="border-b border-line py-1.5">
                       {row.left || <span className="opacity-30"> </span>}
                     </div>
                   ))}
                 </div>
               </div>
-              <div className="rounded-2xl border border-violet-300/20 bg-violet-500/[0.06]">
-                <div className="border-b border-violet-300/15 px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-violet-200/85">
+              <div className="rounded-2xl border border-line bg-cream-dark">
+                <div className="border-b border-line px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-faint">
                   Optimised
                 </div>
-                <div className="max-h-[420px] overflow-auto px-4 py-3 text-xs leading-6 text-violet-50/95">
+                <div className="max-h-[420px] overflow-auto px-4 py-3 text-xs leading-6 text-ink">
                   {diffRows.map((row, index) => (
-                    <div key={`right-${index}`} className="border-b border-white/5 py-1.5">
+                    <div key={`right-${index}`} className="border-b border-line py-1.5">
                       {row.right || <span className="opacity-30"> </span>}
                     </div>
                   ))}

@@ -27,6 +27,8 @@ promptly-extension-store.zip
 promptly-extension-store-*.zip
 promptly-chrome-store-UPLOAD.zip
 promptly-chrome-store-v*.zip
+promptly-firefox-v*.zip
+promptly-edge-v*.zip
 
 ### OS / editor
 .DS_Store

@@ -244,20 +244,13 @@
     });
   }
 
-  /** Lenient gate for Improve / auto-rewrite: not empty; 2+ words OR one clear word (3+ chars). */
+  /** Gate for Improve / auto-rewrite: at least 3 words. */
   function isImprovePromptSubstantive(text) {
     const t = String(text || "").trim();
     if (!t) {
       return false;
     }
-    const words = t.split(/\s+/).filter(Boolean);
-    if (words.length >= 2) {
-      return true;
-    }
-    if (words.length === 1 && words[0].length >= 3) {
-      return true;
-    }
-    return false;
+    return t.split(/\s+/).filter(Boolean).length >= 3;
   }
 
   function looksLikePureGibberish(text) {
@@ -730,7 +723,7 @@
         if (!isOpen) {
           ui.setTabStatus("idle");
         }
-        ui.setAutoAdjustLoading(false, "add 2+ words", true, "improve");
+        ui.setAutoAdjustLoading(false, "Prompt too short", true, "improve");
         return;
       }
       if (isComposeMode && !userInstruction) {
@@ -825,17 +818,12 @@
           ui.setSignedOut(true);
         }
         const rawReason = String(_error?.message || _error || "failed");
-        ui.showErrorToast(mapPromptlyErrorToToast(rawReason));
+        const toastMsg = mapPromptlyErrorToToast(rawReason);
         if (_error?.promptlyCredits) {
           applyCreditsToUi(_error.promptlyCredits, { announceNoTokens: true });
         }
         const limitReached = /daily api token limit reached|daily credit limit reached/i.test(rawReason);
         const tokenShortfall = /not enough api tokens|not enough daily tokens/i.test(rawReason);
-        const reason = limitReached
-          ? "Daily API token limit reached"
-          : tokenShortfall
-            ? "Not enough API tokens for this prompt"
-            : rawReason;
         if (!(_error?.promptlyCredits) && (limitReached || tokenShortfall)) {
           try {
             const credits = await fetchCreditUsageViaProxy();
@@ -846,7 +834,7 @@
             // Ignore credits refresh failure; primary error is already surfaced.
           }
         }
-        ui.setAutoAdjustLoading(false, `failed: ${reason}`, true, isComposeMode ? "compose" : "improve");
+        ui.setAutoAdjustLoading(false, toastMsg, true, isComposeMode ? "compose" : "improve");
         if (!isOpen) {
           ui.setTabStatus("idle");
         }
@@ -2540,6 +2528,7 @@
       return;
     }
     if (!isImprovePromptSubstantive(originalPrompt)) {
+      ui.setAutoAdjustLoading(false, "Prompt too short", true, "improve");
       triggerSendAfterAdjust(trigger);
       return;
     }
@@ -2578,7 +2567,9 @@
       if (isSignInRequiredError(_error)) {
         blockSend = true;
       }
-      ui.showErrorToast(mapPromptlyErrorToToast(String(_error?.message || _error || "")));
+      if (!blockSend) {
+        ui.showErrorToast(mapPromptlyErrorToToast(String(_error?.message || _error || "")));
+      }
       if (_error?.promptlyCredits) {
         applyCreditsToUi(_error.promptlyCredits, { announceNoTokens: true });
       }
