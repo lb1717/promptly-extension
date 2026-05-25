@@ -1109,7 +1109,7 @@
         credits.left_percent != null
           ? Math.max(0, Math.min(100, Math.round(Number(credits.left_percent) || 0)))
           : Math.max(0, Math.min(100, 100 - usedPercent));
-      const displayPercent = used > 0 && usedPercent === 0 ? 1 : usedPercent;
+      const displayPercent = used > 0 ? Math.max(1.5, usedPercent) : 0;
       const displayDeg = Math.max(0, Math.min(360, (displayPercent / 100) * 360));
       this.creditUsageMeter.style.setProperty("--promptly-credit-progress", `${displayPercent}%`);
       if (this.creditUsageWrap) {
@@ -1118,9 +1118,15 @@
         this.creditUsageWrap.style.setProperty("--promptly-credit-progress-deg", `${displayDeg}deg`);
       }
       const maxStr = fmt(max);
+      const resetHours = Math.max(0, Math.ceil(Number(credits.reset_in_hours || 0) || 0));
+      const resetLine =
+        used >= max && resetHours > 0
+          ? `<span class="promptly-credit-line promptly-credit-line-reset">${resetHours}h Until Reset</span>`
+          : "";
       this.creditUsageTooltip.innerHTML =
         `<span class="promptly-credit-line promptly-credit-line-strong">${leftPercent}% Daily Limit Left</span>` +
-        `<span class="promptly-credit-line promptly-credit-line-muted">${fmt(used)} / ${maxStr} Tokens</span>`;
+        `<span class="promptly-credit-line promptly-credit-line-muted">${fmt(used)} / ${maxStr} Tokens</span>` +
+        resetLine;
       this.creditUsageLoaded = true;
       this.creditUsageFetchedAt = Date.now();
     }

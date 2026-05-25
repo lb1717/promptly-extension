@@ -99,6 +99,9 @@ type DailyCreditsPayload = {
   used_percent: number;
   left_percent: number;
   hard_exhausted: boolean;
+  reset_at?: string;
+  reset_in_seconds?: number;
+  reset_in_hours?: number;
 };
 
 type AccountUsageStatsPayload = {

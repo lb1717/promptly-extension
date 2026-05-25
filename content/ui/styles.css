@@ -1080,6 +1080,15 @@
   color: rgba(180, 186, 198, 0.92);
 }
 
+.promptly-credit-line-reset {
+  display: block;
+  margin-top: 2px;
+  font-weight: 700;
+  font-size: 7px;
+  line-height: 1.2;
+  color: rgba(255, 255, 255, 0.96);
+}
+
 .promptly-tab-credit-wrap:hover .promptly-tab-credit-tooltip {
   opacity: 1;
   transform: translate(-50%, 0);

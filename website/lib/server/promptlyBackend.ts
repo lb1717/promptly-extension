@@ -28,7 +28,8 @@ const PROMPT_SETTINGS_COLLECTION = "promptly_settings";
 const PROMPT_ENGINEERING_DOC_ID = "prompt_engineering";
 const TIER_LIMITS_DOC_ID = "tier_limits";
 const USER_EMAIL_INDEX_COLLECTION = "user_email_index";
-const TIER_LIMITS_CACHE_MS = 30_000;
+// Admin plan-limit changes should be reflected by the next credits/optimize request.
+const TIER_LIMITS_CACHE_MS = 0;
 /** Default Pro daily cap (tokens / UTC day) when admin doc not set — editable in Admin → Plan limits. */
 export const DEFAULT_PRO_DAILY_TOKEN_LIMIT = 12_000_000;
 const PROMPT_TEMPLATE_MAX_CHARS = 24_000;
@@ -177,10 +178,19 @@ export function buildCreditsEnvelope(
     }
   }
 
+  const now = new Date();
+  const resetAt = new Date(now);
+  resetAt.setUTCHours(24, 0, 0, 0);
+  const resetInSeconds = Math.max(0, Math.ceil((resetAt.getTime() - now.getTime()) / 1000));
+  const resetInHours = resetInSeconds > 0 ? Math.max(1, Math.ceil(resetInSeconds / 3600)) : 0;
+
   return {
     ...credits,
     remaining: remainingBudget,
     hard_exhausted: used >= limit,
+    reset_at: resetAt.toISOString(),
+    reset_in_seconds: resetInSeconds,
+    reset_in_hours: resetInHours,
     planned_bill_estimate: plannedBillEstimate,
     can_run_estimated_prompt: canRunEstimatedPrompt
   };
