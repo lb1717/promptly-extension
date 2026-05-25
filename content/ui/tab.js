@@ -172,7 +172,8 @@
       this.shadowRoot = this.host.attachShadow({ mode: "open" });
       const styleLink = document.createElement("link");
       styleLink.rel = "stylesheet";
-      styleLink.href = `${chrome.runtime.getURL("content/ui/styles.css")}?v=1.0.14`;
+      const extVersion = chrome.runtime.getManifest().version;
+      styleLink.href = `${chrome.runtime.getURL("content/ui/styles.css")}?v=${encodeURIComponent(extVersion)}`;
 
       this.root = document.createElement("div");
       this.root.className = "promptly-root";
