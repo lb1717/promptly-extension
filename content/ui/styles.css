@@ -1012,6 +1012,10 @@
   justify-content: center;
   overflow: visible;
   transform: translateX(-2px);
+  cursor: default;
+  pointer-events: auto;
+  padding: 2px;
+  margin: -2px;
 }
 
 /* Vertical connector on wrap (unmasked): 12 o'clock of ring to tooltip */

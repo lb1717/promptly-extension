@@ -721,6 +721,166 @@ async function fetchWithTimeout(url, init, timeoutMs) {
   }
 }
 
+const CREDITS_CACHE_TTL_MS = 10_000;
+const CREDITS_FETCH_TIMEOUT_MS = 12_000;
+const AUTH_RESOLVE_TIMEOUT_MS = 8_000;
+/** @type {{ email: string, credits: object, fetchedAt: number } | null} */
+let creditsCacheEntry = null;
+
+function readCreditsCache(email) {
+  if (!creditsCacheEntry) {
+    return null;
+  }
+  const key = String(email || "").trim().toLowerCase();
+  if (!key || creditsCacheEntry.email !== key) {
+    return null;
+  }
+  if (Date.now() - creditsCacheEntry.fetchedAt > CREDITS_CACHE_TTL_MS) {
+    return null;
+  }
+  return creditsCacheEntry.credits;
+}
+
+function writeCreditsCache(email, credits) {
+  const key = String(email || "").trim().toLowerCase();
+  if (!key || !credits) {
+    return;
+  }
+  creditsCacheEntry = { email: key, credits, fetchedAt: Date.now() };
+}
+
+function clearCreditsCache() {
+  creditsCacheEntry = null;
+}
+
+function buildCreditEstimateHeaders(message) {
+  const headers = {};
+  const hasLenEstimate =
+    typeof message?.estimatePromptLength === "number" &&
+    typeof message?.estimateInstructionLength === "number";
+  if (!hasLenEstimate) {
+    return headers;
+  }
+  headers["x-promptly-estimate-prompt-length"] = String(
+    Math.max(0, Math.floor(message.estimatePromptLength))
+  );
+  headers["x-promptly-estimate-instruction-length"] = String(
+    Math.max(0, Math.floor(message.estimateInstructionLength))
+  );
+  return headers;
+}
+
+async function resolveApiAuthHeaders() {
+  const timeoutMs = AUTH_RESOLVE_TIMEOUT_MS;
+  try {
+    const identity = await Promise.race([
+      getFirebaseIdentityForApi(false),
+      new Promise((_, reject) =>
+        globalThis.setTimeout(() => reject(new Error("Firebase auth timed out")), timeoutMs)
+      )
+    ]);
+    const email = String(identity?.email || "").trim().toLowerCase();
+    if (identity?.idToken) {
+      return {
+        email,
+        headers: {
+          "x-promptly-client": "promptly-extension",
+          Authorization: `Bearer ${identity.idToken}`
+        }
+      };
+    }
+  } catch (_firebaseErr) {
+    // Fall through to web-auth session or Google token.
+  }
+
+  const local = await chrome.storage.local.get([
+    SESSION_WEB_AUTH_EMAIL,
+    SESSION_WEB_AUTH_TOKEN,
+    SESSION_WEB_AUTH_EXPIRES_AT
+  ]);
+  const webEmail = String(local[SESSION_WEB_AUTH_EMAIL] || "").trim().toLowerCase();
+  const webToken = await readWebAuthSessionTokenIfValid();
+  if (webEmail && webToken) {
+    return {
+      email: webEmail,
+      headers: {
+        "x-promptly-client": "promptly-extension",
+        "x-promptly-user-email": webEmail,
+        "x-promptly-google-access-token": webToken
+      }
+    };
+  }
+
+  const googleAccessToken = await Promise.race([
+    getGoogleAccessTokenForApi(),
+    new Promise((_, reject) =>
+      globalThis.setTimeout(() => reject(new Error("Google auth timed out")), 4000)
+    )
+  ]);
+  const chromeEmail = await getEmailFromGoogleAccessToken(googleAccessToken);
+  return {
+    email: chromeEmail,
+    headers: {
+      "x-promptly-client": "promptly-extension",
+      "x-promptly-user-email": chromeEmail,
+      "x-promptly-google-access-token": googleAccessToken
+    }
+  };
+}
+
+async function fetchUserCreditsFromApi(message = {}, options = {}) {
+  const persisted = await readPersistedSignInState();
+  if (!persisted?.chromeEmail) {
+    const err = new Error("Not signed in");
+    err.needsSignIn = true;
+    throw err;
+  }
+
+  const skipCache = options.skipCache === true || options.forceRefresh === true;
+  if (!skipCache) {
+    const cached = readCreditsCache(persisted.chromeEmail);
+    if (cached) {
+      return cached;
+    }
+  }
+
+  const auth = await resolveApiAuthHeaders();
+  const baseUrl = await getManagedProxyBaseUrl();
+  if (!baseUrl) {
+    throw new Error("Missing app base URL in extension settings");
+  }
+
+  const response = await fetchWithTimeout(
+    buildApiUrl(baseUrl, "/api/credits"),
+    {
+      method: "GET",
+      headers: {
+        ...auth.headers,
+        ...buildCreditEstimateHeaders(message)
+      }
+    },
+    CREDITS_FETCH_TIMEOUT_MS
+  );
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const err = new Error(String(body?.error || `Credits request failed (${response.status})`));
+    if (response.status === 401) {
+      err.needsSignIn = true;
+    }
+    throw err;
+  }
+  const credits = body?.credits || null;
+  if (!credits) {
+    throw new Error("Credits response was empty");
+  }
+  writeCreditsCache(String(persisted.chromeEmail || auth.email || "").trim().toLowerCase(), credits);
+  return credits;
+}
+
+function prefetchUserCredits() {
+  void fetchUserCreditsFromApi({}, { skipCache: true }).catch(() => {});
+}
+
 async function signInToFirebaseWithGoogle({
   firebaseWebApiKey,
   firebaseAuthDomain,
@@ -786,7 +946,7 @@ async function persistFirebaseSessionAfterGoogleWebSignIn(webSession) {
 }
 
 async function refreshFirebaseIdToken({ firebaseWebApiKey, refreshToken }) {
-  const response = await fetch(
+  const response = await fetchWithTimeout(
     `https://securetoken.googleapis.com/v1/token?key=${encodeURIComponent(firebaseWebApiKey)}`,
     {
       method: "POST",
@@ -795,7 +955,8 @@ async function refreshFirebaseIdToken({ firebaseWebApiKey, refreshToken }) {
         grant_type: "refresh_token",
         refresh_token: refreshToken
       }).toString()
-    }
+    },
+    8000
   );
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -954,17 +1115,45 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message.type === "PROMPTLY_CLEAR_SESSION") {
         await chrome.storage.local.remove(["promptlyFirebaseIdentity"]);
         await clearWebAuthSessionCache();
+        clearCreditsCache();
         sendResponse({ ok: true });
+        return;
+      }
+
+      if (message.type === "PROMPTLY_GET_CREDITS") {
+        try {
+          const credits = await fetchUserCreditsFromApi(message, {
+            skipCache: message.forceRefresh === true
+          });
+          sendResponse({ ok: true, data: { credits } });
+        } catch (error) {
+          sendResponse({
+            ok: false,
+            error: String(error?.message || error),
+            needsSignIn: !!error?.needsSignIn
+          });
+        }
         return;
       }
 
       if (message.type === "PROMPTLY_CHECK_CHROME_SIGNIN") {
         const persisted = await readPersistedSignInState();
-        if (persisted) {
-          sendResponse({ ok: true, data: persisted });
+        if (!persisted?.chromeEmail) {
+          sendResponse({ ok: false, error: "Not signed in" });
           return;
         }
-        sendResponse({ ok: false, error: "Not signed in" });
+        const data = {
+          chromeEmail: persisted.chromeEmail,
+          authProvider: persisted.authProvider || null
+        };
+        if (message.includeCredits) {
+          try {
+            data.credits = await fetchUserCreditsFromApi(message, { skipCache: false });
+          } catch (_creditsError) {
+            data.credits = null;
+          }
+        }
+        sendResponse({ ok: true, data });
         return;
       }
 
@@ -976,12 +1165,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           } catch (_refreshError) {
             // Persisted Promptly session still counts as signed in until explicit sign-out.
           }
+          prefetchUserCredits();
           sendResponse({ ok: true, data: { chromeEmail: persisted.chromeEmail } });
           return;
         }
         // Explicit sign-in only — opens the web popup when no persisted session exists.
         const result = await completeExtensionSignInWebPopup();
         if (result.kind === "firebase_email") {
+          prefetchUserCredits();
           sendResponse({ ok: true, data: { chromeEmail: result.firebaseEmail } });
           return;
         }
@@ -997,6 +1188,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         } catch (_e) {
           /* Firebase session improves long-lived API auth; ignore failures here */
         }
+        prefetchUserCredits();
         sendResponse({ ok: true, data: { chromeEmail } });
         return;
       }
@@ -1118,34 +1310,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           ok: false,
           error: "Missing app base URL in extension settings"
         });
-        return;
-      }
-
-      if (message.type === "PROMPTLY_GET_CREDITS") {
-        const creditHeaders = { ...apiAuthHeaders };
-        const hasLenEstimate =
-          typeof message.estimatePromptLength === "number" &&
-          typeof message.estimateInstructionLength === "number";
-        if (hasLenEstimate) {
-          const estPrompt = Math.max(0, Math.floor(message.estimatePromptLength));
-          const estInstr = Math.max(0, Math.floor(message.estimateInstructionLength));
-          creditHeaders["x-promptly-estimate-prompt-length"] = String(estPrompt);
-          creditHeaders["x-promptly-estimate-instruction-length"] = String(estInstr);
-        }
-        const response = await fetch(buildApiUrl(baseUrl, "/api/credits"), {
-          method: "GET",
-          headers: creditHeaders
-        });
-        const body = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          sendResponse({
-            ok: false,
-            error: body.error || `Proxy error (${response.status})`,
-            credits: body.credits || null
-          });
-          return;
-        }
-        sendResponse({ ok: true, data: body });
         return;
       }
 

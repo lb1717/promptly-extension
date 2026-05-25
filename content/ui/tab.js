@@ -126,6 +126,7 @@
       onLoadSettingsAccount,
       onManageAccount,
       onPromptlySignOut,
+      onRefreshCredits,
       onVisualStyleChange,
       onVisualColorChange,
       onDragStart,
@@ -144,6 +145,10 @@
       this.onManageAccount = onManageAccount;
       this.onPromptlySignOut =
         typeof onPromptlySignOut === "function" ? onPromptlySignOut : null;
+      this.onRefreshCredits = typeof onRefreshCredits === "function" ? onRefreshCredits : null;
+      this.creditUsageLoaded = false;
+      this.creditUsageFetchedAt = 0;
+      this.creditHoverFetchAt = 0;
       this.onVisualStyleChange = onVisualStyleChange;
       this.onVisualColorChange = onVisualColorChange;
       this.onDragStart = onDragStart;
@@ -256,9 +261,15 @@
         this.creditUsageWrap.style.setProperty("--promptly-credit-progress-deg", "7.2deg");
       }
       if (this.creditUsageTooltip) {
-        this.creditUsageTooltip.innerHTML =
-          "<span class='promptly-credit-line promptly-credit-line-strong'>—</span>" +
-          "<span class='promptly-credit-line promptly-credit-line-muted'>— / — Tokens</span>";
+        this.resetCreditUsageDisplay();
+      }
+      if (this.creditUsageWrap) {
+        this.creditUsageWrap.setAttribute("title", "Daily token usage");
+        this.creditUsageWrap.addEventListener("mouseenter", () => this.handleCreditWrapHover());
+        this.creditUsageWrap.addEventListener("focusin", () => this.handleCreditWrapHover());
+        this.creditUsageWrap.addEventListener("pointerdown", (event) => {
+          event.stopPropagation();
+        });
       }
       const runToggleAutoSend = (event) => {
         event.preventDefault();
@@ -344,7 +355,8 @@
             node instanceof Element &&
             (node.closest(".promptly-tab-auto-switch") ||
               node.closest(".promptly-tab-signin") ||
-              node.closest(".promptly-tab-settings"))
+              node.closest(".promptly-tab-settings") ||
+              node.closest(".promptly-tab-credit-wrap"))
         );
         if (hitControl) {
           return;
@@ -403,7 +415,8 @@
           event.target instanceof Element &&
           (event.target.closest(".promptly-tab-auto-switch") ||
             event.target.closest(".promptly-tab-signin") ||
-            event.target.closest(".promptly-tab-settings"))
+            event.target.closest(".promptly-tab-settings") ||
+            event.target.closest(".promptly-tab-credit-wrap"))
         ) {
           return;
         }
@@ -769,11 +782,90 @@
       this.autoSendSwitch.setAttribute("aria-checked", isEnabled ? "true" : "false");
     }
 
+    isSignedOut() {
+      return this.root.classList.contains("is-signed-out");
+    }
+
     setSignedOut(isSignedOut) {
       this.root.classList.toggle("is-signed-out", !!isSignedOut);
       if (isSignedOut) {
         this.setSettingsAccountEmail("");
+        this.resetCreditUsageDisplay();
       }
+    }
+
+    resetCreditUsageDisplay() {
+      this.creditUsageLoaded = false;
+      this.creditUsageFetchedAt = 0;
+      if (this.creditUsageMeter) {
+        this.creditUsageMeter.style.setProperty("--promptly-credit-progress", "2%");
+      }
+      if (this.creditUsageWrap) {
+        this.creditUsageWrap.classList.remove("is-credits-loading");
+        this.creditUsageWrap.style.setProperty("--promptly-credit-progress", "2%");
+        this.creditUsageWrap.style.setProperty("--promptly-credit-progress-deg", "7.2deg");
+      }
+      if (this.creditUsageTooltip) {
+        this.creditUsageTooltip.innerHTML =
+          "<span class='promptly-credit-line promptly-credit-line-strong'>—</span>" +
+          "<span class='promptly-credit-line promptly-credit-line-muted'>— / — Tokens</span>";
+      }
+    }
+
+    hasCreditUsageData() {
+      return this.creditUsageLoaded;
+    }
+
+    creditUsageNeedsRefresh(maxAgeMs = 45000) {
+      if (!this.creditUsageLoaded) {
+        return true;
+      }
+      if (!this.creditUsageFetchedAt) {
+        return true;
+      }
+      return Date.now() - this.creditUsageFetchedAt > maxAgeMs;
+    }
+
+    handleCreditWrapHover() {
+      if (this.isSignedOut()) {
+        return;
+      }
+      const now = Date.now();
+      if (now - this.creditHoverFetchAt < 1500) {
+        return;
+      }
+      const placeholder =
+        this.creditUsageTooltip?.querySelector(".promptly-credit-line-strong")?.textContent?.includes("—") ||
+        false;
+      if (!placeholder && !this.creditUsageNeedsRefresh()) {
+        return;
+      }
+      if (typeof this.onRefreshCredits !== "function") {
+        return;
+      }
+      this.creditHoverFetchAt = now;
+      void Promise.resolve(this.onRefreshCredits({ fromHover: true, showLoading: placeholder }));
+    }
+
+    setCreditUsageLoading(isLoading) {
+      if (this.creditUsageWrap) {
+        this.creditUsageWrap.classList.toggle("is-credits-loading", !!isLoading);
+      }
+      if (!isLoading || !this.creditUsageTooltip || this.creditUsageLoaded) {
+        return;
+      }
+      this.creditUsageTooltip.innerHTML =
+        "<span class='promptly-credit-line promptly-credit-line-strong'>Loading usage…</span>" +
+        "<span class='promptly-credit-line promptly-credit-line-muted'>Fetching token balance</span>";
+    }
+
+    setCreditUsageUnavailable() {
+      if (!this.creditUsageTooltip) {
+        return;
+      }
+      this.creditUsageTooltip.innerHTML =
+        "<span class='promptly-credit-line promptly-credit-line-strong'>Usage unavailable</span>" +
+        "<span class='promptly-credit-line promptly-credit-line-muted'>Hover again to retry</span>";
     }
 
     async setSettingsOpen(isOpen) {
@@ -1012,12 +1104,19 @@
       const fmt = (n) => Math.max(0, Math.floor(Number(n) || 0)).toLocaleString("en-US");
       const max = Math.max(1, Number(credits.max || 1));
       const used = Math.min(max, Math.max(0, Number(credits.used || 0)));
-      const usedPercent = Math.max(0, Math.min(100, Math.round((used / max) * 100)));
-      const leftPercent = Math.max(0, Math.min(100, 100 - usedPercent));
-      const displayPercent = Math.max(2, usedPercent);
+      const usedPercent =
+        credits.used_percent != null
+          ? Math.max(0, Math.min(100, Math.round(Number(credits.used_percent) || 0)))
+          : Math.max(0, Math.min(100, Math.round((used / max) * 100)));
+      const leftPercent =
+        credits.left_percent != null
+          ? Math.max(0, Math.min(100, Math.round(Number(credits.left_percent) || 0)))
+          : Math.max(0, Math.min(100, 100 - usedPercent));
+      const displayPercent = used > 0 ? Math.max(2, usedPercent) : 0;
       const displayDeg = Math.max(0, Math.min(360, (displayPercent / 100) * 360));
       this.creditUsageMeter.style.setProperty("--promptly-credit-progress", `${displayPercent}%`);
       if (this.creditUsageWrap) {
+        this.creditUsageWrap.classList.remove("is-credits-loading");
         this.creditUsageWrap.style.setProperty("--promptly-credit-progress", `${displayPercent}%`);
         this.creditUsageWrap.style.setProperty("--promptly-credit-progress-deg", `${displayDeg}deg`);
       }
@@ -1025,6 +1124,8 @@
       this.creditUsageTooltip.innerHTML =
         `<span class="promptly-credit-line promptly-credit-line-strong">${leftPercent}% Daily Limit Left</span>` +
         `<span class="promptly-credit-line promptly-credit-line-muted">${fmt(used)} / ${maxStr} Tokens</span>`;
+      this.creditUsageLoaded = true;
+      this.creditUsageFetchedAt = Date.now();
     }
 
     setTabStatus(status) {
