@@ -81,12 +81,12 @@ function ExtensionSignInContent() {
 
   const brandHeader = (
     <div className="mb-6 flex w-full flex-col items-center text-center">
-      <p className="text-sm font-semibold tracking-tight text-ink">Promptly Labs</p>
       <img
         src="/images/promptly-logo.png"
         alt="Promptly"
-        className="mt-3 h-11 w-auto max-w-[200px] object-contain"
+        className="h-12 w-auto max-w-[220px] object-contain"
       />
+      <h1 className="mt-3 text-2xl font-semibold tracking-tight text-ink">Promptly Labs</h1>
     </div>
   );
 
@@ -149,12 +149,12 @@ export default function ExtensionSignInPage() {
       fallback={
         <main className="flex min-h-screen items-center justify-center bg-white p-6 text-ink">
           <div className="flex flex-col items-center text-center">
-            <p className="text-sm font-semibold tracking-tight text-ink">Promptly Labs</p>
             <img
               src="/images/promptly-logo.png"
               alt="Promptly"
-              className="mt-3 h-11 w-auto max-w-[200px] object-contain"
+              className="h-12 w-auto max-w-[220px] object-contain"
             />
+            <h1 className="mt-3 text-2xl font-semibold tracking-tight text-ink">Promptly Labs</h1>
             <p className="mt-6 text-sm text-muted">Loading…</p>
           </div>
         </main>

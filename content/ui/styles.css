@@ -386,10 +386,14 @@
 }
 
 .promptly-settings-header {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 7px;
+  width: 100%;
+  box-sizing: border-box;
   margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 2px solid #b8b2a6;
 }
 
 .promptly-settings-header-separator {
@@ -468,27 +472,47 @@
   margin-bottom: 7px;
 }
 
+.promptly-settings-block {
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(224, 221, 214, 0.95);
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.promptly-settings-block:last-child {
+  margin-bottom: 0;
+}
+
+.promptly-settings-block .promptly-settings-section {
+  margin-bottom: 0;
+}
+
+.promptly-settings-block-account .promptly-settings-section-account {
+  margin-bottom: 10px;
+}
+
 .promptly-settings-section-account {
-  border-top: 1px solid #e0ddd6;
-  padding-top: 8px;
+  padding-top: 0;
+  border-top: none;
 }
 
 .promptly-settings-section-account .promptly-settings-heading {
-  margin-bottom: 0;
-  padding-bottom: 8px;
-  border-bottom: 1px solid #e0ddd6;
+  margin-bottom: 7px;
+  padding-bottom: 0;
+  border-bottom: none;
 }
 
 .promptly-settings-section-account .promptly-settings-account-row {
-  padding-top: 8px;
-  padding-bottom: 8px;
+  padding-top: 0;
+  padding-bottom: 0;
   margin-bottom: 0;
-  border-bottom: 1px solid #e0ddd6;
+  border-bottom: none;
 }
 
 .promptly-settings-section-visuals {
-  border-top: 1px solid #e0ddd6;
-  padding-top: 8px;
+  padding-top: 0;
+  border-top: none;
 }
 
 .promptly-settings-email {

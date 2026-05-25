@@ -475,6 +475,7 @@
         "<span class='promptly-settings-separator promptly-settings-header-separator' aria-hidden='true'>|</span>" +
         "<a class='promptly-settings-header-link' href='https://promptly-labs.com' target='_blank' rel='noopener noreferrer'>Promptly Labs</a>" +
         "</div>" +
+        "<div class='promptly-settings-block promptly-settings-block-account'>" +
         "<div class='promptly-settings-section promptly-settings-section-account'>" +
         "<div class='promptly-settings-label promptly-settings-heading'>Account</div>" +
         "<div class='promptly-settings-account-row'>" +
@@ -506,6 +507,7 @@
         "</div>" +
         "</div>" +
         "</div>" +
+        "<div class='promptly-settings-block promptly-settings-block-visuals'>" +
         "<div class='promptly-settings-section promptly-settings-section-visuals'>" +
         "<div class='promptly-settings-label promptly-settings-heading'>Visuals</div>" +
         "<div class='promptly-settings-visuals-row'>" +
@@ -520,6 +522,8 @@
         "<span class='promptly-settings-toggle-label promptly-settings-toggle-wide is-active'>Wide mode</span>" +
         "<button type='button' class='promptly-settings-toggle' role='switch' aria-checked='false' aria-label='Toggle thin mode'><span class='promptly-settings-toggle-knob'></span></button>" +
         "<span class='promptly-settings-toggle-label promptly-settings-toggle-thin'>Thin mode</span>" +
+        "</div>" +
+        "</div>" +
         "</div>";
       this.settingsEmailEl = this.settingsPanel.querySelector(".promptly-settings-email");
       this.settingsTierEl = this.settingsPanel.querySelector(".promptly-settings-tier-badge");
