@@ -723,7 +723,6 @@ async function fetchWithTimeout(url, init, timeoutMs) {
 
 const CREDITS_CACHE_TTL_MS = 10_000;
 const CREDITS_FETCH_TIMEOUT_MS = 12_000;
-const AUTH_RESOLVE_TIMEOUT_MS = 8_000;
 /** @type {{ email: string, credits: object, fetchedAt: number } | null} */
 let creditsCacheEntry = null;
 
@@ -770,62 +769,42 @@ function buildCreditEstimateHeaders(message) {
   return headers;
 }
 
-async function resolveApiAuthHeaders() {
-  const timeoutMs = AUTH_RESOLVE_TIMEOUT_MS;
+async function resolveExtensionApiAuthHeaders() {
   try {
-    const identity = await Promise.race([
-      getFirebaseIdentityForApi(false),
-      new Promise((_, reject) =>
-        globalThis.setTimeout(() => reject(new Error("Firebase auth timed out")), timeoutMs)
-      )
-    ]);
-    const email = String(identity?.email || "").trim().toLowerCase();
-    if (identity?.idToken) {
+    const identity = await getFirebaseIdentityForApi(false);
+    return {
+      email: String(identity.email || "").trim().toLowerCase(),
+      headers: {
+        "x-promptly-client": "promptly-extension",
+        Authorization: `Bearer ${identity.idToken}`
+      }
+    };
+  } catch (_firebaseErr) {
+    const local = await chrome.storage.local.get([SESSION_WEB_AUTH_EMAIL]);
+    const webEmail = String(local[SESSION_WEB_AUTH_EMAIL] || "").trim().toLowerCase();
+    const webToken = await readWebAuthSessionTokenIfValid();
+    if (webEmail && webToken) {
       return {
-        email,
+        email: webEmail,
         headers: {
           "x-promptly-client": "promptly-extension",
-          Authorization: `Bearer ${identity.idToken}`
+          "x-promptly-user-email": webEmail,
+          "x-promptly-google-access-token": webToken
         }
       };
     }
-  } catch (_firebaseErr) {
-    // Fall through to web-auth session or Google token.
-  }
 
-  const local = await chrome.storage.local.get([
-    SESSION_WEB_AUTH_EMAIL,
-    SESSION_WEB_AUTH_TOKEN,
-    SESSION_WEB_AUTH_EXPIRES_AT
-  ]);
-  const webEmail = String(local[SESSION_WEB_AUTH_EMAIL] || "").trim().toLowerCase();
-  const webToken = await readWebAuthSessionTokenIfValid();
-  if (webEmail && webToken) {
+    const googleAccessToken = await getGoogleAccessTokenForApi();
+    const chromeEmail = await getEmailFromGoogleAccessToken(googleAccessToken);
     return {
-      email: webEmail,
+      email: chromeEmail,
       headers: {
         "x-promptly-client": "promptly-extension",
-        "x-promptly-user-email": webEmail,
-        "x-promptly-google-access-token": webToken
+        "x-promptly-user-email": chromeEmail,
+        "x-promptly-google-access-token": googleAccessToken
       }
     };
   }
-
-  const googleAccessToken = await Promise.race([
-    getGoogleAccessTokenForApi(),
-    new Promise((_, reject) =>
-      globalThis.setTimeout(() => reject(new Error("Google auth timed out")), 4000)
-    )
-  ]);
-  const chromeEmail = await getEmailFromGoogleAccessToken(googleAccessToken);
-  return {
-    email: chromeEmail,
-    headers: {
-      "x-promptly-client": "promptly-extension",
-      "x-promptly-user-email": chromeEmail,
-      "x-promptly-google-access-token": googleAccessToken
-    }
-  };
 }
 
 async function fetchUserCreditsFromApi(message = {}, options = {}) {
@@ -844,7 +823,7 @@ async function fetchUserCreditsFromApi(message = {}, options = {}) {
     }
   }
 
-  const auth = await resolveApiAuthHeaders();
+  const auth = await resolveExtensionApiAuthHeaders();
   const baseUrl = await getManagedProxyBaseUrl();
   if (!baseUrl) {
     throw new Error("Missing app base URL in extension settings");
@@ -1007,7 +986,25 @@ async function getFirebaseIdentityForApi(forceRefresh = false) {
         return nextIdentity;
       }
     } catch (_error) {
-      // Silent only — never open the sign-in popup from background API calls.
+      try {
+        const webToken = await readWebAuthSessionTokenIfValid();
+        if (webToken) {
+          await persistFirebaseSessionAfterGoogleWebSignIn({
+            accessToken: webToken,
+            idToken: String(identity.idToken || "")
+          });
+          const reloaded = await chrome.storage.local.get(["promptlyFirebaseIdentity"]);
+          const rebuilt = reloaded.promptlyFirebaseIdentity || null;
+          if (
+            rebuilt?.idToken &&
+            Number(rebuilt.expiresAtSec || 0) - FIREBASE_ID_TOKEN_BUFFER_SEC > nowSec
+          ) {
+            return rebuilt;
+          }
+        }
+      } catch (_rebuildError) {
+        // Silent only — never open the sign-in popup from background API calls.
+      }
     }
   }
 
@@ -1146,6 +1143,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           chromeEmail: persisted.chromeEmail,
           authProvider: persisted.authProvider || null
         };
+        try {
+          await getFirebaseIdentityForApi(false);
+        } catch (_warmAuthError) {
+          // Credits fetch has additional auth fallbacks.
+        }
         if (message.includeCredits) {
           try {
             data.credits = await fetchUserCreditsFromApi(message, { skipCache: false });
@@ -1271,31 +1273,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
       let apiAuthHeaders;
       try {
-        const identity = await getFirebaseIdentityForApi(false);
-        apiAuthHeaders = {
-          "x-promptly-client": "promptly-extension",
-          Authorization: `Bearer ${identity.idToken}`
-        };
-      } catch (_firebaseErr) {
-        let googleAccessToken;
-        try {
-          googleAccessToken = await getGoogleAccessTokenForApi();
-        } catch (error) {
-          sendResponse({
-            ok: false,
-            error:
-              "Sign in with Promptly first — use the Sign in button on the tab, then try again.",
-            needsSignIn: true,
-            details: String(error?.message || error)
-          });
-          return;
-        }
-        const chromeEmail = await getEmailFromGoogleAccessToken(googleAccessToken);
-        apiAuthHeaders = {
-          "x-promptly-client": "promptly-extension",
-          "x-promptly-user-email": chromeEmail,
-          "x-promptly-google-access-token": googleAccessToken
-        };
+        const auth = await resolveExtensionApiAuthHeaders();
+        apiAuthHeaders = auth.headers;
+      } catch (error) {
+        sendResponse({
+          ok: false,
+          error:
+            "Sign in with Promptly first — use the Sign in button on the tab, then try again.",
+          needsSignIn: true,
+          details: String(error?.message || error)
+        });
+        return;
       }
       const baseUrl = await getManagedProxyBaseUrl();
       const prompt = String(message.prompt || "").trim();

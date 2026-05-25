@@ -1431,17 +1431,25 @@
       try {
         let credits = null;
         let lastError = null;
-        for (let attempt = 0; attempt < 2; attempt += 1) {
+        for (let attempt = 0; attempt < 4; attempt += 1) {
           try {
-            credits = await fetchCreditUsageViaProxy(estimate, { forceRefresh: force || attempt > 0 });
+            credits = await fetchCreditUsageViaProxy(estimate, {
+              forceRefresh: force || attempt > 0
+            });
             lastError = null;
             break;
           } catch (error) {
             lastError = error;
+            if (error?.promptlyNeedsSignIn) {
+              throw error;
+            }
             const message = String(error?.message || error || "");
-            if (attempt === 0 && isTransientExtensionMessageError(message)) {
-              await new Promise((resolve) => window.setTimeout(resolve, 220));
+            if (attempt < 3) {
+              await new Promise((resolve) => window.setTimeout(resolve, 280 * (attempt + 1)));
               continue;
+            }
+            if (isTransientExtensionMessageError(message)) {
+              throw error;
             }
             throw error;
           }

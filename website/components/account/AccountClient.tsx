@@ -91,6 +91,15 @@ type BillingPayload = {
   billingPortalAvailable: boolean;
 };
 
+type DailyCreditsPayload = {
+  used: number;
+  max: number;
+  remaining: number;
+  used_percent: number;
+  left_percent: number;
+  hard_exhausted: boolean;
+};
+
 type AccountUsageStatsPayload = {
   ok: true;
   range_days: number;
@@ -189,6 +198,9 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
   const [accountStats, setAccountStats] = useState<AccountUsageStatsPayload | null>(null);
   const [accountStatsLoading, setAccountStatsLoading] = useState(false);
   const [accountStatsError, setAccountStatsError] = useState("");
+  const [dailyCredits, setDailyCredits] = useState<DailyCreditsPayload | null>(null);
+  const [dailyCreditsLoading, setDailyCreditsLoading] = useState(false);
+  const [dailyCreditsError, setDailyCreditsError] = useState("");
   const [portalBusy, setPortalBusy] = useState(false);
   const [checkoutBusyTier, setCheckoutBusyTier] = useState<"pro" | "student" | "enterprise" | null>(null);
   const [showBillingDetails, setShowBillingDetails] = useState(false);
@@ -273,21 +285,42 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
     }
   }, []);
 
+  const loadDailyCredits = useCallback(async (current: User) => {
+    setDailyCreditsLoading(true);
+    setDailyCreditsError("");
+    try {
+      const token = await current.getIdToken();
+      const res = await fetch("/api/account/credits", {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error || `Request failed (${res.status})`);
+      }
+      setDailyCredits((data?.credits || null) as DailyCreditsPayload | null);
+    } catch (e) {
+      setDailyCredits(null);
+      setDailyCreditsError(String(e instanceof Error ? e.message : e));
+    } finally {
+      setDailyCreditsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     const auth = getFirebaseAuth();
     const unsub = onAuthStateChanged(auth, async (nextUser) => {
       setUser(nextUser);
       setLoading(false);
       if (nextUser) {
-        await loadBilling(nextUser);
-        await loadAccountStats(nextUser);
+        await Promise.all([loadBilling(nextUser), loadAccountStats(nextUser), loadDailyCredits(nextUser)]);
       } else {
         setBilling(null);
         setAccountStats(null);
+        setDailyCredits(null);
       }
     });
     return () => unsub();
-  }, [loadBilling, loadAccountStats]);
+  }, [loadBilling, loadAccountStats, loadDailyCredits]);
 
   const permissionInlineMessages = useMemo(() => {
     const msgs: string[] = [];
@@ -306,6 +339,20 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
     if (raw === "student") return "student";
     return "free";
   }, [billing?.subscriptionTier]);
+
+  const currentPlanLabel = useMemo(
+    () => tierLabel(billing?.subscriptionTier || "free"),
+    [billing?.subscriptionTier]
+  );
+
+  const dailyTokenUsagePct = useMemo(() => {
+    if (!dailyCredits) {
+      return 0;
+    }
+    const used = Math.max(0, Number(dailyCredits.used || 0));
+    const max = Math.max(1, Number(dailyCredits.max || 1));
+    return Math.max(0, Math.min(100, Math.round((used / max) * 100)));
+  }, [dailyCredits]);
 
   const serviceBars = useMemo(() => {
     const breakdown = accountStats?.service_breakdown;
@@ -691,18 +738,23 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                   Member since
                 </p>
                 <p className="mt-1.5 text-base font-semibold text-muted sm:text-lg">{formatJoinDate(user)}</p>
+                <p className="mt-2 text-sm font-semibold text-ink sm:text-base">
+                  {billingLoading && !billing ? "Loading plan…" : currentPlanLabel}
+                </p>
               </div>
 
               <div className="col-start-3 row-span-2 row-start-1 flex min-w-[9.25rem] flex-col gap-2 self-stretch justify-self-end sm:min-w-[11rem]">
                 <button
                   type="button"
                   onClick={async () => {
-                    await Promise.all([loadBilling(user), loadAccountStats(user)]);
+                    await Promise.all([loadBilling(user), loadAccountStats(user), loadDailyCredits(user)]);
                   }}
-                  disabled={billingLoading || accountStatsLoading}
+                  disabled={billingLoading || accountStatsLoading || dailyCreditsLoading}
                   className="rounded-lg border border-line px-3 py-2.5 text-sm font-medium text-muted hover:bg-cream-dark disabled:opacity-60"
                 >
-                  {billingLoading || accountStatsLoading ? "Refreshing…" : "Refresh account data"}
+                  {billingLoading || accountStatsLoading || dailyCreditsLoading
+                    ? "Refreshing…"
+                    : "Refresh account data"}
                 </button>
                 <button
                   type="button"
@@ -735,6 +787,31 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
               <p className="mt-3 max-w-xl text-[10px] leading-relaxed text-faint">
                 {permissionInlineMessages.join(" · ")}
               </p>
+            ) : null}
+          </section>
+
+          <section className="rounded-2xl border border-line bg-cream px-4 py-3 sm:px-6 sm:py-3.5">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">Daily token usage</p>
+              {dailyCredits ? (
+                <p className="text-[11px] font-medium text-muted">
+                  {Math.max(0, Math.floor(Number(dailyCredits.used || 0))).toLocaleString()} /{" "}
+                  {Math.max(1, Math.floor(Number(dailyCredits.max || 1))).toLocaleString()}
+                </p>
+              ) : dailyCreditsLoading ? (
+                <p className="text-[11px] text-faint">Loading…</p>
+              ) : (
+                <p className="text-[11px] text-faint">—</p>
+              )}
+            </div>
+            <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-cream-dark">
+              <div
+                className="h-full rounded-full bg-ink transition-[width] duration-300 ease-out"
+                style={{ width: `${dailyTokenUsagePct}%` }}
+              />
+            </div>
+            {dailyCreditsError ? (
+              <p className="mt-2 text-[10px] text-amber-700/90">{dailyCreditsError}</p>
             ) : null}
           </section>
 

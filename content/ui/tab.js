@@ -844,7 +844,7 @@
         return;
       }
       this.creditHoverFetchAt = now;
-      void Promise.resolve(this.onRefreshCredits({ fromHover: true, showLoading: placeholder }));
+      void Promise.resolve(this.onRefreshCredits({ fromHover: true, showLoading: placeholder, force: true }));
     }
 
     setCreditUsageLoading(isLoading) {
