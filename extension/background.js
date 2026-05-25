@@ -98,27 +98,6 @@ async function readWebAuthSessionTokenIfValid() {
   return token;
 }
 
-function getSignedInChromeEmail() {
-  return new Promise((resolve, reject) => {
-    if (!chrome.identity || typeof chrome.identity.getProfileUserInfo !== "function") {
-      reject(new Error("Chrome identity unavailable"));
-      return;
-    }
-    chrome.identity.getProfileUserInfo({ accountStatus: "ANY" }, (info) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      const email = String(info?.email || "").trim().toLowerCase();
-      if (!email) {
-        reject(new Error("Sign in to Chrome with your Google account"));
-        return;
-      }
-      resolve(email);
-    });
-  });
-}
-
 async function getEmailFromGoogleAccessToken(accessToken) {
   const token = String(accessToken || "").trim();
   if (!token) {
@@ -140,41 +119,6 @@ async function getEmailFromGoogleAccessToken(accessToken) {
     throw new Error("Google sign-in did not return an email");
   }
   return email;
-}
-
-async function getEffectiveSignedInEmail({ interactive = false } = {}) {
-  try {
-    return await getSignedInChromeEmail();
-  } catch (_err) {
-    // Continue: profile may be empty even after Google web sign-in.
-  }
-  if (interactive) {
-    const token = await getChromeGoogleAccessToken(true);
-    return await getEmailFromGoogleAccessToken(token);
-  }
-  const token = await getGoogleAccessTokenForApi();
-  return await getEmailFromGoogleAccessToken(token);
-}
-
-function getChromeGoogleAccessToken(interactive = true) {
-  return new Promise((resolve, reject) => {
-    if (!chrome.identity || typeof chrome.identity.getAuthToken !== "function") {
-      reject(new Error("Chrome OAuth unavailable. Reload extension after manifest update."));
-      return;
-    }
-    chrome.identity.getAuthToken({ interactive }, (token) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      const value = String(token || "").trim();
-      if (!value) {
-        reject(new Error("Google OAuth token was empty"));
-        return;
-      }
-      resolve(value);
-    });
-  });
 }
 
 /** One Google web-auth window at a time (Sign in + any Firebase refresh fallback). */
@@ -226,24 +170,6 @@ async function completeExtensionSignInWebPopup() {
     idToken: String(raw?.idToken || "").trim(),
     expiresInSec: raw?.expiresInSec != null ? Number(raw.expiresInSec) : null
   };
-}
-
-/**
- * Access token for API calls — never opens a browser window.
- * 1) chrome.identity silent cache (if Chrome synced after sign-in)
- * 2) token from last extension sign-in popup (Google or email/password) when applicable
- */
-async function getGoogleAccessTokenForApi() {
-  try {
-    return await getChromeGoogleAccessToken(false);
-  } catch (_ignored) {
-    // fall through
-  }
-  const cached = await readWebAuthSessionTokenIfValid();
-  if (cached) {
-    return cached;
-  }
-  throw new Error("Not signed in");
 }
 
 function randomString(byteLength = 16) {
@@ -704,9 +630,8 @@ async function buildManageAccountUrl() {
   const baseUrl = await getManagedProxyBaseUrl();
   const accountUrl = `${baseUrl.replace(/\/$/, "")}/account`;
   try {
-    const identity = await getFirebaseIdentityForApi(false);
-    const idToken = String(identity?.idToken || "").trim();
-    if (!idToken) {
+    const session = await getPromptlySession({ requireFreshToken: true });
+    if (!session.signedIn || !session.idToken) {
       return accountUrl;
     }
     const response = await fetch(buildApiUrl(baseUrl, "/api/account/extension-auth-link"), {
@@ -714,7 +639,7 @@ async function buildManageAccountUrl() {
       headers: {
         "Content-Type": "application/json",
         "x-promptly-client": "promptly-extension",
-        Authorization: `Bearer ${idToken}`
+        Authorization: `Bearer ${session.idToken}`
       },
       body: "{}"
     });
@@ -828,14 +753,7 @@ function promptlyWebsitePageMatchesSender(senderUrl) {
 }
 
 async function rebuildFirebaseIdentityFromGoogleSession() {
-  let accessToken = await readWebAuthSessionTokenIfValid();
-  if (!accessToken) {
-    try {
-      accessToken = await getGoogleAccessTokenForApi();
-    } catch (_error) {
-      accessToken = null;
-    }
-  }
+  const accessToken = await readWebAuthSessionTokenIfValid();
   if (!accessToken) {
     return null;
   }
@@ -852,62 +770,143 @@ async function rebuildFirebaseIdentityFromGoogleSession() {
   return rebuilt;
 }
 
+function sessionFromFirebaseIdentity(identity, authProvider = "firebase") {
+  const email = String(identity?.email || "").trim().toLowerCase();
+  const idToken = String(identity?.idToken || "").trim();
+  if (!email || !idToken) {
+    return null;
+  }
+  return {
+    signedIn: true,
+    email,
+    chromeEmail: email,
+    uid: String(identity?.uid || "").trim() || null,
+    idToken,
+    refreshToken: String(identity?.refreshToken || "").trim() || null,
+    expiresAtSec: Number(identity?.expiresAtSec || 0) || 0,
+    authProvider
+  };
+}
+
+function signedOutPromptlySession() {
+  return {
+    signedIn: false,
+    email: null,
+    chromeEmail: null,
+    uid: null,
+    idToken: null,
+    refreshToken: null,
+    expiresAtSec: 0,
+    authProvider: null
+  };
+}
+
+async function getPromptlySession(options = {}) {
+  const requireFreshToken = options.requireFreshToken !== false;
+  const nowSec = Math.floor(Date.now() / 1000);
+  const cached = await chrome.storage.local.get(["promptlyFirebaseIdentity"]);
+  const identity = cached?.promptlyFirebaseIdentity || null;
+  const cachedSession = sessionFromFirebaseIdentity(identity);
+  const cachedTokenIsFresh =
+    cachedSession && Number(cachedSession.expiresAtSec || 0) - FIREBASE_ID_TOKEN_BUFFER_SEC > nowSec;
+
+  if (cachedSession && cachedTokenIsFresh) {
+    return cachedSession;
+  }
+
+  if (identity?.refreshToken) {
+    try {
+      const refreshedIdentity = await getFirebaseIdentityForApi(true);
+      const refreshedSession = sessionFromFirebaseIdentity(refreshedIdentity, "firebase_refresh");
+      if (refreshedSession) {
+        return refreshedSession;
+      }
+    } catch (_refreshError) {
+      // Continue to web-auth rebuild below.
+    }
+  }
+
+  const rebuilt = await rebuildFirebaseIdentityFromGoogleSession();
+  const rebuiltSession = sessionFromFirebaseIdentity(rebuilt, "google_web_rebuild");
+  if (rebuiltSession && (!requireFreshToken || Number(rebuiltSession.expiresAtSec || 0) - FIREBASE_ID_TOKEN_BUFFER_SEC > nowSec)) {
+    return rebuiltSession;
+  }
+
+  return signedOutPromptlySession();
+}
+
+async function getPromptlyApiAuthHeaders(options = {}) {
+  const session = await getPromptlySession({ requireFreshToken: options.requireFreshToken !== false });
+  if (!session.signedIn || !session.idToken) {
+    const err = new Error("Sign in with Promptly first — use the Sign in button on the tab, then try again.");
+    err.needsSignIn = true;
+    throw err;
+  }
+  return {
+    session,
+    headers: {
+      "x-promptly-client": "promptly-extension",
+      Authorization: `Bearer ${session.idToken}`
+    }
+  };
+}
+
 async function fetchUserCreditsFromApi(message = {}, options = {}) {
   const baseUrl = await getManagedProxyBaseUrl();
   if (!baseUrl) {
     throw new Error("Missing app base URL in extension settings");
   }
 
-  const persisted = await readPersistedSignInState();
-  const accountEmail = String(persisted?.chromeEmail || "").trim().toLowerCase();
+  const { session, headers: authHeaders } = await getPromptlyApiAuthHeaders({ requireFreshToken: true });
+  const accountEmail = String(session.email || "").trim().toLowerCase();
   const skipCache = options.skipCache !== true && options.forceRefresh !== true;
   if (skipCache && accountEmail) {
     const cached = await readPersistedCreditsCache(accountEmail);
     if (cached) {
-      return cached;
+      return {
+        credits: cached,
+        creditSource: "cache",
+        authProvider: session.authProvider || null,
+        hasIdToken: !!session.idToken
+      };
     }
   }
 
-  try {
-    await rebuildFirebaseIdentityFromGoogleSession();
-  } catch (_rebuildError) {
-    // Continue with existing auth headers.
-  }
-
-  const auth = await resolveExtensionApiAuthHeaders();
   const estimateHeaders = buildCreditEstimateHeaders(message);
-  const headers = { ...auth.headers, ...estimateHeaders };
   let body = {};
   let credits = null;
+  let creditSource = "";
+  let authStatus = 0;
 
-  const extensionResponse = await fetchWithTimeout(
-    buildApiUrl(baseUrl, "/api/credits"),
-    { method: "GET", headers },
+  const accountResponse = await fetchWithTimeout(
+    buildApiUrl(baseUrl, "/api/account/credits"),
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${session.idToken}`,
+        ...estimateHeaders
+      }
+    },
     CREDITS_FETCH_TIMEOUT_MS
   );
-  body = await extensionResponse.json().catch(() => ({}));
-  if (extensionResponse.ok && body?.credits) {
+  authStatus = accountResponse.status;
+  body = await accountResponse.json().catch(() => ({}));
+  if (accountResponse.ok && body?.credits) {
     credits = body.credits;
+    creditSource = "account";
   }
 
-  const bearer = String(auth.headers.Authorization || "")
-    .replace(/^Bearer\s+/i, "")
-    .trim();
-  if (!credits && bearer) {
-    const accountResponse = await fetchWithTimeout(
-      buildApiUrl(baseUrl, "/api/account/credits"),
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${bearer}`,
-          ...estimateHeaders
-        }
-      },
+  if (!credits) {
+    const extensionResponse = await fetchWithTimeout(
+      buildApiUrl(baseUrl, "/api/credits"),
+      { method: "GET", headers: { ...authHeaders, ...estimateHeaders } },
       CREDITS_FETCH_TIMEOUT_MS
     );
-    body = await accountResponse.json().catch(() => ({}));
-    if (accountResponse.ok && body?.credits) {
+    authStatus = extensionResponse.status;
+    body = await extensionResponse.json().catch(() => ({}));
+    if (extensionResponse.ok && body?.credits) {
       credits = body.credits;
+      creditSource = "extension";
     }
   }
 
@@ -915,18 +914,28 @@ async function fetchUserCreditsFromApi(message = {}, options = {}) {
     if (accountEmail) {
       const stale = await readPersistedCreditsCache(accountEmail);
       if (stale) {
-        return stale;
+        return {
+          credits: stale,
+          creditSource: "stale-cache",
+          authProvider: session.authProvider || null,
+          hasIdToken: !!session.idToken
+        };
       }
     }
     const err = new Error(String(body?.error || "Unable to load credits"));
-    if (extensionResponse.status === 401) {
+    if (authStatus === 401) {
       err.needsSignIn = true;
     }
     throw err;
   }
 
-  writeCreditsCache(String(accountEmail || auth.email || "").trim().toLowerCase(), credits);
-  return credits;
+  writeCreditsCache(accountEmail, credits);
+  return {
+    credits,
+    creditSource,
+    authProvider: session.authProvider || null,
+    hasIdToken: !!session.idToken
+  };
 }
 
 function buildCreditEstimateHeaders(message) {
@@ -945,45 +954,6 @@ function buildCreditEstimateHeaders(message) {
   );
   return headers;
 }
-
-async function resolveExtensionApiAuthHeaders() {
-  try {
-    const identity = await getFirebaseIdentityForApi(false);
-    return {
-      email: String(identity.email || "").trim().toLowerCase(),
-      headers: {
-        "x-promptly-client": "promptly-extension",
-        Authorization: `Bearer ${identity.idToken}`
-      }
-    };
-  } catch (_firebaseErr) {
-    const local = await chrome.storage.local.get([SESSION_WEB_AUTH_EMAIL]);
-    const webEmail = String(local[SESSION_WEB_AUTH_EMAIL] || "").trim().toLowerCase();
-    const webToken = await readWebAuthSessionTokenIfValid();
-    if (webEmail && webToken) {
-      return {
-        email: webEmail,
-        headers: {
-          "x-promptly-client": "promptly-extension",
-          "x-promptly-user-email": webEmail,
-          "x-promptly-google-access-token": webToken
-        }
-      };
-    }
-
-    const googleAccessToken = await getGoogleAccessTokenForApi();
-    const chromeEmail = await getEmailFromGoogleAccessToken(googleAccessToken);
-    return {
-      email: chromeEmail,
-      headers: {
-        "x-promptly-client": "promptly-extension",
-        "x-promptly-user-email": chromeEmail,
-        "x-promptly-google-access-token": googleAccessToken
-      }
-    };
-  }
-}
-
 
 function prefetchUserCredits() {
   void fetchUserCreditsFromApi({}, { skipCache: true }).catch(() => {});
@@ -1150,45 +1120,6 @@ async function getFirebaseIdentityForApi(forceRefresh = false) {
   throw new Error("Not signed in");
 }
 
-async function readPersistedFirebaseIdentityEmail() {
-  const cached = await chrome.storage.local.get(["promptlyFirebaseIdentity"]);
-  const identity = cached?.promptlyFirebaseIdentity || null;
-  const email = String(identity?.email || "").trim().toLowerCase();
-  return email || null;
-}
-
-async function readPersistedSignInState() {
-  const firebaseEmail = await readPersistedFirebaseIdentityEmail();
-  if (firebaseEmail) {
-    return { chromeEmail: firebaseEmail, authProvider: "firebase_email" };
-  }
-  const local = await chrome.storage.local.get([
-    SESSION_WEB_AUTH_EMAIL,
-    SESSION_WEB_AUTH_TOKEN,
-    SESSION_WEB_AUTH_EXPIRES_AT,
-    "promptlyFirebaseIdentity"
-  ]);
-  const webEmail = String(local[SESSION_WEB_AUTH_EMAIL] || "").trim().toLowerCase();
-  const webToken = String(local[SESSION_WEB_AUTH_TOKEN] || "").trim();
-  const webExp = Number(local[SESSION_WEB_AUTH_EXPIRES_AT] || 0);
-  if (webEmail && webToken && webExp > Date.now() + 15_000) {
-    return { chromeEmail: webEmail, authProvider: "google" };
-  }
-  const identity = local?.promptlyFirebaseIdentity || null;
-  if (identity?.refreshToken) {
-    const identityEmail = String(identity.email || webEmail || "").trim().toLowerCase();
-    if (identityEmail) {
-      return { chromeEmail: identityEmail, authProvider: "firebase_email" };
-    }
-  }
-  try {
-    const chromeEmail = await getEffectiveSignedInEmail({ interactive: false });
-    return { chromeEmail: String(chromeEmail || "").trim().toLowerCase() || null, authProvider: "google" };
-  } catch (_error) {
-    return null;
-  }
-}
-
 chrome.runtime.onInstalled.addListener(async () => {
   const existing = await chrome.storage.sync.get([
     "proxyBaseUrl",
@@ -1258,10 +1189,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
       if (message.type === "PROMPTLY_GET_CREDITS") {
         try {
-          const credits = await fetchUserCreditsFromApi(message, {
+          const creditResult = await fetchUserCreditsFromApi(message, {
             skipCache: message.forceRefresh === true
           });
-          sendResponse({ ok: true, data: { ok: true, credits } });
+          sendResponse({
+            ok: true,
+            data: {
+              ok: true,
+              credits: creditResult.credits,
+              creditSource: creditResult.creditSource,
+              authProvider: creditResult.authProvider,
+              hasIdToken: creditResult.hasIdToken
+            }
+          });
         } catch (error) {
           sendResponse({
             ok: false,
@@ -1273,25 +1213,28 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
 
       if (message.type === "PROMPTLY_CHECK_CHROME_SIGNIN") {
-        const persisted = await readPersistedSignInState();
-        if (!persisted?.chromeEmail) {
+        const session = await getPromptlySession({ requireFreshToken: false });
+        if (!session.signedIn) {
           sendResponse({ ok: false, error: "Not signed in" });
           return;
         }
         const data = {
-          chromeEmail: persisted.chromeEmail,
-          authProvider: persisted.authProvider || null
+          chromeEmail: session.email,
+          authProvider: session.authProvider || null,
+          hasIdToken: !!session.idToken
         };
-        try {
-          await getFirebaseIdentityForApi(false);
-        } catch (_warmAuthError) {
-          // Credits fetch has additional auth fallbacks.
+        if (!session.idToken) {
+          const fresh = await getPromptlySession({ requireFreshToken: true });
+          data.hasIdToken = !!fresh.idToken;
         }
         if (message.includeCredits) {
           try {
-            data.credits = await fetchUserCreditsFromApi(message, { skipCache: false });
+            const creditResult = await fetchUserCreditsFromApi(message, { skipCache: false });
+            data.credits = creditResult.credits;
+            data.creditSource = creditResult.creditSource;
           } catch (_creditsError) {
-            data.credits = await readPersistedCreditsCache(persisted.chromeEmail);
+            data.credits = await readPersistedCreditsCache(session.email);
+            data.creditSource = data.credits ? "stale-cache" : null;
           }
         }
         sendResponse({ ok: true, data });
@@ -1299,22 +1242,27 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
 
       if (message.type === "PROMPTLY_ENSURE_CHROME_SIGNIN") {
-        const persisted = await readPersistedSignInState();
-        if (persisted?.chromeEmail) {
-          try {
-            await getFirebaseIdentityForApi(false);
-          } catch (_refreshError) {
-            // Persisted Promptly session still counts as signed in until explicit sign-out.
-          }
+        const existingSession = await getPromptlySession({ requireFreshToken: false });
+        if (existingSession.signedIn) {
           prefetchUserCredits();
-          sendResponse({ ok: true, data: { chromeEmail: persisted.chromeEmail } });
+          sendResponse({
+            ok: true,
+            data: {
+              chromeEmail: existingSession.email,
+              authProvider: existingSession.authProvider || null,
+              hasIdToken: !!existingSession.idToken
+            }
+          });
           return;
         }
         // Explicit sign-in only — opens the web popup when no persisted session exists.
         const result = await completeExtensionSignInWebPopup();
         if (result.kind === "firebase_email") {
           prefetchUserCredits();
-          sendResponse({ ok: true, data: { chromeEmail: result.firebaseEmail } });
+          sendResponse({
+            ok: true,
+            data: { chromeEmail: result.firebaseEmail, authProvider: "firebase_email", hasIdToken: true }
+          });
           return;
         }
         const session = {
@@ -1329,26 +1277,32 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         } catch (_e) {
           /* Firebase session improves long-lived API auth; ignore failures here */
         }
+        const nextSession = await getPromptlySession({ requireFreshToken: false });
         prefetchUserCredits();
-        sendResponse({ ok: true, data: { chromeEmail } });
+        sendResponse({
+          ok: true,
+          data: {
+            chromeEmail: nextSession.email || chromeEmail,
+            authProvider: nextSession.authProvider || "google",
+            hasIdToken: !!nextSession.idToken
+          }
+        });
         return;
       }
 
       if (message.type === "PROMPTLY_GET_ACCOUNT_STATUS") {
-        const persisted = await readPersistedSignInState();
-        const chromeEmail = String(persisted?.chromeEmail || "").trim();
-        if (!chromeEmail) {
+        const session = await getPromptlySession({ requireFreshToken: true });
+        if (!session.signedIn || !session.idToken) {
           sendResponse({ ok: false, error: "Not signed in" });
           return;
         }
         let subscriptionTier = "";
         try {
-          const identity = await getFirebaseIdentityForApi(false);
           const baseUrl = await getManagedProxyBaseUrl();
           const response = await fetch(buildApiUrl(baseUrl, "/api/account/billing"), {
             method: "GET",
             headers: {
-              Authorization: `Bearer ${identity.idToken}`
+              Authorization: `Bearer ${session.idToken}`
             }
           });
           const body = await response.json().catch(() => ({}));
@@ -1361,8 +1315,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         sendResponse({
           ok: true,
           data: {
-            chromeEmail,
-            subscriptionTier: subscriptionTier || null
+            chromeEmail: session.email,
+            subscriptionTier: subscriptionTier || null,
+            authProvider: session.authProvider || null,
+            hasIdToken: !!session.idToken
           }
         });
         return;
@@ -1375,17 +1331,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
 
       if (message.type === "PROMPTLY_VERIFY_USER_SESSION") {
-        const firebaseEmail = await readPersistedFirebaseIdentityEmail();
-        let sessionEmail = String(firebaseEmail || "").trim().toLowerCase();
-        if (!sessionEmail) {
-          try {
-            sessionEmail = String(await getEffectiveSignedInEmail({ interactive: false }))
-              .trim()
-              .toLowerCase();
-          } catch (_e) {
-            sessionEmail = "";
-          }
-        }
+        const session = await getPromptlySession({ requireFreshToken: false });
+        const sessionEmail = String(session.email || "").trim().toLowerCase();
         const pageEmailHint = String(message.pageEmailHint || "").trim().toLowerCase();
         const hasAuthenticatedUi = !!message.hasAuthenticatedUi;
         if (!hasAuthenticatedUi) {
@@ -1405,14 +1352,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         }
         sendResponse({
           ok: true,
-          data: { chromeEmail: sessionEmail || null, pageEmailHint: pageEmailHint || null }
+          data: {
+            chromeEmail: sessionEmail || null,
+            pageEmailHint: pageEmailHint || null,
+            authProvider: session.authProvider || null,
+            hasIdToken: !!session.idToken
+          }
         });
         return;
       }
 
       let apiAuthHeaders;
       try {
-        const auth = await resolveExtensionApiAuthHeaders();
+        const auth = await getPromptlyApiAuthHeaders({ requireFreshToken: true });
         apiAuthHeaders = auth.headers;
       } catch (error) {
         sendResponse({
@@ -1519,7 +1471,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         sendResponse({
           ok: false,
           error: body.error || `Proxy error (${response.status})`,
-          credits: body.credits || null
+          credits: body.credits || null,
+          needsSignIn: response.status === 401
         });
         return;
       }

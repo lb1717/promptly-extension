@@ -971,8 +971,7 @@
   border-radius: 50%;
   flex: 0 0 auto;
   margin-left: 4px;
-  /* Connector must NOT live on this node: radial mask clips ::after. */
-  /* 12 o'clock start, clockwise: white = used tokens, grey = left */
+  /* Hard 12 o'clock start, clockwise: white = used tokens, grey = left. */
   background: conic-gradient(
     from 0deg,
     #ffffff 0%,
@@ -988,13 +987,13 @@
   content: "";
   position: absolute;
   left: 50%;
-  top: 50%;
-  width: 2.5px;
-  height: 2.5px;
-  border-radius: 50%;
-  background: #ffffff;
+  top: 0;
+  width: 1px;
+  height: 3px;
+  border-radius: 0;
+  background: #111827;
   pointer-events: none;
-  transform: translate(-50%, -50%) translateY(-5px);
+  transform: translateX(-50%);
   z-index: 2;
 }
 
@@ -1039,19 +1038,7 @@
 }
 
 .promptly-tab-credit-wrap::after {
-  content: "";
-  position: absolute;
-  left: var(--promptly-credit-meter-center-x);
-  top: 50%;
-  width: var(--promptly-credit-cap-size);
-  height: var(--promptly-credit-cap-size);
-  border-radius: 50%;
-  background: #ffffff;
-  z-index: 3;
-  pointer-events: none;
-  transform: translate(-50%, -50%) rotate(var(--promptly-credit-progress-deg))
-    translateY(calc(-1 * var(--promptly-credit-cap-orbit)));
-  transition: transform 160ms ease;
+  content: none;
 }
 
 .promptly-tab-credit-tooltip {

@@ -634,14 +634,8 @@
     },
     onLoadSettingsAccount: async () => {
       try {
-        let email = "";
-        try {
-          const signedIn = await checkChromeSignedIn({ retries: 2 });
-          email = String(signedIn?.chromeEmail || "").trim();
-        } catch (_checkError) {
-          const hint = await readLocalPersistedSessionHint();
-          email = String(hint?.chromeEmail || "").trim();
-        }
+        const signedIn = await checkChromeSignedIn({ retries: 2 });
+        const email = String(signedIn?.chromeEmail || "").trim();
         if (!email) {
           return { email: "", subscriptionTier: "free" };
         }
@@ -1048,42 +1042,6 @@
     });
   }
 
-  function readLocalPersistedSessionHint() {
-    return new Promise((resolve) => {
-      if (!chrome?.storage?.local) {
-        resolve(null);
-        return;
-      }
-      chrome.storage.local.get(
-        ["promptlyFirebaseIdentity", "promptlyWebAuthEmail", "promptlyWebAuthAccessToken", "promptlyWebAuthExpiresAt"],
-        (data) => {
-          if (chrome.runtime.lastError) {
-            resolve(null);
-            return;
-          }
-          const identity = data?.promptlyFirebaseIdentity || null;
-          const firebaseEmail = String(identity?.email || "").trim().toLowerCase();
-          if (firebaseEmail) {
-            resolve({ chromeEmail: firebaseEmail });
-            return;
-          }
-          const webEmail = String(data?.promptlyWebAuthEmail || "").trim().toLowerCase();
-          const webToken = String(data?.promptlyWebAuthAccessToken || "").trim();
-          const webExp = Number(data?.promptlyWebAuthExpiresAt || 0);
-          if (webEmail && webToken && webExp > Date.now() + 15_000) {
-            resolve({ chromeEmail: webEmail });
-            return;
-          }
-          if (identity?.refreshToken && firebaseEmail) {
-            resolve({ chromeEmail: firebaseEmail });
-            return;
-          }
-          resolve(null);
-        }
-      );
-    });
-  }
-
   async function checkChromeSignedIn(options = {}) {
     const retries = Math.max(1, Number(options.retries) || 3);
     let lastError = null;
@@ -1103,25 +1061,8 @@
     throw lastError || new Error("Not signed in");
   }
 
-  async function hasPersistedPromptlySession() {
-    try {
-      const session = await checkChromeSignedIn({ retries: 2 });
-      if (String(session?.chromeEmail || "").trim()) {
-        return true;
-      }
-    } catch (_error) {
-      // Fall through to local storage hint.
-    }
-    const hint = await readLocalPersistedSessionHint();
-    return !!String(hint?.chromeEmail || "").trim();
-  }
-
   async function applySignedOutState(isSignedOut) {
     if (!isSignedOut) {
-      ui.setSignedOut(false);
-      return;
-    }
-    if (await hasPersistedPromptlySession()) {
       ui.setSignedOut(false);
       return;
     }
@@ -1158,26 +1099,14 @@
   }
 
   async function syncSignedInUiFromSession() {
-    const hint = await readLocalPersistedSessionHint();
     const cachedCredits = await readLocalPersistedCreditsHint();
-    if (hint?.chromeEmail) {
-      ui.setSignedOut(false);
-      ui.setSettingsAccountEmail(hint.chromeEmail);
+    try {
+      const session = await checkChromeSignedIn({ retries: 4 });
       if (cachedCredits) {
         applyCreditsToUi(cachedCredits);
       }
-      void refreshCreditsFromServer();
-    }
-    try {
-      const session = await checkChromeSignedIn({ retries: 4 });
       await applySignedInStateFromSession(session, { loadCredits: true, loadAccountStatus: true });
     } catch (_error) {
-      if (hint?.chromeEmail) {
-        ui.setSignedOut(false);
-        ui.setSettingsAccountEmail(hint.chromeEmail);
-        refreshCreditsFromServer();
-        return;
-      }
       await applySignedOutState(true);
     }
   }
@@ -1248,7 +1177,7 @@
             reject(new Error(err));
             return;
           }
-      ui.setSignedOut(false);
+          ui.setSignedOut(false);
           resolve(response.data || {});
         }
       );
@@ -1438,9 +1367,6 @@
       if (cachedCredits) {
         applyCreditsToUi(cachedCredits);
         return;
-      }
-      if (error?.promptlyNeedsSignIn) {
-        void applySignedOutState(true);
       }
     }
   }

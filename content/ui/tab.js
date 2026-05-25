@@ -1109,7 +1109,7 @@
         credits.left_percent != null
           ? Math.max(0, Math.min(100, Math.round(Number(credits.left_percent) || 0)))
           : Math.max(0, Math.min(100, 100 - usedPercent));
-      const displayPercent = Math.max(2, usedPercent);
+      const displayPercent = used > 0 && usedPercent === 0 ? 1 : usedPercent;
       const displayDeg = Math.max(0, Math.min(360, (displayPercent / 100) * 360));
       this.creditUsageMeter.style.setProperty("--promptly-credit-progress", `${displayPercent}%`);
       if (this.creditUsageWrap) {
