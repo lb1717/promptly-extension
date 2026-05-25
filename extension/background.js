@@ -852,84 +852,80 @@ async function rebuildFirebaseIdentityFromGoogleSession() {
   return rebuilt;
 }
 
-async function ensureFreshFirebaseIdentity() {
-  const nowSec = Math.floor(Date.now() / 1000);
-  const cached = await chrome.storage.local.get(["promptlyFirebaseIdentity"]);
-  const identity = cached.promptlyFirebaseIdentity || null;
-  if (
-    identity?.idToken &&
-    Number(identity.expiresAtSec || 0) - FIREBASE_ID_TOKEN_BUFFER_SEC > nowSec
-  ) {
-    return identity;
+async function fetchUserCreditsFromApi(message = {}, options = {}) {
+  const baseUrl = await getManagedProxyBaseUrl();
+  if (!baseUrl) {
+    throw new Error("Missing app base URL in extension settings");
   }
 
-  if (identity?.refreshToken) {
-    try {
-      return await getFirebaseIdentityForApi(false);
-    } catch (_refreshError) {
-      // Continue to Google-session rebuild below.
+  const persisted = await readPersistedSignInState();
+  const accountEmail = String(persisted?.chromeEmail || "").trim().toLowerCase();
+  const skipCache = options.skipCache !== true && options.forceRefresh !== true;
+  if (skipCache && accountEmail) {
+    const cached = await readPersistedCreditsCache(accountEmail);
+    if (cached) {
+      return cached;
     }
   }
 
-  const rebuilt = await rebuildFirebaseIdentityFromGoogleSession();
-  if (rebuilt?.idToken) {
-    return rebuilt;
+  try {
+    await rebuildFirebaseIdentityFromGoogleSession();
+  } catch (_rebuildError) {
+    // Continue with existing auth headers.
   }
 
-  return await getFirebaseIdentityForApi(false);
-}
+  const auth = await resolveExtensionApiAuthHeaders();
+  const estimateHeaders = buildCreditEstimateHeaders(message);
+  const headers = { ...auth.headers, ...estimateHeaders };
+  let body = {};
+  let credits = null;
 
-async function fetchCreditsViaAccountApi(baseUrl, idToken, message = {}) {
-  const response = await fetchWithTimeout(
-    buildApiUrl(baseUrl, "/api/account/credits"),
-    {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${idToken}`,
-        ...buildCreditEstimateHeaders(message)
-      }
-    },
-    CREDITS_FETCH_TIMEOUT_MS
-  );
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const err = new Error(String(body?.error || `Account credits failed (${response.status})`));
-    if (response.status === 401) {
-      err.needsSignIn = true;
-    }
-    throw err;
-  }
-  const credits = body?.credits || null;
-  if (!credits) {
-    throw new Error("Account credits response was empty");
-  }
-  return credits;
-}
-
-async function fetchCreditsViaExtensionApi(baseUrl, auth, message = {}) {
-  const response = await fetchWithTimeout(
+  const extensionResponse = await fetchWithTimeout(
     buildApiUrl(baseUrl, "/api/credits"),
-    {
-      method: "GET",
-      headers: {
-        ...auth.headers,
-        ...buildCreditEstimateHeaders(message)
-      }
-    },
+    { method: "GET", headers },
     CREDITS_FETCH_TIMEOUT_MS
   );
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const err = new Error(String(body?.error || `Credits request failed (${response.status})`));
-    if (response.status === 401) {
+  body = await extensionResponse.json().catch(() => ({}));
+  if (extensionResponse.ok && body?.credits) {
+    credits = body.credits;
+  }
+
+  const bearer = String(auth.headers.Authorization || "")
+    .replace(/^Bearer\s+/i, "")
+    .trim();
+  if (!credits && bearer) {
+    const accountResponse = await fetchWithTimeout(
+      buildApiUrl(baseUrl, "/api/account/credits"),
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${bearer}`,
+          ...estimateHeaders
+        }
+      },
+      CREDITS_FETCH_TIMEOUT_MS
+    );
+    body = await accountResponse.json().catch(() => ({}));
+    if (accountResponse.ok && body?.credits) {
+      credits = body.credits;
+    }
+  }
+
+  if (!credits) {
+    if (accountEmail) {
+      const stale = await readPersistedCreditsCache(accountEmail);
+      if (stale) {
+        return stale;
+      }
+    }
+    const err = new Error(String(body?.error || "Unable to load credits"));
+    if (extensionResponse.status === 401) {
       err.needsSignIn = true;
     }
     throw err;
   }
-  const credits = body?.credits || null;
-  if (!credits) {
-    throw new Error("Credits response was empty");
-  }
+
+  writeCreditsCache(String(accountEmail || auth.email || "").trim().toLowerCase(), credits);
   return credits;
 }
 
@@ -988,65 +984,6 @@ async function resolveExtensionApiAuthHeaders() {
   }
 }
 
-async function fetchUserCreditsFromApi(message = {}, options = {}) {
-  const persisted = await readPersistedSignInState();
-  if (!persisted?.chromeEmail) {
-    const err = new Error("Not signed in");
-    err.needsSignIn = true;
-    throw err;
-  }
-  const accountEmail = String(persisted.chromeEmail || "").trim().toLowerCase();
-
-  const skipCache = options.skipCache === true || options.forceRefresh === true;
-  if (!skipCache) {
-    const cached = await readPersistedCreditsCache(accountEmail);
-    if (cached) {
-      return cached;
-    }
-  }
-
-  const baseUrl = await getManagedProxyBaseUrl();
-  if (!baseUrl) {
-    throw new Error("Missing app base URL in extension settings");
-  }
-
-  let credits = null;
-  let lastError = null;
-
-  try {
-    const identity = await ensureFreshFirebaseIdentity();
-    const idToken = String(identity?.idToken || "").trim();
-    if (idToken) {
-      credits = await fetchCreditsViaAccountApi(baseUrl, idToken, message);
-    }
-  } catch (error) {
-    lastError = error;
-  }
-
-  if (!credits) {
-    try {
-      const auth = await resolveExtensionApiAuthHeaders();
-      credits = await fetchCreditsViaExtensionApi(baseUrl, auth, message);
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  if (!credits) {
-    const stale = await readPersistedCreditsCache(accountEmail);
-    if (stale) {
-      return stale;
-    }
-    const err = lastError instanceof Error ? lastError : new Error("Unable to load credits");
-    if (err?.needsSignIn) {
-      throw err;
-    }
-    throw err;
-  }
-
-  writeCreditsCache(accountEmail, credits);
-  return credits;
-}
 
 function prefetchUserCredits() {
   void fetchUserCreditsFromApi({}, { skipCache: true }).catch(() => {});
@@ -1324,7 +1261,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           const credits = await fetchUserCreditsFromApi(message, {
             skipCache: message.forceRefresh === true
           });
-          sendResponse({ ok: true, data: { credits } });
+          sendResponse({ ok: true, data: { ok: true, credits } });
         } catch (error) {
           sendResponse({
             ok: false,

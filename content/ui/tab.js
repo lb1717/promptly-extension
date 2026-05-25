@@ -831,20 +831,17 @@
         return;
       }
       const now = Date.now();
-      if (now - this.creditHoverFetchAt < 1500) {
-        return;
-      }
-      const placeholder =
-        this.creditUsageTooltip?.querySelector(".promptly-credit-line-strong")?.textContent?.includes("—") ||
-        false;
-      if (!placeholder && !this.creditUsageNeedsRefresh()) {
+      if (now - this.creditHoverFetchAt < 1200) {
         return;
       }
       if (typeof this.onRefreshCredits !== "function") {
         return;
       }
       this.creditHoverFetchAt = now;
-      void Promise.resolve(this.onRefreshCredits({ fromHover: true, showLoading: placeholder, force: true }));
+      if (!this.creditUsageLoaded) {
+        this.setCreditUsageLoading(true);
+      }
+      void Promise.resolve(this.onRefreshCredits());
     }
 
     setCreditUsageLoading(isLoading) {
@@ -1112,7 +1109,7 @@
         credits.left_percent != null
           ? Math.max(0, Math.min(100, Math.round(Number(credits.left_percent) || 0)))
           : Math.max(0, Math.min(100, 100 - usedPercent));
-      const displayPercent = used > 0 ? Math.max(2, usedPercent) : 0;
+      const displayPercent = Math.max(2, usedPercent);
       const displayDeg = Math.max(0, Math.min(360, (displayPercent / 100) * 360));
       this.creditUsageMeter.style.setProperty("--promptly-credit-progress", `${displayPercent}%`);
       if (this.creditUsageWrap) {

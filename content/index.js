@@ -46,9 +46,7 @@
   let autoModeBlockedByTokens = false;
   let visibilityCreditsRefreshTimer = null;
   let creditsPollTimer = null;
-  let creditRefreshInFlight = null;
   const CREDITS_POLL_MS = 45000;
-  const EXTENSION_MESSAGE_TIMEOUT_MS = 14000;
   let bypassNextAutoSendInterception = false;
   let dragStartOffsetX = 0;
   let composeWidthExpanded = false;
@@ -293,29 +291,13 @@
     }
   }
 
-  function sendExtensionMessage(payload, timeoutMs = EXTENSION_MESSAGE_TIMEOUT_MS) {
-    return new Promise((resolve, reject) => {
-      const timer = window.setTimeout(() => {
-        reject(new Error("Extension request timed out"));
-      }, Math.max(1000, Number(timeoutMs) || EXTENSION_MESSAGE_TIMEOUT_MS));
-      chrome.runtime.sendMessage(payload, (response) => {
-        window.clearTimeout(timer);
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-          return;
-        }
-        resolve(response);
-      });
-    });
-  }
-
   function startCreditsPolling() {
     stopCreditsPolling();
     creditsPollTimer = window.setInterval(() => {
       if (destroyed || document.visibilityState !== "visible" || ui.isSignedOut()) {
         return;
       }
-      void refreshCreditsFromServer(null, { showLoading: false });
+      void refreshCreditsFromServer();
     }, CREDITS_POLL_MS);
   }
 
@@ -618,17 +600,13 @@
     onSuggestionClick: () => {},
     onSignIn: async () => {
       try {
-        const existing = await checkChromeSignedIn({ includeCredits: true }).catch(() => null);
+        const existing = await checkChromeSignedIn().catch(() => null);
         if (existing?.chromeEmail) {
           ui.setSignedOut(false);
           ui.setSettingsAccountEmail(existing.chromeEmail);
           ui.showToast(`Signed in as ${existing.chromeEmail}.`, { tone: "success" });
-          if (existing.credits) {
-            applyCreditsToUi(existing.credits);
-            startCreditsPolling();
-          } else {
-            await refreshCreditsFromServer(null, { showLoading: true, force: true });
-          }
+          refreshCreditsFromServer();
+          startCreditsPolling();
           return;
         }
       } catch (_alreadySignedInCheck) {
@@ -645,7 +623,8 @@
         ui.setSettingsAccountEmail(String(result?.chromeEmail || "").trim());
         ui.showRepositionHint();
         if (result?.chromeEmail) {
-          await refreshCreditsFromServer(null, { showLoading: true, force: true });
+          refreshCreditsFromServer();
+          startCreditsPolling();
         }
       } catch (error) {
         ui.showErrorToast(mapPromptlyErrorToToast(String(error?.message || error)));
@@ -702,7 +681,7 @@
         ui.showErrorToast(String(error?.message || error));
       }
     },
-    onRefreshCredits: (options) => refreshCreditsFromServer(null, options || {}),
+    onRefreshCredits: () => refreshCreditsFromServer(),
     onVisualStyleChange: (style) => {
       const nextStyle =
         style === "midnight" ? "midnight" : style === "minimalistic" ? "minimalistic" : "default";
@@ -1010,16 +989,20 @@
     );
   }
 
-  async function checkChromeSignedInOnce(options = {}) {
-    const response = await sendExtensionMessage({
-      type: "PROMPTLY_CHECK_CHROME_SIGNIN",
-      includeCredits: options.includeCredits === true,
-      forceRefresh: options.forceRefresh === true
+  async function checkChromeSignedInOnce() {
+    return new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({ type: "PROMPTLY_CHECK_CHROME_SIGNIN" }, (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        if (!response || !response.ok) {
+          reject(new Error(response?.error || "Not signed in"));
+          return;
+        }
+        resolve(response.data || {});
+      });
     });
-    if (!response || !response.ok) {
-      throw new Error(response?.error || "Not signed in");
-    }
-    return response.data || {};
   }
 
   function isTransientExtensionMessageError(message) {
@@ -1156,12 +1139,8 @@
     ui.setSignedOut(false);
     ui.setSettingsAccountEmail(email);
     if (options.loadCredits !== false) {
-      if (session?.credits) {
-        applyCreditsToUi(session.credits);
-        startCreditsPolling();
-      } else {
-        await refreshCreditsFromServer(null, { showLoading: !ui.hasCreditUsageData(), force: true });
-      }
+      refreshCreditsFromServer();
+      startCreditsPolling();
     }
     if (options.loadAccountStatus) {
       try {
@@ -1187,16 +1166,16 @@
       if (cachedCredits) {
         applyCreditsToUi(cachedCredits);
       }
-      void refreshCreditsFromServer(null, { showLoading: !cachedCredits, force: true });
+      void refreshCreditsFromServer();
     }
     try {
-      const session = await checkChromeSignedIn({ retries: 4, includeCredits: true });
+      const session = await checkChromeSignedIn({ retries: 4 });
       await applySignedInStateFromSession(session, { loadCredits: true, loadAccountStatus: true });
     } catch (_error) {
       if (hint?.chromeEmail) {
         ui.setSignedOut(false);
         ui.setSettingsAccountEmail(hint.chromeEmail);
-        await refreshCreditsFromServer(null, { showLoading: !ui.hasCreditUsageData(), force: true });
+        refreshCreditsFromServer();
         return;
       }
       await applySignedOutState(true);
@@ -1415,118 +1394,53 @@
     });
   }
 
-  async function fetchCreditUsageViaProxy(estimate = null, options = {}) {
-    const payload = { type: "PROMPTLY_GET_CREDITS" };
-    if (options.forceRefresh === true) {
-      payload.forceRefresh = true;
-    }
-    if (
-      estimate &&
-      typeof estimate.promptLength === "number" &&
-      typeof estimate.instructionLength === "number"
-    ) {
-      payload.estimatePromptLength = estimate.promptLength;
-      payload.estimateInstructionLength = estimate.instructionLength;
-    }
-    const response = await sendExtensionMessage(payload);
-    if (!response || !response.ok) {
-      const err = new Error(response?.error || "Unable to load credits");
-      if (response?.needsSignIn) {
-        err.promptlyNeedsSignIn = true;
+  async function fetchCreditUsageViaProxy(estimate = null) {
+    return new Promise((resolve, reject) => {
+      const payload = { type: "PROMPTLY_GET_CREDITS" };
+      if (
+        estimate &&
+        typeof estimate.promptLength === "number" &&
+        typeof estimate.instructionLength === "number"
+      ) {
+        payload.estimatePromptLength = estimate.promptLength;
+        payload.estimateInstructionLength = estimate.instructionLength;
       }
-      throw err;
-    }
-    return response.data?.credits || null;
+      chrome.runtime.sendMessage(payload, (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        if (!response || !response.ok) {
+          const err = new Error(response?.error || "Unable to load credits");
+          if (response?.needsSignIn) {
+            err.promptlyNeedsSignIn = true;
+          }
+          reject(err);
+          return;
+        }
+        resolve(response.data?.credits || null);
+      });
+    });
   }
 
-  async function refreshCreditsFromServer(estimate = null, options = {}) {
-    const showLoading = options.showLoading !== false;
-    const force = options.force === true;
+  async function refreshCreditsFromServer(estimate = null) {
     if (ui.isSignedOut()) {
       return;
     }
-    if (creditRefreshInFlight && !force) {
-      try {
-        await Promise.race([
-          creditRefreshInFlight,
-          new Promise((_, reject) =>
-            window.setTimeout(() => reject(new Error("Credits fetch timed out")), EXTENSION_MESSAGE_TIMEOUT_MS)
-          )
-        ]);
-        if (ui.hasCreditUsageData()) {
-          return;
-        }
-      } catch (_waitError) {
-        creditRefreshInFlight = null;
-      }
-    }
-    if (showLoading && !ui.hasCreditUsageData()) {
-      ui.setCreditUsageLoading(true);
-    }
-    const task = (async () => {
-      try {
-        let credits = null;
-        let lastError = null;
-        for (let attempt = 0; attempt < 4; attempt += 1) {
-          try {
-            credits = await fetchCreditUsageViaProxy(estimate, {
-              forceRefresh: force || attempt > 0
-            });
-            lastError = null;
-            break;
-          } catch (error) {
-            lastError = error;
-            if (error?.promptlyNeedsSignIn) {
-              throw error;
-            }
-            const message = String(error?.message || error || "");
-            if (attempt < 3) {
-              await new Promise((resolve) => window.setTimeout(resolve, 280 * (attempt + 1)));
-              continue;
-            }
-            if (isTransientExtensionMessageError(message)) {
-              throw error;
-            }
-            throw error;
-          }
-        }
-        if (credits) {
-          applyCreditsToUi(credits);
-          ui.setSignedOut(false);
-          startCreditsPolling();
-          return;
-        }
-        if (lastError) {
-          throw lastError;
-        }
-        if (showLoading || options.fromHover) {
-          // Keep last known usage visible instead of a dead-end unavailable state.
-          if (!ui.hasCreditUsageData()) {
-            ui.setCreditUsageUnavailable();
-          }
-        }
-      } catch (error) {
-        if (error?.promptlyNeedsSignIn) {
-          stopCreditsPolling();
-          void applySignedOutState(true);
-        } else if (showLoading || options.fromHover) {
-          const cachedCredits = await readLocalPersistedCreditsHint();
-          if (cachedCredits) {
-            applyCreditsToUi(cachedCredits);
-          } else if (!ui.hasCreditUsageData()) {
-            ui.setCreditUsageUnavailable();
-          }
-        }
-      } finally {
-        ui.setCreditUsageLoading(false);
-      }
-    })();
-    creditRefreshInFlight = task;
     try {
-      await task;
-    } finally {
-      if (creditRefreshInFlight === task) {
-        creditRefreshInFlight = null;
+      const credits = await fetchCreditUsageViaProxy(estimate);
+      if (credits) {
+        applyCreditsToUi(credits);
+        ui.setSignedOut(false);
+      }
+    } catch (error) {
+      const cachedCredits = await readLocalPersistedCreditsHint();
+      if (cachedCredits) {
+        applyCreditsToUi(cachedCredits);
+        return;
+      }
+      if (error?.promptlyNeedsSignIn) {
+        void applySignedOutState(true);
       }
     }
   }
