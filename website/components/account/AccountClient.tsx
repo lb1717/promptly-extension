@@ -273,7 +273,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
     setAccountStatsError("");
     try {
       const token = await current.getIdToken();
-      const res = await fetch("/api/account/stats?days=14", {
+      const res = await fetch("/api/account/stats?days=7", {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json().catch(() => ({}));
@@ -858,7 +858,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <h2 className="text-sm font-semibold uppercase tracking-[0.15em] text-faint">Prompt stats</h2>
-                <p className="mt-1 text-xs text-faint">Last 14 days — summary only</p>
+                <p className="mt-1 text-xs text-faint">Last 7 days — summary only</p>
               </div>
               {!extensionMode ? (
                 <Link
@@ -934,16 +934,24 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
 
                   <div className="rounded-xl border border-line bg-cream-dark p-4">
                     <p className="text-xs uppercase tracking-wider text-faint">Daily prompt volume</p>
-                    <div className="mt-4 flex h-28 items-end gap-1.5">
+                    <div className="mt-4 flex h-32 items-end gap-1.5">
                       {(() => {
                         const maxPrompts = Math.max(1, ...accountStats.timeline.map((d) => d.prompts));
                         return accountStats.timeline.map((day) => (
-                          <div key={day.day} className="group flex-1">
+                          <div key={day.day} className="group flex h-full flex-1 flex-col justify-end">
+                            <div className="mb-1 text-center text-[10px] font-semibold text-muted">
+                              {day.prompts.toLocaleString()}
+                            </div>
                             <div
-                              className="w-full rounded-t-sm bg-ink transition-all hover:bg-neutral-700"
-                              style={{ height: `${Math.max(8, (day.prompts / maxPrompts) * 100)}%` }}
+                              className="min-h-1 w-full rounded-t-sm bg-ink transition-all hover:bg-neutral-700"
+                              style={{ height: `${day.prompts > 0 ? Math.max(10, (day.prompts / maxPrompts) * 100) : 2}%` }}
                               title={`${day.day}: ${day.prompts} prompts`}
                             />
+                            <div className="mt-1 text-center text-[9px] text-faint">
+                              {new Date(`${day.day}T00:00:00Z`).toLocaleDateString(undefined, {
+                                weekday: "short"
+                              })}
+                            </div>
                           </div>
                         ));
                       })()}
