@@ -812,16 +812,11 @@ async function getFirebaseIdentityForApi(forceRefresh = false) {
   const identity = cached.promptlyFirebaseIdentity || null;
   const firebaseWebApiKey = String(settings.firebaseWebApiKey || "").trim() || DEFAULT_FIREBASE_WEB_API_KEY;
   const firebaseAuthDomain = String(settings.firebaseAuthDomain || "").trim() || DEFAULT_FIREBASE_AUTH_DOMAIN;
-  const firebaseOAuthWebClientId =
-    String(settings.firebaseOAuthWebClientId || "").trim() || DEFAULT_FIREBASE_WEB_OAUTH_CLIENT_ID;
   if (!firebaseWebApiKey) {
     throw new Error("Missing Firebase Web API key in extension settings");
   }
   if (!firebaseAuthDomain) {
     throw new Error("Missing Firebase auth domain in extension settings");
-  }
-  if (!firebaseOAuthWebClientId) {
-    throw new Error("Missing Firebase Web OAuth client ID in extension settings");
   }
   const nowSec = Math.floor(Date.now() / 1000);
   if (
@@ -851,48 +846,11 @@ async function getFirebaseIdentityForApi(forceRefresh = false) {
         return nextIdentity;
       }
     } catch (_error) {
-      // Fall through to fresh Google -> Firebase sign-in.
+      // Silent only — never open the sign-in popup from background API calls.
     }
   }
 
-  const signInResult = await launchGoogleWebAuthFlowOnce(firebaseOAuthWebClientId);
-  if (signInResult && signInResult.kind === "firebase_email") {
-    const nowSec2 = Math.floor(Date.now() / 1000);
-    const nextFromEmail = {
-      idToken: String(signInResult.idToken || "").trim(),
-      refreshToken: String(signInResult.refreshToken || "").trim(),
-      email: String(signInResult.email || "").trim().toLowerCase(),
-      uid: String(signInResult.uid || "").trim(),
-      expiresAtSec:
-        Number.isFinite(Number(signInResult.expiresAtSec)) && Number(signInResult.expiresAtSec) > nowSec2
-          ? Number(signInResult.expiresAtSec)
-          : nowSec2 + 3600
-    };
-    await chrome.storage.local.set({ promptlyFirebaseIdentity: nextFromEmail });
-    return nextFromEmail;
-  }
-  const googleSession = signInResult;
-  try {
-    const ge = await getEmailFromGoogleAccessToken(googleSession.accessToken);
-    await saveWebAuthSession(googleSession.accessToken, ge, googleSession.expiresInSec);
-  } catch (_e) {
-    /* ignore */
-  }
-  const firebaseSession = await signInToFirebaseWithGoogle({
-    firebaseWebApiKey,
-    firebaseAuthDomain,
-    googleAccessToken: googleSession.accessToken,
-    googleIdToken: googleSession.idToken
-  });
-  const nextIdentity = {
-    idToken: String(firebaseSession.idToken || "").trim(),
-    refreshToken: String(firebaseSession.refreshToken || "").trim(),
-    email: String(firebaseSession.email || "").trim().toLowerCase(),
-    uid: String(firebaseSession.localId || "").trim(),
-    expiresAtSec: nowSec + Math.max(120, Number(firebaseSession.expiresIn || 3600))
-  };
-  await chrome.storage.local.set({ promptlyFirebaseIdentity: nextIdentity });
-  return nextIdentity;
+  throw new Error("Not signed in");
 }
 
 async function readPersistedFirebaseIdentityEmail() {
@@ -992,7 +950,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
 
       if (message.type === "PROMPTLY_ENSURE_CHROME_SIGNIN") {
-        // Always use web auth flow for explicit sign-in — avoids hanging getAuthToken from SW.
+        const persisted = await readPersistedSignInState();
+        if (persisted?.chromeEmail) {
+          try {
+            await getFirebaseIdentityForApi(false);
+          } catch (_refreshError) {
+            // Persisted Promptly session still counts as signed in until explicit sign-out.
+          }
+          sendResponse({ ok: true, data: { chromeEmail: persisted.chromeEmail } });
+          return;
+        }
+        // Explicit sign-in only — opens the web popup when no persisted session exists.
         const result = await completeExtensionSignInWebPopup();
         if (result.kind === "firebase_email") {
           sendResponse({ ok: true, data: { chromeEmail: result.firebaseEmail } });
@@ -1015,9 +983,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
 
       if (message.type === "PROMPTLY_GET_ACCOUNT_STATUS") {
-        let chromeEmail = "";
         const persisted = await readPersistedSignInState();
-        chromeEmail = String(persisted?.chromeEmail || "").trim();
+        const chromeEmail = String(persisted?.chromeEmail || "").trim();
+        if (!chromeEmail) {
+          sendResponse({ ok: false, error: "Not signed in" });
+          return;
+        }
         let subscriptionTier = "";
         try {
           const identity = await getFirebaseIdentityForApi(false);
@@ -1033,12 +1004,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             subscriptionTier = String(body?.subscriptionTier || "").trim().toLowerCase();
           }
         } catch (_error) {
-          // Keep tier empty when unavailable.
+          // Keep tier empty when billing is unavailable; user remains signed in.
         }
         sendResponse({
           ok: true,
           data: {
-            chromeEmail: chromeEmail || null,
+            chromeEmail,
             subscriptionTier: subscriptionTier || null
           }
         });

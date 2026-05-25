@@ -580,6 +580,18 @@
     },
     onSuggestionClick: () => {},
     onSignIn: async () => {
+      try {
+        const existing = await checkChromeSignedIn().catch(() => null);
+        if (existing?.chromeEmail) {
+          ui.setSignedOut(false);
+          ui.setSettingsAccountEmail(existing.chromeEmail);
+          ui.showToast(`Signed in as ${existing.chromeEmail}.`, { tone: "success" });
+          refreshCreditsFromServer();
+          return;
+        }
+      } catch (_alreadySignedInCheck) {
+        // Continue to interactive sign-in.
+      }
       ui.showToast("Starting sign-in…", { tone: "info" });
       try {
         const result = await ensureChromeSignedIn();
@@ -588,6 +600,7 @@
           { tone: "success" }
         );
         ui.setSignedOut(false);
+        ui.setSettingsAccountEmail(String(result?.chromeEmail || "").trim());
         ui.showRepositionHint();
         if (result?.chromeEmail) {
           refreshCreditsFromServer();
@@ -595,18 +608,24 @@
       } catch (error) {
         ui.showErrorToast(mapPromptlyErrorToToast(String(error?.message || error)));
         ui.setSignedOut(true);
+        ui.setSettingsAccountEmail("");
         throw error;
       }
     },
     onLoadSettingsAccount: async () => {
       try {
+        const signedIn = await checkChromeSignedIn();
+        const email = String(signedIn?.chromeEmail || "").trim();
+        if (!email) {
+          return { email: "", subscriptionTier: "free" };
+        }
         const data = await getPromptlyAccountStatus();
         return {
-          email: String(data?.chromeEmail || "").trim() || "Not signed in",
+          email: String(data?.chromeEmail || email).trim() || email,
           subscriptionTier: String(data?.subscriptionTier || "").trim() || ""
         };
       } catch (_error) {
-        return { email: "Not signed in" };
+        return { email: "", subscriptionTier: "free" };
       }
     },
     onManageAccount: async () => {
@@ -628,8 +647,7 @@
           });
         });
         ui.setSignedOut(true);
-        ui.setSettingsAccountEmail("Not signed in");
-        ui.setSettingsTierBadge("free");
+        ui.setSettingsAccountEmail("");
         observers.scheduleUpdate();
         ui.showToast("Signed out of Promptly.", { tone: "info", durationMs: 2200 });
       } catch (error) {
@@ -921,10 +939,56 @@
     observers.scheduleUpdate();
   }, UI_DISPLAY_DELAY_MS);
   ui.setAutoSendEnabled(autoAdjustOnSend);
+
+  function isPromptlyAuthSessionError(message) {
+    const lowered = String(message || "").toLowerCase();
+    if (!lowered) {
+      return false;
+    }
+    if (lowered.includes("not signed in on this ai service")) {
+      return false;
+    }
+    if (lowered.includes("does not match your promptly sign-in")) {
+      return false;
+    }
+    if (lowered.includes("account mismatch")) {
+      return false;
+    }
+    return (
+      lowered.includes("sign in to promptly") ||
+      lowered.includes("not signed in") ||
+      lowered.includes("missing firebase auth token")
+    );
+  }
+
+  async function syncSignedInUiFromSession() {
+    try {
+      const session = await checkChromeSignedIn();
+      const email = String(session?.chromeEmail || "").trim();
+      if (!email) {
+        throw new Error("Not signed in");
+      }
+      ui.setSignedOut(false);
+      ui.setSettingsAccountEmail(email);
+      try {
+        const status = await getPromptlyAccountStatus();
+        if (status?.chromeEmail) {
+          ui.setSettingsAccountEmail(String(status.chromeEmail).trim());
+        }
+        if (status?.subscriptionTier) {
+          ui.setSettingsTierBadge(String(status.subscriptionTier).trim());
+        }
+      } catch (_statusError) {
+        // Signed-in state still holds from persisted session.
+      }
+    } catch (_error) {
+      ui.setSignedOut(true);
+      ui.setSettingsAccountEmail("");
+    }
+  }
+
   // Try to detect sign-in status on startup (non-interactive).
-  checkChromeSignedIn()
-    .then(() => ui.setSignedOut(false))
-    .catch(() => ui.setSignedOut(true));
+  syncSignedInUiFromSession();
 
   function getPromptText(target) {
     if (!target || !adapters.isEditable(target)) {
@@ -982,8 +1046,12 @@
             return;
           }
           if (!response || !response.ok) {
-        ui.setSignedOut(true);
-            reject(new Error(response?.error || "User verification failed"));
+            const err = String(response?.error || "User verification failed");
+            if (isPromptlyAuthSessionError(err)) {
+              ui.setSignedOut(true);
+              ui.setSettingsAccountEmail("");
+            }
+            reject(new Error(err));
             return;
           }
       ui.setSignedOut(false);
@@ -2444,14 +2512,7 @@
     if (error.promptlyNeedsSignIn) {
       return true;
     }
-    const msg = String(error?.message || error || "").toLowerCase();
-    return (
-      msg.includes("sign in") ||
-      msg.includes("not signed in") ||
-      msg.includes("missing firebase auth token") ||
-      msg.includes("user verification failed") ||
-      msg.includes("account mismatch")
-    );
+    return isPromptlyAuthSessionError(String(error?.message || error || ""));
   }
 
   function isLikelySendButton(target) {

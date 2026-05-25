@@ -274,6 +274,9 @@
       const runSignInFlow = (event) => {
         event.preventDefault();
         event.stopPropagation();
+        if (!this.root.classList.contains("is-signed-out")) {
+          return;
+        }
         this.showToast("Opening Google sign-in…", { tone: "info" });
         if (typeof this.onSignIn === "function") {
           Promise.resolve(this.onSignIn())
@@ -768,6 +771,9 @@
 
     setSignedOut(isSignedOut) {
       this.root.classList.toggle("is-signed-out", !!isSignedOut);
+      if (isSignedOut) {
+        this.setSettingsAccountEmail("");
+      }
     }
 
     async setSettingsOpen(isOpen) {
@@ -783,11 +789,14 @@
       try {
         const data = await this.onLoadSettingsAccount();
         const email = String(data?.email || "").trim();
-        this.setSettingsAccountEmail(email || "Not signed in");
+        if (!email) {
+          this.setSettingsAccountEmail("");
+          return;
+        }
+        this.setSettingsAccountEmail(email);
         this.setSettingsTierBadge(String(data?.subscriptionTier || "").trim());
       } catch (_error) {
-        this.setSettingsAccountEmail("Not signed in");
-        this.setSettingsTierBadge("free");
+        this.setSettingsAccountEmail("");
       }
     }
 
@@ -796,7 +805,14 @@
         return;
       }
       const safe = String(email || "").trim();
-      this.settingsEmailEl.textContent = safe || "Not signed in";
+      if (!safe || safe.toLowerCase() === "not signed in") {
+        this.settingsEmailEl.textContent = "Not signed in";
+        if (this.settingsTierEl) {
+          this.settingsTierEl.hidden = true;
+        }
+        return;
+      }
+      this.settingsEmailEl.textContent = safe;
     }
 
     setSettingsTierBadge(tier) {
