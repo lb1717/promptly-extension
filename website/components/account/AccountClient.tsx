@@ -773,9 +773,6 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                   Member since
                 </p>
                 <p className="mt-1.5 text-base font-semibold text-muted sm:text-lg">{formatJoinDate(user)}</p>
-                <p className="mt-2 text-sm font-semibold text-ink sm:text-base">
-                  {billingLoading && !billing ? "Loading plan…" : currentPlanLabel}
-                </p>
               </div>
 
               <div className="col-start-3 row-span-2 row-start-1 flex min-w-[9.25rem] flex-col gap-2 self-stretch justify-self-end sm:min-w-[11rem]">
@@ -814,8 +811,12 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                 <p className="mt-1.5 break-all text-base text-muted sm:text-lg">{user.email || "—"}</p>
               </div>
 
-              {/* Intentionally empty grid cell */}
-              <div className="col-start-2 row-start-2" aria-hidden="true" />
+              <div className="col-start-2 row-start-2 min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-faint sm:text-sm">Plan</p>
+                <p className="mt-1.5 text-base text-muted sm:text-lg">
+                  {billingLoading && !billing ? "Loading…" : currentPlanLabel}
+                </p>
+              </div>
             </div>
 
             {permissionInlineMessages.length ? (
