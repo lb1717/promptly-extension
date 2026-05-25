@@ -217,6 +217,10 @@
   display: none;
 }
 
+.promptly-root.is-signed-out .promptly-tab-credit-wrap {
+  display: none;
+}
+
 .promptly-tab-signin {
   all: unset;
   display: none;

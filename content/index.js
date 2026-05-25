@@ -607,15 +607,20 @@
         }
       } catch (error) {
         ui.showErrorToast(mapPromptlyErrorToToast(String(error?.message || error)));
-        ui.setSignedOut(true);
-        ui.setSettingsAccountEmail("");
+        await applySignedOutState(true);
         throw error;
       }
     },
     onLoadSettingsAccount: async () => {
       try {
-        const signedIn = await checkChromeSignedIn();
-        const email = String(signedIn?.chromeEmail || "").trim();
+        let email = "";
+        try {
+          const signedIn = await checkChromeSignedIn({ retries: 2 });
+          email = String(signedIn?.chromeEmail || "").trim();
+        } catch (_checkError) {
+          const hint = await readLocalPersistedSessionHint();
+          email = String(hint?.chromeEmail || "").trim();
+        }
         if (!email) {
           return { email: "", subscriptionTier: "free" };
         }
@@ -833,7 +838,7 @@
       } catch (_error) {
         hadError = true;
         if (_error?.promptlyNeedsSignIn) {
-          ui.setSignedOut(true);
+          void applySignedOutState(true);
         }
         const rawReason = String(_error?.message || _error || "failed");
         const toastMsg = mapPromptlyErrorToToast(rawReason);
@@ -961,15 +966,125 @@
     );
   }
 
-  async function syncSignedInUiFromSession() {
-    try {
-      const session = await checkChromeSignedIn();
-      const email = String(session?.chromeEmail || "").trim();
-      if (!email) {
-        throw new Error("Not signed in");
+  async function checkChromeSignedInOnce() {
+    return new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({ type: "PROMPTLY_CHECK_CHROME_SIGNIN" }, (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        if (!response || !response.ok) {
+          reject(new Error(response?.error || "Not signed in"));
+          return;
+        }
+        resolve(response.data || {});
+      });
+    });
+  }
+
+  function isTransientExtensionMessageError(message) {
+    const lowered = String(message || "").toLowerCase();
+    return (
+      lowered.includes("could not establish connection") ||
+      lowered.includes("receiving end does not exist") ||
+      lowered.includes("extension context invalidated") ||
+      lowered.includes("message port closed")
+    );
+  }
+
+  function readLocalPersistedSessionHint() {
+    return new Promise((resolve) => {
+      if (!chrome?.storage?.local) {
+        resolve(null);
+        return;
       }
+      chrome.storage.local.get(
+        ["promptlyFirebaseIdentity", "promptlyWebAuthEmail", "promptlyWebAuthAccessToken", "promptlyWebAuthExpiresAt"],
+        (data) => {
+          if (chrome.runtime.lastError) {
+            resolve(null);
+            return;
+          }
+          const identity = data?.promptlyFirebaseIdentity || null;
+          const firebaseEmail = String(identity?.email || "").trim().toLowerCase();
+          if (firebaseEmail) {
+            resolve({ chromeEmail: firebaseEmail });
+            return;
+          }
+          const webEmail = String(data?.promptlyWebAuthEmail || "").trim().toLowerCase();
+          const webToken = String(data?.promptlyWebAuthAccessToken || "").trim();
+          const webExp = Number(data?.promptlyWebAuthExpiresAt || 0);
+          if (webEmail && webToken && webExp > Date.now() + 15_000) {
+            resolve({ chromeEmail: webEmail });
+            return;
+          }
+          if (identity?.refreshToken && firebaseEmail) {
+            resolve({ chromeEmail: firebaseEmail });
+            return;
+          }
+          resolve(null);
+        }
+      );
+    });
+  }
+
+  async function checkChromeSignedIn(options = {}) {
+    const retries = Math.max(1, Number(options.retries) || 3);
+    let lastError = null;
+    for (let attempt = 0; attempt < retries; attempt += 1) {
+      try {
+        return await checkChromeSignedInOnce();
+      } catch (error) {
+        lastError = error;
+        const message = String(error?.message || error || "");
+        if (isTransientExtensionMessageError(message) && attempt < retries - 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, 180 * (attempt + 1)));
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw lastError || new Error("Not signed in");
+  }
+
+  async function hasPersistedPromptlySession() {
+    try {
+      const session = await checkChromeSignedIn({ retries: 2 });
+      if (String(session?.chromeEmail || "").trim()) {
+        return true;
+      }
+    } catch (_error) {
+      // Fall through to local storage hint.
+    }
+    const hint = await readLocalPersistedSessionHint();
+    return !!String(hint?.chromeEmail || "").trim();
+  }
+
+  async function applySignedOutState(isSignedOut) {
+    if (!isSignedOut) {
       ui.setSignedOut(false);
-      ui.setSettingsAccountEmail(email);
+      return;
+    }
+    if (await hasPersistedPromptlySession()) {
+      ui.setSignedOut(false);
+      return;
+    }
+    ui.setSignedOut(true);
+    ui.setSettingsAccountEmail("");
+  }
+
+  async function applySignedInStateFromSession(session, options = {}) {
+    const email = String(session?.chromeEmail || "").trim();
+    if (!email) {
+      await applySignedOutState(true);
+      return;
+    }
+    ui.setSignedOut(false);
+    ui.setSettingsAccountEmail(email);
+    if (options.loadCredits !== false) {
+      refreshCreditsFromServer();
+    }
+    if (options.loadAccountStatus) {
       try {
         const status = await getPromptlyAccountStatus();
         if (status?.chromeEmail) {
@@ -979,15 +1094,32 @@
           ui.setSettingsTierBadge(String(status.subscriptionTier).trim());
         }
       } catch (_statusError) {
-        // Signed-in state still holds from persisted session.
+        // Signed-in UI still holds from persisted session.
       }
-    } catch (_error) {
-      ui.setSignedOut(true);
-      ui.setSettingsAccountEmail("");
     }
   }
 
-  // Try to detect sign-in status on startup (non-interactive).
+  async function syncSignedInUiFromSession() {
+    const hint = await readLocalPersistedSessionHint();
+    if (hint?.chromeEmail) {
+      ui.setSignedOut(false);
+      ui.setSettingsAccountEmail(hint.chromeEmail);
+    }
+    try {
+      const session = await checkChromeSignedIn({ retries: 4 });
+      await applySignedInStateFromSession(session, { loadCredits: true, loadAccountStatus: true });
+    } catch (_error) {
+      if (hint?.chromeEmail) {
+        ui.setSignedOut(false);
+        ui.setSettingsAccountEmail(hint.chromeEmail);
+        refreshCreditsFromServer();
+        return;
+      }
+      await applySignedOutState(true);
+    }
+  }
+
+  // Detect sign-in status on startup (non-interactive).
   syncSignedInUiFromSession();
 
   function getPromptText(target) {
@@ -1048,8 +1180,7 @@
           if (!response || !response.ok) {
             const err = String(response?.error || "User verification failed");
             if (isPromptlyAuthSessionError(err)) {
-              ui.setSignedOut(true);
-              ui.setSettingsAccountEmail("");
+              void applySignedOutState(true);
             }
             reject(new Error(err));
             return;
@@ -1091,22 +1222,6 @@
       return "Try Improve again in a moment.";
     }
     return msg.length > 140 ? `${msg.slice(0, 140)}…` : msg;
-  }
-
-  async function checkChromeSignedIn() {
-    return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage({ type: "PROMPTLY_CHECK_CHROME_SIGNIN" }, (response) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-          return;
-        }
-        if (!response || !response.ok) {
-          reject(new Error(response?.error || "Not signed in"));
-          return;
-        }
-        resolve(response.data || {});
-      });
-    });
   }
 
   async function getPromptlyAccountStatus() {
@@ -1257,7 +1372,7 @@
       }
     } catch (e) {
       if (e?.promptlyNeedsSignIn) {
-        ui.setSignedOut(true);
+        void applySignedOutState(true);
       }
     }
   }
@@ -1272,6 +1387,7 @@
       if (destroyed || document.visibilityState !== "visible") {
         return;
       }
+      void syncSignedInUiFromSession();
       refreshCreditsFromServer();
     }, 400);
   }
@@ -2623,7 +2739,7 @@
       }
     } catch (_error) {
       if (_error?.promptlyNeedsSignIn) {
-        ui.setSignedOut(true);
+        void applySignedOutState(true);
       }
       if (isSignInRequiredError(_error)) {
         blockSend = true;
@@ -2711,15 +2827,6 @@
   }
 
   observers.start();
-  fetchCreditUsageViaProxy()
-    .then((credits) => {
-      if (credits) {
-        applyCreditsToUi(credits);
-      }
-    })
-    .catch(() => {
-      // Tooltip keeps default text when usage fetch fails.
-    });
   chrome.runtime.onMessage.addListener((message) => {
     if (!message || message.type !== "PROMPTLY_OPEN_IN_PAGE_SETTINGS") {
       return;

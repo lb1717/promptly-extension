@@ -865,6 +865,25 @@ async function readPersistedSignInState() {
   if (firebaseEmail) {
     return { chromeEmail: firebaseEmail, authProvider: "firebase_email" };
   }
+  const local = await chrome.storage.local.get([
+    SESSION_WEB_AUTH_EMAIL,
+    SESSION_WEB_AUTH_TOKEN,
+    SESSION_WEB_AUTH_EXPIRES_AT,
+    "promptlyFirebaseIdentity"
+  ]);
+  const webEmail = String(local[SESSION_WEB_AUTH_EMAIL] || "").trim().toLowerCase();
+  const webToken = String(local[SESSION_WEB_AUTH_TOKEN] || "").trim();
+  const webExp = Number(local[SESSION_WEB_AUTH_EXPIRES_AT] || 0);
+  if (webEmail && webToken && webExp > Date.now() + 15_000) {
+    return { chromeEmail: webEmail, authProvider: "google" };
+  }
+  const identity = local?.promptlyFirebaseIdentity || null;
+  if (identity?.refreshToken) {
+    const identityEmail = String(identity.email || webEmail || "").trim().toLowerCase();
+    if (identityEmail) {
+      return { chromeEmail: identityEmail, authProvider: "firebase_email" };
+    }
+  }
   try {
     const chromeEmail = await getEffectiveSignedInEmail({ interactive: false });
     return { chromeEmail: String(chromeEmail || "").trim().toLowerCase() || null, authProvider: "google" };
