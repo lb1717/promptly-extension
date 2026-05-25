@@ -10,7 +10,7 @@ import { Navbar } from "@/components/Navbar";
 import { PricingSection } from "@/components/PricingSection";
 
 export const metadata: Metadata = {
-  title: "Promptly | Better prompts for ChatGPT, Claude & Gemini",
+  title: "Promptly Labs",
   description:
     "One-click prompt improvement inside ChatGPT, Claude, and Gemini—clearer intent, structured outputs, and usage tracking."
 };

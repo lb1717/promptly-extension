@@ -79,9 +79,21 @@ function ExtensionSignInContent() {
 
   const emailAuthReady = !!(extensionId && signinCsrf && firebaseApiKey);
 
+  const brandHeader = (
+    <div className="mb-6 flex w-full flex-col items-center text-center">
+      <p className="text-sm font-semibold tracking-tight text-ink">Promptly Labs</p>
+      <img
+        src="/images/promptly-logo.png"
+        alt="Promptly"
+        className="mt-3 h-11 w-auto max-w-[200px] object-contain"
+      />
+    </div>
+  );
+
   return (
     <main className="flex min-h-screen w-full flex-col items-center justify-center bg-white p-6 text-ink">
       <div className="mx-auto flex w-full max-w-sm flex-col items-center justify-center">
+        {brandHeader}
         {error ? (
           <p className="text-center text-sm leading-relaxed text-red-700">{error}</p>
         ) : (
@@ -136,7 +148,15 @@ export default function ExtensionSignInPage() {
     <Suspense
       fallback={
         <main className="flex min-h-screen items-center justify-center bg-white p-6 text-ink">
-          <p className="text-sm text-muted">Loading…</p>
+          <div className="flex flex-col items-center text-center">
+            <p className="text-sm font-semibold tracking-tight text-ink">Promptly Labs</p>
+            <img
+              src="/images/promptly-logo.png"
+              alt="Promptly"
+              className="mt-3 h-11 w-auto max-w-[200px] object-contain"
+            />
+            <p className="mt-6 text-sm text-muted">Loading…</p>
+          </div>
         </main>
       }
     >
