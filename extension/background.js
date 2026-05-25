@@ -334,6 +334,43 @@ function extensionSignInPageMatchesSender(senderUrl) {
 let pendingExtensionSignIn = null;
 
 chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
+  if (message?.type === "PROMPTLY_WEBSITE_SESSION_SYNC") {
+    if (!promptlyWebsitePageMatchesSender(sender.url)) {
+      sendResponse({ ok: false, error: "Invalid sender" });
+      return false;
+    }
+    (async () => {
+      try {
+        const idToken = String(message.idToken || "").trim();
+        const email = String(message.email || "").trim().toLowerCase();
+        const uid = String(message.uid || "").trim();
+        const expiresAtSec = Number(message.expiresAtSec);
+        if (!idToken || !email) {
+          sendResponse({ ok: false, error: "Incomplete session" });
+          return;
+        }
+        const existing = await chrome.storage.local.get(["promptlyFirebaseIdentity"]);
+        const prev = existing?.promptlyFirebaseIdentity || {};
+        const nextIdentity = {
+          ...prev,
+          idToken,
+          email,
+          uid: uid || String(prev.uid || "").trim(),
+          expiresAtSec:
+            Number.isFinite(expiresAtSec) && expiresAtSec > Math.floor(Date.now() / 1000)
+              ? expiresAtSec
+              : Math.floor(Date.now() / 1000) + 3300,
+          refreshToken: String(prev.refreshToken || message.refreshToken || "").trim()
+        };
+        await chrome.storage.local.set({ promptlyFirebaseIdentity: nextIdentity });
+        prefetchUserCredits();
+        sendResponse({ ok: true });
+      } catch (error) {
+        sendResponse({ ok: false, error: String(error?.message || error) });
+      }
+    })();
+    return true;
+  }
   if (message?.type === "PROMPTLY_OAUTH_BRIDGE") {
     if (!pendingExtensionSignIn) {
       return false;
@@ -722,34 +759,178 @@ async function fetchWithTimeout(url, init, timeoutMs) {
 }
 
 const CREDITS_CACHE_TTL_MS = 10_000;
+const CREDITS_PERSIST_TTL_MS = 120_000;
 const CREDITS_FETCH_TIMEOUT_MS = 12_000;
+const CREDITS_STORAGE_KEY = "promptlyLastCredits";
 /** @type {{ email: string, credits: object, fetchedAt: number } | null} */
 let creditsCacheEntry = null;
-
-function readCreditsCache(email) {
-  if (!creditsCacheEntry) {
-    return null;
-  }
-  const key = String(email || "").trim().toLowerCase();
-  if (!key || creditsCacheEntry.email !== key) {
-    return null;
-  }
-  if (Date.now() - creditsCacheEntry.fetchedAt > CREDITS_CACHE_TTL_MS) {
-    return null;
-  }
-  return creditsCacheEntry.credits;
-}
 
 function writeCreditsCache(email, credits) {
   const key = String(email || "").trim().toLowerCase();
   if (!key || !credits) {
     return;
   }
-  creditsCacheEntry = { email: key, credits, fetchedAt: Date.now() };
+  const fetchedAt = Date.now();
+  creditsCacheEntry = { email: key, credits, fetchedAt };
+  void chrome.storage.local.set({
+    [CREDITS_STORAGE_KEY]: { email: key, credits, fetchedAt }
+  });
 }
 
 function clearCreditsCache() {
   creditsCacheEntry = null;
+  void chrome.storage.local.remove(CREDITS_STORAGE_KEY);
+}
+
+async function readPersistedCreditsCache(email) {
+  const key = String(email || "").trim().toLowerCase();
+  if (!key) {
+    return null;
+  }
+  if (creditsCacheEntry && creditsCacheEntry.email === key) {
+    if (Date.now() - creditsCacheEntry.fetchedAt <= CREDITS_CACHE_TTL_MS) {
+      return creditsCacheEntry.credits;
+    }
+  }
+  const stored = await chrome.storage.local.get([CREDITS_STORAGE_KEY]);
+  const row = stored?.[CREDITS_STORAGE_KEY] || null;
+  if (!row?.credits || String(row.email || "").trim().toLowerCase() !== key) {
+    return null;
+  }
+  if (Date.now() - Number(row.fetchedAt || 0) > CREDITS_PERSIST_TTL_MS) {
+    return null;
+  }
+  creditsCacheEntry = {
+    email: key,
+    credits: row.credits,
+    fetchedAt: Number(row.fetchedAt || 0)
+  };
+  return row.credits;
+}
+
+function promptlyWebsitePageMatchesSender(senderUrl) {
+  try {
+    const page = new URL(String(senderUrl || "").split("#")[0]);
+    const host = page.hostname.replace(/^www\./, "").toLowerCase();
+    if (host === "promptly-labs.com" && page.protocol === "https:") {
+      return true;
+    }
+    if (host.endsWith(".vercel.app") && page.protocol === "https:") {
+      return true;
+    }
+    if ((host === "localhost" || host === "127.0.0.1") && page.protocol === "http:") {
+      return true;
+    }
+    return false;
+  } catch (_error) {
+    return false;
+  }
+}
+
+async function rebuildFirebaseIdentityFromGoogleSession() {
+  let accessToken = await readWebAuthSessionTokenIfValid();
+  if (!accessToken) {
+    try {
+      accessToken = await getGoogleAccessTokenForApi();
+    } catch (_error) {
+      accessToken = null;
+    }
+  }
+  if (!accessToken) {
+    return null;
+  }
+  try {
+    await persistFirebaseSessionAfterGoogleWebSignIn({ accessToken, idToken: "" });
+  } catch (_error) {
+    return null;
+  }
+  const reloaded = await chrome.storage.local.get(["promptlyFirebaseIdentity"]);
+  const rebuilt = reloaded.promptlyFirebaseIdentity || null;
+  if (!rebuilt?.idToken) {
+    return null;
+  }
+  return rebuilt;
+}
+
+async function ensureFreshFirebaseIdentity() {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const cached = await chrome.storage.local.get(["promptlyFirebaseIdentity"]);
+  const identity = cached.promptlyFirebaseIdentity || null;
+  if (
+    identity?.idToken &&
+    Number(identity.expiresAtSec || 0) - FIREBASE_ID_TOKEN_BUFFER_SEC > nowSec
+  ) {
+    return identity;
+  }
+
+  if (identity?.refreshToken) {
+    try {
+      return await getFirebaseIdentityForApi(false);
+    } catch (_refreshError) {
+      // Continue to Google-session rebuild below.
+    }
+  }
+
+  const rebuilt = await rebuildFirebaseIdentityFromGoogleSession();
+  if (rebuilt?.idToken) {
+    return rebuilt;
+  }
+
+  return await getFirebaseIdentityForApi(false);
+}
+
+async function fetchCreditsViaAccountApi(baseUrl, idToken, message = {}) {
+  const response = await fetchWithTimeout(
+    buildApiUrl(baseUrl, "/api/account/credits"),
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${idToken}`,
+        ...buildCreditEstimateHeaders(message)
+      }
+    },
+    CREDITS_FETCH_TIMEOUT_MS
+  );
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const err = new Error(String(body?.error || `Account credits failed (${response.status})`));
+    if (response.status === 401) {
+      err.needsSignIn = true;
+    }
+    throw err;
+  }
+  const credits = body?.credits || null;
+  if (!credits) {
+    throw new Error("Account credits response was empty");
+  }
+  return credits;
+}
+
+async function fetchCreditsViaExtensionApi(baseUrl, auth, message = {}) {
+  const response = await fetchWithTimeout(
+    buildApiUrl(baseUrl, "/api/credits"),
+    {
+      method: "GET",
+      headers: {
+        ...auth.headers,
+        ...buildCreditEstimateHeaders(message)
+      }
+    },
+    CREDITS_FETCH_TIMEOUT_MS
+  );
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const err = new Error(String(body?.error || `Credits request failed (${response.status})`));
+    if (response.status === 401) {
+      err.needsSignIn = true;
+    }
+    throw err;
+  }
+  const credits = body?.credits || null;
+  if (!credits) {
+    throw new Error("Credits response was empty");
+  }
+  return credits;
 }
 
 function buildCreditEstimateHeaders(message) {
@@ -814,45 +995,56 @@ async function fetchUserCreditsFromApi(message = {}, options = {}) {
     err.needsSignIn = true;
     throw err;
   }
+  const accountEmail = String(persisted.chromeEmail || "").trim().toLowerCase();
 
   const skipCache = options.skipCache === true || options.forceRefresh === true;
   if (!skipCache) {
-    const cached = readCreditsCache(persisted.chromeEmail);
+    const cached = await readPersistedCreditsCache(accountEmail);
     if (cached) {
       return cached;
     }
   }
 
-  const auth = await resolveExtensionApiAuthHeaders();
   const baseUrl = await getManagedProxyBaseUrl();
   if (!baseUrl) {
     throw new Error("Missing app base URL in extension settings");
   }
 
-  const response = await fetchWithTimeout(
-    buildApiUrl(baseUrl, "/api/credits"),
-    {
-      method: "GET",
-      headers: {
-        ...auth.headers,
-        ...buildCreditEstimateHeaders(message)
-      }
-    },
-    CREDITS_FETCH_TIMEOUT_MS
-  );
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const err = new Error(String(body?.error || `Credits request failed (${response.status})`));
-    if (response.status === 401) {
-      err.needsSignIn = true;
+  let credits = null;
+  let lastError = null;
+
+  try {
+    const identity = await ensureFreshFirebaseIdentity();
+    const idToken = String(identity?.idToken || "").trim();
+    if (idToken) {
+      credits = await fetchCreditsViaAccountApi(baseUrl, idToken, message);
+    }
+  } catch (error) {
+    lastError = error;
+  }
+
+  if (!credits) {
+    try {
+      const auth = await resolveExtensionApiAuthHeaders();
+      credits = await fetchCreditsViaExtensionApi(baseUrl, auth, message);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (!credits) {
+    const stale = await readPersistedCreditsCache(accountEmail);
+    if (stale) {
+      return stale;
+    }
+    const err = lastError instanceof Error ? lastError : new Error("Unable to load credits");
+    if (err?.needsSignIn) {
+      throw err;
     }
     throw err;
   }
-  const credits = body?.credits || null;
-  if (!credits) {
-    throw new Error("Credits response was empty");
-  }
-  writeCreditsCache(String(persisted.chromeEmail || auth.email || "").trim().toLowerCase(), credits);
+
+  writeCreditsCache(accountEmail, credits);
   return credits;
 }
 
@@ -966,6 +1158,16 @@ async function getFirebaseIdentityForApi(forceRefresh = false) {
     Number(identity.expiresAtSec || 0) - FIREBASE_ID_TOKEN_BUFFER_SEC > nowSec
   ) {
     return identity;
+  }
+
+  if (!identity?.refreshToken) {
+    const rebuilt = await rebuildFirebaseIdentityFromGoogleSession();
+    if (
+      rebuilt?.idToken &&
+      Number(rebuilt.expiresAtSec || 0) - FIREBASE_ID_TOKEN_BUFFER_SEC > nowSec
+    ) {
+      return rebuilt;
+    }
   }
 
   if (identity?.refreshToken) {
@@ -1152,7 +1354,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           try {
             data.credits = await fetchUserCreditsFromApi(message, { skipCache: false });
           } catch (_creditsError) {
-            data.credits = null;
+            data.credits = await readPersistedCreditsCache(persisted.chromeEmail);
           }
         }
         sendResponse({ ok: true, data });

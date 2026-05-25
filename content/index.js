@@ -1033,6 +1033,38 @@
     );
   }
 
+  function readLocalPersistedCreditsHint() {
+    return new Promise((resolve) => {
+      if (!chrome?.storage?.local) {
+        resolve(null);
+        return;
+      }
+      chrome.storage.local.get(["promptlyLastCredits", "promptlyFirebaseIdentity", "promptlyWebAuthEmail"], (data) => {
+        if (chrome.runtime.lastError) {
+          resolve(null);
+          return;
+        }
+        const row = data?.promptlyLastCredits || null;
+        const identityEmail = String(data?.promptlyFirebaseIdentity?.email || "").trim().toLowerCase();
+        const webEmail = String(data?.promptlyWebAuthEmail || "").trim().toLowerCase();
+        const accountEmail = identityEmail || webEmail;
+        if (!row?.credits || !accountEmail) {
+          resolve(null);
+          return;
+        }
+        if (String(row.email || "").trim().toLowerCase() !== accountEmail) {
+          resolve(null);
+          return;
+        }
+        if (Date.now() - Number(row.fetchedAt || 0) > 120_000) {
+          resolve(null);
+          return;
+        }
+        resolve(row.credits);
+      });
+    });
+  }
+
   function readLocalPersistedSessionHint() {
     return new Promise((resolve) => {
       if (!chrome?.storage?.local) {
@@ -1148,10 +1180,14 @@
 
   async function syncSignedInUiFromSession() {
     const hint = await readLocalPersistedSessionHint();
+    const cachedCredits = await readLocalPersistedCreditsHint();
     if (hint?.chromeEmail) {
       ui.setSignedOut(false);
       ui.setSettingsAccountEmail(hint.chromeEmail);
-      void refreshCreditsFromServer(null, { showLoading: true, force: true });
+      if (cachedCredits) {
+        applyCreditsToUi(cachedCredits);
+      }
+      void refreshCreditsFromServer(null, { showLoading: !cachedCredits, force: true });
     }
     try {
       const session = await checkChromeSignedIn({ retries: 4, includeCredits: true });
@@ -1464,14 +1500,22 @@
           throw lastError;
         }
         if (showLoading || options.fromHover) {
-          ui.setCreditUsageUnavailable();
+          // Keep last known usage visible instead of a dead-end unavailable state.
+          if (!ui.hasCreditUsageData()) {
+            ui.setCreditUsageUnavailable();
+          }
         }
       } catch (error) {
         if (error?.promptlyNeedsSignIn) {
           stopCreditsPolling();
           void applySignedOutState(true);
         } else if (showLoading || options.fromHover) {
-          ui.setCreditUsageUnavailable();
+          const cachedCredits = await readLocalPersistedCreditsHint();
+          if (cachedCredits) {
+            applyCreditsToUi(cachedCredits);
+          } else if (!ui.hasCreditUsageData()) {
+            ui.setCreditUsageUnavailable();
+          }
         }
       } finally {
         ui.setCreditUsageLoading(false);

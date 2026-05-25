@@ -17,6 +17,7 @@ import {
 import { doc, serverTimestamp, setDoc } from "firebase/firestore";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { SITE } from "@/lib/constants";
 
 function formatJoinDate(user: User | null): string {
   if (!user?.metadata?.creationTime) return "—";
@@ -306,12 +307,46 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
     }
   }, []);
 
+  const syncExtensionSession = useCallback(async (current: User) => {
+    const extId =
+      (typeof window !== "undefined" && window.sessionStorage.getItem("promptly_extension_id")) ||
+      SITE.chromeExtensionId;
+    if (!extId) {
+      return;
+    }
+    const chromeApi = (window as Window & {
+      chrome?: { runtime?: { sendMessage?: (id: string, msg: unknown, cb?: () => void) => void; lastError?: unknown } };
+    }).chrome;
+    if (!chromeApi?.runtime?.sendMessage) {
+      return;
+    }
+    try {
+      const idToken = await current.getIdToken(true);
+      chromeApi.runtime.sendMessage(
+        extId,
+        {
+          type: "PROMPTLY_WEBSITE_SESSION_SYNC",
+          idToken,
+          email: current.email || "",
+          uid: current.uid,
+          expiresAtSec: Math.floor(Date.now() / 1000) + 3300
+        },
+        () => {
+          void chromeApi.runtime?.lastError;
+        }
+      );
+    } catch (_error) {
+      // Extension may not be installed; ignore.
+    }
+  }, []);
+
   useEffect(() => {
     const auth = getFirebaseAuth();
     const unsub = onAuthStateChanged(auth, async (nextUser) => {
       setUser(nextUser);
       setLoading(false);
       if (nextUser) {
+        void syncExtensionSession(nextUser);
         await Promise.all([loadBilling(nextUser), loadAccountStats(nextUser), loadDailyCredits(nextUser)]);
       } else {
         setBilling(null);
@@ -320,7 +355,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
       }
     });
     return () => unsub();
-  }, [loadBilling, loadAccountStats, loadDailyCredits]);
+  }, [loadBilling, loadAccountStats, loadDailyCredits, syncExtensionSession]);
 
   const permissionInlineMessages = useMemo(() => {
     const msgs: string[] = [];

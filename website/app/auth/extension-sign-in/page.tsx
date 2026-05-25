@@ -60,6 +60,14 @@ function ExtensionSignInContent() {
     searchParams.get("firebase_api_key")?.trim() ||
     String(process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "").trim();
 
+  if (typeof window !== "undefined" && extensionId) {
+    try {
+      window.sessionStorage.setItem("promptly_extension_id", extensionId);
+    } catch (_error) {
+      // Ignore storage failures.
+    }
+  }
+
   const { error, googleUrl } = useMemo(() => {
     if (!clientId || !redirectUri || !state || !nonce) {
       return {
