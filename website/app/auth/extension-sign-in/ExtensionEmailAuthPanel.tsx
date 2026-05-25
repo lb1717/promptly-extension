@@ -290,14 +290,14 @@ export function ExtensionEmailAuthPanel({ apiKey, extensionId, signinCsrf, disab
   }
 
   return (
-    <div className="mt-6 border-t border-white/10 pt-6">
-      <div className="mb-3 flex w-full items-center justify-center rounded-xl border border-white/15 bg-white/[0.08] px-4 py-2.5 text-sm font-semibold text-white/90 shadow-lg">
-        Email &amp; Password
-      </div>
-      <div className="flex justify-center gap-2 text-[11px] mb-3">
+    <div className="w-full rounded-xl border border-line bg-cream p-5">
+      <h2 className="text-center text-base font-semibold text-ink">
+        {mode === "signin" ? "Sign in with Email" : "Create account with Email"}
+      </h2>
+      <div className="mt-4 flex justify-center gap-2 text-xs">
         <button
           type="button"
-          className={`rounded-lg px-2 py-1 ${mode === "signin" ? "bg-white/15 text-white" : "text-ink/55 hover:text-ink/80"}`}
+          className={`rounded-lg px-2 py-1 ${mode === "signin" ? "bg-cream-dark text-ink" : "text-faint hover:text-ink"}`}
           onClick={() => {
             setMode("signin");
             setError("");
@@ -309,7 +309,7 @@ export function ExtensionEmailAuthPanel({ apiKey, extensionId, signinCsrf, disab
         </button>
         <button
           type="button"
-          className={`rounded-lg px-2 py-1 ${mode === "register" ? "bg-white/15 text-white" : "text-ink/55 hover:text-ink/80"}`}
+          className={`rounded-lg px-2 py-1 ${mode === "register" ? "bg-cream-dark text-ink" : "text-faint hover:text-ink"}`}
           onClick={() => {
             setMode("register");
             setError("");
@@ -320,88 +320,84 @@ export function ExtensionEmailAuthPanel({ apiKey, extensionId, signinCsrf, disab
           Create account
         </button>
       </div>
-      <form onSubmit={mode === "signin" ? onSubmitSignIn : onSubmitRegister} className="space-y-3">
-        <label className="block">
-          <span className="sr-only">Email</span>
-          <input
-            type="email"
-            autoComplete="email"
-            required
-            value={email}
-            onChange={(ev) => setEmail(ev.target.value)}
-            disabled={disabled || busy}
-            placeholder="Email"
-            className="w-full rounded-lg border border-white/15 bg-black/25 px-3 py-2 text-sm text-white placeholder:text-ink/40 outline-none focus:border-violet-400/60"
-          />
-        </label>
+      <form onSubmit={mode === "signin" ? onSubmitSignIn : onSubmitRegister} className="mt-4 space-y-2">
+        <input
+          type="email"
+          autoComplete="email"
+          required
+          value={email}
+          onChange={(ev) => setEmail(ev.target.value)}
+          disabled={disabled || busy}
+          placeholder="Email"
+          className="w-full rounded-lg border border-line bg-cream-dark px-3 py-2 text-sm text-ink placeholder:text-faint/40 outline-none focus:border-line"
+        />
         {mode === "register" ? (
-          <label className="block">
-            <span className="sr-only">Full name</span>
-            <input
-              type="text"
-              autoComplete="name"
-              required
-              value={name}
-              onChange={(ev) => setName(ev.target.value)}
-              disabled={disabled || busy}
-              placeholder="Full name"
-              className="w-full rounded-lg border border-white/15 bg-black/25 px-3 py-2 text-sm text-white placeholder:text-ink/40 outline-none focus:border-violet-400/60"
-            />
-          </label>
+          <input
+            type="text"
+            autoComplete="name"
+            required
+            value={name}
+            onChange={(ev) => setName(ev.target.value)}
+            disabled={disabled || busy}
+            placeholder="Full name"
+            className="w-full rounded-lg border border-line bg-cream-dark px-3 py-2 text-sm text-ink placeholder:text-faint/40 outline-none focus:border-line"
+          />
         ) : null}
-        <label className="block">
-          <span className="sr-only">Password</span>
+        <input
+          type="password"
+          autoComplete={mode === "signin" ? "current-password" : "new-password"}
+          required
+          value={password}
+          onChange={(ev) => setPassword(ev.target.value)}
+          disabled={disabled || busy}
+          placeholder="Password"
+          className="w-full rounded-lg border border-line bg-cream-dark px-3 py-2 text-sm text-ink placeholder:text-faint/40 outline-none focus:border-line"
+        />
+        {mode === "register" ? (
           <input
             type="password"
-            autoComplete={mode === "signin" ? "current-password" : "new-password"}
+            autoComplete="new-password"
             required
-            value={password}
-            onChange={(ev) => setPassword(ev.target.value)}
+            value={password2}
+            onChange={(ev) => setPassword2(ev.target.value)}
             disabled={disabled || busy}
-            placeholder="Password"
-            className="w-full rounded-lg border border-white/15 bg-black/25 px-3 py-2 text-sm text-white placeholder:text-ink/40 outline-none focus:border-violet-400/60"
+            placeholder="Confirm password"
+            className="w-full rounded-lg border border-line bg-cream-dark px-3 py-2 text-sm text-ink placeholder:text-faint/40 outline-none focus:border-line"
           />
-        </label>
-        {mode === "register" ? (
-          <label className="block">
-            <span className="sr-only">Confirm password</span>
-            <input
-              type="password"
-              autoComplete="new-password"
-              required
-              value={password2}
-              onChange={(ev) => setPassword2(ev.target.value)}
-              disabled={disabled || busy}
-              placeholder="Confirm password"
-              className="w-full rounded-lg border border-white/15 bg-black/25 px-3 py-2 text-sm text-white placeholder:text-ink/40 outline-none focus:border-violet-400/60"
-            />
-          </label>
         ) : null}
         <button
           type="submit"
           disabled={disabled || busy}
-          className="w-full rounded-xl bg-violet-600/90 py-2.5 text-sm font-semibold text-white hover:bg-violet-500 disabled:opacity-50"
+          className="w-full rounded-lg bg-cream-dark py-2 text-sm font-semibold text-ink hover:bg-cream-deep disabled:opacity-60"
         >
           {busy ? "Working…" : mode === "signin" ? "Sign in with email" : "Create account"}
         </button>
+        {mode === "signin" ? (
+          <button
+            type="button"
+            onClick={onForgotPassword}
+            disabled={disabled || busy}
+            className="w-full text-center text-[11px] text-faint hover:text-ink disabled:opacity-60"
+          >
+            Forgot password?
+          </button>
+        ) : null}
       </form>
-      {mode === "signin" ? (
-        <button
-          type="button"
-          onClick={onForgotPassword}
-          disabled={disabled || busy}
-          className="mt-2 w-full text-center text-[11px] text-violet-200/90 hover:text-white disabled:opacity-50"
-        >
-          Forgot password?
-        </button>
-      ) : null}
       {mode === "signin" && needsEmailVerification ? (
-        <p className="mt-2 text-center text-[11px] text-amber-200/90 leading-snug">
+        <p className="mt-2 text-center text-[11px] leading-snug text-muted">
           Email must be verified before this account can be used.
         </p>
       ) : null}
-      {error ? <p className="mt-2 text-center text-[11px] text-red-300/95 leading-snug">{error}</p> : null}
-      {message ? <p className="mt-2 text-center text-[11px] text-emerald-200/90 leading-snug">{message}</p> : null}
+      {error ? (
+        <div className="mt-4 w-full rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      ) : null}
+      {message ? (
+        <div className="mt-4 w-full rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-800">
+          {message}
+        </div>
+      ) : null}
     </div>
   );
 }

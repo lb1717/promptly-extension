@@ -77,35 +77,47 @@ function ExtensionSignInContent() {
     };
   }, [clientId, redirectUri, state, nonce]);
 
-  return (
-    <main className="flex min-h-screen flex-col items-center justify-center bg-hero-radial p-6 text-ink">
-      <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-white/[0.06] p-8 shadow-glow backdrop-blur-sm">
-        <h1 className="text-xl font-semibold tracking-tight text-center mb-1">Promptly</h1>
-        <p className="text-sm text-ink/70 text-center mb-8">Sign in to continue with the extension</p>
+  const emailAuthReady = !!(extensionId && signinCsrf && firebaseApiKey);
 
+  return (
+    <main className="flex min-h-screen w-full flex-col items-center justify-center bg-white p-6 text-ink">
+      <div className="mx-auto flex w-full max-w-sm flex-col items-center justify-center">
         {error ? (
-          <p className="text-sm text-red-300/95 text-center leading-relaxed">{error}</p>
+          <p className="text-center text-sm leading-relaxed text-red-700">{error}</p>
         ) : (
           <>
             <a
               href={googleUrl}
-              className="flex items-center justify-center gap-3 w-full rounded-xl bg-white text-violetDark font-semibold text-sm py-3 px-4 no-underline hover:bg-violet-50 transition-colors border border-white/20 shadow-lg"
+              className="inline-flex w-full items-center justify-center gap-2.5 rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream no-underline hover:bg-neutral-800"
             >
-              <GoogleMark />
-              Continue with Google
+              <span>Sign in with Google</span>
+              <img
+                src="/images/google-logo.png"
+                alt=""
+                aria-hidden
+                className="h-[18px] w-[18px] shrink-0 object-contain"
+              />
             </a>
 
-            {extensionId && signinCsrf && firebaseApiKey ? (
-              <ExtensionEmailAuthPanel
-                apiKey={firebaseApiKey}
-                extensionId={extensionId}
-                signinCsrf={signinCsrf}
-                disabled={false}
-              />
+            {emailAuthReady ? (
+              <>
+                <div className="my-5 flex w-full items-center gap-3">
+                  <div className="h-px flex-1 bg-line" aria-hidden />
+                  <span className="text-xs font-medium uppercase tracking-[0.18em] text-faint">or</span>
+                  <div className="h-px flex-1 bg-line" aria-hidden />
+                </div>
+
+                <ExtensionEmailAuthPanel
+                  apiKey={firebaseApiKey}
+                  extensionId={extensionId}
+                  signinCsrf={signinCsrf}
+                  disabled={false}
+                />
+              </>
             ) : (
-              <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-3 text-center">
-                <p className="text-[12px] font-semibold text-amber-100/95">Email sign-in unavailable</p>
-                <p className="mt-1 text-[11px] text-ink/60 leading-snug">
+              <div className="mt-5 w-full rounded-xl border border-line bg-cream px-4 py-3 text-center">
+                <p className="text-[12px] font-semibold text-ink">Email sign-in unavailable</p>
+                <p className="mt-1 text-[11px] leading-snug text-muted">
                   {!extensionId || !signinCsrf
                     ? "Update the Promptly extension so the sign-in window includes extension parameters, then try again."
                     : "Missing Firebase Web API key. Add NEXT_PUBLIC_FIREBASE_API_KEY to the site env, or ensure the extension passes firebase_api_key in this URL."}
@@ -119,35 +131,12 @@ function ExtensionSignInContent() {
   );
 }
 
-function GoogleMark() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden className="shrink-0">
-      <path
-        fill="#FFC107"
-        d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"
-      />
-      <path
-        fill="#FF3D00"
-        d="m6.306 14.691 6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z"
-      />
-      <path
-        fill="#4CAF50"
-        d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238A11.86 11.86 0 0 1 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z"
-      />
-      <path
-        fill="#1976D2"
-        d="M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 0 1-4.087 5.571l.003-.002 6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"
-      />
-    </svg>
-  );
-}
-
 export default function ExtensionSignInPage() {
   return (
     <Suspense
       fallback={
-        <main className="flex min-h-screen items-center justify-center bg-transparent p-6 text-ink">
-          <p className="text-sm opacity-70">Loading…</p>
+        <main className="flex min-h-screen items-center justify-center bg-white p-6 text-ink">
+          <p className="text-sm text-muted">Loading…</p>
         </main>
       }
     >
