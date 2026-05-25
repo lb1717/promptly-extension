@@ -507,6 +507,7 @@
         "</div>" +
         "</div>" +
         "</div>" +
+        "</div>" +
         "<div class='promptly-settings-block promptly-settings-block-visuals'>" +
         "<div class='promptly-settings-section promptly-settings-section-visuals'>" +
         "<div class='promptly-settings-label promptly-settings-heading'>Visuals</div>" +
