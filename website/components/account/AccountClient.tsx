@@ -1014,7 +1014,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                 return (
                   <article
                     key={plan.key}
-                    className={`relative flex flex-col rounded-xl border p-4 ${
+                    className={`relative flex h-full min-h-[320px] flex-col rounded-xl border p-4 sm:min-h-[340px] ${
                       isCurrent
                         ? "border-ink bg-cream-dark shadow-[0_10px_30px_rgba(124,58,237,0.18)]"
                         : isPopular
@@ -1035,10 +1035,10 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                     <h3 className="text-lg font-semibold text-ink">{plan.name}</h3>
                     <p className="mt-1 text-sm font-semibold text-muted">{plan.price}</p>
                     <p className="mt-2 text-xs text-faint">{plan.subtitle}</p>
-                    <ul className="mt-3 space-y-1.5 text-xs text-muted">
+                    <ul className="mt-3 min-h-[5.75rem] flex-1 space-y-1.5 text-xs leading-relaxed text-muted">
                       {plan.details.map((item) => (
-                        <li key={item} className="flex gap-2">
-                          <span className="text-faint">•</span>
+                        <li key={item} className="flex items-start gap-2">
+                          <span className="shrink-0 text-faint">•</span>
                           <span>{item}</span>
                         </li>
                       ))}

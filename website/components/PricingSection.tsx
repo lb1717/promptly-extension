@@ -83,7 +83,7 @@ export function PricingSection() {
           {PLANS.filter((plan) => plan.available).map((plan) => (
             <div
               key={plan.name}
-              className={`relative flex h-full flex-col rounded-2xl border p-6 sm:p-8 ${
+              className={`relative flex h-full min-h-[430px] flex-col rounded-2xl border p-6 sm:min-h-[460px] sm:p-8 ${
                 plan.featured
                   ? "border-ink bg-cream shadow-card"
                   : "border-line bg-cream"
@@ -100,10 +100,10 @@ export function PricingSection() {
                 <span className="text-sm text-faint">/{plan.cadence}</span>
               </p>
               <p className="mt-3 text-sm leading-relaxed text-muted">{plan.blurb}</p>
-              <ul className="mt-6 flex-1 space-y-2 text-sm text-muted">
+              <ul className="mt-6 min-h-[7.5rem] flex-1 space-y-2 text-sm leading-relaxed text-muted">
                 {plan.bullets.map((b) => (
-                  <li key={b} className="flex gap-2">
-                    <span className="text-ink">✓</span>
+                  <li key={b} className="flex items-start gap-2">
+                    <span className="shrink-0 text-ink">✓</span>
                     {b}
                   </li>
                 ))}

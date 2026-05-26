@@ -2,6 +2,8 @@ import Stripe from "stripe";
 
 let stripeSingleton: Stripe | null = null;
 
+const ENTERPRISE_PRICE_ID = "price_1TbGQtE1kSqm5DoEzuLyhaz6";
+
 export function getStripe(): Stripe {
   if (!stripeSingleton) {
     const key = String(process.env.STRIPE_SECRET_KEY || "").trim();
@@ -31,8 +33,7 @@ export function getStripePriceIdForTier(tier: string): string | null {
     return id || null;
   }
   if (t === "enterprise") {
-    const id = String(process.env.STRIPE_PRICE_ID_ENTERPRISE || "").trim();
-    return id || null;
+    return ENTERPRISE_PRICE_ID;
   }
   return null;
 }
