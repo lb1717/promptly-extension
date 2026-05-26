@@ -1,9 +1,9 @@
 export const SITE = {
   name: "Promptly",
   navBrand: "Promptly Labs",
-  chromeStoreUrl: "https://chromewebstore.google.com/detail/promptly/cljggdddakpcdflbnkmpebldloekcbff",
+  chromeStoreUrl: "https://chromewebstore.google.com/detail/promptly/mioebkaecngedfgedplfmcaaccooojpj",
   /** Production Chrome extension ID — used to sync Firebase session from /account to the extension. */
-  chromeExtensionId: "cljggdddakpcdflbnkmpebldloekcbff"
+  chromeExtensionId: "mioebkaecngedfgedplfmcaaccooojpj"
 };
 
 export const NAV_LINKS = [

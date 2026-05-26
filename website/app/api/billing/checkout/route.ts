@@ -30,7 +30,13 @@ export async function POST(request: Request) {
     const paidTier = normalizePaidTier(String(body.tier || "pro"));
     if (!paidTier) {
       return NextResponse.json(
-        { error: 'Invalid tier — use "pro", "student", or "enterprise"' },
+        { error: 'Invalid tier — use "enterprise"' },
+        { status: 400 }
+      );
+    }
+    if (paidTier !== "enterprise") {
+      return NextResponse.json(
+        { error: "This plan is not currently available for checkout." },
         { status: 400 }
       );
     }

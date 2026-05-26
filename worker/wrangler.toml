@@ -34,4 +34,4 @@ DEBUG_LOGS = "false"
 ALLOW_LEGACY_EMAIL_IDENTITY = "false"
 # Must match manifest oauth2.client_id used by chrome.identity.getAuthToken.
 GOOGLE_OAUTH_WEB_CLIENT_ID = "913040005574-npbiuat4hl1d3icqoe5lmtuh34qqd8d6.apps.googleusercontent.com"
-ALLOWED_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173,chrome-extension://cljggdddakpcdflbnkmpebldloekcbff"
+ALLOWED_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173,chrome-extension://mioebkaecngedfgedplfmcaaccooojpj"

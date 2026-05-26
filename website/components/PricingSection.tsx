@@ -6,14 +6,15 @@ const PLANS = [
     name: "Free",
     price: "$0.00",
     cadence: "month",
-    blurb: "Simple prompt improvement for everyday usage.",
+    blurb: "Single prompt improvement for minimal everyday usage or trials.",
     bullets: [
-      "Daily usage tokens: limited",
-      "Core models and functionality"
+      "Core models and functionality",
+      "Daily limited tokens"
     ],
     cta: "Get started",
     href: "/account?plan=free",
-    featured: false
+    featured: false,
+    available: true
   },
   {
     key: "pro",
@@ -29,24 +30,25 @@ const PLANS = [
     ],
     cta: "Upgrade to Pro",
     href: "/account?plan=pro",
-    featured: false
+    featured: false,
+    available: false
   },
   {
     key: "enterprise",
     name: "Enterprise",
-    price: "$30.00",
+    price: "$70.00",
     cadence: "month",
     blurb: "Maximum capability, speed, and reliability at scale.",
     bullets: [
-      "Daily usage tokens: 100× Free",
-      "Model quality: highest available",
-      "Model speed: fastest processing",
-      "Research-grade intelligent prompt engineering",
-      "Priority during peak times"
+      "Research-grade intelligence prompt engineering",
+      "Highest model quality available",
+      "Fastest model quality available",
+      "Extensive AI usage statistics"
     ],
     cta: "Choose Enterprise",
     href: "/account?plan=enterprise",
-    featured: true
+    featured: true,
+    available: true
   },
   {
     key: "student",
@@ -62,7 +64,8 @@ const PLANS = [
     ],
     cta: "Choose Student",
     href: "/account?plan=student",
-    featured: false
+    featured: false,
+    available: false
   }
 ] as const;
 
@@ -76,8 +79,8 @@ export function PricingSection() {
         <p className="mx-auto mb-12 max-w-2xl text-center text-lg font-semibold text-ink sm:text-xl">
           Simple plans for everyday use and professional workflows.
         </p>
-        <div className="mx-auto grid max-w-6xl gap-6 md:grid-cols-2 xl:grid-cols-4">
-          {PLANS.map((plan) => (
+        <div className="mx-auto grid max-w-4xl gap-6 md:grid-cols-2">
+          {PLANS.filter((plan) => plan.available).map((plan) => (
             <div
               key={plan.name}
               className={`relative flex h-full flex-col rounded-2xl border p-6 sm:p-8 ${
@@ -92,9 +95,6 @@ export function PricingSection() {
                 </span>
               ) : null}
               <h3 className="text-xl font-semibold text-ink">{plan.name}</h3>
-              {plan.key === "pro" || plan.key === "student" ? (
-                <p className="mt-2 text-xs font-semibold uppercase tracking-wider text-muted">Free trial</p>
-              ) : null}
               <p className="mt-3 flex items-baseline gap-1">
                 <span className="text-3xl font-semibold tabular-nums text-ink sm:text-4xl">{plan.price}</span>
                 <span className="text-sm text-faint">/{plan.cadence}</span>

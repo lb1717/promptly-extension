@@ -142,12 +142,13 @@ const ACCOUNT_PLANS = [
     key: "free",
     name: "Free",
     price: "$0.00/mo",
-    subtitle: "Simple prompt improvement for everyday usage",
+    subtitle: "Single prompt improvement for minimal everyday usage or trials.",
     details: [
-      "Daily usage tokens: limited",
-      "Core models and functionality"
+      "Core models and functionality",
+      "Daily limited tokens"
     ],
-    idealFor: "casual users, beginners, and quick prompt edits"
+    idealFor: "casual users, beginners, and quick prompt edits",
+    available: true
   },
   {
     key: "pro",
@@ -160,21 +161,22 @@ const ACCOUNT_PLANS = [
       "Model quality: higher than Free",
       "Model speed: faster than Free"
     ],
-    idealFor: "frequent users and builders"
+    idealFor: "frequent users and builders",
+    available: false
   },
   {
     key: "enterprise",
     name: "Enterprise",
-    price: "$30.00/mo",
+    price: "$70.00/mo",
     subtitle: "Maximum capability, speed, and reliability",
     details: [
-      "Daily usage tokens: 100× Free",
-      "Model quality: highest available",
-      "Model speed: fastest processing",
-      "Research-grade intelligent prompt engineering",
-      "Priority during peak times"
+      "Research-grade intelligence prompt engineering",
+      "Highest model quality available",
+      "Fastest model quality available",
+      "Extensive AI usage statistics"
     ],
-    idealFor: "industry professionals and researchers"
+    idealFor: "industry professionals and researchers",
+    available: true
   },
   {
     key: "student",
@@ -187,7 +189,8 @@ const ACCOUNT_PLANS = [
       "All features included in Pro",
       "Discounted price versus Pro"
     ],
-    idealFor: "students learning, building, and experimenting"
+    idealFor: "students learning, building, and experimenting",
+    available: false
   }
 ] as const;
 
@@ -998,14 +1001,14 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
               </div>
             </div>
             <p className="mt-4 text-sm text-faint">
-              Select from all available plans. Your active plan is highlighted below.
+              Select from currently available plans.
             </p>
 
-            <div className="mt-6 grid gap-4 lg:grid-cols-4">
-              {ACCOUNT_PLANS.map((plan) => {
+            <div className="mt-6 grid gap-4 lg:grid-cols-2">
+              {ACCOUNT_PLANS.filter((plan) => plan.available).map((plan) => {
                 const isCurrent = currentTierKey === plan.key;
                 const isPopular = plan.key === "enterprise";
-                const paidTier = plan.key === "pro" || plan.key === "student" || plan.key === "enterprise";
+                const paidTier = plan.key === "enterprise";
                 const canCheckoutPaidTier = Boolean(user && billing?.stripeConfigured && paidTier && !isCurrent);
 
                 return (
@@ -1030,11 +1033,6 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                       </span>
                     ) : null}
                     <h3 className="text-lg font-semibold text-ink">{plan.name}</h3>
-                    {plan.key === "pro" || plan.key === "student" ? (
-                      <p className="mt-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-300">
-                        Free trial
-                      </p>
-                    ) : null}
                     <p className="mt-1 text-sm font-semibold text-muted">{plan.price}</p>
                     <p className="mt-2 text-xs text-faint">{plan.subtitle}</p>
                     <ul className="mt-3 space-y-1.5 text-xs text-muted">
@@ -1063,7 +1061,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                           type="button"
                           onClick={() =>
                             user &&
-                            startStripeCheckoutForTier(user, plan.key as "pro" | "student" | "enterprise")
+                            startStripeCheckoutForTier(user, "enterprise")
                           }
                           disabled={checkoutBusyTier !== null}
                           className="inline-flex w-full items-center justify-center rounded-lg bg-ink px-3 py-2 text-xs font-semibold text-cream hover:bg-neutral-800 disabled:opacity-60"
