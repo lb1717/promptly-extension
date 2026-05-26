@@ -61,8 +61,7 @@ export function PrivacyPolicyDocument({ lastUpdated, privacyEmail }: Props) {
         <ul className="list-disc space-y-2 pl-5 marker:text-faint">
           <li>
             <strong>Account data.</strong> When you create or access an account, we may collect your name, email
-            address, and other identifiers depending on the sign-in method (for example, Google account
-            information that the provider shares with us).
+            address, authentication provider, and account identifiers depending on the sign-in method.
           </li>
           <li>
             <strong>Content you submit.</strong> When you use features such as prompt improvement or generation, we
@@ -104,6 +103,38 @@ export function PrivacyPolicyDocument({ lastUpdated, privacyEmail }: Props) {
             permissions.
           </li>
         </ul>
+
+        <h3 className="pt-2 text-base font-semibold text-ink">4.4 Google user data and OAuth scopes</h3>
+        <p>
+          Promptly uses Google sign-in and Chrome extension identity features only to authenticate you and connect
+          your Google account to your Promptly account. The Google OAuth project associated with Promptly is project
+          ID <strong>promptly-prod-976ef</strong> / project number <strong>913040005574</strong>.
+        </p>
+        <p>When you choose to sign in with Google, Promptly may access, collect, or interact with:</p>
+        <ul className="list-disc space-y-2 pl-5 marker:text-faint">
+          <li>
+            <strong>Your Google email address</strong>, used to identify your account, show your signed-in status,
+            link website and extension sessions, and provide account support.
+          </li>
+          <li>
+            <strong>Your Google account profile identifier</strong> (for example, your Google subject ID), used to
+            maintain a stable account record and prevent duplicate or mismatched accounts.
+          </li>
+          <li>
+            <strong>Basic profile information</strong> that Google returns for sign-in, such as display name or
+            profile metadata, if provided by Google.
+          </li>
+          <li>
+            <strong>Google OAuth access tokens or Firebase authentication tokens</strong>, used to verify your
+            identity with Google/Firebase and create a Promptly session. These tokens are used for authentication
+            and are not used to access Google services such as Gmail, Drive, Calendar, Contacts, or Photos.
+          </li>
+        </ul>
+        <p>
+          Promptly requests only the Google sign-in data needed to authenticate you. We do not request, access, read,
+          modify, or delete the contents of your Gmail, Google Drive files, Google Calendar events, Google Contacts,
+          Google Photos, or other Google Workspace content.
+        </p>
       </section>
 
       <section className="space-y-3">
@@ -112,6 +143,10 @@ export function PrivacyPolicyDocument({ lastUpdated, privacyEmail }: Props) {
         <ul className="list-disc space-y-2 pl-5 marker:text-faint">
           <li>Provide, operate, maintain, and improve the Services;</li>
           <li>Create and manage accounts and authenticate users;</li>
+          <li>
+            Verify Google sign-in, link your website and browser extension sessions, display your signed-in email,
+            and enforce account-specific token limits and billing status;
+          </li>
           <li>Process prompts and return improved or generated text;</li>
           <li>Enforce terms, usage limits, credits, or anti-abuse measures;</li>
           <li>Monitor performance, debug issues, and protect security and integrity;</li>
@@ -121,6 +156,17 @@ export function PrivacyPolicyDocument({ lastUpdated, privacyEmail }: Props) {
         <p>
           <strong>We do not sell your personal information</strong> in the common sense of selling lists to data
           brokers. We may use service providers who process data on our behalf under contract.
+        </p>
+        <p>
+          Promptly’s use and transfer of information received from Google APIs will adhere to the{" "}
+          <a
+            href="https://developers.google.com/terms/api-services-user-data-policy"
+            className="text-muted underline decoration-faint underline-offset-2 hover:text-ink"
+          >
+            Google API Services User Data Policy
+          </a>
+          , including the Limited Use requirements. We do not use Google user data for advertising, sale, or
+          unrelated profiling, and we do not use Google user data to train generalized AI or machine learning models.
         </p>
       </section>
 
@@ -169,7 +215,11 @@ export function PrivacyPolicyDocument({ lastUpdated, privacyEmail }: Props) {
             assets, subject to standard protections.
           </li>
         </ul>
-        <p>We require processors to use information only as instructed and to implement appropriate safeguards.</p>
+        <p>
+          We require processors to use information only as instructed and to implement appropriate safeguards. We do
+          not sell Google user data and do not share Google user data with third parties except as necessary to
+          provide or secure the Services, comply with law, or with your direction or consent.
+        </p>
       </section>
 
       <section className="space-y-3">
@@ -188,6 +238,13 @@ export function PrivacyPolicyDocument({ lastUpdated, privacyEmail }: Props) {
           unless a longer period is required by law. Criteria include whether we have an ongoing relationship with
           you, whether we must meet legal or contractual duties, and whether retention is warranted for security or
           dispute resolution. We may retain de-identified or aggregated information where permitted.
+        </p>
+        <p>
+          Google account identifiers, email addresses, and related Promptly account records are retained while your
+          account is active or as needed for security, billing, abuse prevention, and legal compliance. Google OAuth
+          access tokens are treated as short-lived authentication credentials. You may revoke Promptly’s Google
+          access from your Google Account permissions page or request deletion of your Promptly account data by
+          contacting us.
         </p>
       </section>
 

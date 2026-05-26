@@ -12,7 +12,7 @@ export const metadata: Metadata = {
     "Privacy Policy for Promptly — website, APIs, and Chrome extension. How we collect, use, and share information."
 };
 
-const LAST_UPDATED = "March 30, 2026";
+const LAST_UPDATED = "May 26, 2026";
 
 export default function PrivacyPage() {
   const privacyEmail = process.env.NEXT_PUBLIC_PRIVACY_EMAIL?.trim() || null;
