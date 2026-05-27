@@ -2,6 +2,7 @@
 
 import { Suspense, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
+import { rememberPromptlyExtensionId } from "@/lib/extensionBridge";
 import { ExtensionEmailAuthPanel } from "./ExtensionEmailAuthPanel";
 
 const CALLBACK_PATH = "/auth/extension-google-oauth";
@@ -60,13 +61,7 @@ function ExtensionSignInContent() {
     searchParams.get("firebase_api_key")?.trim() ||
     String(process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "").trim();
 
-  if (typeof window !== "undefined" && extensionId) {
-    try {
-      window.sessionStorage.setItem("promptly_extension_id", extensionId);
-    } catch (_error) {
-      // Ignore storage failures.
-    }
-  }
+  rememberPromptlyExtensionId(extensionId);
 
   const { error, googleUrl } = useMemo(() => {
     if (!clientId || !redirectUri || !state || !nonce) {

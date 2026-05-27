@@ -20,7 +20,7 @@ export function Footer() {
             Terms
           </a>
           <a href={SITE.chromeStoreUrl} className="hover:text-ink">
-            Chrome Store
+            Extension Store
           </a>
         </div>
       </div>

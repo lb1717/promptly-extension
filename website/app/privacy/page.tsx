@@ -9,7 +9,7 @@ import { SITE } from "@/lib/constants";
 export const metadata: Metadata = {
   title: "Privacy Policy | Promptly",
   description:
-    "Privacy Policy for Promptly — website, APIs, and Chrome extension. How we collect, use, and share information."
+    "Privacy Policy for Promptly — website, APIs, and browser extension. How we collect, use, and share information."
 };
 
 const LAST_UPDATED = "May 26, 2026";
@@ -32,7 +32,7 @@ export default function PrivacyPage() {
           </p>
           <h1 className="mt-4 text-3xl font-semibold tracking-tight text-ink sm:text-4xl">Privacy Policy</h1>
           <p className="mt-2 text-sm text-muted">
-            Full policy for <strong>{SITE.name}</strong> (website + Chrome extension).
+            Full policy for <strong>{SITE.name}</strong> (website + browser extension).
           </p>
 
           <div className="mt-10 rounded-2xl border border-line bg-cream p-6 sm:p-8">

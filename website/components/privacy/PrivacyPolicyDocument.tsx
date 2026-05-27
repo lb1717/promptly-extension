@@ -6,7 +6,7 @@ type Props = {
 };
 
 /**
- * Standard-style privacy policy draft (website + Chrome extension).
+ * Standard-style privacy policy draft (website + browser extension).
  * Not legal advice; have counsel review before relying on it.
  */
 export function PrivacyPolicyDocument({ lastUpdated, privacyEmail }: Props) {
@@ -31,8 +31,8 @@ export function PrivacyPolicyDocument({ lastUpdated, privacyEmail }: Props) {
       <section className="space-y-3">
         <h2 className="text-lg font-semibold text-ink">2. Who we are</h2>
         <p>
-          Promptly is operated by the entity or individual responsible for the Services and the Chrome Web Store
-          listing identified as “Promptly.” The “data controller” for personal data we determine the purposes and
+          Promptly is operated by the entity or individual responsible for the Services and the browser extension
+          store listings identified as “Promptly.” The “data controller” for personal data we determine the purposes and
           means of processing is that operator. For contact details, see Section 15 (Contact).
         </p>
       </section>
@@ -43,7 +43,7 @@ export function PrivacyPolicyDocument({ lastUpdated, privacyEmail }: Props) {
         <ul className="list-disc space-y-2 pl-5 marker:text-faint">
           <li>Visitors and users of our website (for example, {SITE.name.toLowerCase()}.com and related subdomains);</li>
           <li>
-            Users of the Promptly Chrome extension when it runs on supported third-party AI chat websites; and
+            Users of the Promptly browser extension when it runs on supported third-party AI chat websites; and
           </li>
           <li>API and account interactions tied to your Promptly account.</li>
         </ul>
@@ -106,7 +106,7 @@ export function PrivacyPolicyDocument({ lastUpdated, privacyEmail }: Props) {
 
         <h3 className="pt-2 text-base font-semibold text-ink">4.4 Google user data and OAuth scopes</h3>
         <p>
-          Promptly uses Google sign-in and Chrome extension identity features only to authenticate you and connect
+          Promptly uses Google sign-in and browser extension identity features only to authenticate you and connect
           your Google account to your Promptly account. The Google OAuth project associated with Promptly is project
           ID <strong>promptly-prod-976ef</strong> / project number <strong>913040005574</strong>.
         </p>
@@ -303,7 +303,7 @@ export function PrivacyPolicyDocument({ lastUpdated, privacyEmail }: Props) {
             href={SITE.chromeStoreUrl}
             className="text-muted underline decoration-faint underline-offset-2 hover:text-ink"
           >
-            Chrome Web Store
+            browser extension store
           </a>{" "}
           developer listing.
           {privacyEmail ? (

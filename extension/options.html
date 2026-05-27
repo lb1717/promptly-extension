@@ -26,11 +26,12 @@
       <p id="oauthRedirectHint" class="redirect-hint"></p>
       <p>
         <strong>Google sign-in:</strong> The gray box above lists the exact redirect URIs to register. They must go on
-        the <strong>same</strong> “Web application” OAuth client as your Client ID field (not a “Chrome Extension”
-        client). Save in Google Cloud, wait ~1 minute, then reload Promptly on <code>chrome://extensions</code>.
+        the <strong>same</strong> “Web application” OAuth client as your Client ID field (not a browser-extension
+        client). Save in Google Cloud, wait ~1 minute, then reload Promptly from your browser's extensions page.
       </p>
       <p id="status"></p>
     </main>
+    <script src="browserCompat.js"></script>
     <script src="options.js"></script>
   </body>
   </html>

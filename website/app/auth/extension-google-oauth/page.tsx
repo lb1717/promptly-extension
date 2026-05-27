@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { sendPromptlyExtensionMessage } from "@/lib/extensionBridge";
 
 function parseOAuthStateParam() {
   const search = typeof window !== "undefined" ? window.location.search || "" : "";
@@ -26,28 +27,19 @@ export default function ExtensionGoogleOAuthPage() {
       return;
     }
 
-    const w = typeof window !== "undefined" ? window : undefined;
-    type ExtSend = (extensionId: string, message: unknown, cb?: () => void) => void;
-    const send = (w as unknown as { chrome?: { runtime?: { sendMessage?: ExtSend } } })?.chrome?.runtime
-      ?.sendMessage;
-    if (typeof send !== "function") {
-      setNote(
-        "This page must open from Google sign-in in the Promptly popup. Close the tab and try Sign in again."
-      );
-      return;
-    }
-
-    send(
-      extId,
-      { type: "PROMPTLY_OAUTH_BRIDGE", search, hash },
-      () => {
+    void sendPromptlyExtensionMessage(extId, { type: "PROMPTLY_OAUTH_BRIDGE", search, hash })
+      .then(() => {
         try {
           window.close();
         } catch {
           setNote("You can close this tab.");
         }
-      }
-    );
+      })
+      .catch(() => {
+        setNote(
+          "This page must open from Promptly's browser extension sign-in popup. Close the tab and try Sign in again."
+        );
+      });
   }, []);
 
   return (

@@ -55,7 +55,7 @@ export function Hero() {
               href={SITE.chromeStoreUrl}
               className={ctaShouldShine ? "promptly-cta-shine relative overflow-hidden" : "relative overflow-hidden"}
             >
-              Add Promptly to Chrome
+              Add Promptly to your browser
             </Button>
           </div>
         </div>
