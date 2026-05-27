@@ -1,9 +1,53 @@
+const CHROME_EXTENSION_ID = "mioebkaecngedfgedplfmcaaccooojpj";
+
+export type BrowserExtensionTarget = {
+  key: "chrome" | "edge" | "firefox" | "safari" | "chromium";
+  name: string;
+  extensionId: string;
+  installUrl: string;
+  primary?: boolean;
+};
+
+const RAW_BROWSER_EXTENSION_TARGETS: BrowserExtensionTarget[] = [
+  {
+    key: "chrome",
+    name: "Google Chrome",
+    extensionId: CHROME_EXTENSION_ID,
+    installUrl: `https://chromewebstore.google.com/detail/promptly/${CHROME_EXTENSION_ID}`,
+    primary: true
+  },
+  {
+    key: "edge",
+    name: "Microsoft Edge",
+    extensionId: String(process.env.NEXT_PUBLIC_EDGE_EXTENSION_ID || "").trim(),
+    installUrl: String(process.env.NEXT_PUBLIC_EDGE_ADDONS_URL || "").trim()
+  },
+  {
+    key: "firefox",
+    name: "Firefox",
+    extensionId: "promptly@promptly-labs.com",
+    installUrl: String(process.env.NEXT_PUBLIC_FIREFOX_ADDONS_URL || "").trim()
+  },
+  {
+    key: "safari",
+    name: "Safari",
+    extensionId: String(process.env.NEXT_PUBLIC_SAFARI_EXTENSION_ID || "").trim(),
+    installUrl: String(process.env.NEXT_PUBLIC_SAFARI_EXTENSION_URL || "").trim()
+  }
+];
+
+export const BROWSER_EXTENSION_TARGETS = RAW_BROWSER_EXTENSION_TARGETS.filter(
+  (target) => target.extensionId || target.primary
+);
+
 export const SITE = {
   name: "Promptly",
   navBrand: "Promptly Labs",
-  chromeStoreUrl: "https://chromewebstore.google.com/detail/promptly/mioebkaecngedfgedplfmcaaccooojpj",
+  chromeStoreUrl: `https://chromewebstore.google.com/detail/promptly/${CHROME_EXTENSION_ID}`,
+  edgeAddonsUrl: String(process.env.NEXT_PUBLIC_EDGE_ADDONS_URL || "").trim(),
   /** Production Chrome extension ID — used to sync Firebase session from /account to the extension. */
-  chromeExtensionId: "mioebkaecngedfgedplfmcaaccooojpj"
+  chromeExtensionId: CHROME_EXTENSION_ID,
+  browserExtensionTargets: BROWSER_EXTENSION_TARGETS
 };
 
 export const NAV_LINKS = [
