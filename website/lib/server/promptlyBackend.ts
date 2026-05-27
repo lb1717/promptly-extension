@@ -250,6 +250,8 @@ export type OptimizeTelemetryNormalized = {
   hostModelLabelSanitized: string | null;
   /** Lowercase slug for grouping chart series. */
   hostModelBucket: string;
+  draftDurationMs: number | null;
+  draftActiveMs: number | null;
 };
 
 function slugHostModelBucketFromLabel(raw: string): string {
@@ -270,7 +272,9 @@ export function parseOptimizeTelemetryFromPayload(payload: Record<string, unknow
     composerCharEstimate: null,
     composerWordEstimate: null,
     hostModelLabelSanitized: null,
-    hostModelBucket: "unknown"
+    hostModelBucket: "unknown",
+    draftDurationMs: null,
+    draftActiveMs: null
   };
   if (!payload?.telemetry || typeof payload.telemetry !== "object") {
     return defaults;
@@ -333,11 +337,37 @@ export function parseOptimizeTelemetryFromPayload(payload: Record<string, unknow
     hostModelBucket = slugHostModelBucketFromLabel(hostModelLabelSanitized);
   }
 
+  let draftDurationMs: number | null = null;
+  const ddRaw =
+    typeof t.draft_duration_ms === "number" && Number.isFinite(t.draft_duration_ms)
+      ? t.draft_duration_ms
+      : typeof t.draftDurationMs === "number" && Number.isFinite(t.draftDurationMs)
+        ? t.draftDurationMs
+        : null;
+  if (ddRaw !== null) {
+    const v = Math.max(0, Math.floor(ddRaw));
+    draftDurationMs = v <= 7_200_000 ? v : null;
+  }
+
+  let draftActiveMs: number | null = null;
+  const daRaw =
+    typeof t.draft_active_ms === "number" && Number.isFinite(t.draft_active_ms)
+      ? t.draft_active_ms
+      : typeof t.draftActiveMs === "number" && Number.isFinite(t.draftActiveMs)
+        ? t.draftActiveMs
+        : null;
+  if (daRaw !== null) {
+    const v = Math.max(0, Math.floor(daRaw));
+    draftActiveMs = v <= 7_200_000 ? v : null;
+  }
+
   return {
     composerCharEstimate,
     composerWordEstimate,
     hostModelLabelSanitized,
-    hostModelBucket
+    hostModelBucket,
+    draftDurationMs,
+    draftActiveMs
   };
 }
 
@@ -403,6 +433,10 @@ async function persistOptimizeMirrorHostActivity(params: {
   cc = Math.min(CREDIT_MAX_PROMPT_CHARS, Math.floor(cc));
 
   const lat = Number(params.optimizeLatencyMs || 0);
+  const draftDurationMs = params.telemetry.draftDurationMs;
+  const draftActiveMs =
+    draftDurationMs ??
+    params.telemetry.draftActiveMs;
   await persistHostLlmActivityEvents(params.user, [
     {
       service: params.service,
@@ -415,8 +449,8 @@ async function persistOptimizeMirrorHostActivity(params: {
       assistantOutputCharEstimate: null,
       timeToFirstStreamActivityMs: null,
       streamVisualActiveMs: null,
-      draftDurationMs: null,
-      draftActiveMs: null,
+      draftDurationMs,
+      draftActiveMs,
       clientOccurredMs: Date.now(),
       ingestSource: "optimize_api",
       optimizeEngineMode: params.optimizeMode
@@ -978,6 +1012,12 @@ export async function getAccountUsageStatsExtended(
     const draftActiveRaw = raw.draftActiveMs ?? raw.draft_active_ms;
     const draftActiveMs =
       typeof draftActiveRaw === "number" && Number.isFinite(draftActiveRaw) ? Math.floor(draftActiveRaw) : null;
+    const draftMs =
+      draftWallMs !== null && draftWallMs > 0
+        ? draftWallMs
+        : draftActiveMs !== null && draftActiveMs > 0
+          ? draftActiveMs
+          : null;
 
     if (isComposer) {
       row.composer_input_events += 1;
@@ -1005,10 +1045,10 @@ export async function getAccountUsageStatsExtended(
           row.draft_wall_samples += 1;
         }
       }
-      if (draftActiveMs !== null && draftActiveMs > 0) {
-        row.draft_active_sum_ms += draftActiveMs;
+      if (draftMs !== null) {
+        row.draft_active_sum_ms += draftMs;
         row.draft_active_samples += 1;
-        row.draft_active_sum_svc[svc] += draftActiveMs;
+        row.draft_active_sum_svc[svc] += draftMs;
         row.draft_active_samples_svc[svc] += 1;
       }
     }
@@ -1241,26 +1281,30 @@ export async function getAccountUsageStatsExtended(
     return Math.round(sum / samples);
   }
 
-  const latency_comparison_ai = (["chatgpt", "claude", "gemini", "unknown"] as const).map((svcKey) => ({
-    service_key: svcKey,
-    prompted_promptly_avg_rewrite_ms:
-      optimizeLatencySvc.samples[svcKey] > 0
-        ? avgOrNull(optimizeLatencySvc.sum[svcKey], optimizeLatencySvc.samples[svcKey])
-        : null,
-    native_avg_host_roundtrip_ms:
-      nativeLatencyTotals.samples[svcKey] > 0
-        ? avgOrNull(nativeLatencyTotals.sum[svcKey], nativeLatencyTotals.samples[svcKey])
-        : null,
-    avg_draft_active_ms:
+  const latency_comparison_ai = (["chatgpt", "claude", "gemini", "unknown"] as const).map((svcKey) => {
+    const avgDraft =
       draftTimingTotals.samples[svcKey] > 0
         ? avgOrNull(draftTimingTotals.sum[svcKey], draftTimingTotals.samples[svcKey])
-        : null,
-    promptly_samples: optimizeLatencySvc.samples[svcKey],
-    native_latency_samples: nativeLatencyTotals.samples[svcKey],
-    draft_timing_samples: draftTimingTotals.samples[svcKey],
-    prompts_with_promptly: mergedOptimizeSvc[svcKey],
-    prompts_native_web: mergedNativeSvc[svcKey]
-  }));
+        : null;
+    return {
+      service_key: svcKey,
+      prompted_promptly_avg_rewrite_ms:
+        optimizeLatencySvc.samples[svcKey] > 0
+          ? avgOrNull(optimizeLatencySvc.sum[svcKey], optimizeLatencySvc.samples[svcKey])
+          : null,
+      native_avg_host_roundtrip_ms:
+        nativeLatencyTotals.samples[svcKey] > 0
+          ? avgOrNull(nativeLatencyTotals.sum[svcKey], nativeLatencyTotals.samples[svcKey])
+          : null,
+      avg_draft_duration_ms: avgDraft,
+      avg_draft_active_ms: avgDraft,
+      promptly_samples: optimizeLatencySvc.samples[svcKey],
+      native_latency_samples: nativeLatencyTotals.samples[svcKey],
+      draft_timing_samples: draftTimingTotals.samples[svcKey],
+      prompts_with_promptly: mergedOptimizeSvc[svcKey],
+      prompts_native_web: mergedNativeSvc[svcKey]
+    };
+  });
 
   const billed_promptly_tokens_sum_events = [...byDayScratch.values()].reduce(
     (s, day) => s + day.billed_promptly_tokens,
@@ -1404,6 +1448,7 @@ export async function getAccountUsageStatsExtended(
       prompts_gemini_surface: combined_totals_by_ai.gemini,
       prompts_unknown_surface: combined_totals_by_ai.unknown,
       mirror_rows_synced_to_host_telemetry: mirror_writes_total,
+      native_sends_observed: combined_totals_prompts_native,
       promptly_share_of_estimated_prompts_percent: promptly_share_pct
     },
     latency_comparison_ai,

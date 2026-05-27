@@ -784,6 +784,7 @@
     },
     onAutoAdjust: async (payload = {}) => {
       clearComposePopupAutoCloseTimer();
+      notePromptlyUiInteraction();
       if (autoAdjustInFlight || !currentTarget || !adapters.isEditable(currentTarget)) {
         return;
       }
@@ -1164,6 +1165,70 @@
       typeof adapters.getPromptWriteSurface === "function" ? adapters.getPromptWriteSurface(target) : target;
     const el = surface && adapters.isEditable(surface) ? surface : target;
     return String(el.innerText || el.textContent || "").replace(/\u00a0/g, " ");
+  }
+
+  function readHostComposerForTelemetry() {
+    const readEditable = (el) => {
+      if (!el || !el.isConnected) {
+        return "";
+      }
+      try {
+        const surfaced =
+          typeof adapters.getPromptWriteSurface === "function" ? adapters.getPromptWriteSurface(el) : el;
+        const leaf = surfaced && adapters.isEditable(surfaced) ? surfaced : el;
+        if (!leaf || !adapters.isEditable(leaf)) {
+          return "";
+        }
+        return String(getPromptText(leaf) || "").trim();
+      } catch (_e) {
+        return "";
+      }
+    };
+    let chunk = readEditable(currentTarget);
+    if (chunk.length) {
+      return chunk;
+    }
+    try {
+      if (typeof adapters.getPromptElement === "function") {
+        const hinted = adapters.getPromptElement(currentTarget ?? null);
+        chunk = readEditable(hinted);
+        if (chunk.length) {
+          return chunk;
+        }
+      }
+    } catch (_e) {
+      /* ignore */
+    }
+    return "";
+  }
+
+  function notePromptlyUiInteraction() {
+    try {
+      window.PromptlyHostActivityListener?.notePromptlyInteraction?.();
+    } catch (_e) {
+      /* ignore */
+    }
+  }
+
+  function recordTelemetryPromptSend(source) {
+    try {
+      const text = readHostComposerForTelemetry();
+      const chars = Math.min(12000, text.length);
+      if (!chars) {
+        return false;
+      }
+      const words = text.split(/\s+/).filter(Boolean).length;
+      return (
+        window.PromptlyHostActivityListener?.recordPromptSend?.({
+          source,
+          charEstimate: chars,
+          wordEstimate: Math.min(12000, words),
+          clickedSendConfirmed: true
+        }) === true
+      );
+    } catch (_e) {
+      return false;
+    }
   }
 
   function setNativeValue(element, value) {
@@ -2629,6 +2694,9 @@
     const target = event.target;
     const clickedInsideWidget = ui.containsNode(target);
     const clickedInput = currentTarget && currentTarget.contains(target);
+    if (clickedInsideWidget) {
+      notePromptlyUiInteraction();
+    }
     if (!clickedInsideWidget && !clickedInput) {
       closePopup();
     }
@@ -2655,6 +2723,22 @@
       event.preventDefault();
       event.stopPropagation();
       runAutoAdjustThenSend({ type: "enter" });
+      return;
+    }
+
+    if (
+      !autoAdjustOnSend &&
+      !bypassNextAutoSendInterception &&
+      event.key === "Enter" &&
+      !event.shiftKey &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.isComposing &&
+      currentTarget &&
+      (event.target === currentTarget || currentTarget.contains(event.target))
+    ) {
+      window.setTimeout(() => recordTelemetryPromptSend("native_enter"), 80);
     }
   }
 
@@ -2703,6 +2787,7 @@
 
     if (trigger.type === "click" && trigger.button) {
       trigger.button.click();
+      window.setTimeout(() => recordTelemetryPromptSend("auto_adjust_click"), 80);
       return;
     }
 
@@ -2717,6 +2802,7 @@
       cancelable: true
     });
     currentTarget.dispatchEvent(enterEvent);
+    window.setTimeout(() => recordTelemetryPromptSend("auto_adjust_enter"), 80);
   }
 
   async function runAutoAdjustThenSend(trigger) {
@@ -2820,6 +2906,16 @@
       event.stopPropagation();
       const button = event.target.closest("button, [role='button']");
       runAutoAdjustThenSend({ type: "click", button });
+      return;
+    }
+
+    if (
+      !autoAdjustOnSend &&
+      !bypassNextAutoSendInterception &&
+      isLikelySendButton(event.target) &&
+      currentTarget
+    ) {
+      window.setTimeout(() => recordTelemetryPromptSend("native_click"), 80);
     }
   }
 
@@ -2876,40 +2972,7 @@
     stopHostPassiveListener = window.PromptlyHostActivityListener.install({
       site,
       getPromptTarget: () => currentTarget,
-      readComposer: () => {
-        const readEditable = (el) => {
-          if (!el || !el.isConnected) {
-            return "";
-          }
-          try {
-            const surfaced =
-              typeof adapters.getPromptWriteSurface === "function" ? adapters.getPromptWriteSurface(el) : el;
-            const leaf = surfaced && adapters.isEditable(surfaced) ? surfaced : el;
-            if (!leaf || !adapters.isEditable(leaf)) {
-              return "";
-            }
-            return String(getPromptText(leaf) || "").trim();
-          } catch (_e) {
-            return "";
-          }
-        };
-        let chunk = readEditable(currentTarget);
-        if (chunk.length) {
-          return chunk;
-        }
-        try {
-          if (typeof adapters.getPromptElement === "function") {
-            const hinted = adapters.getPromptElement(currentTarget ?? null);
-            chunk = readEditable(hinted);
-            if (chunk.length) {
-              return chunk;
-            }
-          }
-        } catch (_e) {
-          /* ignore */
-        }
-        return "";
-      }
+      readComposer: readHostComposerForTelemetry
     });
   }
   document.addEventListener("pointerdown", handlePointerDown, true);

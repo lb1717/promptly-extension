@@ -1,4 +1,22 @@
 (() => {
+  function notePromptlyDraftInteraction() {
+    try {
+      window.PromptlyHostActivityListener?.notePromptlyInteraction?.();
+    } catch (_e) {
+      /* telemetry must not break UI */
+    }
+  }
+
+  function notePromptlyComposeDraftTyping(textValue) {
+    try {
+      if (String(textValue || "").trim().length > 0) {
+        window.PromptlyHostActivityListener?.notePromptlyComposeTyping?.();
+      }
+    } catch (_e) {
+      /* telemetry must not break UI */
+    }
+  }
+
   class PromptlyPopup {
     constructor(
       rootNode,
@@ -107,6 +125,7 @@
       this.autoAdjustButton.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
+        notePromptlyDraftInteraction();
         if (this.autoAdjustButton.disabled) {
           return;
         }
@@ -180,6 +199,8 @@
         this.updateInputLineMode();
       });
       this.rewriteInstructionInput.addEventListener("input", () => {
+        const inputValue = String(this.rewriteInstructionInput.value || "");
+        notePromptlyComposeDraftTyping(inputValue);
         if (
           this.composePromptWritten &&
           this.composeFieldBaseline !== null &&
@@ -188,7 +209,7 @@
           this.composeFieldDirty = true;
         }
         this.updateInputLineMode();
-        const hasText = String(this.rewriteInstructionInput.value || "").trim().length > 0;
+        const hasText = inputValue.trim().length > 0;
         if (!this.rewriteSendButton.classList.contains("is-working")) {
           if (this.composeUseIdleLabel) {
             this.rewriteSendButton.dataset.stage = "idle";
@@ -248,6 +269,7 @@
       this.rewriteSendButton.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
+        notePromptlyDraftInteraction();
         const userInstruction = String(this.rewriteInstructionInput?.value || "").trim();
         if (
           this.composePromptWritten &&

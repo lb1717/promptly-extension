@@ -129,16 +129,22 @@
   }
 
   /**
-   * @returns {Record<string, string|number|undefined>}
+   * @returns {Record<string, string|number|undefined|null>}
    */
   function collectForOptimize(site, promptText, userInstructionText) {
     const p = String(promptText || "").length;
     const u = String(userInstructionText || "").length;
     const combined = Math.min(MAX_COMPOSER_CHARS, Math.max(0, p + u));
     const hostLabel = scrapeHostModelLabel(site);
+    const draft =
+      typeof window.PromptlyHostActivityListener?.peekDraftMetrics === "function"
+        ? window.PromptlyHostActivityListener.peekDraftMetrics()
+        : { draft_duration_ms: null, draft_active_ms: null };
     const telemetry = {
       composer_char_estimate: combined,
-      composer_word_estimate: countWordsRough(`${String(promptText || "")} ${String(userInstructionText || "")}`)
+      composer_word_estimate: countWordsRough(`${String(promptText || "")} ${String(userInstructionText || "")}`),
+      draft_duration_ms: draft.draft_duration_ms,
+      draft_active_ms: draft.draft_active_ms
     };
     if (hostLabel) {
       telemetry.host_model_label = hostLabel.slice(0, MAX_CHARS);

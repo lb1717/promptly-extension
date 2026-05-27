@@ -51,6 +51,7 @@ type CombinedTotals = {
   prompts_gemini_surface: number;
   prompts_unknown_surface: number;
   mirror_rows_synced_to_host_telemetry: number;
+  native_sends_observed?: number;
   promptly_share_of_estimated_prompts_percent: number | null;
 };
 
@@ -75,6 +76,7 @@ type LatencyAiRow = {
   service_key: PromptlySvc;
   prompted_promptly_avg_rewrite_ms: number | null;
   native_avg_host_roundtrip_ms: number | null;
+  avg_draft_duration_ms: number | null;
   avg_draft_active_ms: number | null;
   promptly_samples: number;
   native_latency_samples: number;
@@ -300,6 +302,7 @@ function buildPlaceholderExtendedStats(days: number, granularity: "day" | "week"
       service_key,
       prompted_promptly_avg_rewrite_ms: null,
       native_avg_host_roundtrip_ms: null,
+      avg_draft_duration_ms: null,
       avg_draft_active_ms: null,
       promptly_samples: 0,
       native_latency_samples: 0,
@@ -484,8 +487,13 @@ export function StatisticsClient() {
     return MODEL_CHART_ORDER.map((serviceKey) => {
       const row = displayStats.latency_comparison_ai.find((r) => r.service_key === serviceKey);
       if (!row) return null;
-      const avgDraftingS =
-        typeof row.avg_draft_active_ms === "number" ? Math.round((row.avg_draft_active_ms / 1000) * 10) / 10 : null;
+      const draftMs =
+        typeof row.avg_draft_duration_ms === "number"
+          ? row.avg_draft_duration_ms
+          : typeof row.avg_draft_active_ms === "number"
+            ? row.avg_draft_active_ms
+            : null;
+      const avgDraftingS = draftMs !== null ? Math.round((draftMs / 1000) * 10) / 10 : null;
       const avgResponseS =
         typeof row.native_avg_host_roundtrip_ms === "number"
           ? Math.round((row.native_avg_host_roundtrip_ms / 1000) * 10) / 10
@@ -770,7 +778,7 @@ export function StatisticsClient() {
                       }}
                     />
                     <Legend wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
-                    <Bar dataKey="avg_drafting_s" name="Prompt drafting" fill="#c084fc" radius={[0, 4, 4, 0]} barSize={12}>
+                    <Bar dataKey="avg_drafting_s" name="Prompt drafting (first keystroke → send)" fill="#c084fc" radius={[0, 4, 4, 0]} barSize={12}>
                       {modelTimeChartRows.map((entry, idx) => (
                         <Cell key={`draft-${idx}`} fillOpacity={entry.drafting_missing ? 0.2 : 0.95} />
                       ))}

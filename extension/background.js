@@ -42,6 +42,14 @@ function sanitizeOptimizeTelemetryEnvelope(raw) {
       out.host_model_bucket = b;
     }
   }
+  const dd = raw.draft_duration_ms ?? raw.draftDurationMs;
+  if (typeof dd === "number" && Number.isFinite(dd)) {
+    out.draft_duration_ms = Math.max(0, Math.min(7_200_000, Math.floor(dd)));
+  }
+  const da = raw.draft_active_ms ?? raw.draftActiveMs;
+  if (typeof da === "number" && Number.isFinite(da)) {
+    out.draft_active_ms = Math.max(0, Math.min(7_200_000, Math.floor(da)));
+  }
   return Object.keys(out).length ? out : null;
 }
 

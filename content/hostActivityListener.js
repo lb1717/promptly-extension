@@ -5,8 +5,9 @@
   const COMPOSER_INPUT_DEBOUNCE_MS = 2200;
   /** Prevent flooding Firestore — one compose sample intent at least this far apart (timer may fire sooner but we throttle). */
   const MIN_GAP_BETWEEN_COMPOSE_SAMPLES_MS = 7000;
-  /** Gaps longer than this break active typing accumulation (user stepped away). */
-  const DRAFT_IDLE_BREAK_MS = 45_000;
+  /** Discard draft session after this much inactivity (no typing or Promptly interaction). */
+  const DRAFT_IDLE_TERMINATE_MS = 60_000;
+  const DRAFT_IDLE_CHECK_MS = 5000;
   const DRAFT_MAX_MS = 7_200_000;
   const MAX_CONCURRENT_RESPONSE_WATCHES = 4;
   const WATCH_HEARTBEAT_MS = 4000;
@@ -165,7 +166,23 @@
     return t instanceof Element && !!(t === composer || composer.contains(t));
   }
 
+  function isEditableInputTarget(el) {
+    if (!(el instanceof Element)) {
+      return false;
+    }
+    if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
+      return true;
+    }
+    if (el.isContentEditable) {
+      return true;
+    }
+    const editable = el.closest("[contenteditable=''], [contenteditable='true'], textarea, input[type='text']");
+    return editable instanceof Element;
+  }
+
   let installedHere = false;
+  /** @type {{ destroyed: boolean, site: string, getPromptTarget: () => Element|null, readComposer: () => string } | null} */
+  let activeCfg = null;
   let lastSendAt = 0;
   /** @type {ReturnType<typeof setTimeout>|null} */
   let flushTimer = null;
@@ -178,12 +195,14 @@
   /** @type {ReturnType<typeof setTimeout>|null} */
   let composeDebounceTimer = null;
 
-  /** Wall + active typing time for the current composer draft (until send or composer cleared). */
+  /** Wall-clock draft from first keystroke until send (aborted on idle / page leave). */
   let draftSession = {
     startedMs: null,
-    lastActiveMs: null,
-    activeTypingMs: 0
+    lastActiveMs: null
   };
+
+  /** @type {ReturnType<typeof setInterval>|null} */
+  let draftIdleTimer = null;
 
   /** @type {Array<{ watch: { flush: () => void, cancel: () => void, getHeartbeat?: () => unknown }, sendRow: Record<string, unknown> }>} */
   let pendingResponseWatches = [];
@@ -192,64 +211,99 @@
   let watchHeartbeatTimer = null;
 
   function resetDraftSession() {
-    draftSession = { startedMs: null, lastActiveMs: null, activeTypingMs: 0 };
+    draftSession = { startedMs: null, lastActiveMs: null };
   }
 
-  function noteDraftComposerActivity() {
+  function isDraftSessionValid() {
+    if (!draftSession.startedMs || !draftSession.lastActiveMs) {
+      return false;
+    }
+    return Date.now() - draftSession.lastActiveMs <= DRAFT_IDLE_TERMINATE_MS;
+  }
+
+  function abortDraftSession() {
+    resetDraftSession();
+  }
+
+  function noteDraftActivity() {
     const now = Date.now();
     if (!draftSession.startedMs) {
       draftSession.startedMs = now;
-      draftSession.lastActiveMs = now;
-      return;
-    }
-    if (draftSession.lastActiveMs) {
-      const gap = now - draftSession.lastActiveMs;
-      if (gap > 0 && gap <= DRAFT_IDLE_BREAK_MS) {
-        draftSession.activeTypingMs += gap;
-      }
     }
     draftSession.lastActiveMs = now;
   }
 
+  function checkDraftIdleTimeout() {
+    if (!draftSession.startedMs || !draftSession.lastActiveMs) {
+      return;
+    }
+    if (Date.now() - draftSession.lastActiveMs > DRAFT_IDLE_TERMINATE_MS) {
+      abortDraftSession();
+    }
+  }
+
+  function ensureDraftIdleTimer() {
+    if (draftIdleTimer) {
+      return;
+    }
+    draftIdleTimer = globalThis.setInterval(checkDraftIdleTimeout, DRAFT_IDLE_CHECK_MS);
+  }
+
+  function stopDraftIdleTimer() {
+    if (!draftIdleTimer) {
+      return;
+    }
+    globalThis.clearInterval(draftIdleTimer);
+    draftIdleTimer = null;
+  }
+
+  function peekDraftMetrics() {
+    if (!isDraftSessionValid() || !draftSession.startedMs) {
+      return { draft_duration_ms: null, draft_active_ms: null };
+    }
+    const dur = Math.min(DRAFT_MAX_MS, Math.max(0, Date.now() - draftSession.startedMs));
+    return { draft_duration_ms: dur, draft_active_ms: dur };
+  }
+
   function readDraftSnapshot() {
-    const now = Date.now();
-    let draftDurationMs = null;
-    let draftActiveMs = null;
-    if (draftSession.startedMs) {
-      draftDurationMs = Math.min(DRAFT_MAX_MS, Math.max(0, now - draftSession.startedMs));
-    }
-    let active = draftSession.activeTypingMs;
-    if (draftSession.lastActiveMs) {
-      const gap = now - draftSession.lastActiveMs;
-      if (gap > 0 && gap <= DRAFT_IDLE_BREAK_MS) {
-        active += gap;
-      }
-    }
-    if (active > 0) {
-      draftActiveMs = Math.min(DRAFT_MAX_MS, Math.floor(active));
-    }
-    return { draft_duration_ms: draftDurationMs, draft_active_ms: draftActiveMs };
+    return peekDraftMetrics();
   }
 
   function consumeDraftMetrics() {
-    const now = Date.now();
-    if (draftSession.startedMs && draftSession.lastActiveMs) {
-      const tailGap = now - draftSession.lastActiveMs;
-      if (tailGap > 0 && tailGap <= DRAFT_IDLE_BREAK_MS) {
-        draftSession.activeTypingMs += tailGap;
-      }
+    if (!isDraftSessionValid() || !draftSession.startedMs) {
+      resetDraftSession();
+      return { draft_duration_ms: null, draft_active_ms: null };
     }
-
-    let draftDurationMs = null;
-    let draftActiveMs = null;
-    if (draftSession.startedMs) {
-      draftDurationMs = Math.min(DRAFT_MAX_MS, Math.max(0, now - draftSession.startedMs));
-    }
-    if (draftSession.activeTypingMs > 0) {
-      draftActiveMs = Math.min(DRAFT_MAX_MS, Math.floor(draftSession.activeTypingMs));
-    }
+    const dur = Math.min(DRAFT_MAX_MS, Math.max(0, Date.now() - draftSession.startedMs));
     resetDraftSession();
-    return { draft_duration_ms: draftDurationMs, draft_active_ms: draftActiveMs };
+    return { draft_duration_ms: dur, draft_active_ms: dur };
+  }
+
+  function noteComposerTyping() {
+    if (!activeCfg || activeCfg.destroyed) {
+      return;
+    }
+    let text = "";
+    try {
+      text = String(activeCfg.readComposer() || "").trim();
+    } catch (_e) {
+      text = "";
+    }
+    if (!text.length) {
+      return;
+    }
+    noteDraftActivity();
+  }
+
+  function notePromptlyComposeTyping() {
+    noteDraftActivity();
+  }
+
+  function notePromptlyInteraction() {
+    if (!draftSession.startedMs) {
+      return;
+    }
+    noteDraftActivity();
   }
 
   function maybeClearDraftIfComposerEmpty(cfg) {
@@ -260,7 +314,7 @@
       text = "";
     }
     if (!text.length && draftSession.startedMs) {
-      resetDraftSession();
+      abortDraftSession();
     }
   }
 
@@ -451,18 +505,30 @@
 
   /**
    * @param clickedSendConfirmed true when gesture hit recognizable Send/submit (pointer snapshot fallback).
+   * @param {{ charEstimate?: number, wordEstimate?: number, source?: string }} [overrides]
    */
-  function recordNativePromptSend(cfg, clickedSendConfirmed) {
+  function recordNativePromptSend(cfg, clickedSendConfirmed, overrides) {
     if (cfg.destroyed) return false;
 
-    let text = "";
-    try {
-      text = String(cfg.readComposer() || "").trim();
-    } catch (_e) {
-      text = "";
+    let chars =
+      typeof overrides?.charEstimate === "number" && overrides.charEstimate > 0
+        ? Math.min(12000, Math.floor(overrides.charEstimate))
+        : 0;
+    let wordsRough =
+      typeof overrides?.wordEstimate === "number" && overrides.wordEstimate > 0
+        ? Math.min(12000, Math.floor(overrides.wordEstimate))
+        : 0;
+
+    if (!chars) {
+      let text = "";
+      try {
+        text = String(cfg.readComposer() || "").trim();
+      } catch (_e) {
+        text = "";
+      }
+      chars = Math.min(12000, text.length);
+      wordsRough = chars ? text.split(/\s+/).filter(Boolean).length : 0;
     }
-    let chars = Math.min(12000, text.length);
-    let wordsRough = chars ? text.split(/\s+/).filter(Boolean).length : 0;
 
     if (
       clickedSendConfirmed &&
@@ -491,17 +557,32 @@
       interaction_kind: "send",
       service: cfg.site === "unknown" ? "unknown" : String(cfg.site),
       composer_char_estimate: chars,
-      composer_word_estimate: Math.min(12000, wordsRough),
+      composer_word_estimate: Math.min(12000, wordsRough || Math.max(1, Math.ceil(chars / 6))),
       ...(meta.label
         ? { host_model_label: meta.label.slice(0, 120), host_model_bucket: meta.bucket.slice(0, 48) }
         : {}),
       draft_duration_ms: draft.draft_duration_ms,
       draft_active_ms: draft.draft_active_ms,
+      ...(overrides?.source ? { telemetry_source: String(overrides.source).slice(0, 48) } : {}),
       client_occurred_ms: nowMs
     };
 
     startResponseWatchForSend(cfg, sendRow);
     return true;
+  }
+
+  /**
+   * @param {{ charEstimate?: number, wordEstimate?: number, clickedSendConfirmed?: boolean, source?: string }} [options]
+   */
+  function recordPromptSend(options) {
+    if (!activeCfg || activeCfg.destroyed) {
+      return false;
+    }
+    return recordNativePromptSend(activeCfg, options?.clickedSendConfirmed !== false, {
+      charEstimate: options?.charEstimate,
+      wordEstimate: options?.wordEstimate,
+      source: options?.source
+    });
   }
 
   /** @param {{ site: string, getPromptTarget: () => Element|null, readComposer: () => string }} configuration */
@@ -518,6 +599,8 @@
       getPromptTarget: typeof configuration.getPromptTarget === "function" ? configuration.getPromptTarget : () => null,
       readComposer: configuration.readComposer
     };
+    activeCfg = cfg;
+    ensureDraftIdleTimer();
 
     function onEarlySendIntent(ev) {
       if (ev?.isTrusted !== true || cfg.destroyed) return;
@@ -552,12 +635,17 @@
     function onComposerInputLike(ev) {
       if (!ev?.isTrusted || cfg.destroyed) return;
       if (typeof ev.isComposing === "boolean" && ev.isComposing) return;
-      const composer = resolveComposerRoot(cfg);
-      if (!composer) return;
       if (!(ev instanceof InputEvent) && !(ev instanceof KeyboardEvent)) return;
-      if (!eventPathContainsComposer(ev, composer)) return;
 
-      noteDraftComposerActivity();
+      const composer = resolveComposerRoot(cfg);
+      const inComposerPath = !!(composer && eventPathContainsComposer(ev, composer));
+      const inEditable = ev.target instanceof Element && isEditableInputTarget(ev.target);
+
+      if (!inComposerPath && !inEditable) {
+        return;
+      }
+
+      noteComposerTyping();
 
       globalThis.clearTimeout(composeDebounceTimer);
       composeDebounceTimer = globalThis.setTimeout(() => {
@@ -600,11 +688,13 @@
     function onPageHide() {
       globalThis.clearTimeout(composeDebounceTimer);
       composeDebounceTimer = null;
+      abortDraftSession();
       finalizePendingResponseWatches("flush");
       flushQueued();
     }
 
     function onTabHidden() {
+      abortDraftSession();
       flushQueued();
       syncPendingWatchesToBackground();
     }
@@ -643,12 +733,14 @@
 
     return () => {
       cfg.destroyed = true;
+      activeCfg = null;
       installedHere = false;
       globalThis.clearInterval(periodic);
       globalThis.clearTimeout(composeDebounceTimer);
       composeDebounceTimer = null;
+      stopDraftIdleTimer();
       finalizePendingResponseWatches("cancel");
-      resetDraftSession();
+      abortDraftSession();
       window.removeEventListener("pointerdown", onEarlySendIntent, true);
       window.removeEventListener("mousedown", onEarlySendIntent, true);
       window.removeEventListener("click", onCaptureClick, true);
@@ -665,5 +757,13 @@
     };
   }
 
-  window.PromptlyHostActivityListener = { install };
+  window.PromptlyHostActivityListener = {
+    install,
+    noteComposerTyping,
+    notePromptlyComposeTyping,
+    notePromptlyInteraction,
+    recordPromptSend,
+    peekDraftMetrics,
+    consumeDraftMetrics
+  };
 })();
