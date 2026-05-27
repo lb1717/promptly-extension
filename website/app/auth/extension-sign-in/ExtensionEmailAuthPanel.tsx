@@ -2,6 +2,14 @@
 
 import type { FormEvent } from "react";
 import { useState } from "react";
+import { getFirebaseAuth } from "@/lib/firebaseClient";
+import {
+  preflightEmailRegistration,
+  resolveEmailRegistrationError,
+  resolveEmailSignInError,
+  type AuthProviderHint
+} from "@/lib/firebaseAuthAccountHints";
+import { sendPromptlyExtensionMessage } from "@/lib/extensionBridge";
 
 type Props = {
   apiKey: string;
@@ -9,22 +17,6 @@ type Props = {
   signinCsrf: string;
   disabled: boolean;
 };
-
-type ChromeRuntime = {
-  runtime?: {
-    sendMessage?: (
-      extensionId: string,
-      message: unknown,
-      responseCallback?: (response?: unknown) => void
-    ) => void;
-    lastError?: { message?: string };
-  };
-};
-
-function getChromeRuntime(): ChromeRuntime | undefined {
-  if (typeof window === "undefined") return undefined;
-  return (window as unknown as { chrome?: ChromeRuntime }).chrome;
-}
 
 async function identitySignInWithPassword(apiKey: string, email: string, password: string) {
   const res = await fetch(
@@ -155,30 +147,14 @@ function sendSessionToExtension(
     expiresAtSec: number;
   }
 ) {
-  return new Promise<void>((resolve, reject) => {
-    const chrome = getChromeRuntime();
-    const send = chrome?.runtime?.sendMessage;
-    if (typeof send !== "function") {
-      reject(new Error("Chrome extension API unavailable"));
-      return;
+  return sendPromptlyExtensionMessage(extensionId, {
+    type: "PROMPTLY_FIREBASE_EMAIL_SESSION",
+    ...payload
+  }).then((response) => {
+    const r = response as { ok?: boolean; error?: string } | undefined;
+    if (r && r.ok === false) {
+      throw new Error(String(r.error || "Extension rejected sign-in"));
     }
-    send(
-      extensionId,
-      { type: "PROMPTLY_FIREBASE_EMAIL_SESSION", ...payload },
-      (response: unknown) => {
-        const err = chrome?.runtime?.lastError;
-        if (err?.message) {
-          reject(new Error(err.message));
-          return;
-        }
-        const r = response as { ok?: boolean; error?: string } | undefined;
-        if (r && r.ok === false) {
-          reject(new Error(String(r.error || "Extension rejected sign-in")));
-          return;
-        }
-        resolve();
-      }
-    );
   });
 }
 
@@ -192,11 +168,22 @@ export function ExtensionEmailAuthPanel({ apiKey, extensionId, signinCsrf, disab
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [needsEmailVerification, setNeedsEmailVerification] = useState(false);
+  const [authProviderHint, setAuthProviderHint] = useState<AuthProviderHint>(null);
+
+  function showGuidance(message: string, hint: AuthProviderHint) {
+    setError("");
+    setMessage(message);
+    setAuthProviderHint(hint);
+    if (hint === "use-email") {
+      setMode("signin");
+    }
+  }
 
   async function onSubmitSignIn(e: FormEvent) {
     e.preventDefault();
     setError("");
     setMessage("");
+    setAuthProviderHint(null);
     setNeedsEmailVerification(false);
     if (disabled || !apiKey || !extensionId || !signinCsrf) return;
     setBusy(true);
@@ -226,7 +213,12 @@ export function ExtensionEmailAuthPanel({ apiKey, extensionId, signinCsrf, disab
         /* ignore */
       }
     } catch (err) {
-      setError(String(err instanceof Error ? err.message : err));
+      const resolved = await resolveEmailSignInError(getFirebaseAuth(), email, err);
+      if (resolved.hint) {
+        showGuidance(resolved.message, resolved.hint);
+      } else {
+        setError(resolved.message);
+      }
     } finally {
       setBusy(false);
     }
@@ -236,6 +228,7 @@ export function ExtensionEmailAuthPanel({ apiKey, extensionId, signinCsrf, disab
     e.preventDefault();
     setError("");
     setMessage("");
+    setAuthProviderHint(null);
     setNeedsEmailVerification(false);
     if (disabled || !apiKey || !extensionId || !signinCsrf) return;
     if (password !== password2) {
@@ -253,6 +246,11 @@ export function ExtensionEmailAuthPanel({ apiKey, extensionId, signinCsrf, disab
     }
     setBusy(true);
     try {
+      const preflight = await preflightEmailRegistration(getFirebaseAuth(), email);
+      if (preflight?.blocked) {
+        showGuidance(preflight.message, preflight.hint);
+        return;
+      }
       const body = await identitySignUp(apiKey, email, password);
       await identityUpdateProfile(apiKey, body.idToken, trimmedName);
       await identitySendVerifyEmail(apiKey, body.idToken);
@@ -263,7 +261,12 @@ export function ExtensionEmailAuthPanel({ apiKey, extensionId, signinCsrf, disab
       setName("");
       setMessage("Account created. Verify your email first, then sign in.");
     } catch (err) {
-      setError(String(err instanceof Error ? err.message : err));
+      const resolved = await resolveEmailRegistrationError(getFirebaseAuth(), email, err);
+      if (resolved.hint) {
+        showGuidance(resolved.message, resolved.hint);
+      } else {
+        setError(resolved.message);
+      }
     } finally {
       setBusy(false);
     }
@@ -394,8 +397,19 @@ export function ExtensionEmailAuthPanel({ apiKey, extensionId, signinCsrf, disab
         </div>
       ) : null}
       {message ? (
-        <div className="mt-4 w-full rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-800">
+        <div
+          className={`mt-4 w-full rounded-xl border px-4 py-3 text-sm ${
+            authProviderHint
+              ? "border-amber-500/30 bg-amber-500/10 text-amber-900"
+              : "border-emerald-500/25 bg-emerald-500/10 text-emerald-800"
+          }`}
+        >
           {message}
+          {authProviderHint === "use-google" ? (
+            <p className="mt-2 text-[11px] leading-snug opacity-90">
+              Close this email form and use the Google button above on the sign-in page.
+            </p>
+          ) : null}
         </div>
       ) : null}
     </div>

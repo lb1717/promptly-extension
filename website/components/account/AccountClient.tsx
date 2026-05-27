@@ -23,6 +23,14 @@ import {
   rememberPromptlyExtensionId,
   sendPromptlyExtensionMessageToCandidates
 } from "@/lib/extensionBridge";
+import {
+  emailFromGoogleCredentialError,
+  preflightEmailRegistration,
+  resolveEmailRegistrationError,
+  resolveEmailSignInError,
+  resolveGoogleSignInError,
+  type AuthProviderHint
+} from "@/lib/firebaseAuthAccountHints";
 
 function formatJoinDate(user: User | null): string {
   if (!user?.metadata?.creationTime) return "—";
@@ -225,6 +233,20 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
   const [emailAuthPassword2, setEmailAuthPassword2] = useState("");
   const [emailAuthName, setEmailAuthName] = useState("");
   const [emailAuthMode, setEmailAuthMode] = useState<"signin" | "register">("signin");
+  const [authProviderHint, setAuthProviderHint] = useState<AuthProviderHint>(null);
+
+  function clearAuthGuidance() {
+    setAuthProviderHint(null);
+  }
+
+  function applyAuthGuidance(message: string, hint: AuthProviderHint) {
+    setError("");
+    setAccountNotice(message);
+    setAuthProviderHint(hint);
+    if (hint === "use-email") {
+      setEmailAuthMode("signin");
+    }
+  }
 
   useEffect(() => {
     if (extensionIdFromUrl) {
@@ -443,13 +465,23 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
   async function handleGoogleSignIn() {
     setError("");
     setAccountNotice("");
+    clearAuthGuidance();
     setBusy(true);
     try {
       const auth = getFirebaseAuth();
       const result = await signInWithPopup(auth, getGoogleProvider());
       await syncUserToFirestore(result.user);
     } catch (e) {
-      setError(String(e instanceof Error ? e.message : e));
+      const resolved = resolveGoogleSignInError(e);
+      const conflictEmail = emailFromGoogleCredentialError(e);
+      if (conflictEmail) {
+        setEmailAuthEmail(conflictEmail);
+      }
+      if (resolved.hint) {
+        applyAuthGuidance(resolved.message, resolved.hint);
+      } else {
+        setError(resolved.message);
+      }
     } finally {
       setBusy(false);
     }
@@ -458,12 +490,14 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
   async function handleEmailPasswordSignIn() {
     setError("");
     setAccountNotice("");
+    clearAuthGuidance();
     setBusy(true);
     try {
       const auth = getFirebaseAuth();
+      const email = emailAuthEmail.trim();
       const cred = await signInWithEmailAndPassword(
         auth,
-        emailAuthEmail.trim(),
+        email,
         emailAuthPassword
       );
       await reload(cred.user);
@@ -479,7 +513,12 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
       setEmailAuthPassword("");
       setEmailAuthPassword2("");
     } catch (e) {
-      setError(String(e instanceof Error ? e.message : e));
+      const resolved = await resolveEmailSignInError(getFirebaseAuth(), emailAuthEmail.trim(), e);
+      if (resolved.hint) {
+        applyAuthGuidance(resolved.message, resolved.hint);
+      } else {
+        setError(resolved.message);
+      }
     } finally {
       setBusy(false);
     }
@@ -488,6 +527,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
   async function handleEmailRegister() {
     setError("");
     setAccountNotice("");
+    clearAuthGuidance();
     if (emailAuthPassword !== emailAuthPassword2) {
       setError("Passwords do not match.");
       return;
@@ -504,9 +544,15 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
     setBusy(true);
     try {
       const auth = getFirebaseAuth();
+      const email = emailAuthEmail.trim();
+      const preflight = await preflightEmailRegistration(auth, email);
+      if (preflight?.blocked) {
+        applyAuthGuidance(preflight.message, preflight.hint);
+        return;
+      }
       const cred = await createUserWithEmailAndPassword(
         auth,
-        emailAuthEmail.trim(),
+        email,
         emailAuthPassword
       );
       await updateProfile(cred.user, { displayName: trimmedName });
@@ -519,7 +565,12 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
       setEmailAuthPassword2("");
       setEmailAuthName("");
     } catch (e) {
-      setError(String(e instanceof Error ? e.message : e));
+      const resolved = await resolveEmailRegistrationError(getFirebaseAuth(), emailAuthEmail.trim(), e);
+      if (resolved.hint) {
+        applyAuthGuidance(resolved.message, resolved.hint);
+      } else {
+        setError(resolved.message);
+      }
     } finally {
       setBusy(false);
     }
@@ -618,7 +669,9 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                 type="button"
                 onClick={handleGoogleSignIn}
                 disabled={busy || loading}
-                className="inline-flex w-full items-center justify-center gap-2.5 rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:opacity-60"
+                className={`inline-flex w-full items-center justify-center gap-2.5 rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:opacity-60 ${
+                  authProviderHint === "use-google" ? "ring-2 ring-emerald-500/40 ring-offset-2 ring-offset-page" : ""
+                }`}
               >
                 <span>{busy ? "Signing in…" : "Sign in with Google"}</span>
                 <img src="/images/google-logo.png" alt="" aria-hidden className="h-[18px] w-[18px] shrink-0 object-contain" />
@@ -630,7 +683,11 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                 <div className="h-px flex-1 bg-line" aria-hidden />
               </div>
 
-              <div className="w-full rounded-xl border border-line bg-cream p-5 backdrop-blur-md">
+              <div
+                className={`w-full rounded-xl border border-line bg-cream p-5 backdrop-blur-md ${
+                  authProviderHint === "use-email" ? "ring-2 ring-emerald-500/40" : ""
+                }`}
+              >
                 <h2 className="text-center text-base font-semibold text-ink">
                   {emailAuthMode === "signin" ? "Sign in with Email" : "Create account with Email"}
                 </h2>
@@ -642,6 +699,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                       setEmailAuthMode("signin");
                       setError("");
                       setAccountNotice("");
+                      clearAuthGuidance();
                     }}
                   >
                     Sign in
@@ -653,6 +711,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                       setEmailAuthMode("register");
                       setError("");
                       setAccountNotice("");
+                      clearAuthGuidance();
                     }}
                   >
                     Create account
@@ -741,7 +800,13 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                 </div>
               ) : null}
               {accountNotice ? (
-                <div className="mt-4 w-full rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-800">
+                <div
+                  className={`mt-4 w-full rounded-xl border px-4 py-3 text-sm ${
+                    authProviderHint
+                      ? "border-amber-500/30 bg-amber-500/10 text-amber-900"
+                      : "border-emerald-500/25 bg-emerald-500/10 text-emerald-800"
+                  }`}
+                >
                   {accountNotice}
                 </div>
               ) : null}
