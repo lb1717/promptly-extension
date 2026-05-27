@@ -18,6 +18,7 @@ import { doc, serverTimestamp, setDoc } from "firebase/firestore";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { AutoDismissNoticeBar } from "@/components/ui/AutoDismissNoticeBar";
 import {
   getPromptlyExtensionCandidateIds,
   rememberPromptlyExtensionId,
@@ -800,15 +801,17 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                 </div>
               ) : null}
               {accountNotice ? (
-                <div
-                  className={`mt-4 w-full rounded-xl border px-4 py-3 text-sm ${
+                <AutoDismissNoticeBar
+                  key={accountNotice}
+                  className="mt-4 w-full"
+                  innerClassName={`w-full rounded-xl border px-4 py-3 text-sm ${
                     authProviderHint
                       ? "border-amber-500/30 bg-amber-500/10 text-amber-900"
                       : "border-emerald-500/25 bg-emerald-500/10 text-emerald-800"
                   }`}
                 >
                   {accountNotice}
-                </div>
+                </AutoDismissNoticeBar>
               ) : null}
             </>
           )}
@@ -827,9 +830,12 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
         </div>
       ) : null}
       {user && accountNotice ? (
-        <div className="mb-6 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-800">
+        <AutoDismissNoticeBar
+          key={accountNotice}
+          innerClassName="rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-800"
+        >
           {accountNotice}
-        </div>
+        </AutoDismissNoticeBar>
       ) : null}
 
       {user ? (

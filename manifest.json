@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Promptly",
+  "name": "Promptly Labs",
   "version": "1.1.1",
-  "description": "Prompt assistance tab anchored to AI prompt inputs on ChatGPT, Claude, and Gemini.",
+  "description": "Prompt optimization tool integrated with ChatGPT, Claude, and Gemini.",
   "permissions": [
     "storage",
     "identity",
@@ -54,6 +54,7 @@
         "content/browserCompat.js",
         "content/siteAdapters.js",
         "content/hostTelemetry.js",
+        "content/hostResponseWatcher.js",
         "content/hostActivityListener.js",
         "content/positionManager.js",
         "content/observers.js",
@@ -92,7 +93,7 @@
     "128": "extension/icons/promptly-icon-128.png"
   },
   "action": {
-    "default_title": "Promptly",
+    "default_title": "Promptly Labs",
     "default_icon": {
       "16": "extension/icons/promptly-icon-16.png",
       "32": "extension/icons/promptly-icon-32.png"

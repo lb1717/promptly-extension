@@ -5,6 +5,11 @@
   const COMPOSER_INPUT_DEBOUNCE_MS = 2200;
   /** Prevent flooding Firestore — one compose sample intent at least this far apart (timer may fire sooner but we throttle). */
   const MIN_GAP_BETWEEN_COMPOSE_SAMPLES_MS = 7000;
+  /** Gaps longer than this break active typing accumulation (user stepped away). */
+  const DRAFT_IDLE_BREAK_MS = 45_000;
+  const DRAFT_MAX_MS = 7_200_000;
+  const MAX_CONCURRENT_RESPONSE_WATCHES = 4;
+  const WATCH_HEARTBEAT_MS = 4000;
 
   function slugBucket(label) {
     const s = String(label || "")
@@ -173,6 +178,132 @@
   /** @type {ReturnType<typeof setTimeout>|null} */
   let composeDebounceTimer = null;
 
+  /** Wall + active typing time for the current composer draft (until send or composer cleared). */
+  let draftSession = {
+    startedMs: null,
+    lastActiveMs: null,
+    activeTypingMs: 0
+  };
+
+  /** @type {Array<{ watch: { flush: () => void, cancel: () => void, getHeartbeat?: () => unknown }, sendRow: Record<string, unknown> }>} */
+  let pendingResponseWatches = [];
+
+  /** @type {ReturnType<typeof setInterval>|null} */
+  let watchHeartbeatTimer = null;
+
+  function resetDraftSession() {
+    draftSession = { startedMs: null, lastActiveMs: null, activeTypingMs: 0 };
+  }
+
+  function noteDraftComposerActivity() {
+    const now = Date.now();
+    if (!draftSession.startedMs) {
+      draftSession.startedMs = now;
+      draftSession.lastActiveMs = now;
+      return;
+    }
+    if (draftSession.lastActiveMs) {
+      const gap = now - draftSession.lastActiveMs;
+      if (gap > 0 && gap <= DRAFT_IDLE_BREAK_MS) {
+        draftSession.activeTypingMs += gap;
+      }
+    }
+    draftSession.lastActiveMs = now;
+  }
+
+  function readDraftSnapshot() {
+    const now = Date.now();
+    let draftDurationMs = null;
+    let draftActiveMs = null;
+    if (draftSession.startedMs) {
+      draftDurationMs = Math.min(DRAFT_MAX_MS, Math.max(0, now - draftSession.startedMs));
+    }
+    let active = draftSession.activeTypingMs;
+    if (draftSession.lastActiveMs) {
+      const gap = now - draftSession.lastActiveMs;
+      if (gap > 0 && gap <= DRAFT_IDLE_BREAK_MS) {
+        active += gap;
+      }
+    }
+    if (active > 0) {
+      draftActiveMs = Math.min(DRAFT_MAX_MS, Math.floor(active));
+    }
+    return { draft_duration_ms: draftDurationMs, draft_active_ms: draftActiveMs };
+  }
+
+  function consumeDraftMetrics() {
+    const now = Date.now();
+    if (draftSession.startedMs && draftSession.lastActiveMs) {
+      const tailGap = now - draftSession.lastActiveMs;
+      if (tailGap > 0 && tailGap <= DRAFT_IDLE_BREAK_MS) {
+        draftSession.activeTypingMs += tailGap;
+      }
+    }
+
+    let draftDurationMs = null;
+    let draftActiveMs = null;
+    if (draftSession.startedMs) {
+      draftDurationMs = Math.min(DRAFT_MAX_MS, Math.max(0, now - draftSession.startedMs));
+    }
+    if (draftSession.activeTypingMs > 0) {
+      draftActiveMs = Math.min(DRAFT_MAX_MS, Math.floor(draftSession.activeTypingMs));
+    }
+    resetDraftSession();
+    return { draft_duration_ms: draftDurationMs, draft_active_ms: draftActiveMs };
+  }
+
+  function maybeClearDraftIfComposerEmpty(cfg) {
+    let text = "";
+    try {
+      text = String(cfg.readComposer() || "").trim();
+    } catch (_e) {
+      text = "";
+    }
+    if (!text.length && draftSession.startedMs) {
+      resetDraftSession();
+    }
+  }
+
+  function syncPendingWatchesToBackground() {
+    if (!pendingResponseWatches.length) {
+      return;
+    }
+    try {
+      const watches = pendingResponseWatches
+        .map((entry) => (typeof entry.watch.getHeartbeat === "function" ? entry.watch.getHeartbeat() : null))
+        .filter(Boolean);
+      chrome.runtime.sendMessage({ type: "PROMPTLY_HOST_WATCH_SYNC", watches }, () => {
+        void chrome.runtime.lastError;
+      });
+    } catch (_e) {
+      /* ignore */
+    }
+  }
+
+  function ensureWatchHeartbeat() {
+    if (watchHeartbeatTimer) {
+      return;
+    }
+    watchHeartbeatTimer = globalThis.setInterval(() => {
+      syncPendingWatchesToBackground();
+    }, WATCH_HEARTBEAT_MS);
+  }
+
+  function stopWatchHeartbeatIfIdle() {
+    if (pendingResponseWatches.length || !watchHeartbeatTimer) {
+      return;
+    }
+    globalThis.clearInterval(watchHeartbeatTimer);
+    watchHeartbeatTimer = null;
+    try {
+      chrome.runtime.sendMessage({ type: "PROMPTLY_HOST_WATCH_SYNC", watches: [] }, () => {
+        void chrome.runtime.lastError;
+      });
+    } catch (_e) {
+      /* ignore */
+    }
+  }
+
   function enqueueRow(row) {
     queue.push(row);
     if (queue.length > 35) {
@@ -252,18 +383,70 @@
     lastComposeTelemetryAt = now;
     const wordsRough = text.split(/\s+/).filter(Boolean).length;
     const meta = scrapeModelMeta(cfg.site);
+    const draftSnap = readDraftSnapshot();
     enqueueRow({
       interaction_kind: "composer_input",
       service: cfg.site === "unknown" ? "unknown" : String(cfg.site),
       composer_char_estimate: chars,
       composer_word_estimate: Math.min(12000, wordsRough),
       ...(meta.label ? { host_model_label: meta.label.slice(0, 120), host_model_bucket: meta.bucket.slice(0, 48) } : {}),
+      draft_duration_ms: draftSnap.draft_duration_ms,
+      draft_active_ms: draftSnap.draft_active_ms,
       host_response_latency_ms: null,
       assistant_output_char_estimate: null,
       time_to_first_stream_activity_ms: null,
       stream_visual_active_ms: null,
       client_occurred_ms: now
     });
+  }
+
+  function finalizePendingResponseWatches(reason) {
+    const pending = pendingResponseWatches.splice(0);
+    for (const entry of pending) {
+      if (reason === "flush" && typeof entry.watch.flush === "function") {
+        entry.watch.flush();
+      } else if (typeof entry.watch.cancel === "function") {
+        entry.watch.cancel();
+      }
+    }
+    stopWatchHeartbeatIfIdle();
+  }
+
+  function completeSendRow(sendRow, latencyMetrics) {
+    enqueueRow({
+      ...sendRow,
+      host_response_latency_ms: latencyMetrics.host_response_latency_ms ?? null,
+      assistant_output_char_estimate: latencyMetrics.assistant_output_char_estimate ?? null,
+      time_to_first_stream_activity_ms: latencyMetrics.time_to_first_stream_activity_ms ?? null,
+      stream_visual_active_ms: latencyMetrics.stream_visual_active_ms ?? null
+    });
+  }
+
+  function startResponseWatchForSend(cfg, sendRow) {
+    const createWatch = window.PromptlyHostResponseWatcher?.createWatch;
+    if (typeof createWatch !== "function") {
+      completeSendRow(sendRow, {});
+      return;
+    }
+
+    if (pendingResponseWatches.length >= MAX_CONCURRENT_RESPONSE_WATCHES) {
+      finalizePendingResponseWatches("flush");
+    }
+
+    const sendAtMs = Number(sendRow.client_occurred_ms) || Date.now();
+    const watch = createWatch({
+      site: cfg.site,
+      sendAtMs,
+      onComplete(metrics) {
+        pendingResponseWatches = pendingResponseWatches.filter((entry) => entry.watch !== watch);
+        completeSendRow(sendRow, metrics);
+        stopWatchHeartbeatIfIdle();
+      }
+    });
+
+    pendingResponseWatches.push({ watch, sendRow });
+    ensureWatchHeartbeat();
+    syncPendingWatchesToBackground();
   }
 
   /**
@@ -302,8 +485,9 @@
     lastSendAt = nowMs;
 
     const meta = scrapeModelMeta(cfg.site);
+    const draft = consumeDraftMetrics();
 
-    enqueueRow({
+    const sendRow = {
       interaction_kind: "send",
       service: cfg.site === "unknown" ? "unknown" : String(cfg.site),
       composer_char_estimate: chars,
@@ -311,12 +495,12 @@
       ...(meta.label
         ? { host_model_label: meta.label.slice(0, 120), host_model_bucket: meta.bucket.slice(0, 48) }
         : {}),
-      host_response_latency_ms: null,
-      assistant_output_char_estimate: null,
-      time_to_first_stream_activity_ms: null,
-      stream_visual_active_ms: null,
+      draft_duration_ms: draft.draft_duration_ms,
+      draft_active_ms: draft.draft_active_ms,
       client_occurred_ms: nowMs
-    });
+    };
+
+    startResponseWatchForSend(cfg, sendRow);
     return true;
   }
 
@@ -373,9 +557,12 @@
       if (!(ev instanceof InputEvent) && !(ev instanceof KeyboardEvent)) return;
       if (!eventPathContainsComposer(ev, composer)) return;
 
+      noteDraftComposerActivity();
+
       globalThis.clearTimeout(composeDebounceTimer);
       composeDebounceTimer = globalThis.setTimeout(() => {
         composeDebounceTimer = null;
+        maybeClearDraftIfComposerEmpty(cfg);
         enqueueComposerTypingSample(cfg);
       }, COMPOSER_INPUT_DEBOUNCE_MS);
     }
@@ -410,10 +597,16 @@
       void recordNativePromptSend(cfg, false);
     }
 
-    function onLeave() {
+    function onPageHide() {
       globalThis.clearTimeout(composeDebounceTimer);
       composeDebounceTimer = null;
+      finalizePendingResponseWatches("flush");
       flushQueued();
+    }
+
+    function onTabHidden() {
+      flushQueued();
+      syncPendingWatchesToBackground();
     }
 
     window.addEventListener("pointerdown", onEarlySendIntent, true);
@@ -425,8 +618,22 @@
     document.addEventListener("input", onComposerInputLike, true);
     document.addEventListener("keyup", onComposerInputLike, true);
 
-    window.addEventListener("pagehide", onLeave, false);
-    document.addEventListener("visibilitychange", () => document.visibilityState === "hidden" && onLeave(), false);
+    window.addEventListener("pagehide", onPageHide, false);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") {
+        onTabHidden();
+      }
+    });
+
+    window.addEventListener(
+      "pageshow",
+      (ev) => {
+        if (ev.persisted) {
+          syncPendingWatchesToBackground();
+        }
+      },
+      false
+    );
 
     const periodic = globalThis.setInterval(() => {
       if (queue.length && !flushTimer) {
@@ -440,6 +647,8 @@
       globalThis.clearInterval(periodic);
       globalThis.clearTimeout(composeDebounceTimer);
       composeDebounceTimer = null;
+      finalizePendingResponseWatches("cancel");
+      resetDraftSession();
       window.removeEventListener("pointerdown", onEarlySendIntent, true);
       window.removeEventListener("mousedown", onEarlySendIntent, true);
       window.removeEventListener("click", onCaptureClick, true);
@@ -447,7 +656,11 @@
       window.removeEventListener("keydown", onCaptureKey, true);
       document.removeEventListener("input", onComposerInputLike, true);
       document.removeEventListener("keyup", onComposerInputLike, true);
-      window.removeEventListener("pagehide", onLeave, false);
+      window.removeEventListener("pagehide", onPageHide, false);
+      if (watchHeartbeatTimer) {
+        globalThis.clearInterval(watchHeartbeatTimer);
+        watchHeartbeatTimer = null;
+      }
       flushQueued();
     };
   }

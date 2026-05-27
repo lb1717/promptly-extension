@@ -415,6 +415,8 @@ async function persistOptimizeMirrorHostActivity(params: {
       assistantOutputCharEstimate: null,
       timeToFirstStreamActivityMs: null,
       streamVisualActiveMs: null,
+      draftDurationMs: null,
+      draftActiveMs: null,
       clientOccurredMs: Date.now(),
       ingestSource: "optimize_api",
       optimizeEngineMode: params.optimizeMode
@@ -454,6 +456,10 @@ export type HostLlmActivityEventInput = {
   timeToFirstStreamActivityMs: number | null;
   /** Ms between first streaming cue and finalized assistant text (approx). */
   streamVisualActiveMs: number | null;
+  /** Wall-clock ms from first composer keystroke in session until native send. */
+  draftDurationMs: number | null;
+  /** Active typing ms (idle gaps > ~45s excluded) until native send. */
+  draftActiveMs: number | null;
   /** Client Date.now() when send was observed (sets utcDay for bucketing). */
   clientOccurredMs: number;
   /** Stored as top-level Firestore field `source` (passive batch vs mirrored optimize). */
@@ -589,6 +595,20 @@ export function normalizeHostLlmActivityEventInput(raw: Record<string, unknown>)
     streamVisualActiveMs = v <= 600_000 ? v : null;
   }
 
+  let draftDurationMs: number | null = null;
+  const dd = raw.draft_duration_ms ?? raw.draftDurationMs;
+  if (typeof dd === "number" && Number.isFinite(dd)) {
+    const v = Math.max(0, Math.floor(dd));
+    draftDurationMs = v <= 7_200_000 ? v : null;
+  }
+
+  let draftActiveMs: number | null = null;
+  const da = raw.draft_active_ms ?? raw.draftActiveMs;
+  if (typeof da === "number" && Number.isFinite(da)) {
+    const v = Math.max(0, Math.floor(da));
+    draftActiveMs = v <= 7_200_000 ? v : null;
+  }
+
   return {
     service: svc,
     composerCharEstimate,
@@ -600,6 +620,8 @@ export function normalizeHostLlmActivityEventInput(raw: Record<string, unknown>)
     assistantOutputCharEstimate,
     timeToFirstStreamActivityMs,
     streamVisualActiveMs,
+    draftDurationMs,
+    draftActiveMs,
     clientOccurredMs
   };
 }
@@ -633,6 +655,8 @@ export async function persistHostLlmActivityEvents(user: PromptlyUser, rows: Hos
       assistantOutputCharEstimate: row.assistantOutputCharEstimate,
       timeToFirstStreamActivityMs: row.timeToFirstStreamActivityMs,
       streamVisualActiveMs: row.streamVisualActiveMs,
+      draftDurationMs: row.draftDurationMs,
+      draftActiveMs: row.draftActiveMs,
       clientOccurredMs: row.clientOccurredMs,
       ...(row.optimizeEngineMode ? { optimizeEngineMode: row.optimizeEngineMode } : {})
     });
@@ -701,6 +725,14 @@ type HostPassiveBucketAgg = {
   /** Native round-trip sums per assistant surface when host latency telemetry exists */
   native_host_latency_sum_svc: ServicePromptCounts;
   native_host_latency_samples_svc: ServicePromptCounts;
+  draft_active_sum_svc: ServicePromptCounts;
+  draft_active_samples_svc: ServicePromptCounts;
+  draft_wall_sum_ms: number;
+  draft_wall_samples: number;
+  draft_active_sum_ms: number;
+  draft_active_samples: number;
+  waiting_sum_ms: number;
+  waiting_samples: number;
 };
 
 export async function getAccountUsageStatsExtended(
@@ -832,7 +864,15 @@ export async function getAccountUsageStatsExtended(
       assistant_reply_char_sum: 0,
       assistant_reply_char_samples: 0,
       native_host_latency_sum_svc: emptyServicePromptCounts(),
-      native_host_latency_samples_svc: emptyServicePromptCounts()
+      native_host_latency_samples_svc: emptyServicePromptCounts(),
+      draft_active_sum_svc: emptyServicePromptCounts(),
+      draft_active_samples_svc: emptyServicePromptCounts(),
+      draft_wall_sum_ms: 0,
+      draft_wall_samples: 0,
+      draft_active_sum_ms: 0,
+      draft_active_samples: 0,
+      waiting_sum_ms: 0,
+      waiting_samples: 0
     });
   }
 
@@ -932,6 +972,13 @@ export async function getAccountUsageStatsExtended(
     const hlMs =
       typeof hlRaw === "number" && Number.isFinite(hlRaw) ? Math.floor(hlRaw) : null;
 
+    const draftWallRaw = raw.draftDurationMs ?? raw.draft_duration_ms;
+    const draftWallMs =
+      typeof draftWallRaw === "number" && Number.isFinite(draftWallRaw) ? Math.floor(draftWallRaw) : null;
+    const draftActiveRaw = raw.draftActiveMs ?? raw.draft_active_ms;
+    const draftActiveMs =
+      typeof draftActiveRaw === "number" && Number.isFinite(draftActiveRaw) ? Math.floor(draftActiveRaw) : null;
+
     if (isComposer) {
       row.composer_input_events += 1;
     } else {
@@ -950,7 +997,19 @@ export async function getAccountUsageStatsExtended(
           row.native_host_latency_samples_svc[svc] += 1;
           row.host_latency_samples += 1;
           row.host_latency_sum_ms += hlMs;
+          row.waiting_sum_ms += hlMs;
+          row.waiting_samples += 1;
         }
+        if (draftWallMs !== null && draftWallMs > 0) {
+          row.draft_wall_sum_ms += draftWallMs;
+          row.draft_wall_samples += 1;
+        }
+      }
+      if (draftActiveMs !== null && draftActiveMs > 0) {
+        row.draft_active_sum_ms += draftActiveMs;
+        row.draft_active_samples += 1;
+        row.draft_active_sum_svc[svc] += draftActiveMs;
+        row.draft_active_samples_svc[svc] += 1;
       }
     }
 
@@ -1046,7 +1105,15 @@ export async function getAccountUsageStatsExtended(
           assistant_reply_char_sum: 0,
           assistant_reply_char_samples: 0,
           native_host_latency_sum_svc: emptyServicePromptCounts(),
-          native_host_latency_samples_svc: emptyServicePromptCounts()
+          native_host_latency_samples_svc: emptyServicePromptCounts(),
+          draft_active_sum_svc: emptyServicePromptCounts(),
+          draft_active_samples_svc: emptyServicePromptCounts(),
+          draft_wall_sum_ms: 0,
+          draft_wall_samples: 0,
+          draft_active_sum_ms: 0,
+          draft_active_samples: 0,
+          waiting_sum_ms: 0,
+          waiting_samples: 0
         });
       }
     }
@@ -1066,6 +1133,14 @@ export async function getAccountUsageStatsExtended(
       dst.assistant_reply_char_samples += src.assistant_reply_char_samples;
       addServicePromptCounts(dst.native_host_latency_sum_svc, src.native_host_latency_sum_svc);
       addServicePromptCounts(dst.native_host_latency_samples_svc, src.native_host_latency_samples_svc);
+      addServicePromptCounts(dst.draft_active_sum_svc, src.draft_active_sum_svc);
+      addServicePromptCounts(dst.draft_active_samples_svc, src.draft_active_samples_svc);
+      dst.draft_wall_sum_ms += src.draft_wall_sum_ms;
+      dst.draft_wall_samples += src.draft_wall_samples;
+      dst.draft_active_sum_ms += src.draft_active_sum_ms;
+      dst.draft_active_samples += src.draft_active_samples;
+      dst.waiting_sum_ms += src.waiting_sum_ms;
+      dst.waiting_samples += src.waiting_samples;
     }
     hostPassiveTimelineFlat = [...hostByWeek.entries()]
       .sort((a, b) => (a[0] < b[0] ? -1 : 1))
@@ -1147,10 +1222,16 @@ export async function getAccountUsageStatsExtended(
     sum: emptyServicePromptCounts(),
     samples: emptyServicePromptCounts()
   };
+  const draftTimingTotals = {
+    sum: emptyServicePromptCounts(),
+    samples: emptyServicePromptCounts()
+  };
   for (const day of hostByDayScratch.values()) {
     (Object.keys(nativeLatencyTotals.sum) as PromptlyService[]).forEach((svc) => {
       nativeLatencyTotals.sum[svc] += day.native_host_latency_sum_svc[svc];
       nativeLatencyTotals.samples[svc] += day.native_host_latency_samples_svc[svc];
+      draftTimingTotals.sum[svc] += day.draft_active_sum_svc[svc];
+      draftTimingTotals.samples[svc] += day.draft_active_samples_svc[svc];
     });
   }
 
@@ -1170,8 +1251,13 @@ export async function getAccountUsageStatsExtended(
       nativeLatencyTotals.samples[svcKey] > 0
         ? avgOrNull(nativeLatencyTotals.sum[svcKey], nativeLatencyTotals.samples[svcKey])
         : null,
+    avg_draft_active_ms:
+      draftTimingTotals.samples[svcKey] > 0
+        ? avgOrNull(draftTimingTotals.sum[svcKey], draftTimingTotals.samples[svcKey])
+        : null,
     promptly_samples: optimizeLatencySvc.samples[svcKey],
     native_latency_samples: nativeLatencyTotals.samples[svcKey],
+    draft_timing_samples: draftTimingTotals.samples[svcKey],
     prompts_with_promptly: mergedOptimizeSvc[svcKey],
     prompts_native_web: mergedNativeSvc[svcKey]
   }));
@@ -1189,10 +1275,52 @@ export async function getAccountUsageStatsExtended(
     { chars: 0, samples: 0 }
   );
 
-  /** ~12 seconds per snapshot midpoint between Promptly throttle + debounce knobs in the extension composer listener. Illustrative only. */
+  /** Fallback when measured draft telemetry is unavailable (legacy rows). */
   const TYPING_SNAPSHOT_APPROX_SECONDS = 12;
   const estimated_typing_engagement_minutes =
     Math.round(((hostComposerSnapshotsOnly * TYPING_SNAPSHOT_APPROX_SECONDS) / 60) * 10) / 10;
+
+  const time_balance_totals = hostPassiveTimelineFlat.reduce(
+    (acc, row) => {
+      acc.draft_active_ms += row.draft_active_sum_ms;
+      acc.draft_wall_ms += row.draft_wall_sum_ms;
+      acc.waiting_for_ai_ms += row.waiting_sum_ms;
+      acc.draft_active_samples += row.draft_active_samples;
+      acc.draft_wall_samples += row.draft_wall_samples;
+      acc.waiting_samples += row.waiting_samples;
+      return acc;
+    },
+    {
+      draft_active_ms: 0,
+      draft_wall_ms: 0,
+      waiting_for_ai_ms: 0,
+      draft_active_samples: 0,
+      draft_wall_samples: 0,
+      waiting_samples: 0
+    }
+  );
+
+  const time_balance_timeline = hostPassiveTimelineFlat.map((row) => ({
+    bucket: row.bucket_day,
+    draft_active_minutes: Math.round((row.draft_active_sum_ms / 60000) * 10) / 10,
+    draft_wall_minutes: Math.round((row.draft_wall_sum_ms / 60000) * 10) / 10,
+    waiting_minutes: Math.round((row.waiting_sum_ms / 60000) * 10) / 10,
+    native_sends_with_draft: row.draft_active_samples,
+    native_sends_with_latency: row.waiting_samples
+  }));
+
+  const measured_drafting_active_minutes =
+    time_balance_totals.draft_active_ms > 0
+      ? Math.round((time_balance_totals.draft_active_ms / 60000) * 10) / 10
+      : null;
+  const measured_drafting_wall_minutes =
+    time_balance_totals.draft_wall_ms > 0
+      ? Math.round((time_balance_totals.draft_wall_ms / 60000) * 10) / 10
+      : null;
+  const measured_waiting_for_ai_minutes =
+    time_balance_totals.waiting_for_ai_ms > 0
+      ? Math.round((time_balance_totals.waiting_for_ai_ms / 60000) * 10) / 10
+      : null;
 
   const optimize_avg_comp =
     optimizeComposerAgg.samples > 0
@@ -1232,7 +1360,8 @@ export async function getAccountUsageStatsExtended(
 
   const footnotes = [
     "Combined totals = Improve / Generate telemetry plus native chat sends observed by Promptly — Improve rows mirrored into host telemetry intentionally avoid double-counting.",
-    '“Typing time” is illustrative: composer snapshots throttle around a few-second debounce and a ~7s minimum gap — never exact wall-clock time.',
+    "Drafting minutes sum active typing time from first keystroke until native send (idle gaps over ~45s are excluded). Waiting minutes sum host reply round-trip after send until the assistant message settles in the DOM.",
+    "Native reply timing continues while the chat tab is in the background; watches flush on navigation away. Closed tabs may omit in-flight replies.",
     '"Native host reply" averages only include latency telemetry on passive_listener sends; Promptly averages use billed rewrite turnaround from your extension.',
   ];
   if (eventsResult.indexMissing) {
@@ -1278,13 +1407,29 @@ export async function getAccountUsageStatsExtended(
       promptly_share_of_estimated_prompts_percent: promptly_share_pct
     },
     latency_comparison_ai,
+    time_balance_timeline,
+    time_balance_totals: {
+      draft_active_ms: time_balance_totals.draft_active_ms,
+      draft_wall_ms: time_balance_totals.draft_wall_ms,
+      waiting_for_ai_ms: time_balance_totals.waiting_for_ai_ms,
+      draft_active_samples: time_balance_totals.draft_active_samples,
+      draft_wall_samples: time_balance_totals.draft_wall_samples,
+      waiting_samples: time_balance_totals.waiting_samples,
+      draft_active_minutes: measured_drafting_active_minutes,
+      draft_wall_minutes: measured_drafting_wall_minutes,
+      waiting_for_ai_minutes: measured_waiting_for_ai_minutes
+    },
     value_insights: {
       billed_promptly_tokens_sum_events,
       rollup_daily_prompts_hint: rollupBaseline.totals.prompts,
       optimize_avg_composer_chars: optimize_avg_comp,
       native_web_send_avg_composer_chars: native_avg_comp,
       composer_snapshot_count_illustrative: hostComposerSnapshotsOnly,
-      estimated_drafting_active_minutes_illustrative: estimated_typing_engagement_minutes,
+      estimated_drafting_active_minutes_illustrative:
+        measured_drafting_active_minutes ?? estimated_typing_engagement_minutes,
+      measured_drafting_active_minutes,
+      measured_drafting_wall_minutes,
+      measured_waiting_for_ai_minutes,
       heuristic_native_input_tokens_approx_from_telemetry_chars: heuristic_native_prompt_tokens_approx_total,
       native_web_sends: combined_totals_prompts_native,
       optimize_events_queried: eventCountReturned

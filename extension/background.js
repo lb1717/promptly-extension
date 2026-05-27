@@ -126,13 +126,13 @@ const EXTENSION_SIGNIN_SUCCESS_DELAY_MS = 1000;
 /** One extension sign-in tab at a time. */
 let launchExtensionSignInTabInFlight = null;
 
-async function launchExtensionSignInTabOnce() {
+async function launchExtensionSignInTabOnce(options = {}) {
   if (launchExtensionSignInTabInFlight) {
     return launchExtensionSignInTabInFlight;
   }
   launchExtensionSignInTabInFlight = (async () => {
     try {
-      return await launchExtensionSignInTab();
+      return await launchExtensionSignInTab(options);
     } finally {
       launchExtensionSignInTabInFlight = null;
     }
@@ -140,12 +140,26 @@ async function launchExtensionSignInTabOnce() {
   return launchExtensionSignInTabInFlight;
 }
 
-async function completeExtensionSignInTab() {
-  const raw = await launchExtensionSignInTabOnce();
+async function completeExtensionSignInTab(options = {}) {
+  const raw = await launchExtensionSignInTabOnce(options);
   if (raw?.kind === "website_sync") {
     return raw;
   }
   throw new Error("Extension sign-in did not complete");
+}
+
+async function focusExistingExtensionSignInTab(appBaseUrl) {
+  const prefix = `${appBaseUrl}/auth/extension`;
+  const tabs = await chrome.tabs.query({ url: `${prefix}*` }).catch(() => []);
+  const match = (tabs || []).find((tab) => String(tab.url || "").includes("/auth/extension"));
+  if (!match?.id) {
+    return false;
+  }
+  await chrome.tabs.update(match.id, { active: true }).catch(() => {});
+  if (match.windowId != null) {
+    await chrome.windows.update(match.windowId, { focused: true }).catch(() => {});
+  }
+  return true;
 }
 
 function randomString(byteLength = 16) {
@@ -326,10 +340,12 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
  * Opens /auth/extension in a new browser tab. The website syncs Firebase session back via
  * PROMPTLY_WEBSITE_SESSION_SYNC; we show a success screen briefly, then return to the AI tab.
  */
-async function launchExtensionSignInTab() {
+async function launchExtensionSignInTab(options = {}) {
   const settings = await chrome.storage.sync.get(["proxyBaseUrl"]);
   const appBaseUrl = appBaseUrlForWebRedirects(settings.proxyBaseUrl);
   const successUrl = `${appBaseUrl}/auth/extension/success`;
+  const preferredOriginTabId =
+    typeof options.originTabId === "number" && Number.isFinite(options.originTabId) ? options.originTabId : null;
 
   return new Promise((resolve, reject) => {
     if (!chrome.tabs?.create) {
@@ -337,7 +353,8 @@ async function launchExtensionSignInTab() {
       return;
     }
     if (pendingExtensionSignIn) {
-      reject(new Error("Another sign-in is already in progress."));
+      void focusExistingExtensionSignInTab(appBaseUrl);
+      reject(new Error("Sign-in is already open in another tab — finish there or close it and try again."));
       return;
     }
 
@@ -474,15 +491,7 @@ async function launchExtensionSignInTab() {
     };
     chrome.tabs.onRemoved.addListener(removedListener);
 
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (chrome.runtime.lastError) {
-        fail(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      const activeTab = Array.isArray(tabs) ? tabs[0] : null;
-      if (activeTab?.id != null) {
-        originTabId = activeTab.id;
-      }
+    const openSignInTab = () => {
       chrome.tabs.create({ url: signInPageUrlString, active: true }, (tab) => {
         if (chrome.runtime.lastError) {
           fail(new Error(chrome.runtime.lastError.message));
@@ -494,6 +503,24 @@ async function launchExtensionSignInTab() {
         }
         signInTabId = tab.id;
       });
+    };
+
+    if (preferredOriginTabId != null) {
+      originTabId = preferredOriginTabId;
+      openSignInTab();
+      return;
+    }
+
+    chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
+      if (chrome.runtime.lastError) {
+        fail(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      const activeTab = Array.isArray(tabs) ? tabs[0] : null;
+      if (activeTab?.id != null) {
+        originTabId = activeTab.id;
+      }
+      openSignInTab();
     });
   });
 }
@@ -1106,6 +1133,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     ![
       "PROMPTLY_OPTIMIZE_PROMPT",
       "PROMPTLY_HOST_ACTIVITY_BATCH",
+      "PROMPTLY_HOST_WATCH_SYNC",
       "PROMPTLY_VERIFY_USER_SESSION",
       "PROMPTLY_GET_CREDITS",
       "PROMPTLY_CHECK_CHROME_SIGNIN",
@@ -1197,7 +1225,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           return;
         }
         // Explicit sign-in only — opens a website tab when no persisted session exists.
-        await completeExtensionSignInTab();
+        const originTabId = typeof _sender?.tab?.id === "number" ? _sender.tab.id : null;
+        await completeExtensionSignInTab({ originTabId });
         const nextSession = await getPromptlySession({ requireFreshToken: false });
         if (!nextSession.signedIn) {
           sendResponse({ ok: false, error: "Sign-in failed" });
@@ -1300,6 +1329,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           ok: false,
           error: "Missing app base URL in extension settings"
         });
+        return;
+      }
+
+      if (message.type === "PROMPTLY_HOST_WATCH_SYNC") {
+        const tabId = _sender?.tab?.id;
+        const watches = Array.isArray(message.watches) ? message.watches.slice(0, 8) : [];
+        if (typeof tabId === "number") {
+          await chrome.storage.session.set({ [`promptlyHostWatches:${tabId}`]: watches });
+        }
+        sendResponse({ ok: true });
         return;
       }
 

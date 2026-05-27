@@ -588,6 +588,52 @@
     return host;
   }
 
+  let signInFlowInFlight = false;
+
+  function isExtensionContextInvalidatedMessage(message) {
+    return String(message || "")
+      .toLowerCase()
+      .includes("extension context invalidated");
+  }
+
+  function sendPromptlyRuntimeMessage(message) {
+    return new Promise((resolve, reject) => {
+      if (!chrome?.runtime?.sendMessage) {
+        reject(new Error("Promptly extension is unavailable. Reload this page and try again."));
+        return;
+      }
+      try {
+        chrome.runtime.sendMessage(message, (response) => {
+          const errMsg = chrome.runtime.lastError ? String(chrome.runtime.lastError.message || "") : "";
+          if (errMsg) {
+            if (isExtensionContextInvalidatedMessage(errMsg)) {
+              reject(
+                new Error(
+                  "Promptly was updated or reloaded — refresh this chat page (⌘R / Ctrl+R), then click Sign in again."
+                )
+              );
+              return;
+            }
+            reject(new Error(errMsg));
+            return;
+          }
+          resolve(response);
+        });
+      } catch (error) {
+        const errMsg = String(error instanceof Error ? error.message : error);
+        if (isExtensionContextInvalidatedMessage(errMsg)) {
+          reject(
+            new Error(
+              "Promptly was updated or reloaded — refresh this chat page (⌘R / Ctrl+R), then click Sign in again."
+            )
+          );
+          return;
+        }
+        reject(error instanceof Error ? error : new Error(errMsg));
+      }
+    });
+  }
+
   const ui = new PromptlyTabUI({
     onToggle: () => {
       isOpen = !isOpen;
@@ -599,21 +645,12 @@
     },
     onSuggestionClick: () => {},
     onSignIn: async () => {
-      try {
-        const existing = await checkChromeSignedIn().catch(() => null);
-        if (existing?.chromeEmail) {
-          ui.setSignedOut(false);
-          ui.setSettingsAccountEmail(existing.chromeEmail);
-          ui.showToast(`Signed in as ${existing.chromeEmail}.`, { tone: "success" });
-          refreshCreditsFromServer();
-          startCreditsPolling();
-          return;
-        }
-      } catch (_alreadySignedInCheck) {
-        // Continue to interactive sign-in.
+      if (signInFlowInFlight) {
+        return;
       }
-      ui.showToast("Starting sign-in…", { tone: "info" });
+      signInFlowInFlight = true;
       try {
+        ui.showToast("Opening sign-in in a new tab…", { tone: "info" });
         const result = await ensureChromeSignedIn();
         ui.showToast(
           `Signed in as ${String(result?.chromeEmail || "").trim() || "your account"}.`,
@@ -630,6 +667,8 @@
         ui.showErrorToast(mapPromptlyErrorToToast(String(error?.message || error)));
         await applySignedOutState(true);
         throw error;
+      } finally {
+        signInFlowInFlight = false;
       }
     },
     onLoadSettingsAccount: async () => {
@@ -983,27 +1022,21 @@
   }
 
   async function checkChromeSignedInOnce() {
-    return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage({ type: "PROMPTLY_CHECK_CHROME_SIGNIN" }, (response) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-          return;
-        }
-        if (!response || !response.ok) {
-          reject(new Error(response?.error || "Not signed in"));
-          return;
-        }
-        resolve(response.data || {});
-      });
-    });
+    const response = await sendPromptlyRuntimeMessage({ type: "PROMPTLY_CHECK_CHROME_SIGNIN" });
+    if (!response || !response.ok) {
+      throw new Error(response?.error || "Not signed in");
+    }
+    return response.data || {};
   }
 
   function isTransientExtensionMessageError(message) {
     const lowered = String(message || "").toLowerCase();
+    if (isExtensionContextInvalidatedMessage(lowered)) {
+      return false;
+    }
     return (
       lowered.includes("could not establish connection") ||
       lowered.includes("receiving end does not exist") ||
-      lowered.includes("extension context invalidated") ||
       lowered.includes("message port closed") ||
       lowered.includes("timed out")
     );
@@ -1105,7 +1138,14 @@
         applyCreditsToUi(cachedCredits);
       }
       await applySignedInStateFromSession(session, { loadCredits: true, loadAccountStatus: true });
-    } catch (_error) {
+    } catch (error) {
+      if (isExtensionContextInvalidatedMessage(String(error?.message || error))) {
+        ui.showToast("Promptly updated — refresh this page (⌘R / Ctrl+R) to reconnect.", {
+          tone: "info",
+          durationMs: 6000
+        });
+        return;
+      }
       await applySignedOutState(true);
     }
   }
@@ -1202,6 +1242,15 @@
     if (lowered.includes("not enough api tokens")) return "Not enough tokens left for this prompt.";
     if (lowered.includes("timeout")) return "Request timed out. Try again.";
     if (lowered.includes("sign in with promptly first")) return "Sign in with the tab Sign in button, then try again.";
+    if (isExtensionContextInvalidatedMessage(lowered)) {
+      return "Promptly was updated or reloaded — refresh this chat page (⌘R / Ctrl+R), then click Sign in again.";
+    }
+    if (lowered.includes("sign-in is already open")) {
+      return "Finish signing in on the Promptly tab that opened, or close it and try again.";
+    }
+    if (lowered.includes("sign-in cancelled")) {
+      return "Sign-in was cancelled. Click Sign in to open the Promptly tab again.";
+    }
     // Legacy server message; current API never returns this for improve.
     if (lowered.includes("echoed the request") || lowered.includes("request wrapper")) {
       return "Try Improve again in a moment.";
@@ -1226,24 +1275,25 @@
   }
 
   async function ensureChromeSignedIn() {
-    return new Promise((resolve, reject) => {
-      // Web auth flow can stay open while the user picks an account — allow enough time.
-      const timer = window.setTimeout(() => {
-        reject(new Error("Sign-in timed out. Finish signing in on the Promptly tab or try again."));
-      }, 120000);
-      chrome.runtime.sendMessage({ type: "PROMPTLY_ENSURE_CHROME_SIGNIN" }, (response) => {
+    let timer = null;
+    try {
+      const response = await Promise.race([
+        sendPromptlyRuntimeMessage({ type: "PROMPTLY_ENSURE_CHROME_SIGNIN" }),
+        new Promise((_, reject) => {
+          timer = window.setTimeout(() => {
+            reject(new Error("Sign-in timed out. Finish signing in on the Promptly tab or try again."));
+          }, 120000);
+        })
+      ]);
+      if (!response || !response.ok) {
+        throw new Error(response?.error || "Sign-in failed");
+      }
+      return response.data || {};
+    } finally {
+      if (timer != null) {
         window.clearTimeout(timer);
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-          return;
-        }
-        if (!response || !response.ok) {
-          reject(new Error(response?.error || "Sign-in failed"));
-          return;
-        }
-        resolve(response.data || {});
-      });
-    });
+      }
+    }
   }
 
   async function optimizePromptViaProxy(prompt, userInstruction = "", options = {}) {

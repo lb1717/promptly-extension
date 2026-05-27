@@ -282,21 +282,30 @@
       if (this.autoSendLabel) {
         this.autoSendLabel.addEventListener("click", runToggleAutoSend);
       }
+      let signInFlowInFlight = false;
       const runSignInFlow = (event) => {
         event.preventDefault();
         event.stopPropagation();
         if (!this.root.classList.contains("is-signed-out")) {
           return;
         }
-        this.showToast("Opening Google sign-in…", { tone: "info" });
+        if (signInFlowInFlight) {
+          return;
+        }
+        signInFlowInFlight = true;
         if (typeof this.onSignIn === "function") {
           Promise.resolve(this.onSignIn())
             .then(() => {
               this.setSettingsOpen(false);
             })
-            .catch((error) => {
-              this.showErrorToast(String(error?.message || error || "Sign-in failed"));
+            .catch(() => {
+              /* onSignIn surfaces errors via showErrorToast */
+            })
+            .finally(() => {
+              signInFlowInFlight = false;
             });
+        } else {
+          signInFlowInFlight = false;
         }
       };
       this.signInButton.addEventListener("click", runSignInFlow);
@@ -331,6 +340,7 @@
             event.target instanceof Element &&
             (event.target.closest(".promptly-tab-auto-switch") ||
               event.target.closest(".promptly-tab-settings") ||
+              event.target.closest(".promptly-tab-signin") ||
               event.target.closest(".promptly-settings-panel"))
           ) {
             return;
