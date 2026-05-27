@@ -121,55 +121,31 @@ async function getEmailFromGoogleAccessToken(accessToken) {
   return email;
 }
 
-/** One Google web-auth window at a time (Sign in + any Firebase refresh fallback). */
-let launchWebAuthFlowInFlight = null;
+const EXTENSION_SIGNIN_SUCCESS_DELAY_MS = 1000;
 
-async function launchGoogleWebAuthFlowOnce(clientId) {
-  if (launchWebAuthFlowInFlight) {
-    return launchWebAuthFlowInFlight;
+/** One extension sign-in tab at a time. */
+let launchExtensionSignInTabInFlight = null;
+
+async function launchExtensionSignInTabOnce() {
+  if (launchExtensionSignInTabInFlight) {
+    return launchExtensionSignInTabInFlight;
   }
-  launchWebAuthFlowInFlight = (async () => {
+  launchExtensionSignInTabInFlight = (async () => {
     try {
-      return await launchGoogleWebAuthFlow(clientId);
+      return await launchExtensionSignInTab();
     } finally {
-      launchWebAuthFlowInFlight = null;
+      launchExtensionSignInTabInFlight = null;
     }
   })();
-  return launchWebAuthFlowInFlight;
+  return launchExtensionSignInTabInFlight;
 }
 
-async function completeExtensionSignInWebPopup() {
-  const settings = await chrome.storage.sync.get(["firebaseOAuthWebClientId"]);
-  const clientId =
-    String(settings.firebaseOAuthWebClientId || "").trim() || DEFAULT_FIREBASE_WEB_OAUTH_CLIENT_ID;
-  const raw = await launchGoogleWebAuthFlowOnce(clientId);
-  if (raw && raw.kind === "firebase_email") {
-    const nowSec = Math.floor(Date.now() / 1000);
-    const expiresAtSec =
-      Number.isFinite(Number(raw.expiresAtSec)) && Number(raw.expiresAtSec) > nowSec
-        ? Number(raw.expiresAtSec)
-        : nowSec + 3600;
-    await chrome.storage.local.set({
-      promptlyFirebaseIdentity: {
-        idToken: String(raw.idToken || "").trim(),
-        refreshToken: String(raw.refreshToken || "").trim(),
-        email: String(raw.email || "").trim().toLowerCase(),
-        uid: String(raw.uid || "").trim(),
-        expiresAtSec
-      }
-    });
-    return { kind: "firebase_email", firebaseEmail: String(raw.email || "").trim().toLowerCase() };
+async function completeExtensionSignInTab() {
+  const raw = await launchExtensionSignInTabOnce();
+  if (raw?.kind === "website_sync") {
+    return raw;
   }
-  const accessToken = String(raw?.accessToken || "").trim();
-  if (!accessToken) {
-    throw new Error("Google sign-in returned no access token");
-  }
-  return {
-    kind: "google",
-    accessToken,
-    idToken: String(raw?.idToken || "").trim(),
-    expiresInSec: raw?.expiresInSec != null ? Number(raw.expiresInSec) : null
-  };
+  throw new Error("Extension sign-in did not complete");
 }
 
 function randomString(byteLength = 16) {
@@ -232,12 +208,12 @@ function oauthBridgePageMatchesSender(senderUrl, redirectUri) {
   }
 }
 
-function extensionSignInPageMatchesSender(senderUrl) {
+function extensionAuthPageMatchesSender(senderUrl) {
   try {
     const pageRaw = String(senderUrl || "").split("#")[0];
     const page = new URL(pageRaw);
     const path = (page.pathname.replace(/\/$/, "") || "/").toLowerCase();
-    if (path !== "/auth/extension-sign-in") {
+    if (path !== "/auth/extension-sign-in" && path !== "/auth/extension") {
       return false;
     }
     const host = page.hostname.replace(/^www\./, "").toLowerCase();
@@ -256,7 +232,7 @@ function extensionSignInPageMatchesSender(senderUrl) {
   }
 }
 
-/** Set while extension sign-in popup is open (Google OAuth and/or email-password on the app). */
+/** Set while extension sign-in tab is open. */
 let pendingExtensionSignIn = null;
 
 chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
@@ -290,6 +266,15 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
         };
         await chrome.storage.local.set({ promptlyFirebaseIdentity: nextIdentity });
         prefetchUserCredits();
+        const csrf = String(message.signin_csrf || "").trim();
+        if (pendingExtensionSignIn && csrf && csrf === pendingExtensionSignIn.csrf) {
+          pendingExtensionSignIn.deliverWebsiteSession({
+            email,
+            idToken,
+            uid,
+            expiresAtSec: nextIdentity.expiresAtSec
+          });
+        }
         sendResponse({ ok: true });
       } catch (error) {
         sendResponse({ ok: false, error: String(error?.message || error) });
@@ -298,15 +283,7 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
     return true;
   }
   if (message?.type === "PROMPTLY_OAUTH_BRIDGE") {
-    if (!pendingExtensionSignIn) {
-      return false;
-    }
-    if (!oauthBridgePageMatchesSender(sender.url, pendingExtensionSignIn.redirectUri)) {
-      sendResponse({ ok: false });
-      return false;
-    }
-    pendingExtensionSignIn.deliverOAuth(String(message.search || ""), String(message.hash || ""));
-    sendResponse({ ok: true });
+    sendResponse({ ok: false, error: "Legacy OAuth bridge is no longer used for extension sign-in" });
     return false;
   }
   if (message?.type === "PROMPTLY_FIREBASE_EMAIL_SESSION") {
@@ -314,7 +291,7 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
       sendResponse({ ok: false, error: "No pending sign-in" });
       return false;
     }
-    if (!extensionSignInPageMatchesSender(sender.url)) {
+    if (!extensionAuthPageMatchesSender(sender.url)) {
       sendResponse({ ok: false });
       return false;
     }
@@ -346,19 +323,17 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
 });
 
 /**
- * Google rejects chrome-extension:// redirect URIs. We redirect to your Promptly app base URL
- * (HTTPS / localhost) and forward tokens from that page to the service worker. The sign-in UI
- * uses a small popup aligned to the top-right of the focused window.
+ * Opens /auth/extension in a new browser tab. The website syncs Firebase session back via
+ * PROMPTLY_WEBSITE_SESSION_SYNC; we show a success screen briefly, then return to the AI tab.
  */
-async function launchGoogleWebAuthFlow(clientId) {
-  const settings = await chrome.storage.sync.get(["proxyBaseUrl", "firebaseWebApiKey"]);
-  const redirectUri = `${appBaseUrlForWebRedirects(settings.proxyBaseUrl)}/auth/extension-google-oauth`;
-  const firebaseWebApiKey =
-    String(settings.firebaseWebApiKey || "").trim() || DEFAULT_FIREBASE_WEB_API_KEY;
+async function launchExtensionSignInTab() {
+  const settings = await chrome.storage.sync.get(["proxyBaseUrl"]);
+  const appBaseUrl = appBaseUrlForWebRedirects(settings.proxyBaseUrl);
+  const successUrl = `${appBaseUrl}/auth/extension/success`;
 
   return new Promise((resolve, reject) => {
-    if (!chrome.windows?.create) {
-      reject(new Error("Chrome windows API unavailable for sign-in"));
+    if (!chrome.tabs?.create) {
+      reject(new Error("Browser tabs API unavailable for sign-in"));
       return;
     }
     if (pendingExtensionSignIn) {
@@ -367,26 +342,13 @@ async function launchGoogleWebAuthFlow(clientId) {
     }
 
     const csrf = randomString(12);
-    const state = `${csrf}|${chrome.runtime.id}`;
-    const nonce = randomString(12);
-    const signInPageUrl = new URL(
-      `${appBaseUrlForWebRedirects(settings.proxyBaseUrl)}/auth/extension-sign-in`
-    );
-    signInPageUrl.searchParams.set("client_id", clientId);
-    signInPageUrl.searchParams.set("redirect_uri", redirectUri);
-    signInPageUrl.searchParams.set("state", state);
-    signInPageUrl.searchParams.set("nonce", nonce);
+    const signInPageUrl = new URL(`${appBaseUrl}/auth/extension`);
     signInPageUrl.searchParams.set("extension_id", chrome.runtime.id);
     signInPageUrl.searchParams.set("signin_csrf", csrf);
-    if (firebaseWebApiKey) {
-      signInPageUrl.searchParams.set("firebase_api_key", firebaseWebApiKey);
-    }
+    const signInPageUrlString = signInPageUrl.toString();
 
-    const PANEL_W = 400;
-    const PANEL_H = 720;
-    const MARGIN = 12;
-
-    let createdWindowId = null;
+    let originTabId = null;
+    let signInTabId = null;
     let done = false;
     let timeoutId = null;
     let removedListener = null;
@@ -399,21 +361,12 @@ async function launchGoogleWebAuthFlow(clientId) {
       }
       if (removedListener) {
         try {
-          chrome.windows.onRemoved.removeListener(removedListener);
+          chrome.tabs.onRemoved.removeListener(removedListener);
         } catch (_e) {
           /* ignore */
         }
         removedListener = null;
       }
-    }
-
-    function closePanel() {
-      if (createdWindowId == null) {
-        return;
-      }
-      const id = createdWindowId;
-      createdWindowId = null;
-      chrome.windows.remove(id).catch(() => {});
     }
 
     function fail(err) {
@@ -422,7 +375,6 @@ async function launchGoogleWebAuthFlow(clientId) {
       }
       done = true;
       teardown();
-      closePanel();
       reject(err instanceof Error ? err : new Error(String(err)));
     }
 
@@ -432,44 +384,52 @@ async function launchGoogleWebAuthFlow(clientId) {
       }
       done = true;
       teardown();
-      closePanel();
-      resolve(parsed);
+      void (async () => {
+        try {
+          let activeSignInTabId = signInTabId;
+          if (activeSignInTabId == null) {
+            const matchingTabs = await chrome.tabs.query({ url: `${appBaseUrl}/auth/extension*` }).catch(() => []);
+            const match = (matchingTabs || []).find((tab) =>
+              String(tab.url || "").includes(`signin_csrf=${encodeURIComponent(csrf)}`)
+            );
+            activeSignInTabId = match?.id ?? null;
+          }
+          if (activeSignInTabId != null) {
+            await chrome.tabs.update(activeSignInTabId, { url: successUrl }).catch(() => {});
+          }
+          await new Promise((r) => globalThis.setTimeout(r, EXTENSION_SIGNIN_SUCCESS_DELAY_MS));
+          if (originTabId != null) {
+            await chrome.tabs.update(originTabId, { active: true }).catch(() => {});
+          }
+          if (activeSignInTabId != null) {
+            await chrome.tabs.remove(activeSignInTabId).catch(() => {});
+          }
+        } finally {
+          resolve(parsed);
+        }
+      })();
     }
 
     pendingExtensionSignIn = {
-      redirectUri,
       csrf,
-      deliverOAuth(search, hash) {
+      signInPageUrl: signInPageUrlString,
+      deliverWebsiteSession(payload) {
         if (done) {
           return;
         }
-        try {
-          const parsed = parseOAuthCallbackParams(search, hash);
-          const rawState = parsed.state;
-          const pipe = rawState.lastIndexOf("|");
-          if (pipe < 0) {
-            fail(new Error("OAuth state mismatch"));
-            return;
-          }
-          const stateCsrf = rawState.slice(0, pipe);
-          const stateExt = rawState.slice(pipe + 1);
-          if (stateExt !== chrome.runtime.id || stateCsrf !== csrf) {
-            fail(new Error("OAuth state mismatch"));
-            return;
-          }
-          if (!parsed.accessToken && !parsed.idToken) {
-            fail(new Error("Google OAuth returned no token"));
-            return;
-          }
-          succeed({
-            kind: "google",
-            accessToken: parsed.accessToken,
-            idToken: parsed.idToken,
-            expiresInSec: parsed.expiresInSec
-          });
-        } catch (error) {
-          fail(error instanceof Error ? error : new Error(String(error)));
+        const email = String(payload?.email || "").trim().toLowerCase();
+        const idToken = String(payload?.idToken || "").trim();
+        if (!email || !idToken) {
+          fail(new Error("Incomplete website sign-in"));
+          return;
         }
+        succeed({
+          kind: "website_sync",
+          email,
+          idToken,
+          uid: String(payload?.uid || "").trim(),
+          expiresAtSec: Number(payload?.expiresAtSec || 0)
+        });
       },
       deliverFirebaseEmail(payload) {
         if (done) {
@@ -486,67 +446,54 @@ async function launchGoogleWebAuthFlow(clientId) {
           fail(new Error("Incomplete email sign-in"));
           return;
         }
-        succeed({
-          kind: "firebase_email",
-          idToken,
-          refreshToken,
-          email,
-          uid,
-          expiresAtSec
-        });
+        void chrome.storage.local
+          .set({
+            promptlyFirebaseIdentity: {
+              idToken,
+              refreshToken,
+              email,
+              uid,
+              expiresAtSec
+            }
+          })
+          .then(() => {
+            succeed({ kind: "website_sync", email, idToken, uid, expiresAtSec });
+          })
+          .catch((error) => {
+            fail(error instanceof Error ? error : new Error(String(error)));
+          });
       }
     };
 
     timeoutId = globalThis.setTimeout(() => fail(new Error("Sign-in timed out")), 120000);
 
-    removedListener = (windowId) => {
-      if (windowId === createdWindowId && !done) {
+    removedListener = (tabId) => {
+      if (tabId === signInTabId && !done) {
         fail(new Error("Sign-in cancelled"));
       }
     };
-    chrome.windows.onRemoved.addListener(removedListener);
+    chrome.tabs.onRemoved.addListener(removedListener);
 
-    const openPanel = (left, top) => {
-      const createOpts = {
-        url: signInPageUrl.toString(),
-        type: "popup",
-        width: PANEL_W,
-        height: PANEL_H,
-        focused: true
-      };
-      if (typeof left === "number" && typeof top === "number") {
-        createOpts.left = left;
-        createOpts.top = top;
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (chrome.runtime.lastError) {
+        fail(new Error(chrome.runtime.lastError.message));
+        return;
       }
-      chrome.windows.create(createOpts, (win) => {
+      const activeTab = Array.isArray(tabs) ? tabs[0] : null;
+      if (activeTab?.id != null) {
+        originTabId = activeTab.id;
+      }
+      chrome.tabs.create({ url: signInPageUrlString, active: true }, (tab) => {
         if (chrome.runtime.lastError) {
           fail(new Error(chrome.runtime.lastError.message));
           return;
         }
-        if (!win?.id) {
-          fail(new Error("Failed to open sign-in window"));
+        if (!tab?.id) {
+          fail(new Error("Failed to open sign-in tab"));
           return;
         }
-        createdWindowId = win.id;
-        // Best-effort: keep the sign-in popup surfaced above the current browsing flow.
-        // Chrome does not expose a true cross-platform always-on-top flag for extension popups.
-        chrome.windows.update(createdWindowId, { focused: true, drawAttention: true }).catch(() => {});
-        globalThis.setTimeout(() => {
-          if (createdWindowId != null && !done) {
-            chrome.windows.update(createdWindowId, { focused: true }).catch(() => {});
-          }
-        }, 250);
+        signInTabId = tab.id;
       });
-    };
-
-    chrome.windows.getLastFocused({ windowTypes: ["normal"] }, (w) => {
-      if (chrome.runtime.lastError || !w) {
-        openPanel();
-        return;
-      }
-      const left = Math.max(0, (w.left || 0) + (w.width || 1280) - PANEL_W - MARGIN);
-      const top = Math.max(0, (w.top || 0) + MARGIN);
-      openPanel(left, top);
     });
   });
 }
@@ -1141,21 +1088,15 @@ chrome.runtime.onStartup.addListener(async () => {
   await getManagedProxyBaseUrl();
 });
 
-if (chrome.action && chrome.runtime && typeof chrome.runtime.openOptionsPage === "function") {
-  chrome.action.onClicked.addListener((tab) => {
-    const tabId = Number(tab?.id);
-    if (!Number.isFinite(tabId)) {
-      return;
-    }
-    chrome.tabs.sendMessage(
-      tabId,
-      { type: "PROMPTLY_OPEN_IN_PAGE_SETTINGS" },
-      () => {
-        if (chrome.runtime.lastError) {
-          // Ignore pages where Promptly content script is not injected.
-        }
-      }
-    );
+if (chrome.action && chrome.tabs && typeof chrome.tabs.create === "function") {
+  chrome.action.onClicked.addListener(() => {
+    getManagedProxyBaseUrl()
+      .then((baseUrl) => {
+        chrome.tabs.create({ url: baseUrl || DEFAULT_PROXY_BASE_URL });
+      })
+      .catch(() => {
+        chrome.tabs.create({ url: DEFAULT_PROXY_BASE_URL });
+      });
   });
 }
 
@@ -1255,35 +1196,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           });
           return;
         }
-        // Explicit sign-in only — opens the web popup when no persisted session exists.
-        const result = await completeExtensionSignInWebPopup();
-        if (result.kind === "firebase_email") {
-          prefetchUserCredits();
-          sendResponse({
-            ok: true,
-            data: { chromeEmail: result.firebaseEmail, authProvider: "firebase_email", hasIdToken: true }
-          });
+        // Explicit sign-in only — opens a website tab when no persisted session exists.
+        await completeExtensionSignInTab();
+        const nextSession = await getPromptlySession({ requireFreshToken: false });
+        if (!nextSession.signedIn) {
+          sendResponse({ ok: false, error: "Sign-in failed" });
           return;
         }
-        const session = {
-          accessToken: result.accessToken,
-          idToken: result.idToken,
-          expiresInSec: result.expiresInSec
-        };
-        const chromeEmail = await getEmailFromGoogleAccessToken(session.accessToken);
-        await saveWebAuthSession(session.accessToken, chromeEmail, session.expiresInSec);
-        try {
-          await persistFirebaseSessionAfterGoogleWebSignIn(session);
-        } catch (_e) {
-          /* Firebase session improves long-lived API auth; ignore failures here */
-        }
-        const nextSession = await getPromptlySession({ requireFreshToken: false });
         prefetchUserCredits();
         sendResponse({
           ok: true,
           data: {
-            chromeEmail: nextSession.email || chromeEmail,
-            authProvider: nextSession.authProvider || "google",
+            chromeEmail: nextSession.email,
+            authProvider: nextSession.authProvider || "website_sync",
             hasIdToken: !!nextSession.idToken
           }
         });
@@ -1333,28 +1258,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message.type === "PROMPTLY_VERIFY_USER_SESSION") {
         const session = await getPromptlySession({ requireFreshToken: false });
         const sessionEmail = String(session.email || "").trim().toLowerCase();
-        const pageEmailHint = String(message.pageEmailHint || "").trim().toLowerCase();
-        const hasAuthenticatedUi = !!message.hasAuthenticatedUi;
-        if (!hasAuthenticatedUi) {
-          sendResponse({ ok: false, error: "Not signed in on this AI service page" });
-          return;
-        }
         if (!sessionEmail) {
           sendResponse({ ok: false, error: "Sign in to Promptly first — use the Sign in button on the tab." });
-          return;
-        }
-        if (pageEmailHint && pageEmailHint !== sessionEmail) {
-          sendResponse({
-            ok: false,
-            error: "Signed-in account on this page does not match your Promptly sign-in session"
-          });
           return;
         }
         sendResponse({
           ok: true,
           data: {
             chromeEmail: sessionEmail || null,
-            pageEmailHint: pageEmailHint || null,
             authProvider: session.authProvider || null,
             hasIdToken: !!session.idToken
           }

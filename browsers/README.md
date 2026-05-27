@@ -32,11 +32,11 @@ Temporary install: `about:debugging` → **This Firefox** → **Load Temporary A
 
 Publish: [Firefox Add-ons (AMO)](https://addons.mozilla.org/developers/).
 
-Sign-in uses the same web popup flow as Chrome (`/auth/extension-sign-in` on promptly-labs.com), not Firefox profile Google tokens.
+Sign-in opens a new browser tab at `/auth/extension` on promptly-labs.com (same account UI as the website), not a popup window. After sign-in, the tab briefly shows a success screen and returns you to the AI chat tab.
 
 ## Microsoft Edge
 
-Same bundle as Chrome (Chromium WebExtensions).
+Same shared Chromium extension core as Chrome, with its own package for Microsoft Edge Add-ons. Edge must be tested separately because Microsoft assigns its own store/listing ID, and the website bridge may need that ID through `NEXT_PUBLIC_EDGE_EXTENSION_ID`.
 
 ```bash
 bash scripts/package-extension-edge.sh
@@ -45,6 +45,23 @@ bash scripts/package-extension-edge.sh
 Load unpacked: `edge://extensions` → Developer mode → **Load unpacked** → repo root.
 
 Publish: [Microsoft Edge Add-ons](https://partner.microsoft.com/dashboard/microsoftedge).
+
+After Microsoft assigns the Edge extension ID/listing URL, set these website env vars before deploying the site:
+
+```bash
+NEXT_PUBLIC_EDGE_EXTENSION_ID=<microsoft-edge-extension-id>
+NEXT_PUBLIC_EDGE_ADDONS_URL=<microsoft-edge-add-ons-listing-url>
+```
+
+## Other Chromium browsers
+
+Brave, Opera, Vivaldi, Arc, and similar Chromium browsers use the same MV3 extension core as Chrome/Edge. Package a generic Chromium zip when a store or manual install flow needs a browser-neutral artifact:
+
+```bash
+bash scripts/package-extension-chromium.sh
+```
+
+Load unpacked from the repo root or from an extracted zip in that browser's extensions page.
 
 ## Safari (macOS)
 
@@ -65,6 +82,13 @@ After conversion, enable the extension in **Safari → Settings → Extensions**
 
 See [Safari Web Extensions](https://developer.apple.com/documentation/safariservices/safari_web_extensions) for store submission.
 
+If the Safari wrapper produces a stable extension ID/listing URL, set these website env vars before deploying the site:
+
+```bash
+NEXT_PUBLIC_SAFARI_EXTENSION_ID=<safari-extension-id>
+NEXT_PUBLIC_SAFARI_EXTENSION_URL=<safari-app-or-extension-url>
+```
+
 ## Desktop app + extension together
 
 1. Install the extension in **each browser** you use for AI chat.
@@ -77,6 +101,22 @@ Session is stored per browser profile today; cross-device sync is via the same P
 
 ```bash
 bash scripts/package-extension-for-store.sh
-bash scripts/package-extension-firefox.sh
 bash scripts/package-extension-edge.sh
+bash scripts/package-extension-chromium.sh
+bash scripts/package-extension-firefox.sh
 ```
+
+Safari is generated through Xcode with `xcrun safari-web-extension-converter`, not by the zip scripts above.
+
+## Cross-browser validation checklist
+
+Run Microsoft Edge first, then repeat the same flow in Chrome, Firefox, Safari, and the other Chromium browsers you plan to publish for:
+
+1. Install or load the package for that browser.
+2. Open ChatGPT, Claude, and Gemini.
+3. Confirm the Promptly tab appears inside the AI page.
+4. Sign in from the Promptly tab (opens `/auth/extension` in a new tab; returns to the AI tab when done).
+5. Confirm Google sign-in and email sign-in both return to the extension.
+6. Improve a prompt and confirm the API call succeeds.
+7. Open/manage the account page from the extension.
+8. Confirm the website session syncs back to the extension.

@@ -75,21 +75,19 @@ function showRedirectUriHint() {
   const appBase = normalizeProxyBaseUrl(proxyBaseUrlInput?.value).replace(/\/api$/i, "");
   const appRoot = appBase || DEFAULT_APP_BASE_URL.replace(/\/$/, "");
   const webOAuthRedirect = `${appRoot}/auth/extension-google-oauth`;
-  const signInLanding = `${appRoot}/auth/extension-sign-in`;
+  const signInLanding = `${appRoot}/auth/extension`;
   const primary = chrome.identity.getRedirectURL();
   const alternate = primary.endsWith("/") ? primary.slice(0, -1) : `${primary}/`;
   const extId = chrome.runtime?.id || "(reload options to see id)";
   el.innerHTML = [
-    "<strong>Fix “Error 400: redirect_uri_mismatch”</strong>",
-    `Open Google Cloud → <strong>APIs &amp; Services → Credentials</strong> → OAuth <strong>Web application</strong> client whose <strong>Client ID</strong> matches the field above exactly.`,
-    "<br><br><strong>Authorized redirect URIs</strong> (exact copy):",
-    `<br><strong>1) OAuth callback</strong> (required — Google redirects here after you approve access):`,
+    "<strong>Extension sign-in</strong>",
+    `Sign in from the Promptly tab on ChatGPT, Claude, or Gemini opens a new browser tab at <code style="user-select:all">${signInLanding}</code> (account-style sign-in on promptly-labs.com).`,
+    "<br><br><strong>Legacy OAuth callback</strong> (only if you still use the old extension-sign-in flow):",
     `<br><code style="user-select:all">${webOAuthRedirect}</code>`,
-    `<br><br><strong>Sign-in window</strong> opens <code style="user-select:all">${signInLanding}</code> first (Promptly + Continue with Google) — <em>do not</em> add this URL to Google Cloud.`,
-    "<br><strong>2–3) Chrome token cache</strong> (optional but recommended):",
+    "<br><strong>Browser extension token cache</strong> (optional but recommended where supported):",
     `<br><code style="user-select:all">${primary}</code>`,
     `<br><code style="user-select:all">${alternate}</code>`,
-    `<br><br>If your app lives on a custom domain, add that origin to <code>externally_connectable</code> in <code>manifest.json</code> so the callback page can reach this extension.`,
+    `<br><br>If your app lives on a custom domain, add that origin to <code>externally_connectable</code> in <code>manifest.json</code> so the website can reach this extension.`,
     `<br><br>Extension ID: <code>${extId}</code>`
   ].join("");
 }

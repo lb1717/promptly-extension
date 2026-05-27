@@ -800,8 +800,7 @@
       let composeSuccessUiHandled = false;
       let didApplyOptimizedPrompt = false;
       try {
-        // Improve: require visible service sign-in + optional page email match. Generate Prompt only
-        // needs Chrome Google sign-in (checked in the background on optimize); skip the stricter page gate.
+        // Improve: require Promptly extension sign-in only (no AI-site login or email match).
         if (!isComposeMode) {
           await verifyCurrentUserSession();
         }
@@ -1153,16 +1152,11 @@
   }
 
   async function verifyCurrentUserSession() {
-    const hints = adapters.getSessionVerificationHints
-      ? adapters.getSessionVerificationHints(currentTarget)
-      : { site, hasAuthenticatedUi: !!currentTarget, pageEmailHint: null };
     return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage(
         {
           type: "PROMPTLY_VERIFY_USER_SESSION",
-          site: hints.site || site,
-          hasAuthenticatedUi: !!hints.hasAuthenticatedUi,
-          pageEmailHint: hints.pageEmailHint || ""
+          site
         },
         (response) => {
           if (chrome.runtime.lastError) {
@@ -1204,7 +1198,6 @@
     if (lowered.includes("sign in to promptly first")) {
       return "Sign in to Promptly first — use the Sign in button on the tab.";
     }
-    if (lowered.includes("not signed in on this ai service page")) return "Sign in on this AI site, then try again.";
     if (lowered.includes("daily api token limit reached")) return "Daily token limit reached. Try again tomorrow.";
     if (lowered.includes("not enough api tokens")) return "Not enough tokens left for this prompt.";
     if (lowered.includes("timeout")) return "Request timed out. Try again.";
@@ -1236,7 +1229,7 @@
     return new Promise((resolve, reject) => {
       // Web auth flow can stay open while the user picks an account — allow enough time.
       const timer = window.setTimeout(() => {
-        reject(new Error("Sign-in timed out. Finish the Google window or try again."));
+        reject(new Error("Sign-in timed out. Finish signing in on the Promptly tab or try again."));
       }, 120000);
       chrome.runtime.sendMessage({ type: "PROMPTLY_ENSURE_CHROME_SIGNIN" }, (response) => {
         window.clearTimeout(timer);

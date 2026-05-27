@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { AmbientBackground } from "@/components/AmbientBackground";
 import { AccountClient } from "@/components/account/AccountClient";
 import { Footer } from "@/components/Footer";
@@ -9,7 +10,9 @@ export default function AccountPage() {
       <AmbientBackground />
       <div className="relative z-10">
         <Navbar />
-        <AccountClient />
+        <Suspense fallback={<div className="px-6 py-16 text-center text-sm text-muted">Loading account…</div>}>
+          <AccountClient />
+        </Suspense>
         <Footer />
       </div>
     </main>

@@ -16,8 +16,13 @@ import {
 } from "firebase/auth";
 import { doc, serverTimestamp, setDoc } from "firebase/firestore";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { SITE } from "@/lib/constants";
+import {
+  getPromptlyExtensionCandidateIds,
+  rememberPromptlyExtensionId,
+  sendPromptlyExtensionMessageToCandidates
+} from "@/lib/extensionBridge";
 
 function formatJoinDate(user: User | null): string {
   if (!user?.metadata?.creationTime) return "—";
@@ -195,6 +200,9 @@ const ACCOUNT_PLANS = [
 ] as const;
 
 export function AccountClient({ extensionMode = false }: { extensionMode?: boolean }) {
+  const searchParams = useSearchParams();
+  const extensionIdFromUrl = extensionMode ? String(searchParams.get("extension_id") || "").trim() : "";
+  const signinCsrfFromUrl = extensionMode ? String(searchParams.get("signin_csrf") || "").trim() : "";
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -217,6 +225,12 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
   const [emailAuthPassword2, setEmailAuthPassword2] = useState("");
   const [emailAuthName, setEmailAuthName] = useState("");
   const [emailAuthMode, setEmailAuthMode] = useState<"signin" | "register">("signin");
+
+  useEffect(() => {
+    if (extensionIdFromUrl) {
+      rememberPromptlyExtensionId(extensionIdFromUrl);
+    }
+  }, [extensionIdFromUrl]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -314,37 +328,31 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
   }, []);
 
   const syncExtensionSession = useCallback(async (current: User) => {
-    const extId =
-      (typeof window !== "undefined" && window.sessionStorage.getItem("promptly_extension_id")) ||
-      SITE.chromeExtensionId;
-    if (!extId) {
-      return;
-    }
-    const chromeApi = (window as Window & {
-      chrome?: { runtime?: { sendMessage?: (id: string, msg: unknown, cb?: () => void) => void; lastError?: unknown } };
-    }).chrome;
-    if (!chromeApi?.runtime?.sendMessage) {
+    const candidateIds = getPromptlyExtensionCandidateIds(extensionIdFromUrl || undefined);
+    if (!candidateIds.length) {
       return;
     }
     try {
       const idToken = await current.getIdToken(true);
-      chromeApi.runtime.sendMessage(
-        extId,
-        {
-          type: "PROMPTLY_WEBSITE_SESSION_SYNC",
-          idToken,
-          email: current.email || "",
-          uid: current.uid,
-          expiresAtSec: Math.floor(Date.now() / 1000) + 3300
-        },
-        () => {
-          void chromeApi.runtime?.lastError;
-        }
-      );
+      const payload: Record<string, unknown> = {
+        type: "PROMPTLY_WEBSITE_SESSION_SYNC",
+        idToken,
+        email: current.email || "",
+        uid: current.uid,
+        expiresAtSec: Math.floor(Date.now() / 1000) + 3300
+      };
+      if (signinCsrfFromUrl) {
+        payload.signin_csrf = signinCsrfFromUrl;
+      }
+      const { response } = await sendPromptlyExtensionMessageToCandidates(candidateIds, payload);
+      const r = response as { ok?: boolean } | undefined;
+      if (r && r.ok === false) {
+        return;
+      }
     } catch (_error) {
       // Extension may not be installed; ignore.
     }
-  }, []);
+  }, [extensionIdFromUrl, signinCsrfFromUrl]);
 
   useEffect(() => {
     const auth = getFirebaseAuth();

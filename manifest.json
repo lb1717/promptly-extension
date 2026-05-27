@@ -1,13 +1,13 @@
 {
   "manifest_version": 3,
   "name": "Promptly",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Prompt assistance tab anchored to AI prompt inputs on ChatGPT, Claude, and Gemini.",
   "permissions": [
     "storage",
     "identity",
     "identity.email",
-    "windows"
+    "tabs"
   ],
   "externally_connectable": {
     "matches": [
@@ -51,6 +51,7 @@
         "https://gemini.google.com/*"
       ],
       "js": [
+        "content/browserCompat.js",
         "content/siteAdapters.js",
         "content/hostTelemetry.js",
         "content/hostActivityListener.js",
