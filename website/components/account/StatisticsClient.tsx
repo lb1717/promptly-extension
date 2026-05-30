@@ -821,15 +821,26 @@ export function StatisticsClient() {
     if (!displayStats?.pre_improve_word_timeline?.length) return [];
     const g = displayStats.granularity;
     return displayStats.pre_improve_word_timeline
-      .map((row) => ({
-        ...row,
-        label: g === "week" ? `wk ${formatShortDay(row.bucket)}` : formatShortDay(row.bucket),
-        avg_words_before_display: typeof row.avg_words_before === "number" ? row.avg_words_before : 0,
-        avg_words_after_display: typeof row.avg_words_after === "number" ? row.avg_words_after : 0,
-        has_data:
-          (typeof row.avg_words_before === "number" && row.samples > 0) ||
-          (typeof row.avg_words_after === "number" && row.samples_after > 0)
-      }))
+      .map((row) => {
+        const before = typeof row.avg_words_before === "number" ? row.avg_words_before : null;
+        const after = typeof row.avg_words_after === "number" ? row.avg_words_after : null;
+        let bucket_change_percent: number | null = null;
+        if (before !== null && after !== null && before > 0) {
+          bucket_change_percent = Math.round(((after - before) / before) * 1000) / 10;
+        }
+        const word_delta_display =
+          before !== null && after !== null ? Math.round(Math.abs(after - before) * 10) / 10 : 0;
+        return {
+          ...row,
+          label: g === "week" ? `wk ${formatShortDay(row.bucket)}` : formatShortDay(row.bucket),
+          avg_words_before_display: before ?? 0,
+          avg_words_after_display: after ?? 0,
+          word_delta_display,
+          bucket_change_percent,
+          has_data:
+            (before !== null && row.samples > 0) || (after !== null && row.samples_after > 0)
+        };
+      })
       .filter((row) => row.has_data);
   }, [displayStats]);
 
@@ -1123,10 +1134,20 @@ export function StatisticsClient() {
           {/* Pre-improve word count */}
           {preImproveWordHasData ? (
             <section className="mb-12 rounded-2xl border border-line bg-cream p-6 backdrop-blur-md">
-              <h2 className="flex flex-wrap items-baseline gap-x-2 text-sm font-semibold uppercase tracking-[0.22em] text-faint">
-                <span>Words before Improve</span>
+              <h2 className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm font-semibold uppercase tracking-[0.22em] text-faint">
+                <span>Words before Promptly</span>
                 {preImproveWordChangePercent !== null ? (
-                  <span className="font-bold normal-case tracking-normal text-ink tabular-nums">
+                  <span
+                    className="text-4xl font-bold normal-case leading-none tracking-normal tabular-nums sm:text-5xl"
+                    style={{
+                      color:
+                        preImproveWordChangePercent > 0
+                          ? COLOR_SCORE_GREEN
+                          : preImproveWordChangePercent < 0
+                            ? "#b45309"
+                            : undefined
+                    }}
+                  >
                     {formatWordChangePercent(preImproveWordChangePercent)}
                   </span>
                 ) : null}
@@ -1149,11 +1170,17 @@ export function StatisticsClient() {
                           const payload = item?.payload as {
                             samples?: number;
                             samples_after?: number;
-                            avg_words_before?: number | null;
-                            avg_words_after?: number | null;
+                            bucket_change_percent?: number | null;
                           };
+                          if (name === "Change") {
+                            const pct = payload?.bucket_change_percent;
+                            return [
+                              typeof pct === "number" ? formatWordChangePercent(pct) : "—",
+                              "Change"
+                            ];
+                          }
                           const runs =
-                            name === "Before Improve"
+                            name === "Before Promptly"
                               ? (payload?.samples ?? 0)
                               : (payload?.samples_after ?? 0);
                           return [`${value} words (${runs.toLocaleString()} runs)`, name];
@@ -1162,17 +1189,32 @@ export function StatisticsClient() {
                       <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
                       <Bar
                         dataKey="avg_words_before_display"
-                        name="Before Improve"
+                        name="Before Promptly"
                         fill={COLOR_PROMPTLY}
                         radius={[4, 4, 0, 0]}
-                        maxBarSize={36}
+                        maxBarSize={34}
                       />
+                      <Bar dataKey="word_delta_display" name="Change" fill="#94a3b8" radius={[2, 2, 0, 0]} maxBarSize={14}>
+                        {preImproveWordChartRows.map((entry, idx) => (
+                          <Cell
+                            key={`chg-${idx}`}
+                            fill={
+                              typeof entry.bucket_change_percent === "number" && entry.bucket_change_percent > 0
+                                ? COLOR_SCORE_GREEN
+                                : typeof entry.bucket_change_percent === "number" && entry.bucket_change_percent < 0
+                                  ? "#b45309"
+                                  : "#94a3b8"
+                            }
+                            fillOpacity={0.88}
+                          />
+                        ))}
+                      </Bar>
                       <Bar
                         dataKey="avg_words_after_display"
-                        name="After Improve"
+                        name="After Promptly"
                         fill={COLOR_NATIVE_WEB}
                         radius={[4, 4, 0, 0]}
-                        maxBarSize={36}
+                        maxBarSize={34}
                       />
                     </BarChart>
                   </ResponsiveContainer>
