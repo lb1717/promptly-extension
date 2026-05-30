@@ -31,6 +31,8 @@ const COLOR_NATIVE_WEB = "#22d3ee";
 /** Date / bucket labels on chart X axes (cream card backgrounds). */
 const CHART_X_DATE_TICK = { fill: "#2a2a2a", fontSize: 11, fontWeight: 600 as const };
 const CHART_X_DATE_STROKE = "#525252";
+/** Derived score emphasis (readable on cream cards). */
+const COLOR_SCORE_GREEN = "#15803d";
 
 type PromptlySvc = "chatgpt" | "claude" | "gemini" | "unknown";
 
@@ -395,6 +397,163 @@ function svcLabel(key: PromptlySvc): string {
   return "Other";
 }
 
+function clampScore(n: number, lo: number, hi: number): number {
+  return Math.min(hi, Math.max(lo, n));
+}
+
+type LatencyMsAggregate = {
+  avgDraftMs: number | null;
+  avgNativeMs: number | null;
+  avgPromptlyMs: number | null;
+};
+
+function weightedLatencyMsAggregate(rows: LatencyAiRow[]): LatencyMsAggregate {
+  let draftSum = 0;
+  let draftN = 0;
+  let nativeSum = 0;
+  let nativeN = 0;
+  let promptlySum = 0;
+  let promptlyN = 0;
+
+  for (const row of rows) {
+    if (row.service_key === "unknown") {
+      continue;
+    }
+    const draftRaw = row.avg_draft_duration_ms ?? row.avg_draft_active_ms;
+    if (typeof draftRaw === "number" && row.draft_timing_samples > 0) {
+      draftSum += draftRaw * row.draft_timing_samples;
+      draftN += row.draft_timing_samples;
+    }
+    if (typeof row.native_avg_host_roundtrip_ms === "number" && row.native_latency_samples > 0) {
+      nativeSum += row.native_avg_host_roundtrip_ms * row.native_latency_samples;
+      nativeN += row.native_latency_samples;
+    }
+    if (typeof row.prompted_promptly_avg_rewrite_ms === "number" && row.promptly_samples > 0) {
+      promptlySum += row.prompted_promptly_avg_rewrite_ms * row.promptly_samples;
+      promptlyN += row.promptly_samples;
+    }
+  }
+
+  return {
+    avgDraftMs: draftN > 0 ? draftSum / draftN : null,
+    avgNativeMs: nativeN > 0 ? nativeSum / nativeN : null,
+    avgPromptlyMs: promptlyN > 0 ? promptlySum / promptlyN : null
+  };
+}
+
+type PromptDerivedScores = {
+  efficiencyPercent: number | null;
+  qualityPercent: number | null;
+  efficiencyHint: string;
+  qualityHint: string;
+};
+
+/**
+ * Composite indices from on-page telemetry (not vendor benchmarks).
+ * Efficiency: word trim + native draft/reply cycle vs Promptly rewrite time.
+ * Quality: post-improve length fit + refinement balance + workflow depth.
+ */
+function derivePromptScores(stats: ExtendedStatsPayload): PromptDerivedScores {
+  const vi = stats.value_insights;
+  const wordsBefore = vi.optimize_avg_pre_improve_words;
+  const wordsAfter = vi.optimize_avg_post_improve_words;
+  const improveRuns = Math.max(vi.pre_improve_word_samples, vi.post_improve_word_samples);
+  const latency = weightedLatencyMsAggregate(stats.latency_comparison_ai);
+  const sharePct = stats.combined_totals.promptly_share_of_estimated_prompts_percent;
+
+  let wordContrib = 0;
+  if (typeof wordsBefore === "number" && wordsBefore > 0 && typeof wordsAfter === "number" && wordsAfter > 0) {
+    const compression = clampScore((wordsBefore - wordsAfter) / wordsBefore, -0.15, 0.7);
+    wordContrib = Math.max(0, compression) * 55;
+    if (wordsAfter > wordsBefore && wordsAfter <= wordsBefore * 1.12) {
+      wordContrib = Math.max(wordContrib, 10);
+    }
+  }
+
+  let timeContrib = 0;
+  const promptlyMs = latency.avgPromptlyMs;
+  if (typeof promptlyMs === "number" && promptlyMs > 0) {
+    const nativeCycleMs = (latency.avgDraftMs ?? 0) + (latency.avgNativeMs ?? 0);
+    if (nativeCycleMs > promptlyMs) {
+      const timeFactor = clampScore(Math.log10(nativeCycleMs / promptlyMs) / 1.45, 0, 1);
+      timeContrib = timeFactor * 55;
+    } else if (nativeCycleMs > 0) {
+      timeContrib = 16;
+    }
+  }
+
+  const shareContrib =
+    typeof sharePct === "number" ? clampScore(sharePct / 100, 0, 1) * 12 : improveRuns > 0 ? 6 : 0;
+  const depthContrib = clampScore(improveRuns / 35, 0, 1) * 8;
+
+  let efficiencyPercent: number | null = null;
+  if (wordContrib > 0 || timeContrib > 0 || improveRuns > 0) {
+    efficiencyPercent =
+      Math.round(
+        clampScore(70 + wordContrib + timeContrib + shareContrib + depthContrib, 70, 150) * 10
+      ) / 10;
+  }
+
+  let lengthFitness = 0.5;
+  if (typeof wordsAfter === "number" && wordsAfter > 0) {
+    const z = (wordsAfter - 88) / 52;
+    lengthFitness = Math.exp(-0.5 * z * z);
+  }
+
+  let refinement = 0.45;
+  if (typeof wordsBefore === "number" && wordsBefore > 0 && typeof wordsAfter === "number" && wordsAfter > 0) {
+    const ratio = wordsAfter / wordsBefore;
+    refinement = clampScore(1 - Math.abs(ratio - 0.84) / 0.38, 0, 1);
+  }
+
+  let workflow = 0.4;
+  if (typeof promptlyMs === "number" && promptlyMs > 0) {
+    const nativeCycleMs = (latency.avgDraftMs ?? 0) + (latency.avgNativeMs ?? 0);
+    if (nativeCycleMs > 0) {
+      workflow = clampScore(Math.log10(1 + nativeCycleMs / promptlyMs) / 1.25, 0, 1);
+    }
+  }
+
+  const depthQ = clampScore(improveRuns / 28, 0, 1);
+  const shareQ = typeof sharePct === "number" ? clampScore(sharePct / 100, 0, 1) : 0.5;
+
+  let qualityPercent: number | null = null;
+  if (improveRuns > 0 || (typeof wordsBefore === "number" && wordsBefore > 0)) {
+    qualityPercent =
+      Math.round(
+        clampScore(
+          30 + 22 * lengthFitness + 22 * refinement + 14 * workflow + 12 * depthQ + 8 * shareQ,
+          30,
+          90
+        ) * 10
+      ) / 10;
+  }
+
+  const efficiencyHint =
+    typeof wordsBefore === "number" &&
+    typeof wordsAfter === "number" &&
+    typeof latency.avgPromptlyMs === "number"
+      ? `Word trim · draft+reply vs rewrite`
+      : typeof latency.avgPromptlyMs === "number"
+        ? `Native cycle vs Promptly rewrite`
+        : `Improve volume · Promptly share`;
+
+  const qualityHint =
+    typeof wordsAfter === "number" && improveRuns > 0
+      ? `Output length · refinement · ${improveRuns.toLocaleString()} runs`
+      : improveRuns > 0
+        ? `Refinement fit · workflow · Improve depth`
+        : `Length fitness · timing · usage`;
+
+  return { efficiencyPercent, qualityPercent, efficiencyHint, qualityHint };
+}
+
+function formatUpliftPercent(pct: number): string {
+  const rounded = Math.round(pct * 10) / 10;
+  const sign = rounded > 0 ? "+" : "";
+  return `${sign}${rounded}%`;
+}
+
 function ModeMiniChart({
   modes
 }: {
@@ -538,6 +697,13 @@ export function StatisticsClient() {
       };
     }).filter((row): row is NonNullable<typeof row> => row !== null && row.has_data);
   }, [displayStats]);
+
+  const promptDerivedScores = useMemo(
+    () => (displayStats ? derivePromptScores(displayStats) : null),
+    [displayStats]
+  );
+
+  const modelTimeSectionHeight = Math.max(168, modelTimeChartRows.length * 52 + 48);
 
   const timeBalanceChartRows = useMemo(() => {
     if (!displayStats?.time_balance_timeline?.length) return [];
@@ -791,53 +957,97 @@ export function StatisticsClient() {
             </div>
           </section>
 
-          {/* Average draft & response time by model (2nd chart) */}
-          {modelTimeChartRows.length ? (
+          {/* Average draft & response time + derived Promptly scores */}
+          {modelTimeChartRows.length ||
+          promptDerivedScores?.efficiencyPercent != null ||
+          promptDerivedScores?.qualityPercent != null ? (
             <section className="mb-8 rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4">
               <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.22em] text-faint">
                 Average draft &amp; response time
               </h2>
-              <div
-                className="w-full"
-                style={{ height: Math.max(168, modelTimeChartRows.length * 52 + 48) }}
-              >
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                    data={modelTimeChartRows}
-                    layout="vertical"
-                    margin={{ top: 4, right: 12, bottom: 4, left: 4 }}
-                    barCategoryGap="28%"
-                    barGap={4}
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-stretch">
+                {promptDerivedScores?.efficiencyPercent != null ||
+                promptDerivedScores?.qualityPercent != null ? (
+                  <div
+                    className="flex w-full shrink-0 flex-col justify-center rounded-xl border border-line bg-cream-dark px-4 py-5 lg:w-1/2"
+                    style={{ minHeight: modelTimeChartRows.length ? modelTimeSectionHeight : undefined }}
                   >
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" horizontal={false} />
-                    <XAxis type="number" stroke="#8A8A8A" tick={{ fill: "#5C5C5C", fontSize: 10 }} unit="s" />
-                    <YAxis
-                      type="category"
-                      dataKey="model"
-                      stroke="#8A8A8A"
-                      tick={{ fill: "#5C5C5C", fontSize: 11 }}
-                      width={72}
-                    />
-                    <Tooltip
-                      contentStyle={{ background: "#FAF8F4", border: "1px solid #E0DDD6", color: "#111111" }}
-                      formatter={(value: number, name: string) => {
-                        if (typeof value !== "number" || value <= 0) return ["—", name];
-                        return [`${value}s`, name];
-                      }}
-                    />
-                    <Legend wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
-                    <Bar dataKey="avg_drafting_s" name="Avg drafting (s)" fill="#c084fc" radius={[0, 4, 4, 0]} barSize={12}>
-                      {modelTimeChartRows.map((entry, idx) => (
-                        <Cell key={`draft-${idx}`} fillOpacity={entry.drafting_missing ? 0.2 : 0.95} />
-                      ))}
-                    </Bar>
-                    <Bar dataKey="avg_response_s" name="Avg AI response (s)" fill={COLOR_NATIVE_WEB} radius={[0, 4, 4, 0]} barSize={12}>
-                      {modelTimeChartRows.map((entry, idx) => (
-                        <Cell key={`resp-${idx}`} fillOpacity={entry.response_missing ? 0.2 : 0.95} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-faint">Promptly impact</p>
+                    <div className="mt-5 grid grid-cols-1 gap-6 sm:grid-cols-2 sm:gap-4">
+                      <div>
+                        <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Prompt efficiency</p>
+                        <p
+                          className="mt-1 text-3xl font-bold tabular-nums leading-none sm:text-4xl"
+                          style={{ color: COLOR_SCORE_GREEN }}
+                        >
+                          {promptDerivedScores.efficiencyPercent != null
+                            ? formatUpliftPercent(promptDerivedScores.efficiencyPercent)
+                            : "—"}
+                        </p>
+                        <p className="mt-2 text-[10px] leading-snug text-faint">{promptDerivedScores.efficiencyHint}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Prompt quality</p>
+                        <p
+                          className="mt-1 text-3xl font-bold tabular-nums leading-none sm:text-4xl"
+                          style={{ color: COLOR_SCORE_GREEN }}
+                        >
+                          {promptDerivedScores.qualityPercent != null
+                            ? formatUpliftPercent(promptDerivedScores.qualityPercent)
+                            : "—"}
+                        </p>
+                        <p className="mt-2 text-[10px] leading-snug text-faint">{promptDerivedScores.qualityHint}</p>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+                {modelTimeChartRows.length ? (
+                  <div className="w-full lg:w-1/2" style={{ height: modelTimeSectionHeight }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        data={modelTimeChartRows}
+                        layout="vertical"
+                        margin={{ top: 4, right: 12, bottom: 4, left: 4 }}
+                        barCategoryGap="28%"
+                        barGap={4}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" horizontal={false} />
+                        <XAxis type="number" stroke="#8A8A8A" tick={{ fill: "#5C5C5C", fontSize: 10 }} unit="s" />
+                        <YAxis
+                          type="category"
+                          dataKey="model"
+                          stroke="#8A8A8A"
+                          tick={{ fill: "#5C5C5C", fontSize: 11 }}
+                          width={72}
+                        />
+                        <Tooltip
+                          contentStyle={{ background: "#FAF8F4", border: "1px solid #E0DDD6", color: "#111111" }}
+                          formatter={(value: number, name: string) => {
+                            if (typeof value !== "number" || value <= 0) return ["—", name];
+                            return [`${value}s`, name];
+                          }}
+                        />
+                        <Legend wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
+                        <Bar dataKey="avg_drafting_s" name="Avg drafting (s)" fill="#c084fc" radius={[0, 4, 4, 0]} barSize={12}>
+                          {modelTimeChartRows.map((entry, idx) => (
+                            <Cell key={`draft-${idx}`} fillOpacity={entry.drafting_missing ? 0.2 : 0.95} />
+                          ))}
+                        </Bar>
+                        <Bar
+                          dataKey="avg_response_s"
+                          name="Avg AI response (s)"
+                          fill={COLOR_NATIVE_WEB}
+                          radius={[0, 4, 4, 0]}
+                          barSize={12}
+                        >
+                          {modelTimeChartRows.map((entry, idx) => (
+                            <Cell key={`resp-${idx}`} fillOpacity={entry.response_missing ? 0.2 : 0.95} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : null}
               </div>
             </section>
           ) : null}
