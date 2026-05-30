@@ -554,26 +554,17 @@ function formatUpliftPercent(pct: number): string {
   return `${sign}${rounded}%`;
 }
 
-/** Ease with near-zero velocity at start and end (smooth land, no snap). */
-function countUpEase(t: number): number {
-  const x = Math.min(1, Math.max(0, t));
-  return x * x * x * (x * (x * 6 - 15) + 10);
-}
-
-function AnimatedUpliftPercent({
+function FadeInUpliftPercent({
   value,
-  durationMs = 1500,
   className = "",
   color = COLOR_SCORE_GREEN
 }: {
   value: number;
-  durationMs?: number;
   className?: string;
   color?: string;
 }) {
   const ref = useRef<HTMLSpanElement>(null);
-  const [display, setDisplay] = useState(0);
-  const runIdRef = useRef(0);
+  const [visible, setVisible] = useState(false);
 
   useEffect(() => {
     const el = ref.current;
@@ -581,43 +572,32 @@ function AnimatedUpliftPercent({
       return;
     }
 
+    setVisible(false);
+
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (!entry.isIntersecting) {
           return;
         }
+        setVisible(true);
         observer.disconnect();
-        const runId = ++runIdRef.current;
-        const start = performance.now();
-        const target = value;
-
-        const tick = (now: number) => {
-          if (runIdRef.current !== runId) {
-            return;
-          }
-          const linear = Math.min(1, (now - start) / durationMs);
-          const eased = countUpEase(linear);
-          setDisplay(target * eased);
-          if (linear < 1) {
-            requestAnimationFrame(tick);
-          } else {
-            setDisplay(target);
-          }
-        };
-
-        setDisplay(0);
-        requestAnimationFrame(tick);
       },
       { threshold: 0.2, rootMargin: "0px 0px -8% 0px" }
     );
 
     observer.observe(el);
     return () => observer.disconnect();
-  }, [value, durationMs]);
+  }, [value]);
 
   return (
-    <span ref={ref} className={className} style={{ color }}>
-      {formatUpliftPercent(display)}
+    <span
+      ref={ref}
+      className={`${className} transition-[opacity,transform] duration-700 ease-out ${
+        visible ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0"
+      }`}
+      style={{ color }}
+    >
+      {formatUpliftPercent(value)}
     </span>
   );
 }
@@ -1052,7 +1032,7 @@ export function StatisticsClient() {
                     <div>
                       <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Prompt efficiency</p>
                       {promptDerivedScores.efficiencyPercent != null ? (
-                        <AnimatedUpliftPercent
+                        <FadeInUpliftPercent
                           key={`eff-${promptDerivedScores.efficiencyPercent}-${days}-${granularity}`}
                           value={promptDerivedScores.efficiencyPercent}
                           className="mt-1 block text-3xl font-bold tabular-nums leading-none sm:text-4xl"
@@ -1066,7 +1046,7 @@ export function StatisticsClient() {
                     <div>
                       <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Prompt quality</p>
                       {promptDerivedScores.qualityPercent != null ? (
-                        <AnimatedUpliftPercent
+                        <FadeInUpliftPercent
                           key={`qual-${promptDerivedScores.qualityPercent}-${days}-${granularity}`}
                           value={promptDerivedScores.qualityPercent}
                           className="mt-1 block text-3xl font-bold tabular-nums leading-none sm:text-4xl"
