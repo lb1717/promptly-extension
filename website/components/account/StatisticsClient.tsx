@@ -748,6 +748,7 @@ export function StatisticsClient() {
 
           {/* Prompt volume */}
           <section className="mb-8 rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4">
+            <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.22em] text-faint">Prompt volume</h2>
             <div className="h-72 w-full sm:h-80">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={stackedTimeline} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
