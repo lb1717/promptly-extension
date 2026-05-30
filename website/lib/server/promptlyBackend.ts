@@ -264,6 +264,20 @@ function slugHostModelBucketFromLabel(raw: string): string {
   return s || "unknown";
 }
 
+/** Whitespace-split word count for telemetry (never persists prompt bodies). */
+export function countComposerWordsRough(...parts: string[]): number {
+  const normalized = parts
+    .map((p) => String(p || "").trim())
+    .filter(Boolean)
+    .join(" ")
+    .trim()
+    .replace(/\s+/g, " ");
+  if (!normalized) {
+    return 0;
+  }
+  return Math.min(12000, normalized.split(" ").filter(Boolean).length);
+}
+
 /**
  * Validates optional extension JSON `telemetry` on /api/optimize. Never persists prompt bodies.
  */
@@ -382,7 +396,29 @@ async function persistOptimizeTelemetryEvent(params: {
   telemetry: OptimizeTelemetryNormalized;
   /** Min(cap, prompt+instruction chars) — ensures mirror survives missing client telemetry. */
   serverComposerCharTotal: number;
+  /** Whitespace word count from in-flight request text when extension telemetry omits words. */
+  serverComposerWordTotal: number;
 }): Promise<void> {
+  const telemetry: OptimizeTelemetryNormalized = { ...params.telemetry };
+  if (
+    (telemetry.composerCharEstimate === null || telemetry.composerCharEstimate <= 0) &&
+    params.serverComposerCharTotal > 0
+  ) {
+    telemetry.composerCharEstimate = Math.min(
+      CREDIT_MAX_PROMPT_CHARS,
+      Math.max(0, Math.floor(params.serverComposerCharTotal))
+    );
+  }
+  if (
+    (telemetry.composerWordEstimate === null || telemetry.composerWordEstimate <= 0) &&
+    params.serverComposerWordTotal > 0
+  ) {
+    telemetry.composerWordEstimate = Math.min(
+      12000,
+      Math.max(0, Math.floor(params.serverComposerWordTotal))
+    );
+  }
+
   const db = getFirebaseAdminDb();
   await db.collection(OPTIMIZE_EVENTS_COLLECTION).add({
     telemetrySchemaVersion: 1,
@@ -395,15 +431,15 @@ async function persistOptimizeTelemetryEvent(params: {
     billedPromptlyTokens: Math.max(0, Math.floor(params.billedPromptlyTokens || 0)),
     optimizeLatencyMs: Math.max(0, Math.floor(params.optimizeLatencyMs || 0)),
     billingBasis: params.billingBasis || null,
-    composerCharEstimate: params.telemetry.composerCharEstimate,
-    composerWordEstimate: params.telemetry.composerWordEstimate,
-    hostModelLabelSanitized: params.telemetry.hostModelLabelSanitized,
-    hostModelBucket: params.telemetry.hostModelBucket
+    composerCharEstimate: telemetry.composerCharEstimate,
+    composerWordEstimate: telemetry.composerWordEstimate,
+    hostModelLabelSanitized: telemetry.hostModelLabelSanitized,
+    hostModelBucket: telemetry.hostModelBucket
   });
 
   /** So `/account/statistics` passive charts are not blank when DOM send sniffing misses (iframes / synthetic sends). */
   try {
-    await persistOptimizeMirrorHostActivity(params);
+    await persistOptimizeMirrorHostActivity({ ...params, telemetry });
   } catch (err) {
     console.error("[promptly] persistOptimizeMirrorHostActivity failed:", String(err instanceof Error ? err.message : err));
   }
@@ -469,6 +505,7 @@ export function recordOptimizeTelemetryEventSafe(params: {
   billingBasis?: string;
   telemetry: OptimizeTelemetryNormalized;
   serverComposerCharTotal: number;
+  serverComposerWordTotal: number;
 }): void {
   persistOptimizeTelemetryEvent(params).catch((err) => {
     console.error("[promptly] persistOptimizeTelemetryEvent failed:", String(err instanceof Error ? err.message : err));
@@ -736,6 +773,9 @@ type TimelineBucketAgg = {
   billed_promptly_tokens: number;
   composer_char_sum: number;
   composer_char_samples: number;
+  /** Words in composer before Promptly rewrite (Improve / Auto / Generate). */
+  composer_word_sum: number;
+  composer_word_samples: number;
   latency_sum_ms: number;
   latency_samples: number;
 };
@@ -878,6 +918,8 @@ export async function getAccountUsageStatsExtended(
       billed_promptly_tokens: 0,
       composer_char_sum: 0,
       composer_char_samples: 0,
+      composer_word_sum: 0,
+      composer_word_samples: 0,
       latency_sum_ms: 0,
       latency_samples: 0
     });
@@ -948,6 +990,12 @@ export async function getAccountUsageStatsExtended(
     if (typeof cc === "number" && Number.isFinite(cc) && cc > 0) {
       row.composer_char_samples += 1;
       row.composer_char_sum += Math.min(CREDIT_MAX_PROMPT_CHARS, Math.floor(cc));
+    }
+
+    const wwRaw = raw.composerWordEstimate ?? raw.composer_word_estimate;
+    if (typeof wwRaw === "number" && Number.isFinite(wwRaw) && wwRaw > 0) {
+      row.composer_word_samples += 1;
+      row.composer_word_sum += Math.min(12000, Math.floor(wwRaw));
     }
 
     const lat = Number(raw.optimizeLatencyMs || 0);
@@ -1084,6 +1132,8 @@ export async function getAccountUsageStatsExtended(
           billed_promptly_tokens: 0,
           composer_char_sum: 0,
           composer_char_samples: 0,
+          composer_word_sum: 0,
+          composer_word_samples: 0,
           latency_sum_ms: 0,
           latency_samples: 0
         });
@@ -1098,6 +1148,8 @@ export async function getAccountUsageStatsExtended(
       dst.billed_promptly_tokens += src.billed_promptly_tokens;
       dst.composer_char_sum += src.composer_char_sum;
       dst.composer_char_samples += src.composer_char_samples;
+      dst.composer_word_sum += src.composer_word_sum;
+      dst.composer_word_samples += src.composer_word_samples;
       dst.latency_sum_ms += src.latency_sum_ms;
       dst.latency_samples += src.latency_samples;
     }
@@ -1319,6 +1371,24 @@ export async function getAccountUsageStatsExtended(
     { chars: 0, samples: 0 }
   );
 
+  const optimizeWordAgg = [...byDayScratch.values()].reduce(
+    (agg, day) => {
+      agg.words += day.composer_word_sum;
+      agg.samples += day.composer_word_samples;
+      return agg;
+    },
+    { words: 0, samples: 0 }
+  );
+
+  const pre_improve_word_timeline = timelineFlat.map((t) => ({
+    bucket: t.bucket_day,
+    avg_words:
+      t.composer_word_samples > 0
+        ? Math.round((t.composer_word_sum / t.composer_word_samples) * 10) / 10
+        : null,
+    samples: t.composer_word_samples
+  }));
+
   /** Fallback when measured draft telemetry is unavailable (legacy rows). */
   const TYPING_SNAPSHOT_APPROX_SECONDS = 12;
   const estimated_typing_engagement_minutes =
@@ -1369,6 +1439,10 @@ export async function getAccountUsageStatsExtended(
   const optimize_avg_comp =
     optimizeComposerAgg.samples > 0
       ? Math.round((optimizeComposerAgg.chars / optimizeComposerAgg.samples) * 10) / 10
+      : null;
+  const optimize_avg_pre_improve_words =
+    optimizeWordAgg.samples > 0
+      ? Math.round((optimizeWordAgg.words / optimizeWordAgg.samples) * 10) / 10
       : null;
   const native_avg_comp =
     nativeComposerOnSendSamples > 0
@@ -1438,6 +1512,7 @@ export async function getAccountUsageStatsExtended(
       averages: rollupBaseline.averages
     },
     timeline,
+    pre_improve_word_timeline,
     combined_prompt_timeline,
     combined_totals: {
       prompts_estimate: combined_totals_prompts_estimate,
@@ -1468,6 +1543,8 @@ export async function getAccountUsageStatsExtended(
       billed_promptly_tokens_sum_events,
       rollup_daily_prompts_hint: rollupBaseline.totals.prompts,
       optimize_avg_composer_chars: optimize_avg_comp,
+      optimize_avg_pre_improve_words,
+      pre_improve_word_samples: optimizeWordAgg.samples,
       native_web_send_avg_composer_chars: native_avg_comp,
       composer_snapshot_count_illustrative: hostComposerSnapshotsOnly,
       estimated_drafting_active_minutes_illustrative:

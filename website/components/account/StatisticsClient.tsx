@@ -28,6 +28,9 @@ const COLOR_UNKNOWN = "#64748b";
 /** Promptly accent for “Improve / rewrite” bars. */
 const COLOR_PROMPTLY = "#ab68ff";
 const COLOR_NATIVE_WEB = "#22d3ee";
+/** Date / bucket labels on chart X axes (cream card backgrounds). */
+const CHART_X_DATE_TICK = { fill: "#2a2a2a", fontSize: 11, fontWeight: 600 as const };
+const CHART_X_DATE_STROKE = "#525252";
 
 type PromptlySvc = "chatgpt" | "claude" | "gemini" | "unknown";
 
@@ -87,10 +90,18 @@ type LatencyAiRow = {
 
 const MODEL_CHART_ORDER: PromptlySvc[] = ["gemini", "claude", "chatgpt", "unknown"];
 
+type PreImproveWordBucket = {
+  bucket: string;
+  avg_words: number | null;
+  samples: number;
+};
+
 type ValueInsights = {
   billed_promptly_tokens_sum_events: number;
   rollup_daily_prompts_hint: number;
   optimize_avg_composer_chars: number | null;
+  optimize_avg_pre_improve_words: number | null;
+  pre_improve_word_samples: number;
   native_web_send_avg_composer_chars: number | null;
   composer_snapshot_count_illustrative: number;
   estimated_drafting_active_minutes_illustrative: number;
@@ -158,6 +169,7 @@ type ExtendedStatsPayload = {
     host_composer_chars_equiv_tokens_estimate: number | null;
     avg_optimize_latency_ms: number | null;
   }>;
+  pre_improve_word_timeline: PreImproveWordBucket[];
   combined_prompt_timeline: CombinedPromptBucket[];
   combined_totals: CombinedTotals;
   latency_comparison_ai: LatencyAiRow[];
@@ -286,6 +298,11 @@ function buildPlaceholderExtendedStats(days: number, granularity: "day" | "week"
       averages: { prompts_per_active_day: 0, tokens_per_prompt: 0, response_time_ms: 0 }
     },
     timeline: tl,
+    pre_improve_word_timeline: tl.map((row) => ({
+      bucket: row.bucket,
+      avg_words: null,
+      samples: 0
+    })),
     combined_prompt_timeline: cpt,
     combined_totals: {
       prompts_estimate: 0,
@@ -333,6 +350,8 @@ function buildPlaceholderExtendedStats(days: number, granularity: "day" | "week"
       billed_promptly_tokens_sum_events: 0,
       rollup_daily_prompts_hint: 0,
       optimize_avg_composer_chars: null,
+      optimize_avg_pre_improve_words: null,
+      pre_improve_word_samples: 0,
       native_web_send_avg_composer_chars: null,
       composer_snapshot_count_illustrative: 0,
       estimated_drafting_active_minutes_illustrative: 0,
@@ -624,6 +643,23 @@ export function StatisticsClient() {
     ];
   }, [displayStats]);
 
+  const preImproveWordChartRows = useMemo(() => {
+    if (!displayStats?.pre_improve_word_timeline?.length) return [];
+    const g = displayStats.granularity;
+    return displayStats.pre_improve_word_timeline
+      .map((row) => ({
+        ...row,
+        label: g === "week" ? `wk ${formatShortDay(row.bucket)}` : formatShortDay(row.bucket),
+        avg_words_display: typeof row.avg_words === "number" ? row.avg_words : 0,
+        has_data: typeof row.avg_words === "number" && row.samples > 0
+      }))
+      .filter((row) => row.has_data);
+  }, [displayStats]);
+
+  const preImproveWordHasData =
+    preImproveWordChartRows.length > 0 ||
+    (displayStats?.value_insights?.optimize_avg_pre_improve_words ?? null) !== null;
+
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-6 pb-16">
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -718,7 +754,7 @@ export function StatisticsClient() {
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={stackedTimeline} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
-                  <XAxis dataKey="label" stroke="#dbd4ff" tick={{ fill: "#e9e7ff", fontSize: 10 }} />
+                  <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
                   <YAxis stroke="#8A8A8A" allowDecimals={false} width={32} tick={{ fontSize: 10 }} />
                   <Tooltip
                     contentStyle={{ background: "#FAF8F4", border: "1px solid #E0DDD6", color: "#111111" }}
@@ -805,7 +841,7 @@ export function StatisticsClient() {
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={timeBalanceChartRows.filter((r) => r.has_data)} margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
-                    <XAxis dataKey="label" stroke="#8A8A8A" tick={{ fill: "#5C5C5C", fontSize: 10 }} />
+                    <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
                     <YAxis stroke="#8A8A8A" tick={{ fill: "#5C5C5C" }} label={{ value: "Minutes", angle: -90, position: "insideLeft", fill: "#5C5C5C" }} />
                     <Tooltip contentStyle={{ background: "#FAF8F4", border: "1px solid #E0DDD6", color: "#111111" }} />
                     <Legend />
@@ -859,6 +895,61 @@ export function StatisticsClient() {
               </ResponsiveContainer>
             </div>
           </section>
+
+          {/* Pre-improve word count */}
+          {preImproveWordHasData ? (
+            <section className="mb-12 rounded-2xl border border-line bg-cream p-6 backdrop-blur-md">
+              <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">Words before Improve</h2>
+              <p className="mt-2 text-xs text-faint">
+                Average word count in your composer immediately before Promptly runs (manual Improve, Auto, or Generate). Counts
+                whitespace-separated tokens from the extension; the server fills gaps when the client omits telemetry.
+              </p>
+              {displayStats.value_insights.optimize_avg_pre_improve_words != null ? (
+                <p className="mt-3 text-sm text-ink">
+                  Range average:{" "}
+                  <span className="font-semibold tabular-nums">
+                    {displayStats.value_insights.optimize_avg_pre_improve_words.toLocaleString()} words
+                  </span>
+                  {displayStats.value_insights.pre_improve_word_samples > 0 ? (
+                    <span className="text-faint">
+                      {" "}
+                      ({displayStats.value_insights.pre_improve_word_samples.toLocaleString()} Improve / Auto / Generate runs)
+                    </span>
+                  ) : null}
+                </p>
+              ) : null}
+              {preImproveWordChartRows.length ? (
+                <div className="mt-6 h-72 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={preImproveWordChartRows} margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                      <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
+                      <YAxis
+                        stroke="#8A8A8A"
+                        tick={{ fill: "#5C5C5C" }}
+                        allowDecimals
+                        label={{ value: "Avg words", angle: -90, position: "insideLeft", fill: "#5C5C5C" }}
+                      />
+                      <Tooltip
+                        contentStyle={{ background: "#FAF8F4", border: "1px solid #E0DDD6", color: "#111111" }}
+                        formatter={(value: number, _name: string, item) => {
+                          const samples = (item?.payload as { samples?: number })?.samples ?? 0;
+                          return [`${value} words (${samples.toLocaleString()} runs)`, "Avg before Improve"];
+                        }}
+                      />
+                      <Bar
+                        dataKey="avg_words_display"
+                        name="Avg words before Improve"
+                        fill={COLOR_PROMPTLY}
+                        radius={[6, 6, 0, 0]}
+                        maxBarSize={40}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : null}
+            </section>
+          ) : null}
 
           {/* Composer length */}
           {composerCompareData.length ? (
@@ -927,7 +1018,7 @@ export function StatisticsClient() {
                     margin={{ bottom: 8 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
-                    <XAxis dataKey="label" stroke="#8A8A8A" tick={{ fill: "#5C5C5C", fontSize: 10 }} />
+                    <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
                     <YAxis stroke="#8A8A8A" />
                     <Tooltip contentStyle={{ background: "#FAF8F4", border: "1px solid #E0DDD6", color: "#111111" }} />
                     <Bar dataKey="billed_promptly_tokens" fill="#9333ea" name="Promptly billed tokens / bucket" radius={[4, 4, 0, 0]} maxBarSize={32} />

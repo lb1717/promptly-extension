@@ -3,6 +3,7 @@ import {
   buildCreditsEnvelope,
   buildPromptlyCorsHeaders,
   consumeDailyUsage,
+  countComposerWordsRough,
   CREDIT_MAX_ESTIMATED_INPUT_TOKENS,
   CREDIT_MAX_INSTRUCTION_CHARS,
   CREDIT_MAX_PROMPT_CHARS,
@@ -131,7 +132,8 @@ export async function POST(request: Request) {
       optimizeLatencyMs: optimizeElapsedMs,
       billingBasis,
       telemetry: telemetrySnapshot,
-      serverComposerCharTotal: Math.min(CREDIT_MAX_PROMPT_CHARS, prompt.length + userInstruction.length)
+      serverComposerCharTotal: Math.min(CREDIT_MAX_PROMPT_CHARS, prompt.length + userInstruction.length),
+      serverComposerWordTotal: countComposerWordsRough(prompt, userInstruction)
     });
 
     return NextResponse.json(
