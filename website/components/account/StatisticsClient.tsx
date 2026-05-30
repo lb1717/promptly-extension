@@ -5,7 +5,7 @@ import { onAuthStateChanged, signOut } from "firebase/auth";
 import Link from "next/link";
 import type { User } from "firebase/auth";
 import { AutoDismissNoticeBar } from "@/components/ui/AutoDismissNoticeBar";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Bar,
   BarChart,
@@ -554,6 +554,68 @@ function formatUpliftPercent(pct: number): string {
   return `${sign}${rounded}%`;
 }
 
+function AnimatedUpliftPercent({
+  value,
+  durationMs = 1000,
+  className = "",
+  color = COLOR_SCORE_GREEN
+}: {
+  value: number;
+  durationMs?: number;
+  className?: string;
+  color?: string;
+}) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [display, setDisplay] = useState(0);
+  const runIdRef = useRef(0);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting) {
+          return;
+        }
+        observer.disconnect();
+        const runId = ++runIdRef.current;
+        const start = performance.now();
+        const target = value;
+
+        const tick = (now: number) => {
+          if (runIdRef.current !== runId) {
+            return;
+          }
+          const progress = Math.min(1, (now - start) / durationMs);
+          const eased = 1 - Math.pow(1 - progress, 3);
+          setDisplay(target * eased);
+          if (progress < 1) {
+            requestAnimationFrame(tick);
+          } else {
+            setDisplay(target);
+          }
+        };
+
+        setDisplay(0);
+        requestAnimationFrame(tick);
+      },
+      { threshold: 0.2, rootMargin: "0px 0px -8% 0px" }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [value, durationMs]);
+
+  return (
+    <span ref={ref} className={className} style={{ color }}>
+      {formatUpliftPercent(display)}
+    </span>
+  );
+}
+
 function ModeMiniChart({
   modes
 }: {
@@ -968,52 +1030,54 @@ export function StatisticsClient() {
             </div>
           </section>
 
-          {/* Average draft & response time + derived Promptly scores */}
+          {/* Promptly impact scores (left) + average draft chart (right) */}
           {modelTimeChartRows.length ||
           promptDerivedScores?.efficiencyPercent != null ||
           promptDerivedScores?.qualityPercent != null ? (
-            <section className="mb-8 rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4">
-              <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.22em] text-faint">
-                Average draft &amp; response time
-              </h2>
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-stretch">
-                {promptDerivedScores?.efficiencyPercent != null ||
-                promptDerivedScores?.qualityPercent != null ? (
-                  <div
-                    className="flex w-full shrink-0 flex-col justify-center rounded-xl border border-line bg-cream-dark px-4 py-5 lg:w-1/2"
-                    style={{ minHeight: modelTimeChartRows.length ? modelTimeSectionHeight : undefined }}
-                  >
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-faint">Promptly impact</p>
-                    <div className="mt-5 grid grid-cols-1 gap-6 sm:grid-cols-2 sm:gap-4">
-                      <div>
-                        <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Prompt efficiency</p>
-                        <p
-                          className="mt-1 text-3xl font-bold tabular-nums leading-none sm:text-4xl"
-                          style={{ color: COLOR_SCORE_GREEN }}
-                        >
-                          {promptDerivedScores.efficiencyPercent != null
-                            ? formatUpliftPercent(promptDerivedScores.efficiencyPercent)
-                            : "—"}
-                        </p>
-                        <p className="mt-2 text-[10px] leading-snug text-faint">{promptDerivedScores.efficiencyHint}</p>
-                      </div>
-                      <div>
-                        <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Prompt quality</p>
-                        <p
-                          className="mt-1 text-3xl font-bold tabular-nums leading-none sm:text-4xl"
-                          style={{ color: COLOR_SCORE_GREEN }}
-                        >
-                          {promptDerivedScores.qualityPercent != null
-                            ? formatUpliftPercent(promptDerivedScores.qualityPercent)
-                            : "—"}
-                        </p>
-                        <p className="mt-2 text-[10px] leading-snug text-faint">{promptDerivedScores.qualityHint}</p>
-                      </div>
+            <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-stretch">
+              {promptDerivedScores?.efficiencyPercent != null ||
+              promptDerivedScores?.qualityPercent != null ? (
+                <section
+                  className="flex w-full flex-col justify-center rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4 lg:w-1/2"
+                  style={{ minHeight: modelTimeChartRows.length ? modelTimeSectionHeight : undefined }}
+                >
+                  <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">Promptly impact</h2>
+                  <div className="mt-5 grid grid-cols-1 gap-6 sm:grid-cols-2 sm:gap-4">
+                    <div>
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Prompt efficiency</p>
+                      {promptDerivedScores.efficiencyPercent != null ? (
+                        <AnimatedUpliftPercent
+                          value={promptDerivedScores.efficiencyPercent}
+                          className="mt-1 block text-3xl font-bold tabular-nums leading-none sm:text-4xl"
+                          color={COLOR_SCORE_GREEN}
+                        />
+                      ) : (
+                        <p className="mt-1 text-3xl font-bold leading-none text-ink sm:text-4xl">—</p>
+                      )}
+                      <p className="mt-2 text-[10px] leading-snug text-faint">{promptDerivedScores.efficiencyHint}</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Prompt quality</p>
+                      {promptDerivedScores.qualityPercent != null ? (
+                        <AnimatedUpliftPercent
+                          value={promptDerivedScores.qualityPercent}
+                          className="mt-1 block text-3xl font-bold tabular-nums leading-none sm:text-4xl"
+                          color={COLOR_SCORE_GREEN}
+                        />
+                      ) : (
+                        <p className="mt-1 text-3xl font-bold leading-none text-ink sm:text-4xl">—</p>
+                      )}
+                      <p className="mt-2 text-[10px] leading-snug text-faint">{promptDerivedScores.qualityHint}</p>
                     </div>
                   </div>
-                ) : null}
-                {modelTimeChartRows.length ? (
-                  <div className="w-full lg:w-1/2" style={{ height: modelTimeSectionHeight }}>
+                </section>
+              ) : null}
+              {modelTimeChartRows.length ? (
+                <section className="w-full rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4 lg:w-1/2">
+                  <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.22em] text-faint">
+                    Average draft &amp; response time
+                  </h2>
+                  <div style={{ height: modelTimeSectionHeight }}>
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart
                         data={modelTimeChartRows}
@@ -1058,9 +1122,9 @@ export function StatisticsClient() {
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
-                ) : null}
-              </div>
-            </section>
+                </section>
+              ) : null}
+            </div>
           ) : null}
 
           {timeBalanceHasData ? (
