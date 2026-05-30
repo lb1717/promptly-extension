@@ -554,9 +554,15 @@ function formatUpliftPercent(pct: number): string {
   return `${sign}${rounded}%`;
 }
 
+/** Ease with near-zero velocity at start and end (smooth land, no snap). */
+function countUpEase(t: number): number {
+  const x = Math.min(1, Math.max(0, t));
+  return x * x * x * (x * (x * 6 - 15) + 10);
+}
+
 function AnimatedUpliftPercent({
   value,
-  durationMs = 1000,
+  durationMs = 1500,
   className = "",
   color = COLOR_SCORE_GREEN
 }: {
@@ -589,10 +595,10 @@ function AnimatedUpliftPercent({
           if (runIdRef.current !== runId) {
             return;
           }
-          const progress = Math.min(1, (now - start) / durationMs);
-          const eased = 1 - Math.pow(1 - progress, 3);
+          const linear = Math.min(1, (now - start) / durationMs);
+          const eased = countUpEase(linear);
           setDisplay(target * eased);
-          if (progress < 1) {
+          if (linear < 1) {
             requestAnimationFrame(tick);
           } else {
             setDisplay(target);
@@ -1047,6 +1053,7 @@ export function StatisticsClient() {
                       <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Prompt efficiency</p>
                       {promptDerivedScores.efficiencyPercent != null ? (
                         <AnimatedUpliftPercent
+                          key={`eff-${promptDerivedScores.efficiencyPercent}-${days}-${granularity}`}
                           value={promptDerivedScores.efficiencyPercent}
                           className="mt-1 block text-3xl font-bold tabular-nums leading-none sm:text-4xl"
                           color={COLOR_SCORE_GREEN}
@@ -1060,6 +1067,7 @@ export function StatisticsClient() {
                       <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Prompt quality</p>
                       {promptDerivedScores.qualityPercent != null ? (
                         <AnimatedUpliftPercent
+                          key={`qual-${promptDerivedScores.qualityPercent}-${days}-${granularity}`}
                           value={promptDerivedScores.qualityPercent}
                           className="mt-1 block text-3xl font-bold tabular-nums leading-none sm:text-4xl"
                           color={COLOR_SCORE_GREEN}
