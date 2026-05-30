@@ -92,8 +92,10 @@ const MODEL_CHART_ORDER: PromptlySvc[] = ["gemini", "claude", "chatgpt", "unknow
 
 type PreImproveWordBucket = {
   bucket: string;
-  avg_words: number | null;
+  avg_words_before: number | null;
+  avg_words_after: number | null;
   samples: number;
+  samples_after: number;
 };
 
 type ValueInsights = {
@@ -101,7 +103,10 @@ type ValueInsights = {
   rollup_daily_prompts_hint: number;
   optimize_avg_composer_chars: number | null;
   optimize_avg_pre_improve_words: number | null;
+  optimize_avg_post_improve_words: number | null;
+  pre_improve_word_change_percent: number | null;
   pre_improve_word_samples: number;
+  post_improve_word_samples: number;
   native_web_send_avg_composer_chars: number | null;
   composer_snapshot_count_illustrative: number;
   estimated_drafting_active_minutes_illustrative: number;
@@ -299,8 +304,10 @@ function buildPlaceholderExtendedStats(days: number, granularity: "day" | "week"
     timeline: tl,
     pre_improve_word_timeline: tl.map((row) => ({
       bucket: row.bucket,
-      avg_words: null,
-      samples: 0
+      avg_words_before: null,
+      avg_words_after: null,
+      samples: 0,
+      samples_after: 0
     })),
     combined_prompt_timeline: cpt,
     combined_totals: {
@@ -349,7 +356,10 @@ function buildPlaceholderExtendedStats(days: number, granularity: "day" | "week"
       rollup_daily_prompts_hint: 0,
       optimize_avg_composer_chars: null,
       optimize_avg_pre_improve_words: null,
+      optimize_avg_post_improve_words: null,
+      pre_improve_word_change_percent: null,
       pre_improve_word_samples: 0,
+      post_improve_word_samples: 0,
       native_web_send_avg_composer_chars: null,
       composer_snapshot_count_illustrative: 0,
       estimated_drafting_active_minutes_illustrative: 0,
@@ -648,15 +658,27 @@ export function StatisticsClient() {
       .map((row) => ({
         ...row,
         label: g === "week" ? `wk ${formatShortDay(row.bucket)}` : formatShortDay(row.bucket),
-        avg_words_display: typeof row.avg_words === "number" ? row.avg_words : 0,
-        has_data: typeof row.avg_words === "number" && row.samples > 0
+        avg_words_before_display: typeof row.avg_words_before === "number" ? row.avg_words_before : 0,
+        avg_words_after_display: typeof row.avg_words_after === "number" ? row.avg_words_after : 0,
+        has_data:
+          (typeof row.avg_words_before === "number" && row.samples > 0) ||
+          (typeof row.avg_words_after === "number" && row.samples_after > 0)
       }))
       .filter((row) => row.has_data);
   }, [displayStats]);
 
+  const preImproveWordChangePercent = displayStats?.value_insights?.pre_improve_word_change_percent ?? null;
+
   const preImproveWordHasData =
     preImproveWordChartRows.length > 0 ||
-    (displayStats?.value_insights?.optimize_avg_pre_improve_words ?? null) !== null;
+    (displayStats?.value_insights?.optimize_avg_pre_improve_words ?? null) !== null ||
+    (displayStats?.value_insights?.optimize_avg_post_improve_words ?? null) !== null;
+
+  function formatWordChangePercent(pct: number): string {
+    const rounded = Math.round(pct * 10) / 10;
+    const sign = rounded > 0 ? "+" : "";
+    return `${sign}${rounded}%`;
+  }
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-6 pb-16">
@@ -891,23 +913,16 @@ export function StatisticsClient() {
           {/* Pre-improve word count */}
           {preImproveWordHasData ? (
             <section className="mb-12 rounded-2xl border border-line bg-cream p-6 backdrop-blur-md">
-              <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">Words before Improve</h2>
-              {displayStats.value_insights.optimize_avg_pre_improve_words != null ? (
-                <p className="mt-3 text-sm text-ink">
-                  Range average:{" "}
-                  <span className="font-semibold tabular-nums">
-                    {displayStats.value_insights.optimize_avg_pre_improve_words.toLocaleString()} words
+              <h2 className="flex flex-wrap items-baseline gap-x-2 text-sm font-semibold uppercase tracking-[0.22em] text-faint">
+                <span>Words before Improve</span>
+                {preImproveWordChangePercent !== null ? (
+                  <span className="font-bold normal-case tracking-normal text-ink tabular-nums">
+                    {formatWordChangePercent(preImproveWordChangePercent)}
                   </span>
-                  {displayStats.value_insights.pre_improve_word_samples > 0 ? (
-                    <span className="text-faint">
-                      {" "}
-                      ({displayStats.value_insights.pre_improve_word_samples.toLocaleString()} Improve / Auto / Generate runs)
-                    </span>
-                  ) : null}
-                </p>
-              ) : null}
+                ) : null}
+              </h2>
               {preImproveWordChartRows.length ? (
-                <div className="mt-6 h-72 w-full">
+                <div className="mt-4 h-72 w-full">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={preImproveWordChartRows} margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
@@ -920,17 +935,34 @@ export function StatisticsClient() {
                       />
                       <Tooltip
                         contentStyle={{ background: "#FAF8F4", border: "1px solid #E0DDD6", color: "#111111" }}
-                        formatter={(value: number, _name: string, item) => {
-                          const samples = (item?.payload as { samples?: number })?.samples ?? 0;
-                          return [`${value} words (${samples.toLocaleString()} runs)`, "Avg before Improve"];
+                        formatter={(value: number, name: string, item) => {
+                          const payload = item?.payload as {
+                            samples?: number;
+                            samples_after?: number;
+                            avg_words_before?: number | null;
+                            avg_words_after?: number | null;
+                          };
+                          const runs =
+                            name === "Before Improve"
+                              ? (payload?.samples ?? 0)
+                              : (payload?.samples_after ?? 0);
+                          return [`${value} words (${runs.toLocaleString()} runs)`, name];
                         }}
                       />
+                      <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
                       <Bar
-                        dataKey="avg_words_display"
-                        name="Avg words before Improve"
+                        dataKey="avg_words_before_display"
+                        name="Before Improve"
                         fill={COLOR_PROMPTLY}
-                        radius={[6, 6, 0, 0]}
-                        maxBarSize={40}
+                        radius={[4, 4, 0, 0]}
+                        maxBarSize={36}
+                      />
+                      <Bar
+                        dataKey="avg_words_after_display"
+                        name="After Improve"
+                        fill={COLOR_NATIVE_WEB}
+                        radius={[4, 4, 0, 0]}
+                        maxBarSize={36}
                       />
                     </BarChart>
                   </ResponsiveContainer>

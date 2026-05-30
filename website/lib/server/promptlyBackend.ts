@@ -398,6 +398,8 @@ async function persistOptimizeTelemetryEvent(params: {
   serverComposerCharTotal: number;
   /** Whitespace word count from in-flight request text when extension telemetry omits words. */
   serverComposerWordTotal: number;
+  /** Word count of optimized output returned to the client. */
+  serverOptimizedWordTotal: number;
 }): Promise<void> {
   const telemetry: OptimizeTelemetryNormalized = { ...params.telemetry };
   if (
@@ -433,6 +435,10 @@ async function persistOptimizeTelemetryEvent(params: {
     billingBasis: params.billingBasis || null,
     composerCharEstimate: telemetry.composerCharEstimate,
     composerWordEstimate: telemetry.composerWordEstimate,
+    optimizedWordEstimate:
+      params.serverOptimizedWordTotal > 0
+        ? Math.min(12000, Math.max(0, Math.floor(params.serverOptimizedWordTotal)))
+        : null,
     hostModelLabelSanitized: telemetry.hostModelLabelSanitized,
     hostModelBucket: telemetry.hostModelBucket
   });
@@ -506,6 +512,7 @@ export function recordOptimizeTelemetryEventSafe(params: {
   telemetry: OptimizeTelemetryNormalized;
   serverComposerCharTotal: number;
   serverComposerWordTotal: number;
+  serverOptimizedWordTotal: number;
 }): void {
   persistOptimizeTelemetryEvent(params).catch((err) => {
     console.error("[promptly] persistOptimizeTelemetryEvent failed:", String(err instanceof Error ? err.message : err));
@@ -776,6 +783,8 @@ type TimelineBucketAgg = {
   /** Words in composer before Promptly rewrite (Improve / Auto / Generate). */
   composer_word_sum: number;
   composer_word_samples: number;
+  optimized_word_sum: number;
+  optimized_word_samples: number;
   latency_sum_ms: number;
   latency_samples: number;
 };
@@ -920,6 +929,8 @@ export async function getAccountUsageStatsExtended(
       composer_char_samples: 0,
       composer_word_sum: 0,
       composer_word_samples: 0,
+      optimized_word_sum: 0,
+      optimized_word_samples: 0,
       latency_sum_ms: 0,
       latency_samples: 0
     });
@@ -996,6 +1007,12 @@ export async function getAccountUsageStatsExtended(
     if (typeof wwRaw === "number" && Number.isFinite(wwRaw) && wwRaw > 0) {
       row.composer_word_samples += 1;
       row.composer_word_sum += Math.min(12000, Math.floor(wwRaw));
+    }
+
+    const owRaw = raw.optimizedWordEstimate ?? raw.optimized_word_estimate;
+    if (typeof owRaw === "number" && Number.isFinite(owRaw) && owRaw > 0) {
+      row.optimized_word_samples += 1;
+      row.optimized_word_sum += Math.min(12000, Math.floor(owRaw));
     }
 
     const lat = Number(raw.optimizeLatencyMs || 0);
@@ -1134,6 +1151,8 @@ export async function getAccountUsageStatsExtended(
           composer_char_samples: 0,
           composer_word_sum: 0,
           composer_word_samples: 0,
+          optimized_word_sum: 0,
+          optimized_word_samples: 0,
           latency_sum_ms: 0,
           latency_samples: 0
         });
@@ -1150,6 +1169,8 @@ export async function getAccountUsageStatsExtended(
       dst.composer_char_samples += src.composer_char_samples;
       dst.composer_word_sum += src.composer_word_sum;
       dst.composer_word_samples += src.composer_word_samples;
+      dst.optimized_word_sum += src.optimized_word_sum;
+      dst.optimized_word_samples += src.optimized_word_samples;
       dst.latency_sum_ms += src.latency_sum_ms;
       dst.latency_samples += src.latency_samples;
     }
@@ -1380,13 +1401,27 @@ export async function getAccountUsageStatsExtended(
     { words: 0, samples: 0 }
   );
 
+  const optimizeWordAfterAgg = [...byDayScratch.values()].reduce(
+    (agg, day) => {
+      agg.words += day.optimized_word_sum;
+      agg.samples += day.optimized_word_samples;
+      return agg;
+    },
+    { words: 0, samples: 0 }
+  );
+
   const pre_improve_word_timeline = timelineFlat.map((t) => ({
     bucket: t.bucket_day,
-    avg_words:
+    avg_words_before:
       t.composer_word_samples > 0
         ? Math.round((t.composer_word_sum / t.composer_word_samples) * 10) / 10
         : null,
-    samples: t.composer_word_samples
+    avg_words_after:
+      t.optimized_word_samples > 0
+        ? Math.round((t.optimized_word_sum / t.optimized_word_samples) * 10) / 10
+        : null,
+    samples: t.composer_word_samples,
+    samples_after: t.optimized_word_samples
   }));
 
   /** Fallback when measured draft telemetry is unavailable (legacy rows). */
@@ -1454,6 +1489,20 @@ export async function getAccountUsageStatsExtended(
   const optimize_avg_pre_improve_words =
     optimizeWordAgg.samples > 0
       ? Math.round((optimizeWordAgg.words / optimizeWordAgg.samples) * 10) / 10
+      : null;
+  const optimize_avg_post_improve_words =
+    optimizeWordAfterAgg.samples > 0
+      ? Math.round((optimizeWordAfterAgg.words / optimizeWordAfterAgg.samples) * 10) / 10
+      : null;
+  const pre_improve_word_change_percent =
+    optimize_avg_pre_improve_words !== null &&
+    optimize_avg_post_improve_words !== null &&
+    optimize_avg_pre_improve_words > 0
+      ? Math.round(
+          ((optimize_avg_post_improve_words - optimize_avg_pre_improve_words) /
+            optimize_avg_pre_improve_words) *
+            1000
+        ) / 10
       : null;
   const native_avg_comp =
     nativeComposerOnSendSamples > 0
@@ -1555,7 +1604,10 @@ export async function getAccountUsageStatsExtended(
       rollup_daily_prompts_hint: rollupBaseline.totals.prompts,
       optimize_avg_composer_chars: optimize_avg_comp,
       optimize_avg_pre_improve_words,
+      optimize_avg_post_improve_words,
+      pre_improve_word_change_percent,
       pre_improve_word_samples: optimizeWordAgg.samples,
+      post_improve_word_samples: optimizeWordAfterAgg.samples,
       native_web_send_avg_composer_chars: native_avg_comp,
       composer_snapshot_count_illustrative: hostComposerSnapshotsOnly,
       estimated_drafting_active_minutes_illustrative:

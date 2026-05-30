@@ -133,7 +133,8 @@ export async function POST(request: Request) {
       billingBasis,
       telemetry: telemetrySnapshot,
       serverComposerCharTotal: Math.min(CREDIT_MAX_PROMPT_CHARS, prompt.length + userInstruction.length),
-      serverComposerWordTotal: countComposerWordsRough(prompt, userInstruction)
+      serverComposerWordTotal: countComposerWordsRough(prompt, userInstruction),
+      serverOptimizedWordTotal: countComposerWordsRough(optimized_prompt)
     });
 
     return NextResponse.json(
