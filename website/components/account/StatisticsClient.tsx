@@ -115,9 +115,8 @@ type ValueInsights = {
 
 type TimeBalanceBucket = {
   bucket: string;
-  draft_active_minutes: number;
-  draft_wall_minutes: number;
-  waiting_minutes: number;
+  avg_draft_minutes: number;
+  avg_waiting_minutes: number;
   native_sends_with_draft: number;
   native_sends_with_latency: number;
 };
@@ -329,9 +328,8 @@ function buildPlaceholderExtendedStats(days: number, granularity: "day" | "week"
     })),
     time_balance_timeline: tl.map((row) => ({
       bucket: row.bucket,
-      draft_active_minutes: 0,
-      draft_wall_minutes: 0,
-      waiting_minutes: 0,
+      avg_draft_minutes: 0,
+      avg_waiting_minutes: 0,
       native_sends_with_draft: 0,
       native_sends_with_latency: 0
     })),
@@ -537,7 +535,7 @@ export function StatisticsClient() {
     return displayStats.time_balance_timeline.map((row) => ({
       ...row,
       label: g === "week" ? `wk ${formatShortDay(row.bucket)}` : formatShortDay(row.bucket),
-      has_data: row.draft_active_minutes > 0 || row.waiting_minutes > 0
+      has_data: row.avg_draft_minutes > 0 || row.avg_waiting_minutes > 0
     }));
   }, [displayStats]);
 
@@ -770,9 +768,12 @@ export function StatisticsClient() {
             </div>
           </section>
 
-          {/* Drafting vs AI response time by model */}
+          {/* Average draft & response time by model (2nd chart) */}
           {modelTimeChartRows.length ? (
             <section className="mb-8 rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4">
+              <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.22em] text-faint">
+                Average draft &amp; response time
+              </h2>
               <div
                 className="w-full"
                 style={{ height: Math.max(168, modelTimeChartRows.length * 52 + 48) }}
@@ -786,19 +787,7 @@ export function StatisticsClient() {
                     barGap={4}
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" horizontal={false} />
-                    <XAxis
-                      type="number"
-                      stroke="#8A8A8A"
-                      tick={{ fill: "#5C5C5C", fontSize: 10 }}
-                      unit="s"
-                      label={{
-                        value: "Seconds (avg per prompt)",
-                        position: "insideBottom",
-                        offset: -2,
-                        fill: "#5C5C5C",
-                        fontSize: 10
-                      }}
-                    />
+                    <XAxis type="number" stroke="#8A8A8A" tick={{ fill: "#5C5C5C", fontSize: 10 }} unit="s" />
                     <YAxis
                       type="category"
                       dataKey="model"
@@ -814,12 +803,12 @@ export function StatisticsClient() {
                       }}
                     />
                     <Legend wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
-                    <Bar dataKey="avg_drafting_s" name="Prompt drafting (first keystroke → send)" fill="#c084fc" radius={[0, 4, 4, 0]} barSize={12}>
+                    <Bar dataKey="avg_drafting_s" name="Avg drafting (s)" fill="#c084fc" radius={[0, 4, 4, 0]} barSize={12}>
                       {modelTimeChartRows.map((entry, idx) => (
                         <Cell key={`draft-${idx}`} fillOpacity={entry.drafting_missing ? 0.2 : 0.95} />
                       ))}
                     </Bar>
-                    <Bar dataKey="avg_response_s" name="AI response" fill={COLOR_NATIVE_WEB} radius={[0, 4, 4, 0]} barSize={12}>
+                    <Bar dataKey="avg_response_s" name="Avg AI response (s)" fill={COLOR_NATIVE_WEB} radius={[0, 4, 4, 0]} barSize={12}>
                       {modelTimeChartRows.map((entry, idx) => (
                         <Cell key={`resp-${idx}`} fillOpacity={entry.response_missing ? 0.2 : 0.95} />
                       ))}
@@ -833,34 +822,40 @@ export function StatisticsClient() {
           {timeBalanceHasData ? (
             <section className="mb-12 rounded-2xl border border-line bg-cream p-6 backdrop-blur-md">
               <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">Writing vs waiting for AI</h2>
-              <p className="mt-2 text-xs text-faint">
-                Stacked minutes per {displayStats.granularity === "week" ? "week" : "day"} from native chat sends — active drafting time
-                (typing) compared with waiting for the host assistant reply to finish.
-              </p>
-              <div className="mt-6 h-96 w-full">
+              <div className="mt-4 h-96 w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={timeBalanceChartRows.filter((r) => r.has_data)} margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
                     <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
-                    <YAxis stroke="#8A8A8A" tick={{ fill: "#5C5C5C" }} label={{ value: "Minutes", angle: -90, position: "insideLeft", fill: "#5C5C5C" }} />
-                    <Tooltip contentStyle={{ background: "#FAF8F4", border: "1px solid #E0DDD6", color: "#111111" }} />
+                    <YAxis
+                      stroke="#8A8A8A"
+                      tick={{ fill: "#5C5C5C" }}
+                      allowDecimals
+                      label={{ value: "Avg min / send", angle: -90, position: "insideLeft", fill: "#5C5C5C" }}
+                    />
+                    <Tooltip
+                      contentStyle={{ background: "#FAF8F4", border: "1px solid #E0DDD6", color: "#111111" }}
+                      formatter={(value: number, name: string) => {
+                        if (typeof value !== "number" || value <= 0) return ["—", name];
+                        return [`${value} min`, name];
+                      }}
+                    />
                     <Legend />
-                    <Bar dataKey="draft_active_minutes" name="Drafting (active typing)" stackId="time" fill="#c084fc" radius={[0, 0, 0, 0]} />
-                    <Bar dataKey="waiting_minutes" name="Waiting for AI reply" stackId="time" fill={COLOR_NATIVE_WEB} radius={[8, 8, 0, 0]} />
+                    <Bar dataKey="avg_draft_minutes" name="Avg drafting" fill="#c084fc" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="avg_waiting_minutes" name="Avg waiting for AI" fill={COLOR_NATIVE_WEB} radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
               {displayStats.time_balance_totals ? (
                 <p className="mt-4 text-[11px] text-faint">
-                  Range total:{" "}
+                  Range average per send:{" "}
                   {displayStats.time_balance_totals.draft_active_minutes != null
                     ? `${displayStats.time_balance_totals.draft_active_minutes.toLocaleString()} min drafting`
                     : "— drafting"}{" "}
                   ·{" "}
                   {displayStats.time_balance_totals.waiting_for_ai_minutes != null
                     ? `${displayStats.time_balance_totals.waiting_for_ai_minutes.toLocaleString()} min waiting`
-                    : "— waiting"}{" "}
-                  ({displayStats.time_balance_totals.waiting_samples.toLocaleString()} measured replies)
+                    : "— waiting"}
                 </p>
               ) : null}
             </section>
@@ -869,11 +864,7 @@ export function StatisticsClient() {
           {/*Latency */}
           <section className="mb-12 rounded-2xl border border-line bg-cream p-6 backdrop-blur-md">
             <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">Rewrite vs native turnaround time</h2>
-            <p className="mt-2 text-xs text-faint">
-              Promptly bar = billed rewrite turnaround from the sidebar. Native bar = send-to-reply-settle timing on ChatGPT,
-              Claude, and Gemini (continues if you switch tabs away).
-            </p>
-            <div className="mt-6 h-96 w-full">
+            <div className="mt-4 h-96 w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={latencyChartRows} margin={{ top: 8, right: 12, bottom: 56, left: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
@@ -900,10 +891,6 @@ export function StatisticsClient() {
           {preImproveWordHasData ? (
             <section className="mb-12 rounded-2xl border border-line bg-cream p-6 backdrop-blur-md">
               <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">Words before Improve</h2>
-              <p className="mt-2 text-xs text-faint">
-                Average word count in your composer immediately before Promptly runs (manual Improve, Auto, or Generate). Counts
-                whitespace-separated tokens from the extension; the server fills gaps when the client omits telemetry.
-              </p>
               {displayStats.value_insights.optimize_avg_pre_improve_words != null ? (
                 <p className="mt-3 text-sm text-ink">
                   Range average:{" "}
@@ -955,10 +942,7 @@ export function StatisticsClient() {
           {composerCompareData.length ? (
             <section className="mb-12 rounded-2xl border border-line bg-cream p-6 backdrop-blur-md">
               <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">Draft verbosity</h2>
-              <p className="mt-2 text-xs text-faint">
-                Telemetry-only averages pulled from scraped composer snapshots—helps explain why rewriting with Promptly can reduce upstream token stress.
-              </p>
-              <div className="mt-6 h-64 w-full max-w-xl">
+              <div className="mt-4 h-64 w-full max-w-xl">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={composerCompareData} layout="vertical" margin={{ left: 32, top: 8 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
@@ -980,8 +964,7 @@ export function StatisticsClient() {
           {pathwayCompareData.length ? (
             <section className="mb-12 rounded-2xl border border-line bg-cream p-6 backdrop-blur-md">
               <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">Pathway breakdown</h2>
-              <p className="mt-2 text-xs text-faint">Stack Promptly-mediated runs against native submits for ChatGPT vs Claude vs Gemini.</p>
-              <div className="mt-6 h-80 w-full">
+              <div className="mt-4 h-80 w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={pathwayCompareData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
@@ -1002,12 +985,10 @@ export function StatisticsClient() {
           <section className="mb-12 grid gap-10 lg:grid-cols-2">
             <div className="rounded-2xl border border-line bg-cream-dark p-6">
               <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-faint">Improve mode mixes</h3>
-              <p className="mt-1 text-[11px] text-faint">Shows how Promptly was invoked whenever telemetry tagged the Optimize path.</p>
               <ModeMiniChart modes={displayStats.breakdowns_from_events.mode} />
             </div>
             <div className="rounded-2xl border border-line bg-cream-dark p-6">
-              <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-faint">Billed Promptly tokens (bucket-level)</h3>
-              <p className="mt-1 text-[11px] text-faint">Roughly parallels how expensive each Improve window was—not host AI metering.</p>
+              <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-faint">Billed Promptly tokens</h3>
               <div className="mt-4 h-64 w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
@@ -1030,9 +1011,6 @@ export function StatisticsClient() {
 
           <section className="mb-12 rounded-2xl border border-line bg-cream-dark p-6">
             <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-faint">Scraped model buckets (Improve path)</h3>
-            <p className="mt-2 text-[11px] text-faint">
-              Host UI labels when available—can drift whenever chat providers redesign their pickers.
-            </p>
             <div className="mt-4 overflow-x-auto rounded-xl border border-line">
               <table className="min-w-[520px] w-full border-collapse text-left text-sm">
                 <thead className="border-b border-line text-[10px] uppercase tracking-wide text-muted">

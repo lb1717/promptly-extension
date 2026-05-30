@@ -1092,12 +1092,12 @@ export async function getAccountUsageStatsExtended(
           row.draft_wall_sum_ms += draftWallMs;
           row.draft_wall_samples += 1;
         }
-      }
-      if (draftMs !== null) {
-        row.draft_active_sum_ms += draftMs;
-        row.draft_active_samples += 1;
-        row.draft_active_sum_svc[svc] += draftMs;
-        row.draft_active_samples_svc[svc] += 1;
+        if (draftMs !== null) {
+          row.draft_active_sum_ms += draftMs;
+          row.draft_active_samples += 1;
+          row.draft_active_sum_svc[svc] += draftMs;
+          row.draft_active_samples_svc[svc] += 1;
+        }
       }
     }
 
@@ -1416,24 +1416,35 @@ export async function getAccountUsageStatsExtended(
 
   const time_balance_timeline = hostPassiveTimelineFlat.map((row) => ({
     bucket: row.bucket_day,
-    draft_active_minutes: Math.round((row.draft_active_sum_ms / 60000) * 10) / 10,
-    draft_wall_minutes: Math.round((row.draft_wall_sum_ms / 60000) * 10) / 10,
-    waiting_minutes: Math.round((row.waiting_sum_ms / 60000) * 10) / 10,
+    avg_draft_minutes:
+      row.draft_active_samples > 0
+        ? Math.round((row.draft_active_sum_ms / row.draft_active_samples / 60000) * 10) / 10
+        : 0,
+    avg_waiting_minutes:
+      row.waiting_samples > 0
+        ? Math.round((row.waiting_sum_ms / row.waiting_samples / 60000) * 10) / 10
+        : 0,
     native_sends_with_draft: row.draft_active_samples,
     native_sends_with_latency: row.waiting_samples
   }));
 
   const measured_drafting_active_minutes =
-    time_balance_totals.draft_active_ms > 0
-      ? Math.round((time_balance_totals.draft_active_ms / 60000) * 10) / 10
+    time_balance_totals.draft_active_samples > 0
+      ? Math.round(
+          (time_balance_totals.draft_active_ms / time_balance_totals.draft_active_samples / 60000) * 10
+        ) / 10
       : null;
   const measured_drafting_wall_minutes =
-    time_balance_totals.draft_wall_ms > 0
-      ? Math.round((time_balance_totals.draft_wall_ms / 60000) * 10) / 10
+    time_balance_totals.draft_wall_samples > 0
+      ? Math.round(
+          (time_balance_totals.draft_wall_ms / time_balance_totals.draft_wall_samples / 60000) * 10
+        ) / 10
       : null;
   const measured_waiting_for_ai_minutes =
-    time_balance_totals.waiting_for_ai_ms > 0
-      ? Math.round((time_balance_totals.waiting_for_ai_ms / 60000) * 10) / 10
+    time_balance_totals.waiting_samples > 0
+      ? Math.round(
+          (time_balance_totals.waiting_for_ai_ms / time_balance_totals.waiting_samples / 60000) * 10
+        ) / 10
       : null;
 
   const optimize_avg_comp =
@@ -1478,7 +1489,7 @@ export async function getAccountUsageStatsExtended(
 
   const footnotes = [
     "Combined totals = Improve / Generate telemetry plus native chat sends observed by Promptly — Improve rows mirrored into host telemetry intentionally avoid double-counting.",
-    "Drafting minutes sum active typing time from first keystroke until native send (idle gaps over ~45s are excluded). Waiting minutes sum host reply round-trip after send until the assistant message settles in the DOM.",
+    "Drafting and waiting charts show average minutes per native send (not stacked totals). Drafting = first keystroke until send; waiting = send until host reply settles in the DOM.",
     "Native reply timing continues while the chat tab is in the background; watches flush on navigation away. Closed tabs may omit in-flight replies.",
     '"Native host reply" averages only include latency telemetry on passive_listener sends; Promptly averages use billed rewrite turnaround from your extension.',
   ];
