@@ -19,6 +19,11 @@ export function isStripeConfigured(): boolean {
   return Boolean(String(process.env.STRIPE_SECRET_KEY || "").trim());
 }
 
+export function isStripeCheckoutAvailableForTier(tier: string): boolean {
+  if (!isStripeConfigured()) return false;
+  return Boolean(getStripePriceIdForTier(tier));
+}
+
 /** Paid plans above Free — stored in Firestore subscriptionTier. */
 export type PaidTier = "pro" | "student" | "enterprise";
 

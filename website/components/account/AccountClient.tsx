@@ -1,6 +1,6 @@
 "use client";
 
-import { getFirebaseAuth, getFirebaseDb, getGoogleProvider } from "@/lib/firebaseClient";
+import { getFirebaseAuth } from "@/lib/firebaseClient";
 import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
@@ -9,12 +9,11 @@ import {
   sendPasswordResetEmail,
   signInWithCustomToken,
   signInWithEmailAndPassword,
-  signInWithPopup,
   signOut,
   updateProfile,
   User
 } from "firebase/auth";
-import { doc, serverTimestamp, setDoc } from "firebase/firestore";
+import { syncPromptlyUserDoc } from "@/lib/promptlyUserSync";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -32,6 +31,7 @@ import {
   resolveGoogleSignInError,
   type AuthProviderHint
 } from "@/lib/firebaseAuthAccountHints";
+import { listenForGoogleSignInReturn, openGoogleSignInInNewTab } from "@/lib/firebaseGoogleAuth";
 
 function formatJoinDate(user: User | null): string {
   if (!user?.metadata?.creationTime) return "—";
@@ -44,13 +44,6 @@ function formatJoinDate(user: User | null): string {
   } catch {
     return "—";
   }
-}
-
-function inferAuthProvider(user: User): string {
-  const ids = (user.providerData || []).map((p) => p.providerId).filter(Boolean);
-  if (ids.includes("password")) return "password";
-  if (ids.includes("google.com")) return "google";
-  return ids[0] || "unknown";
 }
 
 function tierLabel(tier: string): string {
@@ -378,11 +371,31 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
   }, [extensionIdFromUrl, signinCsrfFromUrl]);
 
   useEffect(() => {
+    return listenForGoogleSignInReturn({
+      onSuccess: () => {
+        setAccountNotice("Signed in with Google.");
+        setBusy(false);
+      },
+      onError: (message) => {
+        const resolved = resolveGoogleSignInError(new Error(message));
+        if (resolved.hint) {
+          applyAuthGuidance(resolved.message, resolved.hint);
+        } else {
+          setError(resolved.message);
+        }
+        setBusy(false);
+      },
+      onSettled: () => setBusy(false)
+    });
+  }, []);
+
+  useEffect(() => {
     const auth = getFirebaseAuth();
     const unsub = onAuthStateChanged(auth, async (nextUser) => {
       setUser(nextUser);
       setLoading(false);
       if (nextUser) {
+        setBusy(false);
         void syncExtensionSession(nextUser);
         await Promise.all([loadBilling(nextUser), loadAccountStats(nextUser), loadDailyCredits(nextUser)]);
       } else {
@@ -445,22 +458,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
   }, [accountStats]);
 
   async function syncUserToFirestore(currentUser: User) {
-    const db = getFirebaseDb();
-    const ref = doc(db, "users", currentUser.uid);
-    await setDoc(
-      ref,
-      {
-        uid: currentUser.uid,
-        email: currentUser.email || null,
-        displayName: currentUser.displayName || null,
-        photoURL: currentUser.photoURL || null,
-        provider: inferAuthProvider(currentUser),
-        updatedAt: serverTimestamp(),
-        plan: "free",
-        subscriptionTier: "free"
-      },
-      { merge: true }
-    );
+    await syncPromptlyUserDoc(currentUser);
   }
 
   async function handleGoogleSignIn() {
@@ -469,9 +467,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
     clearAuthGuidance();
     setBusy(true);
     try {
-      const auth = getFirebaseAuth();
-      const result = await signInWithPopup(auth, getGoogleProvider());
-      await syncUserToFirestore(result.user);
+      openGoogleSignInInNewTab(`${window.location.pathname}${window.location.search}`);
     } catch (e) {
       const resolved = resolveGoogleSignInError(e);
       const conflictEmail = emailFromGoogleCredentialError(e);
@@ -483,7 +479,6 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
       } else {
         setError(resolved.message);
       }
-    } finally {
       setBusy(false);
     }
   }
@@ -674,7 +669,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                   authProviderHint === "use-google" ? "ring-2 ring-emerald-500/40 ring-offset-2 ring-offset-page" : ""
                 }`}
               >
-                <span>{busy ? "Signing in…" : "Sign in with Google"}</span>
+                <span>{busy ? "Waiting for Google…" : "Sign in with Google"}</span>
                 <img src="/images/google-logo.png" alt="" aria-hidden className="h-[18px] w-[18px] shrink-0 object-contain" />
               </button>
 

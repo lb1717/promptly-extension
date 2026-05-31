@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getFirebaseAdminDb } from "@/lib/server/firebaseAdmin";
 import { requireWebFirebaseUser } from "@/lib/server/promptlyBackend";
+import { getActiveSalesLinkBySlug } from "@/lib/server/salesLinks";
 import {
   getStripeAllowPromotionCodes,
   getOriginFromRequest,
@@ -8,12 +9,13 @@ import {
   getStripePriceIdForTier,
   getStripeTrialDaysForTier,
   isStripeConfigured,
-  normalizePaidTier
+  normalizePaidTier,
+  type PaidTier
 } from "@/lib/server/stripe";
 
 export const runtime = "nodejs";
 
-type Body = { tier?: string };
+type Body = { tier?: string; salesLinkSlug?: string };
 
 export async function POST(request: Request) {
   try {
@@ -27,14 +29,20 @@ export async function POST(request: Request) {
     } catch {
       body = {};
     }
-    const paidTier = normalizePaidTier(String(body.tier || "pro"));
+    const salesLinkSlug = String(body.salesLinkSlug || "").trim().toLowerCase();
+    const salesLink = salesLinkSlug ? await getActiveSalesLinkBySlug(salesLinkSlug) : null;
+    if (salesLinkSlug && !salesLink) {
+      return NextResponse.json({ error: "This invite link is invalid or no longer active." }, { status: 400 });
+    }
+
+    let paidTier: PaidTier | null = salesLink?.tier ?? normalizePaidTier(String(body.tier || "pro"));
     if (!paidTier) {
       return NextResponse.json(
-        { error: 'Invalid tier — use "enterprise"' },
+        { error: 'Invalid tier — use "pro", "student", or "enterprise"' },
         { status: 400 }
       );
     }
-    if (paidTier !== "enterprise") {
+    if (!salesLink && paidTier !== "enterprise") {
       return NextResponse.json(
         { error: "This plan is not currently available for checkout." },
         { status: 400 }
@@ -55,24 +63,33 @@ export async function POST(request: Request) {
 
     const origin = getOriginFromRequest(request);
     const stripe = getStripe();
-    const trialDays = getStripeTrialDaysForTier(paidTier);
-    const allowPromotionCodes = getStripeAllowPromotionCodes();
+    const trialDays = salesLink ? null : getStripeTrialDaysForTier(paidTier);
+    const promotionCodeId = salesLink?.stripePromotionCodeId || null;
+    const allowPromotionCodes = promotionCodeId ? false : getStripeAllowPromotionCodes();
+    const returnBase = salesLink ? `${origin}/join/${encodeURIComponent(salesLink.slug)}` : `${origin}/account`;
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       payment_method_types: ["card"],
       payment_method_collection: "always",
       line_items: [{ price: priceId, quantity: 1 }],
-      allow_promotion_codes: allowPromotionCodes,
-      success_url: `${origin}/account?checkout=success`,
-      cancel_url: `${origin}/account?checkout=cancel`,
+      ...(promotionCodeId ? { discounts: [{ promotion_code: promotionCodeId }] } : { allow_promotion_codes: allowPromotionCodes }),
+      success_url: `${returnBase}?checkout=success`,
+      cancel_url: `${returnBase}?checkout=cancel`,
       client_reference_id: user.uid,
       customer: existingCustomer,
       customer_email: existingCustomer ? undefined : user.email || undefined,
-      metadata: { firebaseUid: user.uid },
+      metadata: {
+        firebaseUid: user.uid,
+        ...(salesLink ? { salesLinkSlug: salesLink.slug, salesLinkId: salesLink.id } : {})
+      },
       subscription_data: {
         ...(trialDays ? { trial_period_days: trialDays } : {}),
-        metadata: { firebaseUid: user.uid, subscriptionTier: paidTier }
+        metadata: {
+          firebaseUid: user.uid,
+          subscriptionTier: paidTier,
+          ...(salesLink ? { salesLinkSlug: salesLink.slug, salesLinkId: salesLink.id } : {})
+        }
       }
     });
 

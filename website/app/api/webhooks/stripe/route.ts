@@ -6,6 +6,7 @@ import {
   attachDefaultPaymentMethod,
   syncUserBillingFromSubscription
 } from "@/lib/server/stripeBillingSync";
+import { incrementSalesLinkSignupCount } from "@/lib/server/salesLinks";
 import { getStripe } from "@/lib/server/stripe";
 
 export const runtime = "nodejs";
@@ -59,6 +60,13 @@ export async function POST(request: Request) {
             typeof sub.customer === "string" ? sub.customer : sub.customer?.id;
           if (customerId) {
             await attachDefaultPaymentMethod(db, firebaseUid, stripe, customerId);
+          }
+          const salesLinkSlug =
+            session.metadata?.salesLinkSlug?.trim() || sub.metadata?.salesLinkSlug?.trim() || "";
+          if (salesLinkSlug) {
+            await incrementSalesLinkSignupCount(salesLinkSlug).catch((err) => {
+              console.error("sales link signup count increment failed", err);
+            });
           }
         }
         break;

@@ -2299,9 +2299,17 @@ export async function requireWebFirebaseUser(request: Request): Promise<{
     (decoded as { firebase?: { sign_in_provider?: string } }).firebase?.sign_in_provider || ""
   ).trim();
   const displayName = String((decoded as { name?: string }).name || "").trim();
+  const photoURL = String((decoded as { picture?: string }).picture || "").trim();
+  const provider =
+    signInProvider === "google.com"
+      ? "google"
+      : signInProvider === "password"
+        ? "password"
+        : signInProvider || "firebase";
   const promptlyUser = await upsertPromptlyUser(canonicalUid, email, {
-    provider: "firebase",
+    provider,
     ...(displayName ? { displayName } : {}),
+    ...(photoURL ? { photoURL } : {}),
     ...(signInProvider ? { signInProvider } : {})
   });
   return { ok: true, user: promptlyUser };

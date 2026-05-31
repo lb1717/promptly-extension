@@ -1,0 +1,289 @@
+import { FieldValue } from "firebase-admin/firestore";
+import { randomBytes } from "crypto";
+import { getFirebaseAdminDb } from "@/lib/server/firebaseAdmin";
+import { normalizePaidTier, type PaidTier } from "@/lib/server/stripe";
+
+const COLLECTION = "promptly_sales_links";
+
+export type SalesLinkTier = PaidTier;
+
+export type SalesLinkRecord = {
+  id: string;
+  slug: string;
+  recipientName: string;
+  tier: SalesLinkTier;
+  offerTitle: string;
+  offerDescription: string;
+  stripePromotionCodeId: string | null;
+  stripePromotionCodeLabel: string | null;
+  internalNote: string | null;
+  active: boolean;
+  signupCount: number;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+export type PublicSalesLink = {
+  slug: string;
+  recipientName: string;
+  tier: SalesLinkTier;
+  offerTitle: string;
+  offerDescription: string;
+};
+
+function slugifyBase(value: string): string {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+}
+
+function generateSlug(recipientName: string, preferred?: string): string {
+  const custom = slugifyBase(preferred || "");
+  if (custom.length >= 3) {
+    return custom;
+  }
+  const base = slugifyBase(recipientName) || "invite";
+  const suffix = randomBytes(3).toString("hex");
+  return `${base}-${suffix}`;
+}
+
+function docToRecord(id: string, data: FirebaseFirestore.DocumentData | undefined): SalesLinkRecord | null {
+  if (!data) return null;
+  const tier = normalizePaidTier(String(data.tier || ""));
+  if (!tier) return null;
+  const slug = String(data.slug || id).trim();
+  if (!slug) return null;
+  return {
+    id,
+    slug,
+    recipientName: String(data.recipientName || "").trim(),
+    tier,
+    offerTitle: String(data.offerTitle || "").trim(),
+    offerDescription: String(data.offerDescription || "").trim(),
+    stripePromotionCodeId:
+      typeof data.stripePromotionCodeId === "string" && data.stripePromotionCodeId.trim()
+        ? data.stripePromotionCodeId.trim()
+        : null,
+    stripePromotionCodeLabel:
+      typeof data.stripePromotionCodeLabel === "string" && data.stripePromotionCodeLabel.trim()
+        ? data.stripePromotionCodeLabel.trim()
+        : null,
+    internalNote:
+      typeof data.internalNote === "string" && data.internalNote.trim() ? data.internalNote.trim() : null,
+    active: data.active !== false,
+    signupCount: Math.max(0, Number(data.signupCount || 0)),
+    createdAt: data.createdAt?.toDate?.()?.toISOString?.() ?? null,
+    updatedAt: data.updatedAt?.toDate?.()?.toISOString?.() ?? null
+  };
+}
+
+function toPublicRecord(record: SalesLinkRecord): PublicSalesLink {
+  return {
+    slug: record.slug,
+    recipientName: record.recipientName,
+    tier: record.tier,
+    offerTitle: record.offerTitle,
+    offerDescription: record.offerDescription
+  };
+}
+
+async function slugExists(slug: string, excludeId?: string): Promise<boolean> {
+  const db = getFirebaseAdminDb();
+  const snap = await db.collection(COLLECTION).where("slug", "==", slug).limit(2).get();
+  return snap.docs.some((doc) => doc.id !== excludeId);
+}
+
+export async function adminListSalesLinks(): Promise<{ ok: true; links: SalesLinkRecord[] }> {
+  const db = getFirebaseAdminDb();
+  const snap = await db.collection(COLLECTION).orderBy("createdAt", "desc").get();
+  const links = snap.docs
+    .map((doc) => docToRecord(doc.id, doc.data()))
+    .filter((item): item is SalesLinkRecord => Boolean(item));
+  return { ok: true, links };
+}
+
+export async function getActiveSalesLinkBySlug(slug: string): Promise<SalesLinkRecord | null> {
+  const clean = String(slug || "").trim().toLowerCase();
+  if (!clean) return null;
+  const db = getFirebaseAdminDb();
+  const snap = await db.collection(COLLECTION).where("slug", "==", clean).limit(1).get();
+  const doc = snap.docs[0];
+  if (!doc) return null;
+  const record = docToRecord(doc.id, doc.data());
+  if (!record || !record.active) return null;
+  return record;
+}
+
+export async function getPublicSalesLinkBySlug(slug: string): Promise<PublicSalesLink | null> {
+  const record = await getActiveSalesLinkBySlug(slug);
+  return record ? toPublicRecord(record) : null;
+}
+
+export type CreateSalesLinkInput = {
+  recipientName: string;
+  tier: string;
+  offerTitle: string;
+  offerDescription: string;
+  stripePromotionCodeId?: string | null;
+  stripePromotionCodeLabel?: string | null;
+  internalNote?: string | null;
+  slug?: string | null;
+  active?: boolean;
+};
+
+export async function adminCreateSalesLink(input: CreateSalesLinkInput): Promise<{ ok: true; link: SalesLinkRecord }> {
+  const recipientName = String(input.recipientName || "").trim();
+  const offerTitle = String(input.offerTitle || "").trim();
+  const offerDescription = String(input.offerDescription || "").trim();
+  const tier = normalizePaidTier(String(input.tier || ""));
+  if (!recipientName) {
+    throw new Error("Recipient name is required.");
+  }
+  if (!offerTitle) {
+    throw new Error("Offer headline is required.");
+  }
+  if (!offerDescription) {
+    throw new Error("Offer description is required.");
+  }
+  if (!tier) {
+    throw new Error('Plan tier must be "pro", "student", or "enterprise".');
+  }
+
+  let slug = generateSlug(recipientName, input.slug || undefined).toLowerCase();
+  if (await slugExists(slug)) {
+    slug = generateSlug(recipientName);
+  }
+  if (await slugExists(slug)) {
+    throw new Error("Could not generate a unique link slug. Try a custom slug.");
+  }
+
+  const promoId =
+    typeof input.stripePromotionCodeId === "string" && input.stripePromotionCodeId.trim()
+      ? input.stripePromotionCodeId.trim()
+      : null;
+  const promoLabel =
+    typeof input.stripePromotionCodeLabel === "string" && input.stripePromotionCodeLabel.trim()
+      ? input.stripePromotionCodeLabel.trim()
+      : null;
+  const internalNote =
+    typeof input.internalNote === "string" && input.internalNote.trim() ? input.internalNote.trim() : null;
+
+  const db = getFirebaseAdminDb();
+  const ref = db.collection(COLLECTION).doc();
+  const payload = {
+    slug,
+    recipientName,
+    tier,
+    offerTitle,
+    offerDescription,
+    stripePromotionCodeId: promoId,
+    stripePromotionCodeLabel: promoLabel,
+    internalNote,
+    active: input.active !== false,
+    signupCount: 0,
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp()
+  };
+  await ref.set(payload);
+  const saved = await ref.get();
+  const link = docToRecord(saved.id, saved.data());
+  if (!link) {
+    throw new Error("Failed to read saved sales link.");
+  }
+  return { ok: true, link };
+}
+
+export type UpdateSalesLinkInput = Partial<{
+  recipientName: string;
+  tier: string;
+  offerTitle: string;
+  offerDescription: string;
+  stripePromotionCodeId: string | null;
+  stripePromotionCodeLabel: string | null;
+  internalNote: string | null;
+  active: boolean;
+}>;
+
+export async function adminUpdateSalesLink(
+  id: string,
+  patch: UpdateSalesLinkInput
+): Promise<{ ok: true; link: SalesLinkRecord }> {
+  const cleanId = String(id || "").trim();
+  if (!cleanId) {
+    throw new Error("Missing sales link id.");
+  }
+  const db = getFirebaseAdminDb();
+  const ref = db.collection(COLLECTION).doc(cleanId);
+  const existing = await ref.get();
+  if (!existing.exists) {
+    throw new Error("Sales link not found.");
+  }
+
+  const update: Record<string, unknown> = { updatedAt: FieldValue.serverTimestamp() };
+
+  if (typeof patch.recipientName === "string") {
+    const name = patch.recipientName.trim();
+    if (!name) throw new Error("Recipient name cannot be empty.");
+    update.recipientName = name;
+  }
+  if (typeof patch.offerTitle === "string") {
+    const title = patch.offerTitle.trim();
+    if (!title) throw new Error("Offer headline cannot be empty.");
+    update.offerTitle = title;
+  }
+  if (typeof patch.offerDescription === "string") {
+    const desc = patch.offerDescription.trim();
+    if (!desc) throw new Error("Offer description cannot be empty.");
+    update.offerDescription = desc;
+  }
+  if (typeof patch.tier === "string") {
+    const tier = normalizePaidTier(patch.tier);
+    if (!tier) throw new Error('Plan tier must be "pro", "student", or "enterprise".');
+    update.tier = tier;
+  }
+  if (patch.stripePromotionCodeId !== undefined) {
+    update.stripePromotionCodeId =
+      typeof patch.stripePromotionCodeId === "string" && patch.stripePromotionCodeId.trim()
+        ? patch.stripePromotionCodeId.trim()
+        : null;
+  }
+  if (patch.stripePromotionCodeLabel !== undefined) {
+    update.stripePromotionCodeLabel =
+      typeof patch.stripePromotionCodeLabel === "string" && patch.stripePromotionCodeLabel.trim()
+        ? patch.stripePromotionCodeLabel.trim()
+        : null;
+  }
+  if (patch.internalNote !== undefined) {
+    update.internalNote =
+      typeof patch.internalNote === "string" && patch.internalNote.trim() ? patch.internalNote.trim() : null;
+  }
+  if (typeof patch.active === "boolean") {
+    update.active = patch.active;
+  }
+
+  await ref.set(update, { merge: true });
+  const saved = await ref.get();
+  const link = docToRecord(saved.id, saved.data());
+  if (!link) {
+    throw new Error("Failed to read updated sales link.");
+  }
+  return { ok: true, link };
+}
+
+export async function incrementSalesLinkSignupCount(slug: string): Promise<void> {
+  const record = await getActiveSalesLinkBySlug(slug);
+  if (!record) return;
+  const db = getFirebaseAdminDb();
+  await db
+    .collection(COLLECTION)
+    .doc(record.id)
+    .set(
+      {
+        signupCount: FieldValue.increment(1),
+        updatedAt: FieldValue.serverTimestamp()
+      },
+      { merge: true }
+    );
+}

@@ -150,6 +150,9 @@ export function resolveGoogleSignInError(error: unknown): { message: string; hin
   if (getFirebaseErrorCode(error) === "auth/popup-closed-by-user") {
     return { message: "Google sign-in was cancelled.", hint: null };
   }
+  if (getFirebaseErrorCode(error) === "auth/redirect-cancelled-by-user") {
+    return { message: "Google sign-in was cancelled.", hint: null };
+  }
   return { message: getFirebaseErrorMessage(error), hint: null };
 }
 
