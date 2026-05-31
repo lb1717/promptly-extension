@@ -1,14 +1,18 @@
-import type { Metadata } from "next";
 import Link from "next/link";
 import { AmbientBackground } from "@/components/AmbientBackground";
 import { Footer } from "@/components/Footer";
 import { Navbar } from "@/components/Navbar";
 import { PAPER_ENTRIES } from "@/lib/researchContent";
 
-export const metadata: Metadata = {
-  title: "Papers | Promptly Research Labs",
-  description: "A curated reading list of MIT and arXiv sources behind the Promptly Research Labs pages."
-};
+import { buildPageMetadata } from "@/lib/seo";
+
+export const metadata = buildPageMetadata({
+  title: "Papers & Research Sources",
+  description:
+    "A curated reading list of MIT and arXiv sources on prompt engineering, instruction drift, and automatic prompt optimisation behind Promptly Research Labs.",
+  path: "/papers",
+  keywords: ["prompt engineering papers", "MIT prompt research", "arXiv prompt optimization", "Promptly Labs"]
+});
 
 export default function PapersPage() {
   return (

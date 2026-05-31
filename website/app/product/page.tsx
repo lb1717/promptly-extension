@@ -1,4 +1,3 @@
-import type { Metadata } from "next";
 import { AmbientBackground } from "@/components/AmbientBackground";
 import { Benefits } from "@/components/Benefits";
 import { DemoSection } from "@/components/DemoSection";
@@ -8,12 +7,14 @@ import { Hero } from "@/components/Hero";
 import { IntegratedWith } from "@/components/IntegratedWith";
 import { Navbar } from "@/components/Navbar";
 import { PricingSection } from "@/components/PricingSection";
+import { buildPageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
-  title: "Promptly Labs",
+export const metadata = buildPageMetadata({
+  title: "Promptly — One-Click Prompt Improvement for ChatGPT, Claude & Gemini",
   description:
-    "One-click prompt improvement inside ChatGPT, Claude, and Gemini—clearer intent, structured outputs, and usage tracking."
-};
+    "Improve AI prompts in one click inside ChatGPT, Claude, and Gemini. Promptly rewrites for clearer intent, structured outputs, and less wasted effort.",
+  path: "/product"
+});
 
 export default function ProductPage() {
   return (

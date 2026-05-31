@@ -1,4 +1,3 @@
-import type { Metadata } from "next";
 import Link from "next/link";
 import { AmbientBackground } from "@/components/AmbientBackground";
 import { PrivacyPolicyDocument } from "@/components/privacy/PrivacyPolicyDocument";
@@ -6,11 +5,14 @@ import { Footer } from "@/components/Footer";
 import { Navbar } from "@/components/Navbar";
 import { SITE } from "@/lib/constants";
 
-export const metadata: Metadata = {
-  title: "Privacy Policy | Promptly",
+import { buildPageMetadata } from "@/lib/seo";
+
+export const metadata = buildPageMetadata({
+  title: "Privacy Policy",
   description:
-    "Privacy Policy for Promptly — website, APIs, and browser extension. How we collect, use, and share information."
-};
+    "Privacy Policy for Promptly — website, APIs, and browser extension. How we collect, use, and share information.",
+  path: "/privacy"
+});
 
 const LAST_UPDATED = "May 26, 2026";
 
