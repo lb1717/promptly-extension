@@ -12,7 +12,7 @@ const PLANS = [
       "Daily limited tokens"
     ],
     cta: "Get started",
-    href: "/account?plan=free",
+    href: "/get-started",
     featured: false,
     available: true
   },

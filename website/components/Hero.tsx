@@ -52,10 +52,10 @@ export function Hero() {
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3">
             <Button
-              href={SITE.chromeStoreUrl}
+              href={SITE.getStartedPath}
               className={ctaShouldShine ? "promptly-cta-shine relative overflow-hidden" : "relative overflow-hidden"}
             >
-              Add Promptly to your browser
+              Get started
             </Button>
           </div>
         </div>

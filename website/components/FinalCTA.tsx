@@ -13,8 +13,8 @@ export type FinalCTAProps = {
 export function FinalCTA({
   title = "Better prompts, one click",
   description = "Install Promptly and improve every prompt before you send—no prompt engineering required.",
-  primaryHref = SITE.chromeStoreUrl,
-  primaryLabel = "Add Promptly to your browser",
+  primaryHref = SITE.getStartedPath,
+  primaryLabel = "Get started",
   secondaryHref,
   secondaryLabel
 }: FinalCTAProps) {

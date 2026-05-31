@@ -17,7 +17,7 @@ import {
 
 export const runtime = "nodejs";
 
-type Body = { tier?: string; salesLinkSlug?: string };
+type Body = { tier?: string; salesLinkSlug?: string; onboarding?: boolean };
 
 export async function POST(request: Request) {
   try {
@@ -68,7 +68,12 @@ export async function POST(request: Request) {
     const trialDays = salesLink ? null : getStripeTrialDaysForTier(paidTier);
     const checkoutDiscount = stripeCheckoutDiscountItem(salesLink?.stripePromotionCodeId);
     const allowPromotionCodes = checkoutDiscount ? false : getStripeAllowPromotionCodes();
-    const returnBase = salesLink ? `${origin}/join/${encodeURIComponent(salesLink.slug)}` : `${origin}/account`;
+    const onboarding = body.onboarding === true;
+    const returnBase = salesLink
+      ? `${origin}/join/${encodeURIComponent(salesLink.slug)}`
+      : onboarding
+        ? `${origin}/get-started`
+        : `${origin}/account`;
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",

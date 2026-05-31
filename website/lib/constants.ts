@@ -43,6 +43,8 @@ export const BROWSER_EXTENSION_TARGETS = RAW_BROWSER_EXTENSION_TARGETS.filter(
 export const SITE = {
   name: "Promptly",
   navBrand: "Promptly Labs",
+  /** Public general onboarding funnel (not sales invite links). */
+  getStartedPath: "/get-started",
   chromeStoreUrl: `https://chromewebstore.google.com/detail/promptly/${CHROME_EXTENSION_ID}`,
   edgeAddonsUrl: String(process.env.NEXT_PUBLIC_EDGE_ADDONS_URL || "").trim(),
   /** Production Chrome extension ID — used to sync Firebase session from /account to the extension. */

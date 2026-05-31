@@ -112,3 +112,31 @@ export async function sendPromptlyExtensionMessageToCandidates(
   }
   throw new Error(errors[0] || "Promptly extension not reachable");
 }
+
+type ExtensionSessionUser = {
+  getIdToken: (forceRefresh?: boolean) => Promise<string>;
+  email: string | null;
+  uid: string;
+};
+
+/** Push Firebase session to the installed extension (returns false if extension not reachable). */
+export async function syncWebsiteSessionToExtension(user: ExtensionSessionUser): Promise<boolean> {
+  const candidateIds = getPromptlyExtensionCandidateIds();
+  if (!candidateIds.length) {
+    return false;
+  }
+  try {
+    const idToken = await user.getIdToken(true);
+    const { response } = await sendPromptlyExtensionMessageToCandidates(candidateIds, {
+      type: "PROMPTLY_WEBSITE_SESSION_SYNC",
+      idToken,
+      email: user.email || "",
+      uid: user.uid,
+      expiresAtSec: Math.floor(Date.now() / 1000) + 3300
+    });
+    const r = response as { ok?: boolean } | undefined;
+    return r?.ok !== false;
+  } catch {
+    return false;
+  }
+}
