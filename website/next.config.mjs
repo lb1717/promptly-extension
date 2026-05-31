@@ -1,9 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  // Use the default `.next` folder in local dev (avoids dev-server cache bugs).
-  // Set NEXT_DIST_DIR=.next-build on Vercel when the Output Directory is `.next-build`.
-  ...(process.env.NEXT_DIST_DIR ? { distDir: process.env.NEXT_DIST_DIR } : {}),
+  // Local dev uses `.next` (avoids cache bugs). Production builds use `.next-build` to match Vercel Output Directory.
+  distDir:
+    process.env.NEXT_DIST_DIR ||
+    (process.env.NODE_ENV === "production" ? ".next-build" : ".next"),
   async headers() {
     return [
       {
