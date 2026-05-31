@@ -80,6 +80,34 @@ export function getStripeAllowPromotionCodes(): boolean {
   return !(raw === "0" || raw === "false" || raw === "no" || raw === "off");
 }
 
+export type StripeCheckoutDiscountItem = { promotion_code: string } | { coupon: string };
+
+/**
+ * Stripe Checkout accepts either a promotion code ID (promo_...) or a coupon ID (e.g. CI9wdF2Y).
+ * Admins often copy the coupon ID from Product catalogue → Coupons — that uses the coupon field.
+ */
+export function stripeCheckoutDiscountItem(
+  stripeDiscountRef: string | null | undefined
+): StripeCheckoutDiscountItem | null {
+  const value = String(stripeDiscountRef || "").trim();
+  if (!value) return null;
+  if (value.startsWith("promo_")) {
+    return { promotion_code: value };
+  }
+  return { coupon: value };
+}
+
+export function formatStripeCheckoutError(message: string): string {
+  const text = String(message || "");
+  if (/no such promotion code/i.test(text)) {
+    return "That Stripe discount ID is not a promotion code (promo_…). Paste the coupon ID from the coupon page (e.g. CI9wdF2Y), or create a promotion code and use promo_….";
+  }
+  if (/no such coupon/i.test(text)) {
+    return "Stripe could not find that coupon ID. Copy the ID from Product catalogue → Coupons → your coupon → Details.";
+  }
+  return text;
+}
+
 export function getOriginFromRequest(request: Request): string {
   const env = String(process.env.NEXT_PUBLIC_APP_URL || process.env.APP_BASE_URL || "")
     .trim()

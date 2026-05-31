@@ -3,6 +3,7 @@ import { getFirebaseAdminDb } from "@/lib/server/firebaseAdmin";
 import { requireWebFirebaseUser } from "@/lib/server/promptlyBackend";
 import { getActiveSalesLinkBySlug } from "@/lib/server/salesLinks";
 import {
+  formatStripeCheckoutError,
   getStripeAllowPromotionCodes,
   getOriginFromRequest,
   getStripe,
@@ -10,6 +11,7 @@ import {
   getStripeTrialDaysForTier,
   isStripeConfigured,
   normalizePaidTier,
+  stripeCheckoutDiscountItem,
   type PaidTier
 } from "@/lib/server/stripe";
 
@@ -64,8 +66,8 @@ export async function POST(request: Request) {
     const origin = getOriginFromRequest(request);
     const stripe = getStripe();
     const trialDays = salesLink ? null : getStripeTrialDaysForTier(paidTier);
-    const promotionCodeId = salesLink?.stripePromotionCodeId || null;
-    const allowPromotionCodes = promotionCodeId ? false : getStripeAllowPromotionCodes();
+    const checkoutDiscount = stripeCheckoutDiscountItem(salesLink?.stripePromotionCodeId);
+    const allowPromotionCodes = checkoutDiscount ? false : getStripeAllowPromotionCodes();
     const returnBase = salesLink ? `${origin}/join/${encodeURIComponent(salesLink.slug)}` : `${origin}/account`;
 
     const session = await stripe.checkout.sessions.create({
@@ -73,7 +75,7 @@ export async function POST(request: Request) {
       payment_method_types: ["card"],
       payment_method_collection: "always",
       line_items: [{ price: priceId, quantity: 1 }],
-      ...(promotionCodeId ? { discounts: [{ promotion_code: promotionCodeId }] } : { allow_promotion_codes: allowPromotionCodes }),
+      ...(checkoutDiscount ? { discounts: [checkoutDiscount] } : { allow_promotion_codes: allowPromotionCodes }),
       success_url: `${returnBase}?checkout=success`,
       cancel_url: `${returnBase}?checkout=cancel`,
       client_reference_id: user.uid,
@@ -98,7 +100,7 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({ ok: true, url: session.url });
   } catch (error) {
-    const message = String(error instanceof Error ? error.message : error);
+    const message = formatStripeCheckoutError(String(error instanceof Error ? error.message : error));
     if (message.includes("401") || message.toLowerCase().includes("auth")) {
       return NextResponse.json({ error: message }, { status: 401 });
     }

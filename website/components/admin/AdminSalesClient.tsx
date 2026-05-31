@@ -258,15 +258,16 @@ export function AdminSalesClient() {
               />
             </label>
             <label className="block text-sm">
-              <span className="mb-1 block text-violet-200/80">Stripe promotion code ID</span>
+              <span className="mb-1 block text-violet-200/80">Stripe coupon or promotion code ID</span>
               <input
                 value={promoId}
                 onChange={(e) => setPromoId(e.target.value)}
-                placeholder="promo_..."
+                placeholder="CI9wdF2Y or promo_..."
                 className="w-full rounded-lg border border-violet-500/25 bg-[#1a1228] px-3 py-2 text-sm text-white outline-none focus:border-violet-400"
               />
               <span className="mt-1 block text-xs text-violet-300/60">
-                From Stripe Dashboard → Product catalog → Coupons → Promotion codes. Auto-applied at checkout.
+                Paste the coupon ID from Product catalogue → Coupons → Details (e.g. CI9wdF2Y), or a promotion code
+                ID (promo_…) if you created one. Auto-applied at checkout.
               </span>
             </label>
             <label className="block text-sm">
@@ -371,8 +372,8 @@ export function AdminSalesClient() {
       <section className="mt-6 rounded-2xl border border-violet-500/15 bg-[#221830]/40 p-5 text-sm text-violet-200/75">
         <h3 className="font-semibold text-violet-100">How it works</h3>
         <ol className="mt-3 list-decimal space-y-2 pl-5">
-          <li>Create a coupon and promotion code in Stripe (e.g. 100% off for 3 months).</li>
-          <li>Create an invite link here with the recipient name, plan, offer copy, and Stripe promo ID.</li>
+          <li>Create a coupon in Stripe (e.g. 100% off for 1 month) and copy its ID from the coupon Details.</li>
+          <li>Create an invite link with that coupon ID (e.g. CI9wdF2Y) or a promotion code ID (promo_…).</li>
           <li>Send the link — recipients see a 4-step flow: welcome → account → plan → install extension.</li>
           <li>When they activate the plan, Stripe Checkout opens with your promo code already applied.</li>
         </ol>
