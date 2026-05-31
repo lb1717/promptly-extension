@@ -96,6 +96,7 @@ export function GeneralOnboardingClient() {
   });
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [extensionDetected, setExtensionDetected] = useState(false);
+  const [storeLinkClicked, setStoreLinkClicked] = useState(false);
   const [openingAi, setOpeningAi] = useState<string | null>(null);
 
   const [emailAuthMode, setEmailAuthMode] = useState<"signin" | "register">("register");
@@ -591,6 +592,7 @@ export function GeneralOnboardingClient() {
                   href={SITE.chromeStoreUrl}
                   target="_blank"
                   rel="noopener noreferrer"
+                  onClick={() => setStoreLinkClicked(true)}
                   className="inline-flex flex-1 items-center justify-center rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800"
                 >
                   Add to Chrome
@@ -600,6 +602,7 @@ export function GeneralOnboardingClient() {
                     href={edgeUrl}
                     target="_blank"
                     rel="noopener noreferrer"
+                    onClick={() => setStoreLinkClicked(true)}
                     className="inline-flex flex-1 items-center justify-center rounded-xl border border-line bg-cream px-4 py-2.5 text-sm font-semibold text-ink hover:bg-cream-dark"
                   >
                     Add to Edge
@@ -633,10 +636,14 @@ export function GeneralOnboardingClient() {
               <p className="text-sm text-emerald-700">Extension detected — you&apos;re connected.</p>
             ) : null}
 
+            {!storeLinkClicked ? (
+              <p className="text-center text-xs text-faint">Add Promptly to Chrome or Edge above to continue.</p>
+            ) : null}
             <button
               type="button"
               onClick={() => goToStep(5)}
-              className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-cream hover:bg-neutral-800"
+              disabled={!storeLinkClicked}
+              className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {extensionDetected ? "Finish setup" : "I've installed — finish setup"}
             </button>
