@@ -22,7 +22,7 @@ import {
   resolveEmailSignInError,
   resolveGoogleSignInError
 } from "@/lib/firebaseAuthAccountHints";
-import { listenForGoogleSignInReturn, openGoogleSignInInNewTab } from "@/lib/firebaseGoogleAuth";
+import { listenForGoogleSignInReturn, signInWithGoogleInteractive } from "@/lib/firebaseGoogleAuth";
 
 type PublicSalesLink = {
   slug: string;
@@ -275,11 +275,22 @@ export function SalesJoinClient({ slug }: { slug: string }) {
     setError("");
     setNotice("");
     setBusy(true);
+    let openedTab = false;
     try {
-      openGoogleSignInInNewTab(`${window.location.pathname}${window.location.search}`);
+      const returnTo = `${window.location.pathname}${window.location.search}`;
+      const flow = await signInWithGoogleInteractive(returnTo);
+      if (flow.status === "success") {
+        await syncUserToFirestore(flow.user);
+        setNotice("Signed in with Google.");
+      } else if (flow.status === "cancelled") {
+        setError("Google sign-in was cancelled.");
+      } else {
+        openedTab = true;
+      }
     } catch (e) {
       setError(resolveGoogleSignInError(e).message);
-      setBusy(false);
+    } finally {
+      if (!openedTab) setBusy(false);
     }
   }
 

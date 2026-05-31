@@ -31,7 +31,7 @@ import {
   resolveGoogleSignInError,
   type AuthProviderHint
 } from "@/lib/firebaseAuthAccountHints";
-import { listenForGoogleSignInReturn, openGoogleSignInInNewTab } from "@/lib/firebaseGoogleAuth";
+import { listenForGoogleSignInReturn, signInWithGoogleInteractive } from "@/lib/firebaseGoogleAuth";
 
 function formatJoinDate(user: User | null): string {
   if (!user?.metadata?.creationTime) return "—";
@@ -466,8 +466,18 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
     setAccountNotice("");
     clearAuthGuidance();
     setBusy(true);
+    let openedTab = false;
     try {
-      openGoogleSignInInNewTab(`${window.location.pathname}${window.location.search}`);
+      const returnTo = `${window.location.pathname}${window.location.search}`;
+      const flow = await signInWithGoogleInteractive(returnTo);
+      if (flow.status === "success") {
+        await syncUserToFirestore(flow.user);
+        setAccountNotice("Signed in with Google.");
+      } else if (flow.status === "cancelled") {
+        setError("Google sign-in was cancelled.");
+      } else {
+        openedTab = true;
+      }
     } catch (e) {
       const resolved = resolveGoogleSignInError(e);
       const conflictEmail = emailFromGoogleCredentialError(e);
@@ -479,7 +489,8 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
       } else {
         setError(resolved.message);
       }
-      setBusy(false);
+    } finally {
+      if (!openedTab) setBusy(false);
     }
   }
 

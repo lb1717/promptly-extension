@@ -1,5 +1,5 @@
 import { FirebaseApp, getApp, getApps, initializeApp } from "firebase/app";
-import { GoogleAuthProvider, getAuth } from "firebase/auth";
+import { GoogleAuthProvider, browserLocalPersistence, getAuth, setPersistence } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
 function required(name: string, value: string | undefined) {
@@ -28,8 +28,16 @@ export function getFirebaseApp(): FirebaseApp {
   return initializeApp(getFirebaseConfig());
 }
 
+let authPersistenceReady: Promise<void> | null = null;
+
 export function getFirebaseAuth() {
-  return getAuth(getFirebaseApp());
+  const auth = getAuth(getFirebaseApp());
+  if (!authPersistenceReady) {
+    authPersistenceReady = setPersistence(auth, browserLocalPersistence).catch(() => {
+      /* Safari private mode / restricted storage — Firebase falls back internally */
+    });
+  }
+  return auth;
 }
 
 export function getFirebaseDb() {

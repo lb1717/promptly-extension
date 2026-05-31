@@ -5,18 +5,21 @@ import {
   consumeGoogleSignInRedirectResult,
   notifyGoogleSignInOpenerError,
   notifyGoogleSignInOpenerSuccess,
+  signInWithGooglePopupInTab,
   startGoogleSignInRedirect,
   tryCloseGoogleSignInTab,
+  waitForAuthenticatedUser,
   wasGoogleRedirectPending
 } from "@/lib/firebaseGoogleAuth";
-import { resolveGoogleSignInError } from "@/lib/firebaseAuthAccountHints";
+import { getFirebaseErrorCode, resolveGoogleSignInError } from "@/lib/firebaseAuthAccountHints";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
 import { syncPromptlyUserDoc } from "@/lib/promptlyUserSync";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { User } from "firebase/auth";
 
-type Status = "loading" | "redirecting" | "done" | "cancelled" | "error";
+type Status = "loading" | "ready" | "working" | "done" | "cancelled" | "error";
 
 export function GoogleSignInCallbackClient() {
   const searchParams = useSearchParams();
@@ -25,78 +28,127 @@ export function GoogleSignInCallbackClient() {
   const [errorMessage, setErrorMessage] = useState("");
   const finishedRef = useRef(false);
 
+  const finishSuccess = useCallback(async (user: User) => {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
+    clearGoogleRedirectPending();
+    await syncPromptlyUserDoc(user);
+    setStatus("done");
+    notifyGoogleSignInOpenerSuccess();
+    tryCloseGoogleSignInTab();
+  }, []);
+
+  const finishError = useCallback((message: string) => {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
+    clearGoogleRedirectPending();
+    setErrorMessage(message);
+    setStatus("error");
+    notifyGoogleSignInOpenerError(message);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
-
-    async function finishSuccess() {
-      if (finishedRef.current || cancelled) return;
-      finishedRef.current = true;
-      clearGoogleRedirectPending();
-      setStatus("done");
-      notifyGoogleSignInOpenerSuccess();
-      tryCloseGoogleSignInTab();
-    }
-
-    async function finishError(message: string) {
-      if (finishedRef.current || cancelled) return;
-      finishedRef.current = true;
-      clearGoogleRedirectPending();
-      setErrorMessage(message);
-      setStatus("error");
-      notifyGoogleSignInOpenerError(message);
-    }
 
     (async () => {
       try {
         const result = await consumeGoogleSignInRedirectResult();
         if (cancelled || finishedRef.current) return;
 
-        const hadPendingRedirect = wasGoogleRedirectPending();
-        clearGoogleRedirectPending();
-
         if (result?.user) {
-          await syncPromptlyUserDoc(result.user);
-          await finishSuccess();
+          await finishSuccess(result.user);
           return;
         }
 
         const auth = getFirebaseAuth();
         if (auth.currentUser) {
-          await syncPromptlyUserDoc(auth.currentUser);
-          await finishSuccess();
+          await finishSuccess(auth.currentUser);
           return;
         }
 
+        const hadPendingRedirect = wasGoogleRedirectPending();
+        clearGoogleRedirectPending();
+
         if (hadPendingRedirect) {
+          const user = await waitForAuthenticatedUser(8000);
+          if (cancelled || finishedRef.current) return;
+          if (user) {
+            await finishSuccess(user);
+            return;
+          }
           finishedRef.current = true;
           setStatus("cancelled");
           notifyGoogleSignInOpenerError("Google sign-in was cancelled.");
           return;
         }
 
-        setStatus("redirecting");
-        await startGoogleSignInRedirect();
+        if (!cancelled) {
+          setStatus("ready");
+        }
       } catch (e) {
         if (cancelled || finishedRef.current) return;
         const resolved = resolveGoogleSignInError(e);
-        await finishError(resolved.message);
+        finishError(resolved.message);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [finishError, finishSuccess]);
+
+  async function handleContinueWithGoogle() {
+    if (finishedRef.current || status === "working") return;
+    setStatus("working");
+    setErrorMessage("");
+
+    try {
+      const cred = await signInWithGooglePopupInTab();
+      await finishSuccess(cred.user);
+    } catch (e) {
+      const code = getFirebaseErrorCode(e);
+      if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") {
+        finishedRef.current = true;
+        setStatus("cancelled");
+        notifyGoogleSignInOpenerError("Google sign-in was cancelled.");
+        return;
+      }
+
+      try {
+        await startGoogleSignInRedirect();
+      } catch (redirectError) {
+        const resolved = resolveGoogleSignInError(redirectError);
+        finishError(resolved.message);
+      }
+    }
+  }
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-page px-6 py-16 text-ink">
       <img src="/images/promptly-logo.png" alt="Promptly" className="h-12 w-auto object-contain" />
       <h1 className="mt-4 text-xl font-semibold">Google sign-in</h1>
 
-      {status === "loading" || status === "redirecting" ? (
+      {status === "loading" || status === "working" ? (
         <p className="mt-3 text-sm text-muted">
-          {status === "redirecting" ? "Redirecting to Google…" : "Completing sign-in…"}
+          {status === "working" ? "Opening Google…" : "Completing sign-in…"}
         </p>
+      ) : null}
+
+      {status === "ready" ? (
+        <div className="mt-6 flex max-w-sm flex-col items-center gap-4 text-center">
+          <p className="text-sm text-muted">Continue in this tab to connect your Promptly account with Google.</p>
+          <button
+            type="button"
+            onClick={handleContinueWithGoogle}
+            className="inline-flex w-full items-center justify-center gap-2.5 rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800"
+          >
+            Continue with Google
+            <img src="/images/google-logo.png" alt="" aria-hidden className="h-[18px] w-[18px] shrink-0 object-contain" />
+          </button>
+          <Link href={returnTo} className="text-sm font-semibold text-muted underline hover:text-ink">
+            Back to Promptly
+          </Link>
+        </div>
       ) : null}
 
       {status === "done" ? (
@@ -111,7 +163,17 @@ export function GoogleSignInCallbackClient() {
       {status === "cancelled" ? (
         <div className="mt-4 max-w-sm text-center">
           <p className="text-sm text-muted">Sign-in was cancelled. Close this tab and try again from Promptly.</p>
-          <Link href={returnTo} className="mt-4 inline-block text-sm font-semibold text-ink underline">
+          <button
+            type="button"
+            onClick={() => {
+              finishedRef.current = false;
+              void handleContinueWithGoogle();
+            }}
+            className="mt-4 inline-flex items-center justify-center rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800"
+          >
+            Try again
+          </button>
+          <Link href={returnTo} className="mt-3 block text-sm font-semibold text-ink underline">
             Back to Promptly
           </Link>
         </div>
@@ -120,7 +182,17 @@ export function GoogleSignInCallbackClient() {
       {status === "error" ? (
         <div className="mt-4 max-w-sm text-center">
           <p className="text-sm text-red-700">{errorMessage || "Google sign-in failed."}</p>
-          <Link href={returnTo} className="mt-4 inline-block text-sm font-semibold text-ink underline">
+          <button
+            type="button"
+            onClick={() => {
+              finishedRef.current = false;
+              setStatus("ready");
+            }}
+            className="mt-4 inline-flex items-center justify-center rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800"
+          >
+            Try again
+          </button>
+          <Link href={returnTo} className="mt-3 block text-sm font-semibold text-ink underline">
             Back to Promptly
           </Link>
         </div>
