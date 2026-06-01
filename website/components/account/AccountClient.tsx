@@ -1173,7 +1173,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                   <p className="mt-2 text-xs text-faint">
                     {billing.stripeConfigured
                       ? "Webhook: POST /api/webhooks/stripe — syncs subscription and invoices to Firestore."
-                      : "Set STRIPE_SECRET_KEY and price IDs to enable Checkout and the customer portal."}
+                      : "Stripe checkout uses price IDs from lib/server/stripe.ts — set STRIPE_SECRET_KEY to enable billing."}
                   </p>
                 </div>
               </div>

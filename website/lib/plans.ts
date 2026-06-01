@@ -63,7 +63,7 @@ export const WEBSITE_PLANS: readonly WebsitePlan[] = [
       "Highest model quality available",
       "Fastest model quality available",
       "Usage statistics to understand AI across teams and cut time on prompting",
-      "Designed for founders and executives tracking AI performance firm-wide and presenting AI efficiency"
+      "Designed for founders and executives tracking AI performance firm-wide"
     ],
     paid: true,
     available: true

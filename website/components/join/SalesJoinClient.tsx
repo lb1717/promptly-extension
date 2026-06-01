@@ -412,7 +412,7 @@ export function SalesJoinClient({ slug }: { slug: string }) {
     }
     if (!checkoutStatus.tierAvailable) {
       const tierLabel = link?.tier === "enterprise" ? "Enterprise" : link?.tier === "pro" ? "Pro" : "Student";
-      return `The ${tierLabel} plan price is not configured. Add the matching STRIPE_PRICE_ID_* env var in Stripe Dashboard → Products.`;
+      return `The ${tierLabel} plan price is not configured. Check lib/server/stripe.ts price IDs in Stripe Dashboard → Products.`;
     }
     return "";
   }, [checkoutStatus, user, link?.tier]);

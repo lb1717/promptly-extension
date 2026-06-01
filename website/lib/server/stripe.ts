@@ -32,12 +32,10 @@ export type PaidTier = "pro" | "student" | "enterprise";
 export function getStripePriceIdForTier(tier: string): string | null {
   const t = tier.toLowerCase();
   if (t === "pro" || t === "plus" || t === "professional") {
-    const id = String(process.env.STRIPE_PRICE_ID_PRO || "").trim();
-    return id || PRO_PRICE_ID;
+    return PRO_PRICE_ID;
   }
   if (t === "student") {
-    const id = String(process.env.STRIPE_PRICE_ID_STUDENT || "").trim();
-    return id || STUDENT_PRICE_ID;
+    return STUDENT_PRICE_ID;
   }
   if (t === "enterprise") {
     return ENTERPRISE_PRICE_ID;
