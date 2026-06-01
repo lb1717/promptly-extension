@@ -31,6 +31,12 @@ export async function POST(request: Request) {
         typeof b.stripe_promotion_code_id === "string" ? b.stripe_promotion_code_id : null,
       stripePromotionCodeLabel:
         typeof b.stripe_promotion_code_label === "string" ? b.stripe_promotion_code_label : null,
+      offerFreeTrial: b.offer_free_trial === true,
+      trialDays:
+        b.offer_free_trial === true && b.trial_days != null && b.trial_days !== ""
+          ? Number(b.trial_days)
+          : null,
+      skipPaymentMethod: b.skip_payment_method === true,
       internalNote: typeof b.internal_note === "string" ? b.internal_note : null,
       slug: typeof b.slug === "string" ? b.slug : null,
       active: b.active !== false

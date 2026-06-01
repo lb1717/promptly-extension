@@ -33,6 +33,14 @@ export async function PATCH(request: Request, { params }: Params) {
           : typeof b.stripe_promotion_code_label === "string"
             ? b.stripe_promotion_code_label
             : undefined,
+      offerFreeTrial: typeof b.offer_free_trial === "boolean" ? b.offer_free_trial : undefined,
+      trialDays:
+        b.trial_days === null
+          ? null
+          : b.trial_days != null && b.trial_days !== ""
+            ? Number(b.trial_days)
+            : undefined,
+      skipPaymentMethod: typeof b.skip_payment_method === "boolean" ? b.skip_payment_method : undefined,
       internalNote:
         b.internal_note === null ? null : typeof b.internal_note === "string" ? b.internal_note : undefined,
       active: typeof b.active === "boolean" ? b.active : undefined

@@ -59,9 +59,14 @@ export async function POST(request: Request) {
 
     const origin = getOriginFromRequest(request);
     const stripe = getStripe();
-    const trialDays = salesLink ? null : getStripeTrialDaysForTier(paidTier);
+    const trialDays = salesLink?.offerFreeTrial
+      ? salesLink.trialDays ?? 7
+      : salesLink
+        ? null
+        : getStripeTrialDaysForTier(paidTier);
     const checkoutDiscount = stripeCheckoutDiscountItem(salesLink?.stripePromotionCodeId);
     const allowPromotionCodes = checkoutDiscount ? false : getStripeAllowPromotionCodes();
+    const paymentMethodCollection = salesLink?.skipPaymentMethod ? "if_required" : "always";
     const onboarding = body.onboarding === true;
     const returnBase = salesLink
       ? `${origin}/join/${encodeURIComponent(salesLink.slug)}`
@@ -72,7 +77,7 @@ export async function POST(request: Request) {
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       payment_method_types: ["card"],
-      payment_method_collection: "always",
+      payment_method_collection: paymentMethodCollection,
       line_items: [{ price: priceId, quantity: 1 }],
       ...(checkoutDiscount ? { discounts: [checkoutDiscount] } : { allow_promotion_codes: allowPromotionCodes }),
       success_url: `${returnBase}?checkout=success`,

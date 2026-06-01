@@ -16,6 +16,9 @@ export type SalesLinkRecord = {
   offerDescription: string;
   stripePromotionCodeId: string | null;
   stripePromotionCodeLabel: string | null;
+  offerFreeTrial: boolean;
+  trialDays: number | null;
+  skipPaymentMethod: boolean;
   internalNote: string | null;
   active: boolean;
   signupCount: number;
@@ -49,6 +52,20 @@ function generateSlug(recipientName: string, preferred?: string): string {
   return `${base}-${suffix}`;
 }
 
+function parseTrialDays(raw: unknown, offerFreeTrial: boolean): number | null {
+  if (!offerFreeTrial) return null;
+  if (raw == null || raw === "") return 7;
+  const value = Number(raw);
+  if (!Number.isFinite(value)) {
+    throw new Error("Trial days must be a positive number.");
+  }
+  const days = Math.floor(value);
+  if (days < 1 || days > 365) {
+    throw new Error("Trial days must be between 1 and 365.");
+  }
+  return days;
+}
+
 function docToRecord(id: string, data: FirebaseFirestore.DocumentData | undefined): SalesLinkRecord | null {
   if (!data) return null;
   const tier = normalizePaidTier(String(data.tier || ""));
@@ -70,6 +87,14 @@ function docToRecord(id: string, data: FirebaseFirestore.DocumentData | undefine
       typeof data.stripePromotionCodeLabel === "string" && data.stripePromotionCodeLabel.trim()
         ? data.stripePromotionCodeLabel.trim()
         : null,
+    offerFreeTrial: data.offerFreeTrial === true,
+    trialDays:
+      data.offerFreeTrial === true && typeof data.trialDays === "number" && data.trialDays > 0
+        ? Math.floor(data.trialDays)
+        : data.offerFreeTrial === true
+          ? 7
+          : null,
+    skipPaymentMethod: data.skipPaymentMethod === true,
     internalNote:
       typeof data.internalNote === "string" && data.internalNote.trim() ? data.internalNote.trim() : null,
     active: data.active !== false,
@@ -128,6 +153,9 @@ export type CreateSalesLinkInput = {
   offerDescription: string;
   stripePromotionCodeId?: string | null;
   stripePromotionCodeLabel?: string | null;
+  offerFreeTrial?: boolean;
+  trialDays?: number | null;
+  skipPaymentMethod?: boolean;
   internalNote?: string | null;
   slug?: string | null;
   active?: boolean;
@@ -169,6 +197,9 @@ export async function adminCreateSalesLink(input: CreateSalesLinkInput): Promise
       : null;
   const internalNote =
     typeof input.internalNote === "string" && input.internalNote.trim() ? input.internalNote.trim() : null;
+  const offerFreeTrial = input.offerFreeTrial === true;
+  const trialDays = parseTrialDays(input.trialDays, offerFreeTrial);
+  const skipPaymentMethod = input.skipPaymentMethod === true;
 
   const db = getFirebaseAdminDb();
   const ref = db.collection(COLLECTION).doc();
@@ -180,6 +211,9 @@ export async function adminCreateSalesLink(input: CreateSalesLinkInput): Promise
     offerDescription,
     stripePromotionCodeId: promoId,
     stripePromotionCodeLabel: promoLabel,
+    offerFreeTrial,
+    trialDays,
+    skipPaymentMethod,
     internalNote,
     active: input.active !== false,
     signupCount: 0,
@@ -202,6 +236,9 @@ export type UpdateSalesLinkInput = Partial<{
   offerDescription: string;
   stripePromotionCodeId: string | null;
   stripePromotionCodeLabel: string | null;
+  offerFreeTrial: boolean;
+  trialDays: number | null;
+  skipPaymentMethod: boolean;
   internalNote: string | null;
   active: boolean;
 }>;
@@ -254,6 +291,21 @@ export async function adminUpdateSalesLink(
       typeof patch.stripePromotionCodeLabel === "string" && patch.stripePromotionCodeLabel.trim()
         ? patch.stripePromotionCodeLabel.trim()
         : null;
+  }
+  if (typeof patch.offerFreeTrial === "boolean") {
+    update.offerFreeTrial = patch.offerFreeTrial;
+    if (!patch.offerFreeTrial) {
+      update.trialDays = null;
+    } else if (patch.trialDays !== undefined) {
+      update.trialDays = parseTrialDays(patch.trialDays, true);
+    } else if (existing.data()?.offerFreeTrial !== true) {
+      update.trialDays = 7;
+    }
+  } else if (patch.trialDays !== undefined && existing.data()?.offerFreeTrial === true) {
+    update.trialDays = parseTrialDays(patch.trialDays, true);
+  }
+  if (typeof patch.skipPaymentMethod === "boolean") {
+    update.skipPaymentMethod = patch.skipPaymentMethod;
   }
   if (patch.internalNote !== undefined) {
     update.internalNote =

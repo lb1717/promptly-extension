@@ -13,6 +13,9 @@ type SalesLink = {
   offerDescription: string;
   stripePromotionCodeId: string | null;
   stripePromotionCodeLabel: string | null;
+  offerFreeTrial: boolean;
+  trialDays: number | null;
+  skipPaymentMethod: boolean;
   internalNote: string | null;
   active: boolean;
   signupCount: number;
@@ -57,6 +60,9 @@ export function AdminSalesClient() {
   const [offerDescription, setOfferDescription] = useState("");
   const [promoId, setPromoId] = useState("");
   const [promoLabel, setPromoLabel] = useState("");
+  const [offerFreeTrial, setOfferFreeTrial] = useState(false);
+  const [trialDays, setTrialDays] = useState("7");
+  const [skipPaymentMethod, setSkipPaymentMethod] = useState(false);
   const [internalNote, setInternalNote] = useState("");
 
   const origin = useMemo(() => {
@@ -94,6 +100,9 @@ export function AdminSalesClient() {
     setOfferDescription("");
     setPromoId("");
     setPromoLabel("");
+    setOfferFreeTrial(false);
+    setTrialDays("7");
+    setSkipPaymentMethod(false);
     setInternalNote("");
   }
 
@@ -113,6 +122,9 @@ export function AdminSalesClient() {
           offer_description: offerDescription,
           stripe_promotion_code_id: promoId.trim() || null,
           stripe_promotion_code_label: promoLabel.trim() || null,
+          offer_free_trial: offerFreeTrial,
+          trial_days: offerFreeTrial ? Number(trialDays) : null,
+          skip_payment_method: skipPaymentMethod,
           internal_note: internalNote.trim() || null
         })
       });
@@ -279,6 +291,52 @@ export function AdminSalesClient() {
                 className="w-full rounded-lg border border-violet-500/25 bg-[#1a1228] px-3 py-2 text-sm text-white outline-none focus:border-violet-400"
               />
             </label>
+            <div className="block text-sm sm:col-span-2">
+              <span className="mb-2 block text-violet-200/80">Checkout options</span>
+              <div className="space-y-3 rounded-lg border border-violet-500/20 bg-[#1a1228] p-4">
+                <label className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={offerFreeTrial}
+                    onChange={(e) => setOfferFreeTrial(e.target.checked)}
+                    className="mt-1"
+                  />
+                  <span>
+                    <span className="block font-medium text-white">Include a free trial</span>
+                    <span className="block text-xs text-violet-300/60">
+                      Starts the subscription in Stripe trialing status before the first charge.
+                    </span>
+                  </span>
+                </label>
+                {offerFreeTrial ? (
+                  <label className="ml-7 block max-w-[12rem] text-sm">
+                    <span className="mb-1 block text-violet-200/80">Trial length (days)</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={365}
+                      value={trialDays}
+                      onChange={(e) => setTrialDays(e.target.value)}
+                      className="w-full rounded-lg border border-violet-500/25 bg-[#120c1c] px-3 py-2 text-sm text-white outline-none focus:border-violet-400"
+                    />
+                  </label>
+                ) : null}
+                <label className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={skipPaymentMethod}
+                    onChange={(e) => setSkipPaymentMethod(e.target.checked)}
+                    className="mt-1"
+                  />
+                  <span>
+                    <span className="block font-medium text-white">Do not require a credit card at checkout</span>
+                    <span className="block text-xs text-violet-300/60">
+                      Best with a free trial or 100% off promo — Stripe collects payment details later if needed.
+                    </span>
+                  </span>
+                </label>
+              </div>
+            </div>
             <label className="block text-sm sm:col-span-2">
               <span className="mb-1 block text-violet-200/80">Internal note (optional)</span>
               <input
@@ -312,6 +370,7 @@ export function AdminSalesClient() {
                 <th className="py-2 pr-4">Plan</th>
                 <th className="py-2 pr-4">Offer</th>
                 <th className="py-2 pr-4">Promo</th>
+                <th className="py-2 pr-4">Checkout</th>
                 <th className="py-2 pr-4">Signups</th>
                 <th className="py-2 pr-4">Status</th>
                 <th className="py-2 pr-0">Link</th>
@@ -331,6 +390,11 @@ export function AdminSalesClient() {
                   </td>
                   <td className="py-3 pr-4 text-xs font-mono">
                     {link.stripePromotionCodeLabel || link.stripePromotionCodeId || "—"}
+                  </td>
+                  <td className="py-3 pr-4 text-xs text-violet-200/80">
+                    {link.offerFreeTrial ? `${link.trialDays ?? 7}-day trial` : "No trial"}
+                    <br />
+                    {link.skipPaymentMethod ? "No card required" : "Card required"}
                   </td>
                   <td className="py-3 pr-4">{link.signupCount}</td>
                   <td className="py-3 pr-4">
@@ -359,7 +423,7 @@ export function AdminSalesClient() {
               ))}
               {!loading && links.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-8 text-center text-violet-200/70">
+                  <td colSpan={8} className="py-8 text-center text-violet-200/70">
                     No invite links yet. Create one to get started.
                   </td>
                 </tr>
@@ -374,8 +438,9 @@ export function AdminSalesClient() {
         <ol className="mt-3 list-decimal space-y-2 pl-5">
           <li>Create a coupon in Stripe (e.g. 100% off for 1 month) and copy its ID from the coupon Details.</li>
           <li>Create an invite link with that coupon ID (e.g. CI9wdF2Y) or a promotion code ID (promo_…).</li>
+          <li>Optionally enable a free trial and/or skip credit card collection at checkout.</li>
           <li>Send the link — recipients see a 4-step flow: welcome → account → plan → install extension.</li>
-          <li>When they activate the plan, Stripe Checkout opens with your promo code already applied.</li>
+          <li>When they activate the plan, Stripe Checkout opens with your promo, trial, and payment settings applied.</li>
         </ol>
       </section>
     </main>
