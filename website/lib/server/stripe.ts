@@ -3,6 +3,8 @@ import Stripe from "stripe";
 let stripeSingleton: Stripe | null = null;
 
 const ENTERPRISE_PRICE_ID = "price_1TbGQtE1kSqm5DoEzuLyhaz6";
+const PRO_PRICE_ID = "price_1TdR2QE1kSqm5DoEqQGEdSMh";
+const STUDENT_PRICE_ID = "price_1TdQyCE1kSqm5DoEwAxzcAiY";
 
 export function getStripe(): Stripe {
   if (!stripeSingleton) {
@@ -31,11 +33,11 @@ export function getStripePriceIdForTier(tier: string): string | null {
   const t = tier.toLowerCase();
   if (t === "pro" || t === "plus" || t === "professional") {
     const id = String(process.env.STRIPE_PRICE_ID_PRO || "").trim();
-    return id || null;
+    return id || PRO_PRICE_ID;
   }
   if (t === "student") {
     const id = String(process.env.STRIPE_PRICE_ID_STUDENT || "").trim();
-    return id || null;
+    return id || STUDENT_PRICE_ID;
   }
   if (t === "enterprise") {
     return ENTERPRISE_PRICE_ID;

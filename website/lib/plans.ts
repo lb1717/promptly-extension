@@ -29,10 +29,10 @@ export const WEBSITE_PLANS: readonly WebsitePlan[] = [
     priceDisplay: "$9.99/mo",
     subtitle: "Built for coursework, research, and academic writing.",
     details: [
-      "Model tuned for student work and academics",
-      "Strong prompt quality for essays, papers, and study",
-      "Daily usage suited for classes and projects",
-      "AI usage statistics"
+      "Prompt engineering designed for students",
+      "Created to improve academic work",
+      "Strong and fast models available",
+      "Basic AI usage statistics"
     ],
     paid: true,
     available: true
@@ -43,10 +43,11 @@ export const WEBSITE_PLANS: readonly WebsitePlan[] = [
     priceDisplay: "$20.00/mo",
     subtitle: "Professional-grade prompting for frequent daily use.",
     details: [
-      "Advanced prompt engineering for professional workflows",
-      "High model quality and fast rewrites",
-      "Generous daily usage for frequent prompting",
-      "AI usage statistics"
+      "Advanced prompt optimization for professionals",
+      "Created to save time on extensive AI use",
+      "Highest model quality available",
+      "Fastest model quality available",
+      "Extensive AI usage statistics"
     ],
     paid: true,
     available: true,
@@ -61,7 +62,8 @@ export const WEBSITE_PLANS: readonly WebsitePlan[] = [
       "Research-grade intelligence prompt engineering",
       "Highest model quality available",
       "Fastest model quality available",
-      "Extensive AI usage statistics"
+      "Usage statistics to understand AI across teams and cut time on prompting",
+      "Designed for founders and executives tracking AI performance firm-wide and presenting AI efficiency"
     ],
     paid: true,
     available: true
