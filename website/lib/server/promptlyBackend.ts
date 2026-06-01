@@ -519,7 +519,9 @@ export function recordOptimizeTelemetryEventSafe(params: {
   });
 }
 
-export type HostLlmInteractionKind = "send" | "composer_input" | "promptly_optimize";
+export type HostLlmInteractionKind = "send" | "composer_input" | "promptly_optimize" | "engagement_segment";
+
+export type HostEngagementCategory = "drafting" | "waiting" | "reading_idle";
 
 export type HostLlmActivityEventInput = {
   service: PromptlyService;
@@ -538,6 +540,10 @@ export type HostLlmActivityEventInput = {
   draftDurationMs: number | null;
   /** Active typing ms (idle gaps > ~45s excluded) until native send. */
   draftActiveMs: number | null;
+  /** Foreground engagement segment category (engagement_segment rows only). */
+  engagementCategory?: HostEngagementCategory | null;
+  /** Foreground engagement segment duration ms (engagement_segment rows only). */
+  engagementDurationMs?: number | null;
   /** Client Date.now() when send was observed (sets utcDay for bucketing). */
   clientOccurredMs: number;
   /** Stored as top-level Firestore field `source` (passive batch vs mirrored optimize). */
@@ -561,13 +567,65 @@ export function normalizeHostLlmActivityEventInput(raw: Record<string, unknown>)
   const rawKind = raw.interaction_kind ?? raw.interactionKind ?? "send";
   if (typeof rawKind === "string") {
     const k = rawKind.trim().toLowerCase();
-    if (k === "composer_input" || k === "compose" || k === "typing") {
+    if (k === "engagement_segment" || k === "engagement") {
+      interactionKind = "engagement_segment";
+    } else if (k === "composer_input" || k === "compose" || k === "typing") {
       interactionKind = "composer_input";
     }
     /** Only created server-side via optimize mirror — extension submissions treat as ordinary send if spoofed. */
     if (k === "promptly_optimize") {
       interactionKind = "send";
     }
+  }
+
+  if (interactionKind === "engagement_segment") {
+    let engagementCategory: HostEngagementCategory | null = null;
+    const catRaw = raw.engagement_category ?? raw.engagementCategory;
+    if (typeof catRaw === "string") {
+      const c = catRaw.trim().toLowerCase();
+      if (c === "drafting" || c === "waiting" || c === "reading_idle") {
+        engagementCategory = c;
+      }
+    }
+    if (!engagementCategory) {
+      return null;
+    }
+
+    let engagementDurationMs: number | null = null;
+    const durRaw = raw.duration_ms ?? raw.durationMs ?? raw.engagementDurationMs ?? raw.engagement_duration_ms;
+    if (typeof durRaw === "number" && Number.isFinite(durRaw)) {
+      const v = Math.max(0, Math.floor(durRaw));
+      if (v >= 2000 && v <= 1_800_000) {
+        engagementDurationMs = v;
+      }
+    }
+    if (!engagementDurationMs) {
+      return null;
+    }
+
+    let clientOccurredMs = Date.now();
+    const com = raw.client_occurred_ms ?? raw.clientOccurredMs;
+    if (typeof com === "number" && Number.isFinite(com)) {
+      clientOccurredMs = Math.max(0, Math.floor(com));
+    }
+
+    return {
+      service: svc,
+      composerCharEstimate: null,
+      composerWordEstimate: null,
+      hostModelLabelSanitized: null,
+      hostModelBucket: "unknown",
+      hostResponseLatencyMs: null,
+      interactionKind: "engagement_segment",
+      assistantOutputCharEstimate: null,
+      timeToFirstStreamActivityMs: null,
+      streamVisualActiveMs: null,
+      draftDurationMs: null,
+      draftActiveMs: null,
+      engagementCategory,
+      engagementDurationMs,
+      clientOccurredMs
+    };
   }
 
   let composerCharEstimate: number | null = null;
@@ -717,7 +775,7 @@ export async function persistHostLlmActivityEvents(user: PromptlyUser, rows: Hos
     const utcDay = utcDayFromMs(row.clientOccurredMs);
     const ref = db.collection(HOST_LLM_EVENTS_COLLECTION).doc();
     writer.set(ref, {
-      telemetrySchemaVersion: 2,
+      telemetrySchemaVersion: row.interactionKind === "engagement_segment" ? 3 : 2,
       uid: user.uid,
       email: user.email || null,
       utcDay,
@@ -736,6 +794,8 @@ export async function persistHostLlmActivityEvents(user: PromptlyUser, rows: Hos
       draftDurationMs: row.draftDurationMs,
       draftActiveMs: row.draftActiveMs,
       clientOccurredMs: row.clientOccurredMs,
+      ...(row.engagementCategory ? { engagementCategory: row.engagementCategory } : {}),
+      ...(typeof row.engagementDurationMs === "number" ? { engagementDurationMs: row.engagementDurationMs } : {}),
       ...(row.optimizeEngineMode ? { optimizeEngineMode: row.optimizeEngineMode } : {})
     });
     queued += 1;
@@ -770,6 +830,34 @@ function addServicePromptCounts(dst: ServicePromptCounts, src: ServicePromptCoun
   dst.claude += src.claude;
   dst.gemini += src.gemini;
   dst.unknown += src.unknown;
+}
+
+function sumServicePromptCounts(src: ServicePromptCounts): number {
+  return src.chatgpt + src.claude + src.gemini + src.unknown;
+}
+
+type EngagementMsByCategory = {
+  drafting: ServicePromptCounts;
+  waiting: ServicePromptCounts;
+  reading_idle: ServicePromptCounts;
+};
+
+function emptyEngagementMsByCategory(): EngagementMsByCategory {
+  return {
+    drafting: emptyServicePromptCounts(),
+    waiting: emptyServicePromptCounts(),
+    reading_idle: emptyServicePromptCounts()
+  };
+}
+
+function addEngagementMsByCategory(dst: EngagementMsByCategory, src: EngagementMsByCategory) {
+  addServicePromptCounts(dst.drafting, src.drafting);
+  addServicePromptCounts(dst.waiting, src.waiting);
+  addServicePromptCounts(dst.reading_idle, src.reading_idle);
+}
+
+function msToStatMinutes(ms: number): number {
+  return Math.round((ms / 60000) * 10) / 10;
 }
 
 type TimelineBucketAgg = {
@@ -816,6 +904,9 @@ type HostPassiveBucketAgg = {
   draft_active_samples: number;
   waiting_sum_ms: number;
   waiting_samples: number;
+  engagement_ms_by_category: EngagementMsByCategory;
+  screen_time_ms_svc: ServicePromptCounts;
+  engagement_segment_count: number;
 };
 
 export async function getAccountUsageStatsExtended(
@@ -959,7 +1050,10 @@ export async function getAccountUsageStatsExtended(
       draft_active_sum_ms: 0,
       draft_active_samples: 0,
       waiting_sum_ms: 0,
-      waiting_samples: 0
+      waiting_samples: 0,
+      engagement_ms_by_category: emptyEngagementMsByCategory(),
+      screen_time_ms_svc: emptyServicePromptCounts(),
+      engagement_segment_count: 0
     });
   }
 
@@ -1053,10 +1147,33 @@ export async function getAccountUsageStatsExtended(
     }
     const row = hostByDayScratch.get(utcDay)!;
     const ik = String(raw.interactionKind ?? raw.interaction_kind ?? "send").toLowerCase();
+    const isEngagement = ik === "engagement_segment" || ik === "engagement";
     const isComposer = ik === "composer_input" || ik === "compose" || ik === "typing";
 
     const sourceRaw = String(raw.source ?? raw.ingest_source ?? "passive_listener");
     const isMirror = sourceRaw === "optimize_api";
+
+    const svc = normalizePromptlyService(raw.service);
+
+    if (isEngagement) {
+      let engagementCategory: HostEngagementCategory | null = null;
+      const catRaw = raw.engagementCategory ?? raw.engagement_category;
+      if (typeof catRaw === "string") {
+        const c = catRaw.trim().toLowerCase();
+        if (c === "drafting" || c === "waiting" || c === "reading_idle") {
+          engagementCategory = c;
+        }
+      }
+      const durRaw = raw.engagementDurationMs ?? raw.engagement_duration_ms ?? raw.duration_ms ?? raw.durationMs;
+      const durMs =
+        typeof durRaw === "number" && Number.isFinite(durRaw) ? Math.floor(durRaw) : null;
+      if (engagementCategory && durMs !== null && durMs >= 2000) {
+        row.engagement_ms_by_category[engagementCategory][svc] += durMs;
+        row.screen_time_ms_svc[svc] += durMs;
+        row.engagement_segment_count += 1;
+      }
+      continue;
+    }
 
     const cc =
       typeof raw.composerCharEstimate === "number" && Number.isFinite(raw.composerCharEstimate)
@@ -1064,8 +1181,6 @@ export async function getAccountUsageStatsExtended(
         : typeof raw.composer_char_estimate === "number" && Number.isFinite(raw.composer_char_estimate)
           ? raw.composer_char_estimate
           : null;
-
-    const svc = normalizePromptlyService(raw.service);
 
     const hlRaw = raw.hostResponseLatencyMs ?? raw.host_response_latency_ms;
     const hlMs =
@@ -1226,7 +1341,10 @@ export async function getAccountUsageStatsExtended(
           draft_active_sum_ms: 0,
           draft_active_samples: 0,
           waiting_sum_ms: 0,
-          waiting_samples: 0
+          waiting_samples: 0,
+          engagement_ms_by_category: emptyEngagementMsByCategory(),
+          screen_time_ms_svc: emptyServicePromptCounts(),
+          engagement_segment_count: 0
         });
       }
     }
@@ -1254,6 +1372,9 @@ export async function getAccountUsageStatsExtended(
       dst.draft_active_samples += src.draft_active_samples;
       dst.waiting_sum_ms += src.waiting_sum_ms;
       dst.waiting_samples += src.waiting_samples;
+      addEngagementMsByCategory(dst.engagement_ms_by_category, src.engagement_ms_by_category);
+      addServicePromptCounts(dst.screen_time_ms_svc, src.screen_time_ms_svc);
+      dst.engagement_segment_count += src.engagement_segment_count;
     }
     hostPassiveTimelineFlat = [...hostByWeek.entries()]
       .sort((a, b) => (a[0] < b[0] ? -1 : 1))
@@ -1463,6 +1584,46 @@ export async function getAccountUsageStatsExtended(
     native_sends_with_latency: row.waiting_samples
   }));
 
+  const engagementTotalsMs = emptyEngagementMsByCategory();
+  const screenTimeMsSvc = emptyServicePromptCounts();
+  let engagementSegmentCount = 0;
+  for (const row of hostPassiveTimelineFlat) {
+    engagementSegmentCount += row.engagement_segment_count;
+    addEngagementMsByCategory(engagementTotalsMs, row.engagement_ms_by_category);
+    addServicePromptCounts(screenTimeMsSvc, row.screen_time_ms_svc);
+  }
+
+  const buildServiceScreenTime = (service: PromptlyService) => ({
+    total_minutes: msToStatMinutes(screenTimeMsSvc[service]),
+    drafting_minutes: msToStatMinutes(engagementTotalsMs.drafting[service]),
+    waiting_minutes: msToStatMinutes(engagementTotalsMs.waiting[service]),
+    reading_idle_minutes: msToStatMinutes(engagementTotalsMs.reading_idle[service])
+  });
+
+  const screen_time_by_service = {
+    chatgpt: buildServiceScreenTime("chatgpt"),
+    claude: buildServiceScreenTime("claude"),
+    gemini: buildServiceScreenTime("gemini"),
+    unknown: buildServiceScreenTime("unknown")
+  };
+
+  const screen_time_timeline = hostPassiveTimelineFlat.map((row) => ({
+    bucket: row.bucket_day,
+    chatgpt_minutes: msToStatMinutes(row.screen_time_ms_svc.chatgpt),
+    claude_minutes: msToStatMinutes(row.screen_time_ms_svc.claude),
+    gemini_minutes: msToStatMinutes(row.screen_time_ms_svc.gemini),
+    drafting_minutes: msToStatMinutes(sumServicePromptCounts(row.engagement_ms_by_category.drafting)),
+    waiting_minutes: msToStatMinutes(sumServicePromptCounts(row.engagement_ms_by_category.waiting)),
+    reading_idle_minutes: msToStatMinutes(sumServicePromptCounts(row.engagement_ms_by_category.reading_idle))
+  }));
+
+  const engagement_totals = {
+    drafting_minutes: msToStatMinutes(sumServicePromptCounts(engagementTotalsMs.drafting)),
+    waiting_minutes: msToStatMinutes(sumServicePromptCounts(engagementTotalsMs.waiting)),
+    reading_idle_minutes: msToStatMinutes(sumServicePromptCounts(engagementTotalsMs.reading_idle)),
+    segment_count: engagementSegmentCount
+  };
+
   const measured_drafting_active_minutes =
     time_balance_totals.draft_active_samples > 0
       ? Math.round(
@@ -1541,7 +1702,13 @@ export async function getAccountUsageStatsExtended(
     "Drafting and waiting charts show average minutes per native send (not stacked totals). Drafting = first keystroke until send; waiting = send until host reply settles in the DOM.",
     "Native reply timing continues while the chat tab is in the background; watches flush on navigation away. Closed tabs may omit in-flight replies.",
     '"Native host reply" averages only include latency telemetry on passive_listener sends; Promptly averages use billed rewrite turnaround from your extension.',
+    "Screen time charts count foreground tab-visible minutes only (Drafting prompt, Waiting for AI, Reading answer / idle). Historical data before this tracker may be incomplete.",
   ];
+  if (engagementSegmentCount === 0) {
+    footnotes.push(
+      "No screen time segments recorded yet — use ChatGPT, Claude, or Gemini with the updated extension while signed in to populate these charts."
+    );
+  }
   if (eventsResult.indexMissing) {
     footnotes.unshift(
       "Promptly optimize charts may be empty until the Firestore composite index on promptly_optimize_events (uid + utcDay + __name__) exists — firebase deploy --only firestore:indexes."
@@ -1588,6 +1755,9 @@ export async function getAccountUsageStatsExtended(
     },
     latency_comparison_ai,
     time_balance_timeline,
+    screen_time_by_service,
+    screen_time_timeline,
+    engagement_totals,
     time_balance_totals: {
       draft_active_ms: time_balance_totals.draft_active_ms,
       draft_wall_ms: time_balance_totals.draft_wall_ms,

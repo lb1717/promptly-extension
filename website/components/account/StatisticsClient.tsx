@@ -1,7 +1,7 @@
 "use client";
 
 import { getFirebaseAuth } from "@/lib/firebaseClient";
-import { onAuthStateChanged, signOut } from "firebase/auth";
+import { onAuthStateChanged, signInWithCustomToken, signOut } from "firebase/auth";
 import Link from "next/link";
 import type { User } from "firebase/auth";
 import { AutoDismissNoticeBar } from "@/components/ui/AutoDismissNoticeBar";
@@ -90,6 +90,16 @@ type LatencyAiRow = {
   prompts_native_web: number;
 };
 
+const COLOR_DRAFTING = "#c084fc";
+const COLOR_READING_IDLE = "#94a3b8";
+
+const EMPTY_SERVICE_SCREEN_TIME: ServiceScreenTime = {
+  total_minutes: 0,
+  drafting_minutes: 0,
+  waiting_minutes: 0,
+  reading_idle_minutes: 0
+};
+
 const MODEL_CHART_ORDER: PromptlySvc[] = ["gemini", "claude", "chatgpt", "unknown"];
 
 type PreImproveWordBucket = {
@@ -140,6 +150,30 @@ type TimeBalanceTotals = {
   waiting_for_ai_minutes: number | null;
 };
 
+type ServiceScreenTime = {
+  total_minutes: number;
+  drafting_minutes: number;
+  waiting_minutes: number;
+  reading_idle_minutes: number;
+};
+
+type ScreenTimeTimelineBucket = {
+  bucket: string;
+  chatgpt_minutes: number;
+  claude_minutes: number;
+  gemini_minutes: number;
+  drafting_minutes: number;
+  waiting_minutes: number;
+  reading_idle_minutes: number;
+};
+
+type EngagementTotals = {
+  drafting_minutes: number;
+  waiting_minutes: number;
+  reading_idle_minutes: number;
+  segment_count: number;
+};
+
 type ExtendedStatsPayload = {
   ok: true;
   range_days: number;
@@ -181,6 +215,9 @@ type ExtendedStatsPayload = {
   latency_comparison_ai: LatencyAiRow[];
   time_balance_timeline: TimeBalanceBucket[];
   time_balance_totals: TimeBalanceTotals;
+  screen_time_by_service: Record<PromptlySvc, ServiceScreenTime>;
+  screen_time_timeline: ScreenTimeTimelineBucket[];
+  engagement_totals: EngagementTotals;
   value_insights: ValueInsights;
   breakdowns_from_events: {
     service: Record<PromptlySvc, number>;
@@ -352,6 +389,27 @@ function buildPlaceholderExtendedStats(days: number, granularity: "day" | "week"
       draft_active_minutes: null,
       draft_wall_minutes: null,
       waiting_for_ai_minutes: null
+    },
+    screen_time_by_service: {
+      chatgpt: { ...EMPTY_SERVICE_SCREEN_TIME },
+      claude: { ...EMPTY_SERVICE_SCREEN_TIME },
+      gemini: { ...EMPTY_SERVICE_SCREEN_TIME },
+      unknown: { ...EMPTY_SERVICE_SCREEN_TIME }
+    },
+    screen_time_timeline: tl.map((row) => ({
+      bucket: row.bucket,
+      chatgpt_minutes: 0,
+      claude_minutes: 0,
+      gemini_minutes: 0,
+      drafting_minutes: 0,
+      waiting_minutes: 0,
+      reading_idle_minutes: 0
+    })),
+    engagement_totals: {
+      drafting_minutes: 0,
+      waiting_minutes: 0,
+      reading_idle_minutes: 0,
+      segment_count: 0
     },
     value_insights: {
       billed_promptly_tokens_sum_events: 0,
@@ -644,6 +702,32 @@ export function StatisticsClient() {
   const displayStats = user ? stats ?? placeholderStats : null;
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const rawHash = String(window.location.hash || "").replace(/^#/, "");
+    if (!rawHash) return;
+    const hashParams = new URLSearchParams(rawHash);
+    const customToken = String(hashParams.get("promptly_ext_custom_token") || "").trim();
+    if (!customToken) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        await signInWithCustomToken(getFirebaseAuth(), customToken);
+      } catch (_error) {
+        // Ignore handoff failures; user can sign in manually on the account page.
+      } finally {
+        if (cancelled) return;
+        hashParams.delete("promptly_ext_custom_token");
+        const nextHash = hashParams.toString();
+        const nextUrl = `${window.location.pathname}${window.location.search}${nextHash ? `#${nextHash}` : ""}`;
+        window.history.replaceState({}, "", nextUrl);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     const auth = getFirebaseAuth();
     return onAuthStateChanged(auth, (next) => {
       setUser(next);
@@ -771,6 +855,44 @@ export function StatisticsClient() {
     [timeBalanceChartRows, displayStats]
   );
 
+  const screenTimeByServiceRows = useMemo(() => {
+    if (!displayStats?.screen_time_by_service) return [];
+    return (["chatgpt", "claude", "gemini"] as const)
+      .map((serviceKey) => {
+        const row = displayStats.screen_time_by_service[serviceKey] ?? EMPTY_SERVICE_SCREEN_TIME;
+        return {
+          service: svcLabel(serviceKey),
+          key: serviceKey,
+          minutes: row.total_minutes,
+          fill:
+            serviceKey === "chatgpt"
+              ? COLOR_CHATGPT
+              : serviceKey === "claude"
+                ? COLOR_CLAUDE
+                : COLOR_GEMINI
+        };
+      })
+      .filter((row) => row.minutes > 0);
+  }, [displayStats]);
+
+  const engagementTimelineRows = useMemo(() => {
+    if (!displayStats?.screen_time_timeline?.length) return [];
+    const g = displayStats.granularity;
+    return displayStats.screen_time_timeline.map((row) => ({
+      ...row,
+      label: g === "week" ? `wk ${formatShortDay(row.bucket)}` : formatShortDay(row.bucket),
+      has_data: row.drafting_minutes > 0 || row.waiting_minutes > 0 || row.reading_idle_minutes > 0
+    }));
+  }, [displayStats]);
+
+  const screenTimeHasData = useMemo(
+    () =>
+      (displayStats?.engagement_totals?.segment_count ?? 0) > 0 ||
+      screenTimeByServiceRows.length > 0 ||
+      engagementTimelineRows.some((row) => row.has_data),
+    [displayStats, screenTimeByServiceRows, engagementTimelineRows]
+  );
+
   const statsInfoNotices = useMemo((): ReactNode[] => {
     if (!displayStats) return [];
     const notices: ReactNode[] = [];
@@ -872,19 +994,11 @@ export function StatisticsClient() {
       .map((row) => {
         const before = typeof row.avg_words_before === "number" ? row.avg_words_before : null;
         const after = typeof row.avg_words_after === "number" ? row.avg_words_after : null;
-        let bucket_change_percent: number | null = null;
-        if (before !== null && after !== null && before > 0) {
-          bucket_change_percent = Math.round(((after - before) / before) * 1000) / 10;
-        }
-        const word_delta_display =
-          before !== null && after !== null ? Math.round(Math.abs(after - before) * 10) / 10 : 0;
         return {
           ...row,
           label: g === "week" ? `wk ${formatShortDay(row.bucket)}` : formatShortDay(row.bucket),
           avg_words_before_display: before ?? 0,
           avg_words_after_display: after ?? 0,
-          word_delta_display,
-          bucket_change_percent,
           has_data:
             (before !== null && row.samples > 0) || (after !== null && row.samples_after > 0)
         };
@@ -1016,6 +1130,88 @@ export function StatisticsClient() {
             </div>
           </section>
 
+          {screenTimeHasData ? (
+            <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-stretch">
+              <section className="w-full rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4 lg:w-1/2">
+                <h2 className="mb-1 text-sm font-semibold uppercase tracking-[0.22em] text-faint">Screen time by service</h2>
+                <p className="mb-3 text-[11px] text-faint">Foreground minutes on each AI chat while this tab was visible.</p>
+                {screenTimeByServiceRows.length ? (
+                  <div className="h-56 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        data={screenTimeByServiceRows}
+                        layout="vertical"
+                        margin={{ top: 4, right: 12, bottom: 4, left: 4 }}
+                        barCategoryGap="28%"
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" horizontal={false} />
+                        <XAxis type="number" stroke="#8A8A8A" tick={{ fill: "#5C5C5C", fontSize: 10 }} unit=" min" />
+                        <YAxis
+                          type="category"
+                          dataKey="service"
+                          stroke="#8A8A8A"
+                          tick={{ fill: "#5C5C5C", fontSize: 11 }}
+                          width={72}
+                        />
+                        <Tooltip
+                          contentStyle={{ background: "#FAF8F4", border: "1px solid #E0DDD6", color: "#111111" }}
+                          formatter={(value: number) => [`${value} min`, "Screen time"]}
+                        />
+                        <Bar dataKey="minutes" name="Screen time" radius={[0, 4, 4, 0]} barSize={16}>
+                          {screenTimeByServiceRows.map((entry) => (
+                            <Cell key={entry.key} fill={entry.fill} fillOpacity={0.95} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted">No service screen time recorded in this range yet.</p>
+                )}
+              </section>
+
+              <section className="w-full rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4 lg:w-1/2">
+                <h2 className="mb-1 text-sm font-semibold uppercase tracking-[0.22em] text-faint">How you spend your time</h2>
+                <p className="mb-3 text-[11px] text-faint">Drafting, waiting for AI, and reading or idle — visible tab time only.</p>
+                {engagementTimelineRows.some((row) => row.has_data) ? (
+                  <div className="h-56 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={engagementTimelineRows.filter((row) => row.has_data)} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                        <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
+                        <YAxis stroke="#8A8A8A" allowDecimals tick={{ fontSize: 10 }} unit=" min" width={36} />
+                        <Tooltip
+                          contentStyle={{ background: "#FAF8F4", border: "1px solid #E0DDD6", color: "#111111" }}
+                          formatter={(value: number, name: string) => [`${value} min`, name]}
+                        />
+                        <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
+                        <Bar dataKey="drafting_minutes" name="Drafting prompt" stackId="time" fill={COLOR_DRAFTING} />
+                        <Bar dataKey="waiting_minutes" name="Waiting for AI" stackId="time" fill={COLOR_NATIVE_WEB} />
+                        <Bar
+                          dataKey="reading_idle_minutes"
+                          name="Reading answer / idle"
+                          stackId="time"
+                          fill={COLOR_READING_IDLE}
+                          radius={[2, 2, 0, 0]}
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted">No engagement breakdown recorded in this range yet.</p>
+                )}
+              </section>
+            </div>
+          ) : (
+            <section className="mb-8 rounded-2xl border border-line bg-cream p-4 shadow-card sm:p-5">
+              <h2 className="mb-1 text-sm font-semibold uppercase tracking-[0.22em] text-faint">Screen time</h2>
+              <p className="text-sm text-muted">
+                Screen time tracking starts with the latest extension. Use ChatGPT, Claude, or Gemini while signed in to
+                see time by service and how you spend it (drafting, waiting, reading).
+              </p>
+            </section>
+          )}
+
           {/* Promptly impact scores (left) + average draft chart (right) */}
           {modelTimeChartRows.length ||
           promptDerivedScores?.efficiencyPercent != null ||
@@ -1024,11 +1220,11 @@ export function StatisticsClient() {
               {promptDerivedScores?.efficiencyPercent != null ||
               promptDerivedScores?.qualityPercent != null ? (
                 <section
-                  className="flex w-full flex-col justify-center rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4 lg:w-1/2"
+                  className="flex w-full flex-col rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4 lg:w-1/2"
                   style={{ minHeight: modelTimeChartRows.length ? modelTimeSectionHeight : undefined }}
                 >
-                  <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">Promptly impact</h2>
-                  <div className="mt-5 grid grid-cols-1 gap-6 sm:grid-cols-2 sm:gap-4">
+                  <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.22em] text-faint">Promptly impact</h2>
+                  <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 sm:gap-4">
                     <div>
                       <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Prompt efficiency</p>
                       {promptDerivedScores.efficiencyPercent != null ? (
@@ -1186,24 +1382,22 @@ export function StatisticsClient() {
           {/* Pre-improve word count */}
           {preImproveWordHasData ? (
             <section className="mb-12 rounded-2xl border border-line bg-cream p-6 backdrop-blur-md">
-              <h2 className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm font-semibold uppercase tracking-[0.22em] text-faint">
-                <span>Words before Promptly</span>
-                {preImproveWordChangePercent !== null ? (
-                  <span
-                    className="text-4xl font-bold normal-case leading-none tracking-normal tabular-nums sm:text-5xl"
-                    style={{
-                      color:
-                        preImproveWordChangePercent > 0
-                          ? COLOR_SCORE_GREEN
-                          : preImproveWordChangePercent < 0
-                            ? "#b45309"
-                            : undefined
-                    }}
-                  >
-                    {formatWordChangePercent(preImproveWordChangePercent)}
-                  </span>
-                ) : null}
-              </h2>
+              <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.22em] text-faint">Words before Promptly</h2>
+              {preImproveWordChangePercent !== null ? (
+                <p
+                  className="mb-4 text-lg font-semibold tabular-nums leading-none sm:text-xl"
+                  style={{
+                    color:
+                      preImproveWordChangePercent > 0
+                        ? COLOR_SCORE_GREEN
+                        : preImproveWordChangePercent < 0
+                          ? "#b45309"
+                          : "#111111"
+                  }}
+                >
+                  {formatWordChangePercent(preImproveWordChangePercent)}
+                </p>
+              ) : null}
               {preImproveWordChartRows.length ? (
                 <div className="mt-4 h-72 w-full">
                   <ResponsiveContainer width="100%" height="100%">
@@ -1222,15 +1416,7 @@ export function StatisticsClient() {
                           const payload = item?.payload as {
                             samples?: number;
                             samples_after?: number;
-                            bucket_change_percent?: number | null;
                           };
-                          if (name === "Change") {
-                            const pct = payload?.bucket_change_percent;
-                            return [
-                              typeof pct === "number" ? formatWordChangePercent(pct) : "—",
-                              "Change"
-                            ];
-                          }
                           const runs =
                             name === "Before Promptly"
                               ? (payload?.samples ?? 0)
@@ -1246,21 +1432,6 @@ export function StatisticsClient() {
                         radius={[4, 4, 0, 0]}
                         maxBarSize={34}
                       />
-                      <Bar dataKey="word_delta_display" name="Change" fill="#94a3b8" radius={[2, 2, 0, 0]} maxBarSize={14}>
-                        {preImproveWordChartRows.map((entry, idx) => (
-                          <Cell
-                            key={`chg-${idx}`}
-                            fill={
-                              typeof entry.bucket_change_percent === "number" && entry.bucket_change_percent > 0
-                                ? COLOR_SCORE_GREEN
-                                : typeof entry.bucket_change_percent === "number" && entry.bucket_change_percent < 0
-                                  ? "#b45309"
-                                  : "#94a3b8"
-                            }
-                            fillOpacity={0.88}
-                          />
-                        ))}
-                      </Bar>
                       <Bar
                         dataKey="avg_words_after_display"
                         name="After Promptly"

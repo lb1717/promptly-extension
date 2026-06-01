@@ -222,15 +222,20 @@
   }
 
   function abortDraftSession() {
+    window.PromptlyHostEngagementTracker?.noteDraftAborted?.();
     resetDraftSession();
   }
 
   function noteDraftActivity() {
     const now = Date.now();
+    const wasNew = !draftSession.startedMs;
     if (!draftSession.startedMs) {
       draftSession.startedMs = now;
     }
     draftSession.lastActiveMs = now;
+    if (wasNew) {
+      window.PromptlyHostEngagementTracker?.noteDraftingStarted?.();
+    }
   }
 
   function checkDraftIdleTimeout() {
@@ -480,6 +485,7 @@
     const createWatch = window.PromptlyHostResponseWatcher?.createWatch;
     if (typeof createWatch !== "function") {
       completeSendRow(sendRow, {});
+      window.PromptlyHostEngagementTracker?.noteResponseComplete?.();
       return;
     }
 
@@ -494,6 +500,7 @@
       onComplete(metrics) {
         pendingResponseWatches = pendingResponseWatches.filter((entry) => entry.watch !== watch);
         completeSendRow(sendRow, metrics);
+        window.PromptlyHostEngagementTracker?.noteResponseComplete?.();
         stopWatchHeartbeatIfIdle();
       }
     });
@@ -567,6 +574,7 @@
       client_occurred_ms: nowMs
     };
 
+    window.PromptlyHostEngagementTracker?.noteSendRecorded?.();
     startResponseWatchForSend(cfg, sendRow);
     return true;
   }
@@ -601,6 +609,15 @@
     };
     activeCfg = cfg;
     ensureDraftIdleTimer();
+    if (typeof window.PromptlyHostEngagementTracker?.install === "function") {
+      window.PromptlyHostEngagementTracker.install(
+        {
+          site: cfg.site,
+          isDraftSessionActive: isDraftSessionValid
+        },
+        enqueueRow
+      );
+    }
 
     function onEarlySendIntent(ev) {
       if (ev?.isTrusted !== true || cfg.destroyed) return;
@@ -688,12 +705,14 @@
     function onPageHide() {
       globalThis.clearTimeout(composeDebounceTimer);
       composeDebounceTimer = null;
+      window.PromptlyHostEngagementTracker?.onTabHidden?.();
       abortDraftSession();
       finalizePendingResponseWatches("flush");
       flushQueued();
     }
 
     function onTabHidden() {
+      window.PromptlyHostEngagementTracker?.onTabHidden?.();
       abortDraftSession();
       flushQueued();
       syncPendingWatchesToBackground();
@@ -712,6 +731,8 @@
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "hidden") {
         onTabHidden();
+      } else if (document.visibilityState === "visible") {
+        window.PromptlyHostEngagementTracker?.onTabVisible?.();
       }
     });
 
@@ -739,6 +760,7 @@
       globalThis.clearTimeout(composeDebounceTimer);
       composeDebounceTimer = null;
       stopDraftIdleTimer();
+      window.PromptlyHostEngagementTracker?.teardown?.();
       finalizePendingResponseWatches("cancel");
       abortDraftSession();
       window.removeEventListener("pointerdown", onEarlySendIntent, true);
