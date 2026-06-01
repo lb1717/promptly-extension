@@ -62,7 +62,9 @@ export const DEMO_TIMING = {
   moveDuration: 1.3,
   clickDuration: 0.22,
   disappearDelay: 0.45,
-  loopDelay: 1.35
+  loopDelay: 1.35,
+  /** How long the finished “Prompt Improved” state stays visible before the demo replays. */
+  doneScreenHoldMs: 10_000
 };
 
 export const BENEFITS = [

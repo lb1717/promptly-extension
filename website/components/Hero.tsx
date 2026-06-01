@@ -30,6 +30,9 @@ export function Hero() {
     };
   }, []);
 
+  const heroCtaClass =
+    "relative overflow-hidden px-8 py-4 text-base font-bold uppercase tracking-wide sm:px-10 sm:py-4 sm:text-lg";
+
   return (
     <section className="relative overflow-hidden bg-transparent px-4 pb-4 pt-3 sm:pb-5 sm:pt-7">
       <div className="mx-auto max-w-6xl">
@@ -44,7 +47,7 @@ export function Hero() {
             </div>
           </div>
           <h1 className="mb-4 text-4xl font-semibold leading-tight text-ink sm:text-6xl">
-            Prompts that match your intent.
+            Improve your prompts.
           </h1>
           <p className="mx-auto mb-5 max-w-2xl text-muted sm:mb-6">
             Promptly rewrites your prompt in one click inside ChatGPT, Claude, and Gemini—clearer structure,
@@ -53,9 +56,9 @@ export function Hero() {
           <div className="flex flex-wrap items-center justify-center gap-3">
             <Button
               href={SITE.getStartedPath}
-              className={ctaShouldShine ? "promptly-cta-shine relative overflow-hidden" : "relative overflow-hidden"}
+              className={ctaShouldShine ? `promptly-cta-shine ${heroCtaClass}` : heroCtaClass}
             >
-              Get started
+              GET STARTED
             </Button>
           </div>
         </div>

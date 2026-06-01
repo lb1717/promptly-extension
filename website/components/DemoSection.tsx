@@ -1,6 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
+import { DEMO_TIMING } from "@/lib/constants";
 import { useEffect, useRef, useState } from "react";
 
 const ORIGINAL_PROMPT = "read this pdf and explain the arguments with evidence";
@@ -98,11 +99,18 @@ export function DemoSection() {
         window.setTimeout(() => setTabShineActive(true), shineStartMs),
         window.setTimeout(() => setTabShineActive(false), shineEndMs),
         window.setTimeout(() => setPromptText(IMPROVED_PROMPT), improveAtMs),
-        window.setTimeout(() => setTabText("Prompt Improved"), promptImprovedLabelAtMs),
+        window.setTimeout(() => setTabText("Prompt Improved"), promptImprovedLabelAtMs)
+      );
+
+      const animationCompleteAtMs = promptImprovedLabelAtMs + 100;
+      timersRef.current.push(
         window.setTimeout(() => {
           setIsAnimating(false);
           window.dispatchEvent(new CustomEvent("promptly-demo-animation-complete"));
-        }, promptImprovedLabelAtMs + 100)
+        }, animationCompleteAtMs),
+        window.setTimeout(() => {
+          runCycle();
+        }, animationCompleteAtMs + DEMO_TIMING.doneScreenHoldMs)
       );
     };
 
