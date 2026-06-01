@@ -319,6 +319,21 @@ export async function adminUpdateSalesLink(
   return { ok: true, link };
 }
 
+export async function adminDeleteSalesLink(id: string): Promise<{ ok: true }> {
+  const cleanId = String(id || "").trim();
+  if (!cleanId) {
+    throw new Error("Missing sales link id.");
+  }
+  const db = getFirebaseAdminDb();
+  const ref = db.collection(COLLECTION).doc(cleanId);
+  const existing = await ref.get();
+  if (!existing.exists) {
+    throw new Error("Sales link not found.");
+  }
+  await ref.delete();
+  return { ok: true };
+}
+
 export async function incrementSalesLinkSignupCount(slug: string): Promise<void> {
   const record = await getActiveSalesLinkBySlug(slug);
   if (!record) return;

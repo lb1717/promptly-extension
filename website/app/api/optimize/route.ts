@@ -10,12 +10,14 @@ import {
   estimateBundledInputTokensForOptimize,
   getCreditsForUser,
   getUtcDay,
+  getUtcWeekKey,
   handlePromptlyPreflight,
   normalizePromptlyService,
   optimizePrompt,
   parseOptimizeTelemetryFromPayload,
   recordOptimizeTelemetryEventSafe,
-  requirePromptlyUser
+  requirePromptlyUser,
+  weeklyTokenLimitFromDaily
 } from "@/lib/server/promptlyBackend";
 import { resolveOptimizeEngineMode } from "@/lib/server/promptOptimizeEngine";
 
@@ -74,12 +76,13 @@ export async function POST(request: Request) {
       );
     }
 
+    const weeklyLimit = weeklyTokenLimitFromDaily(auth.user.dailyTokenLimit);
     const creditsBefore = await getCreditsForUser(auth.user, request);
-    if (creditsBefore.usage.used >= auth.user.dailyTokenLimit) {
+    if (creditsBefore.usage.used >= weeklyLimit) {
       return NextResponse.json(
         {
-          error: "Daily API token limit reached",
-          credits: buildCreditsEnvelope(creditsBefore.usage, auth.user.dailyTokenLimit, { estimatedInputTokens })
+          error: "Weekly API token limit reached",
+          credits: buildCreditsEnvelope(creditsBefore.usage, weeklyLimit, { estimatedInputTokens })
         },
         { status: 429, headers: buildPromptlyCorsHeaders(origin) }
       );
@@ -107,7 +110,7 @@ export async function POST(request: Request) {
     const usageResult = await consumeDailyUsage({
       user: auth.user,
       optimizeMode,
-      day: getUtcDay(),
+      day: getUtcWeekKey(),
       tokenCost,
       service,
       responseTimeMs: optimizeElapsedMs
@@ -116,8 +119,8 @@ export async function POST(request: Request) {
     if (!usageResult.ok) {
       return NextResponse.json(
         {
-          error: "Daily API token limit reached",
-          credits: buildCreditsEnvelope(usageResult.usage, auth.user.dailyTokenLimit, { estimatedInputTokens })
+          error: "Weekly API token limit reached",
+          credits: buildCreditsEnvelope(usageResult.usage, weeklyLimit, { estimatedInputTokens })
         },
         { status: 429, headers: buildPromptlyCorsHeaders(origin) }
       );
@@ -145,7 +148,7 @@ export async function POST(request: Request) {
         usage: optimized.usage || null,
         billed_tokens: tokenCost,
         billing_basis: billingBasis,
-        credits: buildCreditsEnvelope(usageResult.usage, auth.user.dailyTokenLimit, { estimatedInputTokens })
+        credits: buildCreditsEnvelope(usageResult.usage, weeklyLimit, { estimatedInputTokens })
       },
       {
         status: 200,

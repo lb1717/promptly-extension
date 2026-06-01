@@ -144,10 +144,10 @@ export function AdminTierLimitsClient() {
         <div>
           <h1 className="text-2xl font-semibold text-white">Plan limits</h1>
           <p className="mt-1 text-sm text-violet-200/70">
-            Daily token budget per UTC day from OpenAI usage. <strong className="text-violet-100">Free</strong> users
-            use the first value; <strong className="text-violet-100">Promptly Pro</strong>,{" "}
-            <strong className="text-violet-100">Student</strong>, and{" "}
-            <strong className="text-violet-100">Enterprise</strong> each use their own configured limit. Stripe
+            Daily-equivalent token budget (OpenAI usage units). Users see a weekly allowance (value × 7) that resets
+            every Sunday UTC. <strong className="text-violet-100">Free</strong> users use the first value;{" "}
+            <strong className="text-violet-100">Promptly Pro</strong>, <strong className="text-violet-100">Student</strong>
+            , and <strong className="text-violet-100">Enterprise</strong> each use their own configured limit. Stripe
             webhooks and saved subscription tiers set this value; limits apply on every extension/API request. You can
             also set one global ceiling across all plans.
           </p>

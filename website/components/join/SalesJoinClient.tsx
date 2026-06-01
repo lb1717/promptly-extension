@@ -25,6 +25,8 @@ import { EmailVerificationNotice } from "@/components/auth/EmailVerificationNoti
 import { listenForGoogleSignInReturn, signInWithGoogleInteractive } from "@/lib/firebaseGoogleAuth";
 import { canProceedWithEmailAccount } from "@/lib/emailVerification";
 import { useEmailVerificationStatus } from "@/lib/useEmailVerificationStatus";
+import { AI_TRY_TARGETS } from "@/components/onboarding/AiServiceLogos";
+import { syncWebsiteSessionToExtension } from "@/lib/extensionBridge";
 import { planDetailsForTier } from "@/lib/plans";
 import {
   detectAuthTransition,
@@ -33,10 +35,11 @@ import {
   welcomeContinueStep
 } from "@/lib/onboardingStepFlow";
 
-const STEPS = ["Welcome", "Account", "Plan", "Install"] as const;
+const STEPS = ["Welcome", "Account", "Plan", "Install", "Done"] as const;
 const ACCOUNT_STEP = 2;
 const PLAN_STEP = 3;
 const INSTALL_STEP = 4;
+const DONE_STEP = 5;
 
 function advanceAfterAccountAuth(goToStep: (next: number) => void) {
   goToStep(PLAN_STEP);
@@ -100,6 +103,9 @@ export function SalesJoinClient({ slug }: { slug: string }) {
     tierAvailable: false
   });
   const [checkoutBusy, setCheckoutBusy] = useState(false);
+  const [extensionDetected, setExtensionDetected] = useState(false);
+  const [storeLinkClicked, setStoreLinkClicked] = useState(false);
+  const [openingAi, setOpeningAi] = useState<string | null>(null);
 
   const [emailAuthMode, setEmailAuthMode] = useState<"signin" | "register">("register");
   const [emailAuthEmail, setEmailAuthEmail] = useState("");
@@ -238,10 +244,13 @@ export function SalesJoinClient({ slug }: { slug: string }) {
   useEffect(() => {
     if (!link || authLoading || linkLoading) return;
 
-    if (checkoutResult === "success") {
+    if (checkoutResult === "success" && step <= PLAN_STEP) {
       goToStep(INSTALL_STEP);
+      if (user) loadBilling(user);
       return;
     }
+
+    if (step >= DONE_STEP) return;
 
     if (markAuthHydrated(authHydratedRef, prevUserRef, user)) return;
 
@@ -260,7 +269,28 @@ export function SalesJoinClient({ slug }: { slug: string }) {
     if (justSignedIn && shouldAdvanceToPlanAfterAuth(user, step, ACCOUNT_STEP)) {
       advanceAfterAccountAuth(goToStep);
     }
-  }, [link, user, authLoading, linkLoading, checkoutResult, goToStep, step]);
+  }, [link, user, authLoading, linkLoading, checkoutResult, goToStep, step, loadBilling]);
+
+  useEffect(() => {
+    if (step !== INSTALL_STEP || !user) return;
+    let cancelled = false;
+    const check = async () => {
+      const ok = await syncWebsiteSessionToExtension(user);
+      if (!cancelled && ok) setExtensionDetected(true);
+    };
+    check();
+    const id = window.setInterval(check, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [step, user]);
+
+  useEffect(() => {
+    if (step === DONE_STEP && user) {
+      void syncWebsiteSessionToExtension(user);
+    }
+  }, [step, user]);
 
   useEffect(() => {
     if (verificationUiStatus !== "verified" || !user || step !== ACCOUNT_STEP || !link) return;
@@ -367,6 +397,20 @@ export function SalesJoinClient({ slug }: { slug: string }) {
     }
   }
 
+  async function openAiTarget(key: string, url: string) {
+    if (!user) return;
+    setOpeningAi(key);
+    setError("");
+    try {
+      await syncWebsiteSessionToExtension(user);
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (e) {
+      setError(String(e instanceof Error ? e.message : e));
+    } finally {
+      setOpeningAi(null);
+    }
+  }
+
   async function startCheckout() {
     if (!user || !link) return;
     setCheckoutBusy(true);
@@ -415,7 +459,8 @@ export function SalesJoinClient({ slug }: { slug: string }) {
     if (step === 1) return salesWelcomeTitle(link.recipientName);
     if (step === 2) return "Create your account";
     if (step === 3) return "Your plan";
-    return "Install Promptly";
+    if (step === 4) return "Install Promptly";
+    return "Setup complete";
   }, [link, step]);
 
   if (linkLoading) {
@@ -639,31 +684,131 @@ export function SalesJoinClient({ slug }: { slug: string }) {
         ) : null}
 
         {step === 4 ? (
-          <div className="mt-6 space-y-4">
-            <p className="text-sm text-muted">
-              You&apos;re all set{link.recipientName.trim() ? `, ${link.recipientName.trim()}` : ""}. Install Promptly
-              to start improving prompts in ChatGPT, Claude, and Gemini.
-            </p>
-            <a
-              href={SITE.chromeStoreUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-cream hover:bg-neutral-800"
-            >
-              Add to Google Chrome
-            </a>
-            {edgeUrl ? (
-              <a
-                href={edgeUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex w-full items-center justify-center rounded-xl border border-line bg-cream-dark px-4 py-3 text-sm font-semibold text-ink hover:bg-cream"
-              >
-                Add to Microsoft Edge
-              </a>
+          <div className="mt-6 space-y-5">
+            {checkoutResult === "success" ? (
+              <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                Payment successful — one more step to start using Promptly.
+              </p>
             ) : null}
-            <Link href="/account" className="block text-center text-xs text-faint hover:text-ink">
-              Go to your account dashboard
+            <p className="text-sm text-muted">
+              The browser store opens in a new tab. When you&apos;re done installing, return here — we&apos;ll detect
+              the extension automatically when possible.
+            </p>
+
+            <div className="rounded-xl border border-line bg-cream-dark p-4">
+              <p className="text-xs font-semibold uppercase tracking-wider text-faint">1. Download Promptly</p>
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <a
+                  href={SITE.chromeStoreUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setStoreLinkClicked(true)}
+                  className="inline-flex flex-1 items-center justify-center rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800"
+                >
+                  Add to Chrome
+                </a>
+                {edgeUrl ? (
+                  <a
+                    href={edgeUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => setStoreLinkClicked(true)}
+                    className="inline-flex flex-1 items-center justify-center rounded-xl border border-line bg-cream px-4 py-2.5 text-sm font-semibold text-ink hover:bg-cream-dark"
+                  >
+                    Add to Edge
+                  </a>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-line bg-cream-dark p-4">
+              <p className="text-xs font-semibold uppercase tracking-wider text-faint">
+                2. Open ChatGPT, Claude, or Gemini
+              </p>
+              <p className="mt-2 text-sm text-muted">
+                On a laptop or desktop, open one of these in Chrome or Edge — Promptly appears inside the chat box.
+                It&apos;s a browser extension for your computer, not a mobile app.
+              </p>
+              <div className="mt-3 grid gap-2">
+                {AI_TRY_TARGETS.map(({ key, name, url, Logo }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => openAiTarget(key, url)}
+                    disabled={!user || openingAi !== null}
+                    className="inline-flex items-center gap-3 rounded-lg border border-line bg-cream px-3 py-2.5 text-left text-sm font-medium text-ink hover:bg-cream-dark disabled:opacity-60"
+                  >
+                    <Logo className="h-6 w-6 shrink-0" />
+                    <span>Open {name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {extensionDetected ? (
+              <p className="text-sm text-emerald-700">Extension detected — you&apos;re connected.</p>
+            ) : null}
+
+            {!storeLinkClicked ? (
+              <p className="text-center text-xs text-faint">Add Promptly to Chrome or Edge above to continue.</p>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => goToStep(DONE_STEP)}
+              disabled={!storeLinkClicked}
+              className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {extensionDetected ? "Finish setup" : "I've installed — finish setup"}
+            </button>
+            <button type="button" onClick={() => goToStep(PLAN_STEP)} className="text-xs text-faint hover:text-ink">
+              ← Back
+            </button>
+          </div>
+        ) : null}
+
+        {step === 5 ? (
+          <div className="mt-6 space-y-5">
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50/80 px-4 py-3 text-center">
+              <p className="text-lg font-semibold text-emerald-900">Setup complete</p>
+              <p className="mt-1 text-sm text-emerald-800">
+                You&apos;re all set{link.recipientName.trim() ? `, ${link.recipientName.trim()}` : ""}. Try Promptly on
+                your favourite AI chat.
+              </p>
+            </div>
+
+            <p className="text-center text-sm font-semibold text-ink">Try it out now</p>
+            <p className="text-center text-xs text-faint">
+              Use Chrome or Edge on a computer — these links open AI chat in your desktop browser where Promptly is
+              installed.
+            </p>
+
+            <div className="grid gap-3">
+              {AI_TRY_TARGETS.map(({ key, name, url, Logo }) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => openAiTarget(key, url)}
+                  disabled={!user || openingAi !== null}
+                  className="flex flex-col items-center rounded-xl border border-line bg-cream-dark p-4 transition-colors hover:border-ink/20 hover:bg-cream disabled:opacity-60"
+                >
+                  <Logo className="h-10 w-10" />
+                  <span className="mt-2 text-sm font-semibold text-ink">{name}</span>
+                  <span className="mt-1 text-xs text-faint">
+                    {openingAi === key ? "Signing in to extension…" : "Open & start prompting"}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <p className="text-center text-xs text-faint">
+              We sync your Promptly sign-in to the extension when you open a chat (if installed).
+            </p>
+
+            <Link
+              href="/account"
+              className="inline-flex w-full items-center justify-center rounded-xl border border-line px-4 py-2.5 text-sm font-semibold text-ink hover:bg-cream-dark"
+            >
+              Go to your account
             </Link>
           </div>
         ) : null}

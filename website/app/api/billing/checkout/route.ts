@@ -11,7 +11,7 @@ import {
   getStripeTrialDaysForTier,
   isStripeConfigured,
   normalizePaidTier,
-  stripeCheckoutDiscountItem,
+  resolveStripeCheckoutDiscount,
   type PaidTier
 } from "@/lib/server/stripe";
 
@@ -64,7 +64,9 @@ export async function POST(request: Request) {
       : salesLink
         ? null
         : getStripeTrialDaysForTier(paidTier);
-    const checkoutDiscount = stripeCheckoutDiscountItem(salesLink?.stripePromotionCodeId);
+    const checkoutDiscount = salesLink?.stripePromotionCodeId
+      ? await resolveStripeCheckoutDiscount(stripe, salesLink.stripePromotionCodeId)
+      : null;
     const allowPromotionCodes = checkoutDiscount ? false : getStripeAllowPromotionCodes();
     const paymentMethodCollection = salesLink?.skipPaymentMethod ? "if_required" : "always";
     const onboarding = body.onboarding === true;

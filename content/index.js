@@ -1106,7 +1106,7 @@
         if (_error?.promptlyCredits) {
           applyCreditsToUi(_error.promptlyCredits, { announceNoTokens: true });
         }
-        const limitReached = /daily api token limit reached|daily credit limit reached/i.test(rawReason);
+        const limitReached = /weekly api token limit reached|daily api token limit reached|daily credit limit reached/i.test(rawReason);
         const tokenShortfall = /not enough api tokens|not enough daily tokens/i.test(rawReason);
         if (!(_error?.promptlyCredits) && (limitReached || tokenShortfall)) {
           try {
@@ -1531,7 +1531,9 @@
     if (lowered.includes("sign in to promptly first")) {
       return "Sign in to Promptly first — use the Sign in button on the tab.";
     }
-    if (lowered.includes("daily api token limit reached")) return "Daily token limit reached. Try again tomorrow.";
+    if (lowered.includes("weekly api token limit reached") || lowered.includes("daily api token limit reached")) {
+      return "Weekly token limit reached. Resets Sunday UTC.";
+    }
     if (lowered.includes("not enough api tokens")) return "Not enough tokens left for this prompt.";
     if (lowered.includes("timeout")) return "Request timed out. Try again.";
     if (lowered.includes("sign in with promptly first")) return "Sign in with the tab Sign in button, then try again.";

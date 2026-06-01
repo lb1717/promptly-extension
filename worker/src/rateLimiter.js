@@ -14,17 +14,13 @@ function bucketRetryAfterSeconds(type, bucket, nowMs) {
   return Math.max(1, (bucket + 1) * 3600 - currentSec);
 }
 
-function secondsUntilNextUtcDay(nowMs) {
+function secondsUntilNextUtcWeekReset(nowMs) {
   const now = new Date(nowMs);
-  const nextUtcDayStart = Date.UTC(
-    now.getUTCFullYear(),
-    now.getUTCMonth(),
-    now.getUTCDate() + 1,
-    0,
-    0,
-    0
-  );
-  return Math.max(1, Math.ceil((nextUtcDayStart - nowMs) / 1000));
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const dow = d.getUTCDay();
+  const daysUntilNextSunday = dow === 0 ? 7 : 7 - dow;
+  d.setUTCDate(d.getUTCDate() + daysUntilNextSunday);
+  return Math.max(1, Math.ceil((d.getTime() - nowMs) / 1000));
 }
 
 export class RateLimiterDO {
@@ -62,7 +58,7 @@ export class RateLimiterDO {
             used,
             remaining: Math.max(0, limit - used),
             limit,
-            retryAfter: secondsUntilNextUtcDay(now)
+            retryAfter: secondsUntilNextUtcWeekReset(now)
           }),
           {
             status: 200,
@@ -72,7 +68,7 @@ export class RateLimiterDO {
       }
       const nextUsed = used + cost;
       await this.state.storage.put(storageKey, nextUsed, {
-        expiration: Math.floor(now / 1000) + 60 * 60 * 24 * 3
+        expiration: Math.floor(now / 1000) + 60 * 60 * 24 * 14
       });
       return new Response(
         JSON.stringify({
@@ -111,7 +107,7 @@ export class RateLimiterDO {
           used,
           remaining: Math.max(0, limit - used),
           limit,
-          retryAfter: used >= limit ? secondsUntilNextUtcDay(now) : 0
+          retryAfter: used >= limit ? secondsUntilNextUtcWeekReset(now) : 0
         }),
         {
           status: 200,

@@ -1,5 +1,5 @@
 import { requireAdminSession } from "@/lib/adminData";
-import { adminUpdateSalesLink } from "@/lib/server/salesLinks";
+import { adminDeleteSalesLink, adminUpdateSalesLink } from "@/lib/server/salesLinks";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -46,6 +46,20 @@ export async function PATCH(request: Request, { params }: Params) {
       active: typeof b.active === "boolean" ? b.active : undefined
     });
     return NextResponse.json(result, { status: 200 });
+  } catch (error) {
+    const message = String(error instanceof Error ? error.message : error);
+    const status = message.includes("not found") ? 404 : 400;
+    return NextResponse.json({ error: message }, { status });
+  }
+}
+
+export async function DELETE(_request: Request, { params }: Params) {
+  if (!requireAdminSession()) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  try {
+    await adminDeleteSalesLink(params.id);
+    return NextResponse.json({ ok: true }, { status: 200 });
   } catch (error) {
     const message = String(error instanceof Error ? error.message : error);
     const status = message.includes("not found") ? 404 : 400;

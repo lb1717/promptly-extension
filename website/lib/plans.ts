@@ -18,8 +18,8 @@ export const WEBSITE_PLANS: readonly WebsitePlan[] = [
     key: "free",
     name: "Free",
     priceDisplay: "$0.00/mo",
-    subtitle: "Try Promptly with daily token limits.",
-    details: ["Core models and functionality", "Daily limited tokens"],
+    subtitle: "Try Promptly with weekly token limits.",
+    details: ["Core models and functionality", "Weekly limited tokens"],
     paid: false,
     available: true
   },

@@ -17,6 +17,8 @@ export const DAILY_BILL_PLAN_CAP = 250_000;
 export const DAILY_API_TOKEN_LIMIT_DEFAULT = 4_000_000;
 /** Env `DAILY_TOKEN_LIMIT` values below this are ignored (legacy tiny caps). */
 export const DAILY_API_TOKEN_LIMIT_ENV_MIN = 50_000;
+/** User-facing token allowance is weekly (admin/env daily equivalents × this). */
+export const TOKEN_CYCLE_DAYS = 7;
 
 /**
  * Same combined length rule as /optimize for token estimates.
@@ -27,12 +29,17 @@ export function estimateBundledInputTokens(promptLen, instructionLen) {
   return estimateTokensFromChars(p + i);
 }
 
+export function weeklyTokenLimitFromDaily(dailyLimit) {
+  const base = Math.max(1, Math.floor(Number(dailyLimit) || 1));
+  return base * TOKEN_CYCLE_DAYS;
+}
+
 /**
  * Mirrors /optimize preflight: planned charge before provider returns real total_tokens.
  */
-export function conservativeBillFromEstimatedInput(estimatedInputTokens, dailyLimit) {
+export function conservativeBillFromEstimatedInput(estimatedInputTokens, tokenLimit) {
   const et = Math.max(0, Number(estimatedInputTokens) || 0);
-  const cap = Math.max(1, Math.floor(Number(dailyLimit) || 1));
+  const cap = Math.max(1, Math.floor(Number(tokenLimit) || 1));
   const plannedBillTokens = Math.min(cap, Math.max(1, Math.ceil(et * 2.5)));
   return Math.min(DAILY_BILL_PLAN_CAP, plannedBillTokens);
 }
@@ -53,12 +60,49 @@ export function toCreditsView(raw) {
   };
 }
 
+/** UTC week bucket key: YYYY-MM-DD of the Sunday that starts the current week. */
+export function getUtcWeekKey(now = new Date()) {
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  d.setUTCDate(d.getUTCDate() - d.getUTCDay());
+  return d.toISOString().slice(0, 10);
+}
+
+export function getUtcWeekResetAt(now = new Date()) {
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const dow = d.getUTCDay();
+  const daysUntilNextSunday = dow === 0 ? TOKEN_CYCLE_DAYS : TOKEN_CYCLE_DAYS - dow;
+  d.setUTCDate(d.getUTCDate() + daysUntilNextSunday);
+  return d;
+}
+
+export function getTokenResetCountdown(now = new Date()) {
+  const resetAt = getUtcWeekResetAt(now);
+  const resetInSeconds = Math.max(0, Math.ceil((resetAt.getTime() - now.getTime()) / 1000));
+  const oneDaySeconds = 86400;
+  const resetInDays = resetInSeconds >= oneDaySeconds ? Math.ceil(resetInSeconds / oneDaySeconds) : 0;
+  const resetInHours =
+    resetInSeconds >= oneDaySeconds ? 0 : resetInSeconds > 0 ? Math.max(1, Math.ceil(resetInSeconds / 3600)) : 0;
+  const resetLabel =
+    resetInSeconds >= oneDaySeconds
+      ? `${resetInDays}d until reset`
+      : resetInSeconds > 0
+        ? `${resetInHours}h until reset`
+        : "Resets soon";
+  return {
+    reset_at: resetAt.toISOString(),
+    reset_in_seconds: resetInSeconds,
+    reset_in_hours: resetInHours,
+    reset_in_days: resetInDays,
+    reset_label: resetLabel
+  };
+}
+
 /**
  * @param {object} usageRow - Durable Object daily-credit status/consume shape
- * @param {number} dailyLimit
+ * @param {number} tokenLimit - weekly token limit
  * @param {{ estimatedInputTokens?: number|null }} options
  */
-export function buildCreditsEnvelope(usageRow, dailyLimit, options = {}) {
+export function buildCreditsEnvelope(usageRow, tokenLimit, options = {}) {
   const credits = toCreditsView(usageRow);
   const used = credits.used;
   const limit = credits.max;
@@ -68,7 +112,7 @@ export function buildCreditsEnvelope(usageRow, dailyLimit, options = {}) {
   let canRunEstimatedPrompt = null;
   const est = options.estimatedInputTokens;
   if (est != null && Number.isFinite(est) && est >= 0) {
-    plannedBillEstimate = conservativeBillFromEstimatedInput(est, dailyLimit);
+    plannedBillEstimate = conservativeBillFromEstimatedInput(est, tokenLimit);
     if (est > CREDIT_MAX_ESTIMATED_INPUT_TOKENS) {
       canRunEstimatedPrompt = false;
     } else {
@@ -80,6 +124,7 @@ export function buildCreditsEnvelope(usageRow, dailyLimit, options = {}) {
     ...credits,
     remaining: remainingBudget,
     hard_exhausted: used >= limit,
+    ...getTokenResetCountdown(),
     planned_bill_estimate: plannedBillEstimate,
     can_run_estimated_prompt: canRunEstimatedPrompt
   };

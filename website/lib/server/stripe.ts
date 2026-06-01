@@ -104,13 +104,49 @@ export function stripeCheckoutDiscountItem(
   return { coupon: value };
 }
 
+/**
+ * Resolves admin-entered discount refs for Checkout: promo_ IDs, coupon IDs, or customer-facing codes (ACME90).
+ */
+export async function resolveStripeCheckoutDiscount(
+  stripe: Stripe,
+  stripeDiscountRef: string | null | undefined
+): Promise<StripeCheckoutDiscountItem | null> {
+  const value = String(stripeDiscountRef || "").trim();
+  if (!value) return null;
+  if (value.startsWith("promo_")) {
+    return { promotion_code: value };
+  }
+
+  const listed = await stripe.promotionCodes.list({ code: value, active: true, limit: 10 });
+  const promoMatch =
+    listed.data.find((item) => String(item.code || "").toLowerCase() === value.toLowerCase()) ??
+    listed.data[0];
+  if (promoMatch?.id) {
+    return { promotion_code: promoMatch.id };
+  }
+
+  try {
+    await stripe.coupons.retrieve(value);
+    return { coupon: value };
+  } catch {
+    // Not a coupon ID — fall through to error below.
+  }
+
+  throw new Error(
+    `Could not find Stripe discount "${value}". Use a coupon ID from Product catalogue → Coupons, a promotion code ID (promo_…), or the customer-facing code (e.g. ACME90).`
+  );
+}
+
 export function formatStripeCheckoutError(message: string): string {
   const text = String(message || "");
+  if (/could not find stripe discount/i.test(text)) {
+    return text;
+  }
   if (/no such promotion code/i.test(text)) {
-    return "That Stripe discount ID is not a promotion code (promo_…). Paste the coupon ID from the coupon page (e.g. CI9wdF2Y), or create a promotion code and use promo_….";
+    return "That Stripe discount is not a promotion code ID (promo_…). Paste the coupon ID from the coupon page (e.g. CI9wdF2Y), the customer-facing code (e.g. ACME90), or a promotion code ID.";
   }
   if (/no such coupon/i.test(text)) {
-    return "Stripe could not find that coupon ID. Copy the ID from Product catalogue → Coupons → your coupon → Details.";
+    return "Stripe could not find that coupon ID. Copy the ID from Product catalogue → Coupons → your coupon → Details, or use the customer-facing promotion code.";
   }
   return text;
 }

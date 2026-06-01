@@ -21,6 +21,7 @@ export async function GET(request: Request) {
       {
         ok: true,
         day: result.day,
+        week: result.week,
         credits: result.credits
       },
       {

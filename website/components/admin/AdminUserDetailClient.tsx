@@ -178,7 +178,8 @@ export function AdminUserDetailClient({ userId }: { userId: string }) {
             </h2>
             <p className="mb-4 text-xs text-violet-200/70">
               <span className="text-violet-100">Effective limit now:</span>{" "}
-              {formatNumber(u.daily_token_limit)} tokens / UTC day (from{" "}
+              {formatNumber(u.daily_token_limit)} tokens / day equivalent (
+              {formatNumber(u.daily_token_limit * 7)} / week for users, resets Sunday UTC) from{" "}
               <span className="text-violet-100">{u.subscription_tier || "free"}</span> plan in{" "}
               <Link href="/admin/plan-limits" className="text-violet-300 underline-offset-2 hover:underline">
                 Plan limits

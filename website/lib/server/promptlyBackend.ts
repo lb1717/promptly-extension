@@ -40,6 +40,8 @@ const OPTIMIZE_TEMPLATE_OVERHEAD_CHARS = 6000;
 const PROMPT_ENGINEERING_CACHE_MS = 45_000;
 export const DAILY_BILL_PLAN_CAP = 250_000;
 export const DAILY_API_TOKEN_LIMIT_DEFAULT = 4_000_000;
+/** User-facing token allowance is weekly (admin/plan limits stay as daily equivalents × this). */
+export const TOKEN_CYCLE_DAYS = 7;
 /** Upper bound for admin-set daily token limits (abuse throttle). */
 export const ADMIN_DAILY_TOKEN_LIMIT_MAX = 50_000_000;
 
@@ -130,9 +132,14 @@ export function estimateBundledInputTokensForOptimize(promptLen: number, instruc
   return estimateTokensFromChars(p + i + OPTIMIZE_TEMPLATE_OVERHEAD_CHARS);
 }
 
-export function conservativeBillFromEstimatedInput(estimatedInputTokens: number, dailyLimit: number) {
+export function weeklyTokenLimitFromDaily(dailyLimit: number) {
+  const base = Math.max(1, Math.floor(Number(dailyLimit) || 1));
+  return base * TOKEN_CYCLE_DAYS;
+}
+
+export function conservativeBillFromEstimatedInput(estimatedInputTokens: number, tokenLimit: number) {
   const et = Math.max(0, Number(estimatedInputTokens) || 0);
-  const cap = Math.max(1, Math.floor(Number(dailyLimit) || 1));
+  const cap = Math.max(1, Math.floor(Number(tokenLimit) || 1));
   const plannedBillTokens = Math.min(cap, Math.max(1, Math.ceil(et * 2.5)));
   return Math.min(DAILY_BILL_PLAN_CAP, plannedBillTokens);
 }
@@ -140,7 +147,7 @@ export function conservativeBillFromEstimatedInput(estimatedInputTokens: number,
 function toCreditsView(raw: { used: number; limit: number; remaining?: number }) {
   const usedRaw = Math.max(0, Number(raw.used || 0));
   const limit = Math.max(1, Number(raw.limit || 1));
-  // UI should never show usage beyond the daily cap.
+  // UI should never show usage beyond the weekly cap.
   const used = Math.min(limit, usedRaw);
   const remaining = Math.max(0, Number(raw.remaining ?? Math.max(0, limit - used)));
   const rawUsedPercent = Math.max(0, Math.min(100, Math.round((used / limit) * 100)));
@@ -157,7 +164,7 @@ function toCreditsView(raw: { used: number; limit: number; remaining?: number })
 
 export function buildCreditsEnvelope(
   usageRow: { used: number; limit: number },
-  dailyLimit: number,
+  tokenLimit: number,
   options: { estimatedInputTokens?: number | null } = {}
 ) {
   const credits = toCreditsView(usageRow);
@@ -169,28 +176,20 @@ export function buildCreditsEnvelope(
   let canRunEstimatedPrompt: boolean | null = null;
   const est = options.estimatedInputTokens;
   if (est != null && Number.isFinite(est) && est >= 0) {
-    plannedBillEstimate = conservativeBillFromEstimatedInput(est, dailyLimit);
+    plannedBillEstimate = conservativeBillFromEstimatedInput(est, tokenLimit);
     if (est > CREDIT_MAX_ESTIMATED_INPUT_TOKENS) {
       canRunEstimatedPrompt = false;
     } else {
-      // Soft pre-check: allow run while still under daily cap.
+      // Soft pre-check: allow run while still under weekly cap.
       canRunEstimatedPrompt = used < limit;
     }
   }
-
-  const now = new Date();
-  const resetAt = new Date(now);
-  resetAt.setUTCHours(24, 0, 0, 0);
-  const resetInSeconds = Math.max(0, Math.ceil((resetAt.getTime() - now.getTime()) / 1000));
-  const resetInHours = resetInSeconds > 0 ? Math.max(1, Math.ceil(resetInSeconds / 3600)) : 0;
 
   return {
     ...credits,
     remaining: remainingBudget,
     hard_exhausted: used >= limit,
-    reset_at: resetAt.toISOString(),
-    reset_in_seconds: resetInSeconds,
-    reset_in_hours: resetInHours,
+    ...getTokenResetCountdown(),
     planned_bill_estimate: plannedBillEstimate,
     can_run_estimated_prompt: canRunEstimatedPrompt
   };
@@ -198,6 +197,43 @@ export function buildCreditsEnvelope(
 
 export function getUtcDay() {
   return new Date().toISOString().slice(0, 10);
+}
+
+/** UTC week bucket key: YYYY-MM-DD of the Sunday that starts the current week. */
+export function getUtcWeekKey(now = new Date()) {
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  d.setUTCDate(d.getUTCDate() - d.getUTCDay());
+  return d.toISOString().slice(0, 10);
+}
+
+export function getUtcWeekResetAt(now = new Date()) {
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const dow = d.getUTCDay();
+  const daysUntilNextSunday = dow === 0 ? TOKEN_CYCLE_DAYS : TOKEN_CYCLE_DAYS - dow;
+  d.setUTCDate(d.getUTCDate() + daysUntilNextSunday);
+  return d;
+}
+
+export function getTokenResetCountdown(now = new Date()) {
+  const resetAt = getUtcWeekResetAt(now);
+  const resetInSeconds = Math.max(0, Math.ceil((resetAt.getTime() - now.getTime()) / 1000));
+  const oneDaySeconds = 86400;
+  const resetInDays = resetInSeconds >= oneDaySeconds ? Math.ceil(resetInSeconds / oneDaySeconds) : 0;
+  const resetInHours =
+    resetInSeconds >= oneDaySeconds ? 0 : resetInSeconds > 0 ? Math.max(1, Math.ceil(resetInSeconds / 3600)) : 0;
+  const resetLabel =
+    resetInSeconds >= oneDaySeconds
+      ? `${resetInDays}d until reset`
+      : resetInSeconds > 0
+        ? `${resetInHours}h until reset`
+        : "Resets soon";
+  return {
+    reset_at: resetAt.toISOString(),
+    reset_in_seconds: resetInSeconds,
+    reset_in_hours: resetInHours,
+    reset_in_days: resetInDays,
+    reset_label: resetLabel
+  };
 }
 
 function getDateDaysAgo(daysAgo: number) {
@@ -3704,7 +3740,7 @@ export async function consumeDailyUsage(params: {
   const db = getFirebaseAdminDb();
   const usageRef = db.collection(DAILY_USAGE_COLLECTION).doc(`${params.user.uid}_${params.day}`);
   const userRef = db.collection(USER_COLLECTION).doc(params.user.uid);
-  const dailyLimit = params.user.dailyTokenLimit;
+  const weeklyLimit = weeklyTokenLimitFromDaily(params.user.dailyTokenLimit);
 
   const outcome = await db.runTransaction(async (tx) => {
     const [usageSnap, userSnap] = await Promise.all([tx.get(usageRef), tx.get(userRef)]);
@@ -3739,13 +3775,13 @@ export async function consumeDailyUsage(params: {
       unknown: currentUnknown,
       responseTimeTotalMs: currentResponseTimeTotalMs,
       responseTimeCount: currentResponseTimeCount,
-      limit: dailyLimit
+      limit: weeklyLimit
     };
 
-    if (currentUsed >= dailyLimit) {
+    if (currentUsed >= weeklyLimit) {
       return { ok: false as const, usage: snapshotUsage };
     }
-    const nextUsed = Math.min(dailyLimit, nextUsedRaw);
+    const nextUsed = Math.min(weeklyLimit, nextUsedRaw);
 
     const nextUsage: DailyUsage = {
       ...snapshotUsage,
@@ -3783,7 +3819,7 @@ export async function consumeDailyUsage(params: {
         unknown: nextUsage.unknown,
         responseTimeTotalMs: nextUsage.responseTimeTotalMs,
         responseTimeCount: nextUsage.responseTimeCount,
-        limit: dailyLimit,
+        limit: weeklyLimit,
         updatedAt: FieldValue.serverTimestamp(),
         createdAt: usageSnap.exists ? usageRaw.createdAt || FieldValue.serverTimestamp() : FieldValue.serverTimestamp()
       },
@@ -3797,7 +3833,7 @@ export async function consumeDailyUsage(params: {
       userRef,
       {
         email: params.user.email,
-        dailyTokenLimit: dailyLimit,
+        dailyTokenLimit: params.user.dailyTokenLimit,
         promptsImprovedTotal: currentTotal + 1,
         allTimeMaxDailyTokenUsage: Math.max(currentAllTimeMax, nextUsage.used),
         updatedAt: FieldValue.serverTimestamp(),
@@ -3903,8 +3939,9 @@ export async function adminSaveTierLimits(
 }
 
 export async function getCreditsForUser(user: PromptlyUser, request: Request) {
-  const day = getUtcDay();
-  const usage = await getDailyUsage(user.uid, day, user.dailyTokenLimit);
+  const week = getUtcWeekKey();
+  const weeklyLimit = weeklyTokenLimitFromDaily(user.dailyTokenLimit);
+  const usage = await getDailyUsage(user.uid, week, weeklyLimit);
   const pEst = parseEstimateHeader(request, "x-promptly-estimate-prompt-length", CREDIT_MAX_PROMPT_CHARS);
   const iEst = parseEstimateHeader(
     request,
@@ -3915,9 +3952,10 @@ export async function getCreditsForUser(user: PromptlyUser, request: Request) {
     pEst !== null || iEst !== null ? estimateBundledInputTokensForOptimize(pEst ?? 0, iEst ?? 0) : null;
 
   return {
-    day,
+    day: week,
+    week,
     usage,
-    credits: buildCreditsEnvelope(usage, user.dailyTokenLimit, { estimatedInputTokens })
+    credits: buildCreditsEnvelope(usage, weeklyLimit, { estimatedInputTokens })
   };
 }
 

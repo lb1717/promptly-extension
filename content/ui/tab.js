@@ -277,7 +277,7 @@
         this.resetCreditUsageDisplay();
       }
       if (this.creditUsageWrap) {
-        this.creditUsageWrap.setAttribute("title", "Daily token usage");
+        this.creditUsageWrap.setAttribute("title", "Weekly token usage");
         this.creditUsageWrap.addEventListener("mouseenter", () => this.handleCreditWrapHover());
         this.creditUsageWrap.addEventListener("focusin", () => this.handleCreditWrapHover());
         this.creditUsageWrap.addEventListener("pointerdown", (event) => {
@@ -1219,13 +1219,17 @@
         this.creditUsageWrap.style.setProperty("--promptly-credit-progress-deg", `${displayDeg}deg`);
       }
       const maxStr = fmt(max);
+      const resetLabel = String(credits.reset_label || "").trim();
       const resetHours = Math.max(0, Math.ceil(Number(credits.reset_in_hours || 0) || 0));
-      const resetLine =
-        used >= max && resetHours > 0
-          ? `<span class="promptly-credit-line promptly-credit-line-reset">${resetHours}h Until Reset</span>`
-          : "";
+      const resetDays = Math.max(0, Math.ceil(Number(credits.reset_in_days || 0) || 0));
+      const resetLineText =
+        resetLabel ||
+        (resetDays > 0 ? `${resetDays}d until reset` : resetHours > 0 ? `${resetHours}h until reset` : "");
+      const resetLine = resetLineText
+        ? `<span class="promptly-credit-line promptly-credit-line-reset">${resetLineText}</span>`
+        : "";
       this.creditUsageTooltip.innerHTML =
-        `<span class="promptly-credit-line promptly-credit-line-strong">${leftPercent}% Daily Limit Left</span>` +
+        `<span class="promptly-credit-line promptly-credit-line-strong">${leftPercent}% Weekly Limit Left</span>` +
         `<span class="promptly-credit-line promptly-credit-line-muted">${fmt(used)} / ${maxStr} Tokens</span>` +
         resetLine;
       this.creditUsageLoaded = true;

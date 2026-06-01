@@ -112,6 +112,8 @@ type DailyCreditsPayload = {
   reset_at?: string;
   reset_in_seconds?: number;
   reset_in_hours?: number;
+  reset_in_days?: number;
+  reset_label?: string;
 };
 
 type AccountUsageStatsPayload = {
@@ -384,6 +386,22 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
     () => tierLabel(billing?.subscriptionTier || "free"),
     [billing?.subscriptionTier]
   );
+
+  const weeklyTokenResetLabel = useMemo(() => {
+    if (!dailyCredits) {
+      return "";
+    }
+    const label = String(dailyCredits.reset_label || "").trim();
+    if (label) {
+      return label;
+    }
+    const resetDays = Math.max(0, Math.ceil(Number(dailyCredits.reset_in_days || 0)));
+    if (resetDays > 0) {
+      return `${resetDays}d until reset`;
+    }
+    const resetHours = Math.max(0, Math.ceil(Number(dailyCredits.reset_in_hours || 0)));
+    return resetHours > 0 ? `${resetHours}h until reset` : "";
+  }, [dailyCredits]);
 
   const dailyTokenUsagePct = useMemo(() => {
     if (!dailyCredits) {
@@ -880,7 +898,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
 
           <section className="rounded-2xl border border-line bg-cream px-4 py-3 sm:px-6 sm:py-3.5">
             <div className="flex items-center justify-between gap-3">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">Daily token usage</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">Weekly token usage</p>
               {dailyCredits ? (
                 <p className="text-[11px] font-medium text-muted">
                   {Math.max(0, Math.floor(Number(dailyCredits.used || 0))).toLocaleString()} /{" "}
@@ -898,6 +916,9 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                 style={{ width: `${dailyTokenUsagePct}%` }}
               />
             </div>
+            {weeklyTokenResetLabel ? (
+              <p className="mt-2 text-[10px] text-faint">{weeklyTokenResetLabel}</p>
+            ) : null}
             {dailyCreditsError ? (
               <p className="mt-2 text-[10px] text-amber-700/90">{dailyCreditsError}</p>
             ) : null}

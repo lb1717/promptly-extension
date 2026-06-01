@@ -638,7 +638,10 @@ export function GeneralOnboardingClient() {
               <p className="text-xs font-semibold uppercase tracking-wider text-faint">
                 2. Open ChatGPT, Claude, or Gemini
               </p>
-              <p className="mt-2 text-sm text-muted">Begin prompting — Promptly appears inside the chat box.</p>
+              <p className="mt-2 text-sm text-muted">
+                On a laptop or desktop, open one of these in Chrome or Edge — Promptly appears inside the chat box.
+                It&apos;s a browser extension for your computer, not a mobile app.
+              </p>
               <div className="mt-3 grid gap-2">
                 {AI_TRY_TARGETS.map(({ key, name, url, Logo }) => (
                   <button
@@ -684,6 +687,10 @@ export function GeneralOnboardingClient() {
             </div>
 
             <p className="text-center text-sm font-semibold text-ink">Try it out now</p>
+            <p className="text-center text-xs text-faint">
+              Use Chrome or Edge on a computer — these links open AI chat in your desktop browser where Promptly is
+              installed.
+            </p>
 
             <div className="grid gap-3">
               {AI_TRY_TARGETS.map(({ key, name, url, Logo }) => (

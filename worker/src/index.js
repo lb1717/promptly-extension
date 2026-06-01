@@ -9,7 +9,9 @@ import {
   CREDIT_MAX_PROMPT_CHARS,
   DAILY_API_TOKEN_LIMIT_DEFAULT,
   DAILY_API_TOKEN_LIMIT_ENV_MIN,
-  estimateBundledInputTokens
+  estimateBundledInputTokens,
+  getUtcWeekKey,
+  weeklyTokenLimitFromDaily
 } from "./creditsEnvelope.js";
 export { RateLimiterDO } from "./rateLimiter.js";
 
@@ -53,6 +55,10 @@ async function enforceRateLimit(env, scope, key, minuteLimit, hourLimit) {
   });
   const data = await response.json();
   return data;
+}
+
+function resolveWeeklyTokenLimit(env) {
+  return weeklyTokenLimitFromDaily(resolveDailyTokenLimit(env));
 }
 
 function getUtcDay() {
@@ -483,18 +489,18 @@ export default {
       if (!identity.ok) {
         return jsonResponse(identity.code, { error: identity.error }, corsOrigin);
       }
-      const day = getUtcDay();
-      const dailyLimit = resolveDailyTokenLimit(env);
+      const week = getUtcWeekKey();
+      const weeklyLimit = resolveWeeklyTokenLimit(env);
       const usage = await readDailyTokenUsage(
         env,
         identity.userHash,
-        day,
-        dailyLimit
+        week,
+        weeklyLimit
       );
       if (!usage.ok) {
         return jsonResponse(
           503,
-          { error: usage.error || "Unable to read daily credits" },
+          { error: usage.error || "Unable to read weekly credits" },
           corsOrigin
         );
       }
@@ -516,8 +522,9 @@ export default {
         200,
         {
           ok: true,
-          day,
-          credits: buildCreditsEnvelope(usage, dailyLimit, {
+          day: week,
+          week,
+          credits: buildCreditsEnvelope(usage, weeklyLimit, {
             estimatedInputTokens
           })
         },
@@ -776,21 +783,21 @@ export default {
       );
     }
 
-    const day = getUtcDay();
-    const dailyLimit = resolveDailyTokenLimit(env);
-    const usageBefore = await readDailyTokenUsage(env, identity.userHash, day, dailyLimit);
+    const week = getUtcWeekKey();
+    const weeklyLimit = resolveWeeklyTokenLimit(env);
+    const usageBefore = await readDailyTokenUsage(env, identity.userHash, week, weeklyLimit);
     if (!usageBefore.ok) {
       return jsonResponse(
         503,
-        { error: usageBefore.error || "Unable to read daily credits" },
+        { error: usageBefore.error || "Unable to read weekly credits" },
         corsOrigin
       );
     }
     if (usageBefore.limited) {
       return new Response(
         JSON.stringify({
-          error: "Daily API token limit reached",
-          credits: buildCreditsEnvelope(usageBefore, dailyLimit, { estimatedInputTokens })
+          error: "Weekly API token limit reached",
+          credits: buildCreditsEnvelope(usageBefore, weeklyLimit, { estimatedInputTokens })
         }),
         {
           status: 429,
@@ -802,13 +809,13 @@ export default {
         }
       );
     }
-    const conservativeBill = conservativeBillFromEstimatedInput(estimatedInputTokens, dailyLimit);
-    if (usageBefore.used + conservativeBill > dailyLimit) {
+    const conservativeBill = conservativeBillFromEstimatedInput(estimatedInputTokens, weeklyLimit);
+    if (usageBefore.used + conservativeBill > weeklyLimit) {
       return new Response(
         JSON.stringify({
           error:
-            "Not enough API tokens for this prompt size (same units as OpenAI usage.total_tokens). Shorten the prompt or wait until UTC midnight reset.",
-          credits: buildCreditsEnvelope(usageBefore, dailyLimit, { estimatedInputTokens })
+            "Not enough API tokens for this prompt size (same units as OpenAI usage.total_tokens). Shorten the prompt or wait until the weekly reset on Sunday UTC.",
+          credits: buildCreditsEnvelope(usageBefore, weeklyLimit, { estimatedInputTokens })
         }),
         {
           status: 429,
@@ -843,27 +850,27 @@ export default {
       const credits = await consumeDailyTokens(
         env,
         identity.userHash,
-        day,
-        dailyLimit,
+        week,
+        weeklyLimit,
         tokenCost
       );
       if (!credits.ok) {
         if (credits.creditRequestFailed) {
           return jsonResponse(
             503,
-            { error: credits.error || "Unable to update daily credits" },
+            { error: credits.error || "Unable to update weekly credits" },
             corsOrigin
           );
         }
         const usedAfter = Number(credits.used || 0);
-        const atHardCap = usedAfter >= dailyLimit;
+        const atHardCap = usedAfter >= weeklyLimit;
         const errorMessage = atHardCap
-          ? "Daily API token limit reached"
-          : "Not enough API tokens for this response (OpenAI usage.total_tokens). Try a shorter prompt or wait until UTC midnight reset.";
+          ? "Weekly API token limit reached"
+          : "Not enough API tokens for this response (OpenAI usage.total_tokens). Try a shorter prompt or wait until the weekly reset on Sunday UTC.";
         return new Response(
           JSON.stringify({
             error: errorMessage,
-            credits: buildCreditsEnvelope(credits, dailyLimit, { estimatedInputTokens })
+            credits: buildCreditsEnvelope(credits, weeklyLimit, { estimatedInputTokens })
           }),
           {
             status: 429,
@@ -882,7 +889,7 @@ export default {
         usage: optimized.usage || null,
         billed_tokens: tokenCost,
         billing_basis: billingBasis,
-        credits: buildCreditsEnvelope(credits, dailyLimit, { estimatedInputTokens })
+        credits: buildCreditsEnvelope(credits, weeklyLimit, { estimatedInputTokens })
       };
 
       const latencyMs = Date.now() - started;
@@ -893,7 +900,7 @@ export default {
         keyId: authResult.keyId,
         userIdHash: identity.userHash,
         userEmail: identity.email,
-        day,
+        day: week,
         optimizeMode,
         provider: optimized.provider,
         model: optimized.model,

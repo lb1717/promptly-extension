@@ -52,12 +52,15 @@ export function AdminSalesClient() {
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [copiedSlug, setCopiedSlug] = useState("");
+  const [deletingId, setDeletingId] = useState("");
+  const [updatingId, setUpdatingId] = useState("");
 
   const [recipientName, setRecipientName] = useState("");
   const [slug, setSlug] = useState("");
   const [tier, setTier] = useState<(typeof TIERS)[number]["value"]>("enterprise");
   const [offerTitle, setOfferTitle] = useState("");
   const [offerDescription, setOfferDescription] = useState("");
+  const [promoMode, setPromoMode] = useState<"none" | "preapply">("none");
   const [promoId, setPromoId] = useState("");
   const [promoLabel, setPromoLabel] = useState("");
   const [offerFreeTrial, setOfferFreeTrial] = useState(false);
@@ -98,6 +101,7 @@ export function AdminSalesClient() {
     setTier("enterprise");
     setOfferTitle("");
     setOfferDescription("");
+    setPromoMode("none");
     setPromoId("");
     setPromoLabel("");
     setOfferFreeTrial(false);
@@ -107,6 +111,10 @@ export function AdminSalesClient() {
   }
 
   async function createLink() {
+    if (promoMode === "preapply" && !promoId.trim()) {
+      setError("Enter a Stripe coupon ID, promotion code ID (promo_…), or customer-facing code, or choose affiliate link only.");
+      return;
+    }
     setSaving(true);
     setMessage("");
     setError("");
@@ -120,8 +128,8 @@ export function AdminSalesClient() {
           tier,
           offer_title: offerTitle,
           offer_description: offerDescription,
-          stripe_promotion_code_id: promoId.trim() || null,
-          stripe_promotion_code_label: promoLabel.trim() || null,
+          stripe_promotion_code_id: promoMode === "preapply" ? promoId.trim() : null,
+          stripe_promotion_code_label: promoMode === "preapply" ? promoLabel.trim() || null : null,
           offer_free_trial: offerFreeTrial,
           trial_days: offerFreeTrial ? Number(trialDays) : null,
           skip_payment_method: skipPaymentMethod,
@@ -144,23 +152,55 @@ export function AdminSalesClient() {
     }
   }
 
-  async function toggleActive(link: SalesLink) {
+  async function setLinkActive(link: SalesLink, active: boolean) {
     setError("");
     setMessage("");
+    setUpdatingId(link.id);
     try {
       const res = await fetch(`/api/admin/sales-links/${encodeURIComponent(link.id)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ active: !link.active })
+        body: JSON.stringify({ active })
       });
       const data = await res.json();
       if (!res.ok) {
         setError(data.error || "Failed to update link.");
         return;
       }
+      setMessage(active ? `Reactivated link for ${link.recipientName.trim() || link.slug}.` : `Deactivated link for ${link.recipientName.trim() || link.slug}.`);
       await load();
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));
+    } finally {
+      setUpdatingId("");
+    }
+  }
+
+  async function deleteLink(link: SalesLink) {
+    const label = link.recipientName.trim() || link.slug;
+    const confirmed = window.confirm(
+      `Delete invite link for "${label}"?\n\nThis permanently removes the link. Signups already completed are not affected.`
+    );
+    if (!confirmed) return;
+
+    setError("");
+    setMessage("");
+    setDeletingId(link.id);
+    try {
+      const res = await fetch(`/api/admin/sales-links/${encodeURIComponent(link.id)}`, {
+        method: "DELETE"
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Failed to delete link.");
+        return;
+      }
+      setMessage(`Deleted invite link for ${label}.`);
+      await load();
+    } catch (e) {
+      setError(String(e instanceof Error ? e.message : e));
+    } finally {
+      setDeletingId("");
     }
   }
 
@@ -184,7 +224,8 @@ export function AdminSalesClient() {
           </Link>
           <h1 className="mt-2 text-2xl font-semibold text-white">Sales invite links</h1>
           <p className="mt-1 max-w-2xl text-sm text-violet-200/70">
-            Create personalized signup links with a welcome message, fixed plan, and auto-applied Stripe promo codes.
+            Create personalized signup links with a welcome message and fixed plan — optionally pre-apply a Stripe
+            discount or let the customer enter their own promo code at checkout.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -269,28 +310,69 @@ export function AdminSalesClient() {
                 className="w-full rounded-lg border border-violet-500/25 bg-[#1a1228] px-3 py-2 text-sm text-white outline-none focus:border-violet-400"
               />
             </label>
-            <label className="block text-sm">
-              <span className="mb-1 block text-violet-200/80">Stripe coupon or promotion code ID</span>
-              <input
-                value={promoId}
-                onChange={(e) => setPromoId(e.target.value)}
-                placeholder="CI9wdF2Y or promo_..."
-                className="w-full rounded-lg border border-violet-500/25 bg-[#1a1228] px-3 py-2 text-sm text-white outline-none focus:border-violet-400"
-              />
-              <span className="mt-1 block text-xs text-violet-300/60">
-                Paste the coupon ID from Product catalogue → Coupons → Details (e.g. CI9wdF2Y), or a promotion code
-                ID (promo_…) if you created one. Auto-applied at checkout.
-              </span>
-            </label>
-            <label className="block text-sm">
-              <span className="mb-1 block text-violet-200/80">Promo label (internal reference)</span>
-              <input
-                value={promoLabel}
-                onChange={(e) => setPromoLabel(e.target.value)}
-                placeholder="ACME-90FREE"
-                className="w-full rounded-lg border border-violet-500/25 bg-[#1a1228] px-3 py-2 text-sm text-white outline-none focus:border-violet-400"
-              />
-            </label>
+            <div className="block text-sm sm:col-span-2">
+              <span className="mb-2 block text-violet-200/80">Discount at checkout</span>
+              <div className="space-y-3 rounded-lg border border-violet-500/20 bg-[#1a1228] p-4">
+                <label className="flex items-start gap-3">
+                  <input
+                    type="radio"
+                    name="promoMode"
+                    checked={promoMode === "none"}
+                    onChange={() => setPromoMode("none")}
+                    className="mt-1"
+                  />
+                  <span>
+                    <span className="block font-medium text-white">Affiliate link only</span>
+                    <span className="block text-xs text-violet-300/60">
+                      Fixed plan and welcome message only — the customer can enter their own promo code on the Stripe
+                      checkout page.
+                    </span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-3">
+                  <input
+                    type="radio"
+                    name="promoMode"
+                    checked={promoMode === "preapply"}
+                    onChange={() => setPromoMode("preapply")}
+                    className="mt-1"
+                  />
+                  <span>
+                    <span className="block font-medium text-white">Pre-apply a Stripe discount</span>
+                    <span className="block text-xs text-violet-300/60">
+                      Auto-applies a coupon or promotion code at checkout. Accepts coupon IDs, promo_… IDs, or
+                      customer-facing codes like ACME90. The customer cannot enter a different code.
+                    </span>
+                  </span>
+                </label>
+                {promoMode === "preapply" ? (
+                  <div className="ml-7 grid gap-4 sm:grid-cols-2">
+                    <label className="block text-sm">
+                      <span className="mb-1 block text-violet-200/80">Coupon ID, promo ID, or customer code</span>
+                      <input
+                        value={promoId}
+                        onChange={(e) => setPromoId(e.target.value)}
+                        placeholder="CI9wdF2Y, promo_…, or ACME90"
+                        className="w-full rounded-lg border border-violet-500/25 bg-[#120c1c] px-3 py-2 text-sm text-white outline-none focus:border-violet-400"
+                      />
+                      <span className="mt-1 block text-xs text-violet-300/60">
+                        Coupon ID from Product catalogue → Coupons → Details, a promotion code ID (promo_…), or the
+                        code customers type at checkout (e.g. ACME90).
+                      </span>
+                    </label>
+                    <label className="block text-sm">
+                      <span className="mb-1 block text-violet-200/80">Promo label (internal reference)</span>
+                      <input
+                        value={promoLabel}
+                        onChange={(e) => setPromoLabel(e.target.value)}
+                        placeholder="ACME-90FREE"
+                        className="w-full rounded-lg border border-violet-500/25 bg-[#120c1c] px-3 py-2 text-sm text-white outline-none focus:border-violet-400"
+                      />
+                    </label>
+                  </div>
+                ) : null}
+              </div>
+            </div>
             <div className="block text-sm sm:col-span-2">
               <span className="mb-2 block text-violet-200/80">Checkout options</span>
               <div className="space-y-3 rounded-lg border border-violet-500/20 bg-[#1a1228] p-4">
@@ -361,7 +443,7 @@ export function AdminSalesClient() {
       ) : null}
 
       <section className="rounded-2xl border border-violet-500/20 bg-[#221830]/60 p-5">
-        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-violet-300/90">Active links</h2>
+        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-violet-300/90">All invite links</h2>
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
             <thead>
@@ -369,16 +451,20 @@ export function AdminSalesClient() {
                 <th className="py-2 pr-4">Recipient</th>
                 <th className="py-2 pr-4">Plan</th>
                 <th className="py-2 pr-4">Offer</th>
-                <th className="py-2 pr-4">Promo</th>
+                <th className="py-2 pr-4">Discount</th>
                 <th className="py-2 pr-4">Checkout</th>
                 <th className="py-2 pr-4">Signups</th>
                 <th className="py-2 pr-4">Status</th>
-                <th className="py-2 pr-0">Link</th>
+                <th className="py-2 pr-4">Link</th>
+                <th className="py-2 pr-0">Actions</th>
               </tr>
             </thead>
             <tbody>
               {links.map((link) => (
-                <tr key={link.id} className="border-b border-violet-500/10 text-violet-100/90">
+                <tr
+                  key={link.id}
+                  className={`border-b border-violet-500/10 text-violet-100/90 ${link.active ? "" : "opacity-70"}`}
+                >
                   <td className="py-3 pr-4">
                     <div className="font-medium text-white">{link.recipientName.trim() || "—"}</div>
                     <div className="text-xs text-violet-300/60">{formatDate(link.createdAt)}</div>
@@ -388,8 +474,14 @@ export function AdminSalesClient() {
                     <div className="truncate font-medium">{link.offerTitle}</div>
                     <div className="truncate text-xs text-violet-300/60">{link.offerDescription}</div>
                   </td>
-                  <td className="py-3 pr-4 text-xs font-mono">
-                    {link.stripePromotionCodeLabel || link.stripePromotionCodeId || "—"}
+                  <td className="py-3 pr-4 text-xs">
+                    {link.stripePromotionCodeLabel || link.stripePromotionCodeId ? (
+                      <span className="font-mono">
+                        {link.stripePromotionCodeLabel || link.stripePromotionCodeId}
+                      </span>
+                    ) : (
+                      <span className="text-violet-200/80">Customer enters code</span>
+                    )}
                   </td>
                   <td className="py-3 pr-4 text-xs text-violet-200/80">
                     {link.offerFreeTrial ? `${link.trialDays ?? 7}-day trial` : "No trial"}
@@ -398,32 +490,62 @@ export function AdminSalesClient() {
                   </td>
                   <td className="py-3 pr-4">{link.signupCount}</td>
                   <td className="py-3 pr-4">
-                    <button
-                      type="button"
-                      onClick={() => toggleActive(link)}
-                      className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                    <span
+                      className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${
                         link.active
                           ? "bg-emerald-500/20 text-emerald-300"
                           : "bg-neutral-500/20 text-neutral-300"
                       }`}
                     >
                       {link.active ? "Active" : "Inactive"}
-                    </button>
+                    </span>
                   </td>
-                  <td className="py-3 pr-0">
+                  <td className="py-3 pr-4">
                     <button
                       type="button"
                       onClick={() => copyUrl(link.slug)}
-                      className="rounded-lg border border-violet-500/30 px-3 py-1.5 text-xs font-semibold text-violet-100 hover:bg-violet-500/15"
+                      disabled={!link.active}
+                      className="rounded-lg border border-violet-500/30 px-3 py-1.5 text-xs font-semibold text-violet-100 hover:bg-violet-500/15 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {copiedSlug === link.slug ? "Copied!" : "Copy link"}
                     </button>
+                  </td>
+                  <td className="py-3 pr-0">
+                    <div className="flex flex-wrap gap-2">
+                      {link.active ? (
+                        <button
+                          type="button"
+                          onClick={() => setLinkActive(link, false)}
+                          disabled={updatingId === link.id || deletingId === link.id}
+                          className="rounded-lg border border-amber-500/30 px-2.5 py-1.5 text-xs font-semibold text-amber-200 hover:bg-amber-500/10 disabled:opacity-60"
+                        >
+                          {updatingId === link.id ? "…" : "Deactivate"}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setLinkActive(link, true)}
+                          disabled={updatingId === link.id || deletingId === link.id}
+                          className="rounded-lg border border-emerald-500/30 px-2.5 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/10 disabled:opacity-60"
+                        >
+                          {updatingId === link.id ? "…" : "Activate"}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => deleteLink(link)}
+                        disabled={updatingId === link.id || deletingId === link.id}
+                        className="rounded-lg border border-red-500/30 px-2.5 py-1.5 text-xs font-semibold text-red-200 hover:bg-red-500/10 disabled:opacity-60"
+                      >
+                        {deletingId === link.id ? "…" : "Delete"}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
               {!loading && links.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-8 text-center text-violet-200/70">
+                  <td colSpan={9} className="py-8 text-center text-violet-200/70">
                     No invite links yet. Create one to get started.
                   </td>
                 </tr>
@@ -436,11 +558,19 @@ export function AdminSalesClient() {
       <section className="mt-6 rounded-2xl border border-violet-500/15 bg-[#221830]/40 p-5 text-sm text-violet-200/75">
         <h3 className="font-semibold text-violet-100">How it works</h3>
         <ol className="mt-3 list-decimal space-y-2 pl-5">
-          <li>Create a coupon in Stripe (e.g. 100% off for 1 month) and copy its ID from the coupon Details.</li>
-          <li>Create an invite link with that coupon ID (e.g. CI9wdF2Y) or a promotion code ID (promo_…).</li>
+          <li>
+            Choose <strong className="font-medium text-violet-100">Affiliate link only</strong> for plan + message
+            only, or <strong className="font-medium text-violet-100">Pre-apply a Stripe discount</strong> to lock in a
+            coupon ID, promotion code ID, or customer-facing code at checkout.
+          </li>
+          <li>Deactivate a link to stop new signups without deleting history. Delete removes the link permanently.</li>
           <li>Optionally enable a free trial and/or skip credit card collection at checkout.</li>
-          <li>Send the link — recipients see a 4-step flow: welcome → account → plan → install extension.</li>
-          <li>When they activate the plan, Stripe Checkout opens with your promo, trial, and payment settings applied.</li>
+          <li>Send the link — recipients see a 5-step flow: welcome → account → plan → install extension → try it out.</li>
+          <li>
+            When they activate the plan, Stripe Checkout opens with your trial and payment settings. Affiliate-only
+            links show Stripe&apos;s promo code field; pre-applied links use your coupon automatically. After payment,
+            they get Chrome/Edge install instructions and links to open ChatGPT, Claude, or Gemini.
+          </li>
         </ol>
       </section>
     </main>
