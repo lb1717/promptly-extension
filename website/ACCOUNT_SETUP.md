@@ -82,6 +82,16 @@ To replace it with your brand:
 
 After cutover, users should see **“Continue to: auth.promptly-labs.com”** (or your chosen subdomain) instead of `promptly-prod-976ef.firebaseapp.com`. Local dev can keep the default `firebaseapp.com` domain until you add localhost-compatible custom domain setup.
 
+### Email verification template (password sign-up)
+
+Password accounts receive Firebase’s **Email address verification** message. Edit it in Firebase Console:
+
+1. **Authentication** → **Templates** → **Email address verification**
+2. Customize **Sender name**, **Subject**, and **Body** (HTML supported)
+3. Optional: set a custom **From** address under **Authentication** → **Templates** → **SMTP settings** (requires domain verification)
+
+The `%LINK%` placeholder in the template is replaced with the verification URL. The website polls for verification while the user stays on `/get-started` or `/account`; no code change is needed for template edits beyond redeploying env if you change the auth domain.
+
 ## 4) Verify account pages
 
 Open:

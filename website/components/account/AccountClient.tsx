@@ -31,7 +31,9 @@ import {
   resolveGoogleSignInError,
   type AuthProviderHint
 } from "@/lib/firebaseAuthAccountHints";
+import { EmailVerificationNotice } from "@/components/auth/EmailVerificationNotice";
 import { listenForGoogleSignInReturn, signInWithGoogleInteractive } from "@/lib/firebaseGoogleAuth";
+import { useEmailVerificationStatus } from "@/lib/useEmailVerificationStatus";
 
 function formatJoinDate(user: User | null): string {
   if (!user?.metadata?.creationTime) return "—";
@@ -206,6 +208,13 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
   const extensionIdFromUrl = extensionMode ? String(searchParams.get("extension_id") || "").trim() : "";
   const signinCsrfFromUrl = extensionMode ? String(searchParams.get("signin_csrf") || "").trim() : "";
   const [user, setUser] = useState<User | null>(null);
+  const {
+    uiStatus: verificationUiStatus,
+    trackedEmail: verificationEmail,
+    notifyVerificationSent,
+    notifyVerified,
+    resetVerificationStatus
+  } = useEmailVerificationStatus(user);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -373,6 +382,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
   useEffect(() => {
     return listenForGoogleSignInReturn({
       onSuccess: () => {
+        resetVerificationStatus();
         setAccountNotice("Signed in with Google.");
         setBusy(false);
       },
@@ -387,7 +397,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
       },
       onSettled: () => setBusy(false)
     });
-  }, []);
+  }, [resetVerificationStatus]);
 
   useEffect(() => {
     const auth = getFirebaseAuth();
@@ -471,6 +481,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
       const returnTo = `${window.location.pathname}${window.location.search}`;
       const flow = await signInWithGoogleInteractive(returnTo);
       if (flow.status === "success") {
+        resetVerificationStatus();
         await syncUserToFirestore(flow.user);
         setAccountNotice("Signed in with Google.");
       } else if (flow.status === "cancelled") {
@@ -510,12 +521,12 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
       await reload(cred.user);
       if (!cred.user.emailVerified) {
         await sendEmailVerification(cred.user);
-        await signOut(auth);
+        notifyVerificationSent(email);
         setEmailAuthPassword("");
         setEmailAuthPassword2("");
-        setAccountNotice("Verify your email before signing in. We sent a new verification link.");
         return;
       }
+      notifyVerified(cred.user.email || email);
       await syncUserToFirestore(cred.user);
       setEmailAuthPassword("");
       setEmailAuthPassword2("");
@@ -565,9 +576,8 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
       await updateProfile(cred.user, { displayName: trimmedName });
       await syncUserToFirestore(cred.user);
       await sendEmailVerification(cred.user);
-      await signOut(auth);
       setEmailAuthMode("signin");
-      setAccountNotice("Account created. Verify your email first, then sign in.");
+      notifyVerificationSent(email);
       setEmailAuthPassword("");
       setEmailAuthPassword2("");
       setEmailAuthName("");
@@ -655,6 +665,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
     setBusy(true);
     try {
       await signOut(getFirebaseAuth());
+      resetVerificationStatus();
       setBilling(null);
       setAccountStats(null);
     } catch (e) {
@@ -806,7 +817,9 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                   {error}
                 </div>
               ) : null}
-              {accountNotice ? (
+              {verificationUiStatus !== "none" && verificationEmail ? (
+                <EmailVerificationNotice status={verificationUiStatus} email={verificationEmail} className="mt-4 w-full" />
+              ) : accountNotice ? (
                 <AutoDismissNoticeBar
                   key={accountNotice}
                   className="mt-4 w-full"
@@ -835,10 +848,13 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
           {error}
         </div>
       ) : null}
-      {user && accountNotice ? (
+      {user && verificationUiStatus !== "none" && verificationEmail ? (
+        <EmailVerificationNotice status={verificationUiStatus} email={verificationEmail} className="mb-6" />
+      ) : null}
+      {user && accountNotice && verificationUiStatus === "none" ? (
         <AutoDismissNoticeBar
           key={accountNotice}
-          innerClassName="rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-800"
+          innerClassName="mb-6 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-800"
         >
           {accountNotice}
         </AutoDismissNoticeBar>

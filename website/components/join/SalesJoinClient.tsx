@@ -9,7 +9,6 @@ import {
   reload,
   sendEmailVerification,
   signInWithEmailAndPassword,
-  signOut,
   updateProfile,
   User
 } from "firebase/auth";
@@ -22,7 +21,10 @@ import {
   resolveEmailSignInError,
   resolveGoogleSignInError
 } from "@/lib/firebaseAuthAccountHints";
+import { EmailVerificationNotice } from "@/components/auth/EmailVerificationNotice";
 import { listenForGoogleSignInReturn, signInWithGoogleInteractive } from "@/lib/firebaseGoogleAuth";
+import { canProceedWithEmailAccount } from "@/lib/emailVerification";
+import { useEmailVerificationStatus } from "@/lib/useEmailVerificationStatus";
 
 type PublicSalesLink = {
   slug: string;
@@ -116,6 +118,14 @@ export function SalesJoinClient({ slug }: { slug: string }) {
   const [emailAuthPassword2, setEmailAuthPassword2] = useState("");
   const [emailAuthName, setEmailAuthName] = useState("");
 
+  const {
+    uiStatus: verificationUiStatus,
+    trackedEmail: verificationEmail,
+    notifyVerificationSent,
+    notifyVerified,
+    resetVerificationStatus
+  } = useEmailVerificationStatus(user);
+
   const planInfo = link ? PLAN_DETAILS[link.tier] : null;
 
   useEffect(() => {
@@ -177,9 +187,9 @@ export function SalesJoinClient({ slug }: { slug: string }) {
   useEffect(() => {
     return listenForGoogleSignInReturn({
       onSuccess: () => {
+        resetVerificationStatus();
         setNotice("Signed in with Google.");
         setBusy(false);
-        goToStep(3);
       },
       onError: (message) => {
         setError(message);
@@ -187,7 +197,7 @@ export function SalesJoinClient({ slug }: { slug: string }) {
       },
       onSettled: () => setBusy(false)
     });
-  }, [slug]);
+  }, [resetVerificationStatus]);
 
   useEffect(() => {
     const auth = getFirebaseAuth();
@@ -238,25 +248,48 @@ export function SalesJoinClient({ slug }: { slug: string }) {
       return;
     }
 
-    if (user) {
-      setStep(3);
+    if (user && canProceedWithEmailAccount(user)) {
+      if (verificationUiStatus === "verified") {
+        // Delay step change briefly so the green verified notice is visible.
+      } else {
+        setStep(3);
+        try {
+          window.localStorage.setItem(stepStorageKey(slug), "3");
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+    }
+
+    if (user && !canProceedWithEmailAccount(user)) {
+      setStep(2);
       try {
-        window.localStorage.setItem(stepStorageKey(slug), "3");
+        window.localStorage.setItem(stepStorageKey(slug), "2");
       } catch {
         /* ignore */
       }
       return;
     }
 
-    try {
-      const saved = Number(window.localStorage.getItem(stepStorageKey(slug)) || "1");
-      if (saved >= 1 && saved <= 4) {
-        setStep(saved === 4 ? 1 : saved);
+    if (!user) {
+      try {
+        const saved = Number(window.localStorage.getItem(stepStorageKey(slug)) || "1");
+        if (saved >= 1 && saved <= 4) {
+          setStep(saved === 4 ? 1 : saved);
+        }
+      } catch {
+        /* ignore */
       }
-    } catch {
-      /* ignore */
     }
-  }, [link, user, authLoading, linkLoading, billing, checkoutResult, slug]);
+  }, [link, user, authLoading, linkLoading, billing, checkoutResult, slug, verificationUiStatus]);
+
+  useEffect(() => {
+    if (verificationUiStatus !== "verified" || !user || step !== 2 || !link) return;
+    if (!canProceedWithEmailAccount(user)) return;
+    const timer = window.setTimeout(() => goToStep(3), 1500);
+    return () => window.clearTimeout(timer);
+  }, [verificationUiStatus, user, step, link]);
 
   function goToStep(next: number) {
     setStep(next);
@@ -280,6 +313,7 @@ export function SalesJoinClient({ slug }: { slug: string }) {
       const returnTo = `${window.location.pathname}${window.location.search}`;
       const flow = await signInWithGoogleInteractive(returnTo);
       if (flow.status === "success") {
+        resetVerificationStatus();
         await syncUserToFirestore(flow.user);
         setNotice("Signed in with Google.");
       } else if (flow.status === "cancelled") {
@@ -300,16 +334,17 @@ export function SalesJoinClient({ slug }: { slug: string }) {
     setBusy(true);
     try {
       const auth = getFirebaseAuth();
-      const cred = await signInWithEmailAndPassword(auth, emailAuthEmail.trim(), emailAuthPassword);
+      const email = emailAuthEmail.trim();
+      const cred = await signInWithEmailAndPassword(auth, email, emailAuthPassword);
       await reload(cred.user);
       if (!cred.user.emailVerified) {
         await sendEmailVerification(cred.user);
-        await signOut(auth);
-        setNotice("Verify your email first, then sign in again to continue.");
+        notifyVerificationSent(email);
+        setEmailAuthPassword("");
         return;
       }
+      notifyVerified(cred.user.email || email);
       await syncUserToFirestore(cred.user);
-      goToStep(3);
     } catch (e) {
       setError((await resolveEmailSignInError(getFirebaseAuth(), emailAuthEmail.trim(), e)).message);
     } finally {
@@ -345,9 +380,8 @@ export function SalesJoinClient({ slug }: { slug: string }) {
       await updateProfile(cred.user, { displayName: emailAuthName.trim() });
       await syncUserToFirestore(cred.user);
       await sendEmailVerification(cred.user);
-      await signOut(auth);
       setEmailAuthMode("signin");
-      setNotice("Account created. Verify your email, then sign in to continue.");
+      notifyVerificationSent(email);
       setEmailAuthPassword("");
       setEmailAuthPassword2("");
       setEmailAuthName("");
@@ -459,7 +493,9 @@ export function SalesJoinClient({ slug }: { slug: string }) {
         {error ? (
           <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
         ) : null}
-        {notice ? (
+        {verificationUiStatus !== "none" && verificationEmail ? (
+          <EmailVerificationNotice status={verificationUiStatus} email={verificationEmail} />
+        ) : notice ? (
           <p className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
             {notice}
           </p>

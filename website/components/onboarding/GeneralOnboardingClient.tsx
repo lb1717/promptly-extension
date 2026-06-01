@@ -10,7 +10,6 @@ import {
   reload,
   sendEmailVerification,
   signInWithEmailAndPassword,
-  signOut,
   updateProfile,
   User
 } from "firebase/auth";
@@ -24,7 +23,10 @@ import {
   resolveGoogleSignInError
 } from "@/lib/firebaseAuthAccountHints";
 import { listenForGoogleSignInReturn, signInWithGoogleInteractive } from "@/lib/firebaseGoogleAuth";
+import { EmailVerificationNotice } from "@/components/auth/EmailVerificationNotice";
 import { AI_TRY_TARGETS } from "@/components/onboarding/AiServiceLogos";
+import { canProceedWithEmailAccount } from "@/lib/emailVerification";
+import { useEmailVerificationStatus } from "@/lib/useEmailVerificationStatus";
 
 const STEPS = ["Start", "Account", "Plan", "Install", "Done"] as const;
 
@@ -107,6 +109,14 @@ export function GeneralOnboardingClient() {
 
   const edgeUrl = SITE.edgeAddonsUrl || SITE.browserExtensionTargets.find((t) => t.key === "edge")?.installUrl;
 
+  const {
+    uiStatus: verificationUiStatus,
+    trackedEmail: verificationEmail,
+    notifyVerificationSent,
+    notifyVerified,
+    resetVerificationStatus
+  } = useEmailVerificationStatus(user);
+
   const currentTier = useMemo(() => normalizeTier(billing?.subscriptionTier || "free"), [billing?.subscriptionTier]);
 
   const goToStep = useCallback((next: number) => {
@@ -121,6 +131,7 @@ export function GeneralOnboardingClient() {
   useEffect(() => {
     return listenForGoogleSignInReturn({
       onSuccess: () => {
+        resetVerificationStatus();
         setNotice("Signed in with Google.");
         setBusy(false);
       },
@@ -130,7 +141,7 @@ export function GeneralOnboardingClient() {
       },
       onSettled: () => setBusy(false)
     });
-  }, []);
+  }, [resetVerificationStatus]);
 
   useEffect(() => {
     const auth = getFirebaseAuth();
@@ -192,7 +203,8 @@ export function GeneralOnboardingClient() {
 
     if (step === 5) return;
 
-    if (user && step < 3) {
+    if (user && step < 3 && canProceedWithEmailAccount(user)) {
+      if (verificationUiStatus === "verified") return;
       goToStep(3);
       return;
     }
@@ -200,7 +212,14 @@ export function GeneralOnboardingClient() {
     if (!user && step > 2) {
       goToStep(2);
     }
-  }, [user, authLoading, checkoutResult, goToStep, step]);
+  }, [user, authLoading, checkoutResult, goToStep, step, verificationUiStatus]);
+
+  useEffect(() => {
+    if (verificationUiStatus !== "verified" || !user || step !== 2) return;
+    if (!canProceedWithEmailAccount(user)) return;
+    const timer = window.setTimeout(() => goToStep(3), 1500);
+    return () => window.clearTimeout(timer);
+  }, [verificationUiStatus, user, step, goToStep]);
 
   useEffect(() => {
     if (step !== 4 || !user) return;
@@ -231,6 +250,7 @@ export function GeneralOnboardingClient() {
     try {
       const flow = await signInWithGoogleInteractive("/get-started");
       if (flow.status === "success") {
+        resetVerificationStatus();
         await syncPromptlyUserDoc(flow.user);
         setNotice("Signed in with Google.");
       } else if (flow.status === "cancelled") {
@@ -251,16 +271,17 @@ export function GeneralOnboardingClient() {
     setBusy(true);
     try {
       const auth = getFirebaseAuth();
-      const cred = await signInWithEmailAndPassword(auth, emailAuthEmail.trim(), emailAuthPassword);
+      const email = emailAuthEmail.trim();
+      const cred = await signInWithEmailAndPassword(auth, email, emailAuthPassword);
       await reload(cred.user);
       if (!cred.user.emailVerified) {
         await sendEmailVerification(cred.user);
-        await signOut(auth);
-        setNotice("Verify your email first, then sign in again.");
+        notifyVerificationSent(email);
+        setEmailAuthPassword("");
         return;
       }
+      notifyVerified(cred.user.email || email);
       await syncPromptlyUserDoc(cred.user);
-      goToStep(3);
     } catch (e) {
       setError((await resolveEmailSignInError(getFirebaseAuth(), emailAuthEmail.trim(), e)).message);
     } finally {
@@ -296,9 +317,8 @@ export function GeneralOnboardingClient() {
       await updateProfile(cred.user, { displayName: emailAuthName.trim() });
       await syncPromptlyUserDoc(cred.user);
       await sendEmailVerification(cred.user);
-      await signOut(auth);
       setEmailAuthMode("signin");
-      setNotice("Account created. Verify your email, then sign in.");
+      notifyVerificationSent(email);
       setEmailAuthPassword("");
       setEmailAuthPassword2("");
       setEmailAuthName("");
@@ -409,7 +429,9 @@ export function GeneralOnboardingClient() {
         {error ? (
           <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
         ) : null}
-        {notice ? (
+        {verificationUiStatus !== "none" && verificationEmail ? (
+          <EmailVerificationNotice status={verificationUiStatus} email={verificationEmail} />
+        ) : notice ? (
           <p className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
             {notice}
           </p>
