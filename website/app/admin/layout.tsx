@@ -1,7 +1,7 @@
 import { ReactNode } from "react";
 
 export const metadata = {
-  title: "Promptly Admin",
+  title: "Promptly Labs",
   robots: { index: false, follow: false }
 };
 

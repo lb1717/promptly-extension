@@ -58,7 +58,7 @@ export function buildPageMetadata({
   const ogImage = absoluteUrl("/icon-512.png");
 
   return {
-    title,
+    title: "Promptly Labs",
     description,
     keywords: keywords ?? DEFAULT_KEYWORDS,
     alternates: {
@@ -94,10 +94,7 @@ export function rootMetadata(): Metadata {
 
   return {
     metadataBase: new URL(getSiteUrl()),
-    title: {
-      default: "Promptly — One-Click Prompt Improvement for ChatGPT, Claude & Gemini",
-      template: "%s | Promptly Labs"
-    },
+    title: "Promptly Labs",
     description: DEFAULT_DESCRIPTION,
     keywords: DEFAULT_KEYWORDS,
     applicationName: "Promptly",

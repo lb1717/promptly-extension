@@ -61,6 +61,13 @@ function parsePositiveIntEnv(raw: string): number | null {
 }
 
 export function getStripeTrialDaysForTier(tier: PaidTier): number | null {
+  const enabledRaw = String(process.env.STRIPE_TRIALS_ENABLED || "")
+    .trim()
+    .toLowerCase();
+  const trialsEnabled =
+    enabledRaw === "1" || enabledRaw === "true" || enabledRaw === "yes" || enabledRaw === "on";
+  if (!trialsEnabled) return null;
+
   const perTierRaw =
     tier === "pro"
       ? String(process.env.STRIPE_TRIAL_DAYS_PRO || "").trim()

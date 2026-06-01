@@ -542,9 +542,8 @@ export function GeneralOnboardingClient() {
           <div className="mt-6 space-y-4">
             <p className="text-sm text-muted">Select the plan that fits you. You can change it later from your account.</p>
             <div className="space-y-3">
-              {ONBOARDING_PLANS.filter((p) => p.available).map((plan) => {
+              {ONBOARDING_PLANS.map((plan) => {
                 const isSelected = selectedPlan === plan.key;
-                const isCurrent = currentTier === plan.key;
                 return (
                   <button
                     key={plan.key}
@@ -554,16 +553,9 @@ export function GeneralOnboardingClient() {
                       isSelected ? "border-ink bg-cream-dark shadow-sm" : "border-line bg-cream hover:bg-cream-dark/80"
                     }`}
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="font-semibold text-ink">{plan.name}</p>
-                        <p className="text-sm font-medium text-muted">{plan.priceDisplay}</p>
-                      </div>
-                      {isCurrent ? (
-                        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-emerald-800">
-                          Current
-                        </span>
-                      ) : null}
+                    <div>
+                      <p className="font-semibold text-ink">{plan.name}</p>
+                      <p className="text-sm font-medium text-muted">{plan.priceDisplay}</p>
                     </div>
                     <p className="mt-1 text-xs text-faint">{plan.subtitle}</p>
                     <ul className="mt-2 space-y-1 text-xs text-muted">

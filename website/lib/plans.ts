@@ -70,7 +70,11 @@ export const WEBSITE_PLANS: readonly WebsitePlan[] = [
   }
 ] as const;
 
-export const ONBOARDING_PLANS = WEBSITE_PLANS.filter((plan) => plan.available);
+export const ONBOARDING_PLANS = WEBSITE_PLANS.filter((plan) => plan.available).sort((a, b) => {
+  if (a.key === "free") return 1;
+  if (b.key === "free") return -1;
+  return 0;
+});
 
 export const PRICING_PAGE_PLANS = WEBSITE_PLANS.filter((plan) => plan.available);
 
