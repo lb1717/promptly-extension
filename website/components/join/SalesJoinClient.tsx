@@ -26,6 +26,21 @@ import { listenForGoogleSignInReturn, signInWithGoogleInteractive } from "@/lib/
 import { canProceedWithEmailAccount } from "@/lib/emailVerification";
 import { useEmailVerificationStatus } from "@/lib/useEmailVerificationStatus";
 import { planDetailsForTier } from "@/lib/plans";
+import {
+  detectAuthTransition,
+  markAuthHydrated,
+  shouldAdvanceToPlanAfterAuth,
+  welcomeContinueStep
+} from "@/lib/onboardingStepFlow";
+
+const STEPS = ["Welcome", "Account", "Plan", "Install"] as const;
+const ACCOUNT_STEP = 2;
+const PLAN_STEP = 3;
+const INSTALL_STEP = 4;
+
+function advanceAfterAccountAuth(goToStep: (next: number) => void) {
+  goToStep(PLAN_STEP);
+}
 
 type PublicSalesLink = {
   slug: string;
@@ -45,12 +60,6 @@ type CheckoutStatus = {
   stripeConfigured: boolean;
   tierAvailable: boolean;
 };
-
-const STEPS = ["Welcome", "Account", "Plan", "Install"] as const;
-
-function stepStorageKey(slug: string) {
-  return `promptly_join_${slug}_step`;
-}
 
 function paidTierActive(billing: BillingPayload | null, tier: PublicSalesLink["tier"]) {
   if (!billing) return false;
@@ -101,7 +110,7 @@ export function SalesJoinClient({ slug }: { slug: string }) {
     resetVerificationStatus
   } = useEmailVerificationStatus(user);
 
-  const hasAutoAdvancedRef = useRef(false);
+  const authHydratedRef = useRef(false);
   const prevUserRef = useRef<User | null>(null);
 
   const planInfo = link ? planDetailsForTier(link.tier) : null;
@@ -162,12 +171,20 @@ export function SalesJoinClient({ slug }: { slug: string }) {
     };
   }, [link]);
 
+  const goToStep = useCallback((next: number) => {
+    setStep(next);
+  }, []);
+
   useEffect(() => {
     return listenForGoogleSignInReturn({
       onSuccess: () => {
         resetVerificationStatus();
         setNotice("Signed in with Google.");
         setBusy(false);
+        const current = getFirebaseAuth().currentUser;
+        if (shouldAdvanceToPlanAfterAuth(current, step, ACCOUNT_STEP)) {
+          advanceAfterAccountAuth(goToStep);
+        }
       },
       onError: (message) => {
         setError(message);
@@ -175,7 +192,7 @@ export function SalesJoinClient({ slug }: { slug: string }) {
       },
       onSettled: () => setBusy(false)
     });
-  }, [resetVerificationStatus]);
+  }, [goToStep, resetVerificationStatus, step]);
 
   useEffect(() => {
     const auth = getFirebaseAuth();
@@ -216,71 +233,36 @@ export function SalesJoinClient({ slug }: { slug: string }) {
   useEffect(() => {
     if (!link || authLoading || linkLoading) return;
 
-    if (checkoutResult === "success" || (user && paidTierActive(billing, link.tier))) {
-      setStep(4);
-      try {
-        window.localStorage.setItem(stepStorageKey(slug), "4");
-      } catch {
-        /* ignore */
-      }
+    if (checkoutResult === "success") {
+      goToStep(INSTALL_STEP);
       return;
     }
 
-    const justSignedIn = Boolean(user && !prevUserRef.current);
-    prevUserRef.current = user;
+    if (markAuthHydrated(authHydratedRef, prevUserRef, user)) return;
 
-    if (user && !canProceedWithEmailAccount(user) && step > 2) {
-      setStep(2);
-      try {
-        window.localStorage.setItem(stepStorageKey(slug), "2");
-      } catch {
-        /* ignore */
-      }
+    const { justSignedIn, justSignedOut } = detectAuthTransition(prevUserRef, user);
+
+    if (user && !canProceedWithEmailAccount(user) && step > ACCOUNT_STEP) {
+      goToStep(ACCOUNT_STEP);
       return;
     }
 
-    if (user && canProceedWithEmailAccount(user) && step < 3) {
-      if (verificationUiStatus === "verified") {
-        // Delayed advance handled by the effect below.
-      } else if (justSignedIn || !hasAutoAdvancedRef.current) {
-        hasAutoAdvancedRef.current = true;
-        setStep(3);
-        try {
-          window.localStorage.setItem(stepStorageKey(slug), "3");
-        } catch {
-          /* ignore */
-        }
-        return;
-      }
+    if ((justSignedOut || !user) && step > ACCOUNT_STEP) {
+      goToStep(ACCOUNT_STEP);
+      return;
     }
 
-    if (!user) {
-      try {
-        const saved = Number(window.localStorage.getItem(stepStorageKey(slug)) || "1");
-        if (saved >= 1 && saved <= 4) {
-          setStep(saved === 4 ? 1 : saved);
-        }
-      } catch {
-        /* ignore */
-      }
+    if (justSignedIn && shouldAdvanceToPlanAfterAuth(user, step, ACCOUNT_STEP)) {
+      advanceAfterAccountAuth(goToStep);
     }
-  }, [link, user, authLoading, linkLoading, billing, checkoutResult, slug, verificationUiStatus, step]);
+  }, [link, user, authLoading, linkLoading, checkoutResult, goToStep, step]);
 
   useEffect(() => {
-    if (verificationUiStatus !== "verified" || !user || step !== 2 || !link) return;
+    if (verificationUiStatus !== "verified" || !user || step !== ACCOUNT_STEP || !link) return;
     if (!canProceedWithEmailAccount(user)) return;
-    const timer = window.setTimeout(() => goToStep(3), 1500);
+    const timer = window.setTimeout(() => advanceAfterAccountAuth(goToStep), 800);
     return () => window.clearTimeout(timer);
-  }, [verificationUiStatus, user, step, link]);
-
-  function goToStep(next: number) {
-    setStep(next);
-    try {
-      window.localStorage.setItem(stepStorageKey(slug), String(next));
-    } catch {
-      /* ignore */
-    }
-  }
+  }, [verificationUiStatus, user, step, link, goToStep]);
 
   async function syncUserToFirestore(currentUser: User) {
     await syncPromptlyUserDoc(currentUser);
@@ -298,6 +280,9 @@ export function SalesJoinClient({ slug }: { slug: string }) {
         resetVerificationStatus();
         await syncUserToFirestore(flow.user);
         setNotice("Signed in with Google.");
+        if (shouldAdvanceToPlanAfterAuth(flow.user, step, ACCOUNT_STEP)) {
+          advanceAfterAccountAuth(goToStep);
+        }
       } else if (flow.status === "cancelled") {
         setError("Google sign-in was cancelled.");
       } else {
@@ -327,6 +312,9 @@ export function SalesJoinClient({ slug }: { slug: string }) {
       }
       notifyVerified(cred.user.email || email);
       await syncUserToFirestore(cred.user);
+      if (shouldAdvanceToPlanAfterAuth(cred.user, step, ACCOUNT_STEP)) {
+        advanceAfterAccountAuth(goToStep);
+      }
     } catch (e) {
       setError((await resolveEmailSignInError(getFirebaseAuth(), emailAuthEmail.trim(), e)).message);
     } finally {
@@ -491,7 +479,7 @@ export function SalesJoinClient({ slug }: { slug: string }) {
             </p>
             <button
               type="button"
-              onClick={() => goToStep(2)}
+              onClick={() => goToStep(welcomeContinueStep(user, ACCOUNT_STEP, PLAN_STEP))}
               className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-cream hover:bg-neutral-800"
             >
               Get started
@@ -612,24 +600,34 @@ export function SalesJoinClient({ slug }: { slug: string }) {
               <p className="text-sm text-muted">Checkout was cancelled. You can try again when ready.</p>
             ) : null}
 
-            <button
-              type="button"
-              onClick={startCheckout}
-              disabled={checkoutBusy || !canActivatePlan}
-              className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:opacity-60"
-            >
-              {checkoutBusy
-                ? "Redirecting to Stripe…"
-                : checkoutStatus.loading
-                  ? "Checking checkout…"
-                  : "Activate plan"}
-            </button>
+            {paidTierActive(billing, link.tier) ? (
+              <button
+                type="button"
+                onClick={() => goToStep(INSTALL_STEP)}
+                className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-cream hover:bg-neutral-800"
+              >
+                Continue to install
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={startCheckout}
+                disabled={checkoutBusy || !canActivatePlan}
+                className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:opacity-60"
+              >
+                {checkoutBusy
+                  ? "Redirecting to Stripe…"
+                  : checkoutStatus.loading
+                    ? "Checking checkout…"
+                    : "Activate plan"}
+              </button>
+            )}
 
-            {checkoutBlockedMessage ? (
+            {checkoutBlockedMessage && !paidTierActive(billing, link.tier) ? (
               <p className="text-xs text-faint">{checkoutBlockedMessage}</p>
             ) : null}
 
-            <button type="button" onClick={() => goToStep(2)} className="text-xs text-faint hover:text-ink">
+            <button type="button" onClick={() => goToStep(ACCOUNT_STEP)} className="text-xs text-faint hover:text-ink">
               ← Back
             </button>
           </div>

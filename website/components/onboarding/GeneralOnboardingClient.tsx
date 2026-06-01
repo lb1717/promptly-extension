@@ -28,8 +28,21 @@ import { AI_TRY_TARGETS } from "@/components/onboarding/AiServiceLogos";
 import { canProceedWithEmailAccount } from "@/lib/emailVerification";
 import { useEmailVerificationStatus } from "@/lib/useEmailVerificationStatus";
 import { ONBOARDING_PLANS, type PaidPlanKey, type PlanKey } from "@/lib/plans";
+import {
+  detectAuthTransition,
+  markAuthHydrated,
+  shouldAdvanceToPlanAfterAuth,
+  welcomeContinueStep
+} from "@/lib/onboardingStepFlow";
 
 const STEPS = ["Start", "Account", "Plan", "Install", "Done"] as const;
+const ACCOUNT_STEP = 2;
+const PLAN_STEP = 3;
+const INSTALL_STEP = 4;
+
+function advanceAfterAccountAuth(goToStep: (next: number) => void) {
+  goToStep(PLAN_STEP);
+}
 
 type BillingPayload = {
   subscriptionTier: string;
@@ -41,8 +54,6 @@ type CheckoutStatus = {
   loading: boolean;
   stripeConfigured: boolean;
 };
-
-const STEP_STORAGE_KEY = "promptly_general_onboarding_step";
 
 function normalizeTier(raw: string): PlanKey | "pro" | "student" | "other" {
   const t = raw.toLowerCase();
@@ -81,7 +92,7 @@ export function GeneralOnboardingClient() {
   const [emailAuthPassword2, setEmailAuthPassword2] = useState("");
   const [emailAuthName, setEmailAuthName] = useState("");
 
-  const hasAutoAdvancedRef = useRef(false);
+  const authHydratedRef = useRef(false);
   const prevUserRef = useRef<User | null>(null);
 
   const edgeUrl = SITE.edgeAddonsUrl || SITE.browserExtensionTargets.find((t) => t.key === "edge")?.installUrl;
@@ -98,11 +109,6 @@ export function GeneralOnboardingClient() {
 
   const goToStep = useCallback((next: number) => {
     setStep(next);
-    try {
-      window.localStorage.setItem(STEP_STORAGE_KEY, String(next));
-    } catch {
-      /* ignore */
-    }
   }, []);
 
   useEffect(() => {
@@ -111,6 +117,10 @@ export function GeneralOnboardingClient() {
         resetVerificationStatus();
         setNotice("Signed in with Google.");
         setBusy(false);
+        const current = getFirebaseAuth().currentUser;
+        if (shouldAdvanceToPlanAfterAuth(current, step, ACCOUNT_STEP)) {
+          advanceAfterAccountAuth(goToStep);
+        }
       },
       onError: (message) => {
         setError(message);
@@ -118,7 +128,7 @@ export function GeneralOnboardingClient() {
       },
       onSettled: () => setBusy(false)
     });
-  }, [resetVerificationStatus]);
+  }, [goToStep, resetVerificationStatus, step]);
 
   useEffect(() => {
     const auth = getFirebaseAuth();
@@ -174,33 +184,30 @@ export function GeneralOnboardingClient() {
     if (authLoading) return;
 
     if (checkoutResult === "success") {
-      goToStep(4);
+      goToStep(INSTALL_STEP);
       return;
     }
 
     if (step === 5) return;
 
-    const justSignedIn = Boolean(user && !prevUserRef.current);
-    prevUserRef.current = user;
+    if (markAuthHydrated(authHydratedRef, prevUserRef, user)) return;
 
-    if (!user && step > 2) {
-      goToStep(2);
+    const { justSignedIn, justSignedOut } = detectAuthTransition(prevUserRef, user);
+
+    if ((justSignedOut || !user) && step > ACCOUNT_STEP) {
+      goToStep(ACCOUNT_STEP);
       return;
     }
 
-    if (!user || !canProceedWithEmailAccount(user) || step >= 3) return;
-
-    if (justSignedIn || !hasAutoAdvancedRef.current) {
-      if (verificationUiStatus === "verified") return;
-      hasAutoAdvancedRef.current = true;
-      goToStep(3);
+    if (justSignedIn && shouldAdvanceToPlanAfterAuth(user, step, ACCOUNT_STEP)) {
+      advanceAfterAccountAuth(goToStep);
     }
-  }, [user, authLoading, checkoutResult, goToStep, step, verificationUiStatus]);
+  }, [user, authLoading, checkoutResult, goToStep, step]);
 
   useEffect(() => {
-    if (verificationUiStatus !== "verified" || !user || step !== 2) return;
+    if (verificationUiStatus !== "verified" || !user || step !== ACCOUNT_STEP) return;
     if (!canProceedWithEmailAccount(user)) return;
-    const timer = window.setTimeout(() => goToStep(3), 1500);
+    const timer = window.setTimeout(() => advanceAfterAccountAuth(goToStep), 800);
     return () => window.clearTimeout(timer);
   }, [verificationUiStatus, user, step, goToStep]);
 
@@ -236,6 +243,9 @@ export function GeneralOnboardingClient() {
         resetVerificationStatus();
         await syncPromptlyUserDoc(flow.user);
         setNotice("Signed in with Google.");
+        if (shouldAdvanceToPlanAfterAuth(flow.user, step, ACCOUNT_STEP)) {
+          advanceAfterAccountAuth(goToStep);
+        }
       } else if (flow.status === "cancelled") {
         setError("Google sign-in was cancelled.");
       } else {
@@ -265,6 +275,9 @@ export function GeneralOnboardingClient() {
       }
       notifyVerified(cred.user.email || email);
       await syncPromptlyUserDoc(cred.user);
+      if (shouldAdvanceToPlanAfterAuth(cred.user, step, ACCOUNT_STEP)) {
+        advanceAfterAccountAuth(goToStep);
+      }
     } catch (e) {
       setError((await resolveEmailSignInError(getFirebaseAuth(), emailAuthEmail.trim(), e)).message);
     } finally {
@@ -440,7 +453,7 @@ export function GeneralOnboardingClient() {
             </ul>
             <button
               type="button"
-              onClick={() => goToStep(2)}
+              onClick={() => goToStep(welcomeContinueStep(user, ACCOUNT_STEP, PLAN_STEP))}
               className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-cream hover:bg-neutral-800"
             >
               Get started
