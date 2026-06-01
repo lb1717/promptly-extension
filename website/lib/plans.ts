@@ -76,6 +76,9 @@ export const ONBOARDING_PLANS = WEBSITE_PLANS.filter((plan) => plan.available).s
   return 0;
 });
 
+/** Paid plans shown on /get-started — free is offered as de-emphasized text instead. */
+export const GET_STARTED_PLANS = WEBSITE_PLANS.filter((plan) => plan.available && plan.paid);
+
 export const PRICING_PAGE_PLANS = WEBSITE_PLANS.filter((plan) => plan.available);
 
 export const ACCOUNT_PLANS = WEBSITE_PLANS;

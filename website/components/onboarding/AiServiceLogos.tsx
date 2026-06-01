@@ -25,10 +25,12 @@ export function ClaudeLogo({ className }: { className?: string }) {
 
 export function GeminiLogo({ className }: { className?: string }) {
   return (
-    <svg role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" className={className} aria-hidden>
-      <circle cx="12" cy="12" r="10" fill="#4285F4" />
-      <path fill="#fff" d="M12 6.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5zm-4.5 9.5c1.2-1.8 3.3-3 6-3s4.8 1.2 6 3H7.5z" />
-    </svg>
+    <img
+      src="/images/gemini-logo.png"
+      alt=""
+      aria-hidden
+      className={`object-contain ${className ?? ""}`}
+    />
   );
 }
 

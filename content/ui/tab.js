@@ -886,7 +886,7 @@
       if (this.creditUsageTooltip) {
         this.creditUsageTooltip.innerHTML =
           "<span class='promptly-credit-line promptly-credit-line-strong'>—</span>" +
-          "<span class='promptly-credit-line promptly-credit-line-muted'>— / — Tokens</span>";
+          "<span class='promptly-credit-line promptly-credit-line-muted'>—</span>";
       }
     }
 
@@ -931,7 +931,7 @@
       }
       this.creditUsageTooltip.innerHTML =
         "<span class='promptly-credit-line promptly-credit-line-strong'>Loading usage…</span>" +
-        "<span class='promptly-credit-line promptly-credit-line-muted'>Fetching token balance</span>";
+        "<span class='promptly-credit-line promptly-credit-line-muted'>Fetching plan balance</span>";
     }
 
     setCreditUsageUnavailable() {
@@ -1199,7 +1199,6 @@
       if (!credits || !this.creditUsageMeter || !this.creditUsageTooltip) {
         return;
       }
-      const fmt = (n) => Math.max(0, Math.floor(Number(n) || 0)).toLocaleString("en-US");
       const max = Math.max(1, Number(credits.max || 1));
       const used = Math.min(max, Math.max(0, Number(credits.used || 0)));
       const usedPercent =
@@ -1218,7 +1217,6 @@
         this.creditUsageWrap.style.setProperty("--promptly-credit-progress", `${displayPercent}%`);
         this.creditUsageWrap.style.setProperty("--promptly-credit-progress-deg", `${displayDeg}deg`);
       }
-      const maxStr = fmt(max);
       const resetLabel = String(credits.reset_label || "").trim();
       const resetHours = Math.max(0, Math.ceil(Number(credits.reset_in_hours || 0) || 0));
       const resetDays = Math.max(0, Math.ceil(Number(credits.reset_in_days || 0) || 0));
@@ -1226,11 +1224,10 @@
         resetLabel ||
         (resetDays > 0 ? `${resetDays}d until reset` : resetHours > 0 ? `${resetHours}h until reset` : "");
       const resetLine = resetLineText
-        ? `<span class="promptly-credit-line promptly-credit-line-reset">${resetLineText}</span>`
+        ? `<span class="promptly-credit-line promptly-credit-line-muted">${resetLineText}</span>`
         : "";
       this.creditUsageTooltip.innerHTML =
-        `<span class="promptly-credit-line promptly-credit-line-strong">${leftPercent}% Weekly Limit Left</span>` +
-        `<span class="promptly-credit-line promptly-credit-line-muted">${fmt(used)} / ${maxStr} Tokens</span>` +
+        `<span class="promptly-credit-line promptly-credit-line-strong">${leftPercent}% of weekly plan left</span>` +
         resetLine;
       this.creditUsageLoaded = true;
       this.creditUsageFetchedAt = Date.now();

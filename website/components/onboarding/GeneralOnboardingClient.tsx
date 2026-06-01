@@ -27,7 +27,7 @@ import { EmailVerificationNotice } from "@/components/auth/EmailVerificationNoti
 import { AI_TRY_TARGETS } from "@/components/onboarding/AiServiceLogos";
 import { canProceedWithEmailAccount } from "@/lib/emailVerification";
 import { useEmailVerificationStatus } from "@/lib/useEmailVerificationStatus";
-import { ONBOARDING_PLANS, type PaidPlanKey, type PlanKey } from "@/lib/plans";
+import { GET_STARTED_PLANS, type PaidPlanKey, type PlanKey } from "@/lib/plans";
 import {
   detectAuthTransition,
   markAuthHydrated,
@@ -75,7 +75,7 @@ export function GeneralOnboardingClient() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
-  const [selectedPlan, setSelectedPlan] = useState<PlanKey>("free");
+  const [selectedPlan, setSelectedPlan] = useState<PlanKey>("pro");
   const [billing, setBilling] = useState<BillingPayload | null>(null);
   const [checkoutStatus, setCheckoutStatus] = useState<CheckoutStatus>({
     loading: true,
@@ -347,20 +347,22 @@ export function GeneralOnboardingClient() {
   }
 
   async function continueFromPlan() {
-    const plan = ONBOARDING_PLANS.find((p) => p.key === selectedPlan);
+    const plan = GET_STARTED_PLANS.find((p) => p.key === selectedPlan);
     if (!plan) return;
-    if (plan.paid) {
-      if (currentTier === plan.key) {
-        goToStep(4);
-        return;
-      }
-      if (!checkoutStatus.stripeConfigured) {
-        setError("Stripe checkout is not configured on this server.");
-        return;
-      }
-      await startCheckout(plan.key as PaidPlanKey);
+    if (currentTier === plan.key) {
+      goToStep(4);
       return;
     }
+    if (!checkoutStatus.stripeConfigured) {
+      setError("Stripe checkout is not configured on this server.");
+      return;
+    }
+    await startCheckout(plan.key as PaidPlanKey);
+  }
+
+  function continueWithFreePlan() {
+    setSelectedPlan("free");
+    setError("");
     goToStep(4);
   }
 
@@ -555,7 +557,7 @@ export function GeneralOnboardingClient() {
           <div className="mt-6 space-y-4">
             <p className="text-sm text-muted">Select the plan that fits you. You can change it later from your account.</p>
             <div className="space-y-3">
-              {ONBOARDING_PLANS.map((plan) => {
+              {GET_STARTED_PLANS.map((plan) => {
                 const isSelected = selectedPlan === plan.key;
                 return (
                   <button
@@ -580,6 +582,13 @@ export function GeneralOnboardingClient() {
                 );
               })}
             </div>
+            <button
+              type="button"
+              onClick={continueWithFreePlan}
+              className="w-full text-center text-xs text-faint transition-colors hover:text-muted"
+            >
+              Begin with a limited-use free plan instead
+            </button>
             {checkoutResult === "cancel" ? (
               <p className="text-sm text-muted">Checkout was cancelled. Pick a plan and try again.</p>
             ) : null}
@@ -591,7 +600,7 @@ export function GeneralOnboardingClient() {
             >
               {checkoutBusy
                 ? "Redirecting to Stripe…"
-                : selectedPlan !== "free" && currentTier !== selectedPlan
+                : currentTier !== selectedPlan
                   ? "Continue to payment"
                   : "Continue"}
             </button>
