@@ -56,6 +56,159 @@
   /** While > Date.now(), `sync` skips `ui.setContent` so further-improve chip curtain animation is not torn down. */
   let suppressOpenPopupSetContentUntilMs = 0;
   const FURTHER_IMPROVE_CURTAIN_MS = 300;
+  let tutorial = null;
+
+  function tutorialBlocksNativeSend() {
+    if (!tutorial?.isActive() || tutorial.getStepId() !== "improve") {
+      return false;
+    }
+    const phase = tutorial.getImprovePhase();
+    return phase === "initial" || phase === "further";
+  }
+
+  let tutorialImproveSendHadText = false;
+
+  function resetTutorialImproveSendTracking() {
+    tutorialImproveSendHadText = false;
+  }
+
+  function syncTutorialImproveSendFromComposer(promptText) {
+    if (!tutorial?.isActive() || tutorial.getStepId() !== "improve") {
+      resetTutorialImproveSendTracking();
+      return;
+    }
+    const phase = tutorial.getImprovePhase();
+    if (phase === "complete" || phase === "initial") {
+      resetTutorialImproveSendTracking();
+      return;
+    }
+    const trimmed = String(promptText || "").trim();
+    if (trimmed) {
+      tutorialImproveSendHadText = true;
+      return;
+    }
+    if (!tutorialImproveSendHadText) {
+      return;
+    }
+    resetTutorialImproveSendTracking();
+    tutorial.notifyImproveComposerSentEarly();
+  }
+
+  let tutorialRepositionDemoRaf = null;
+  let tutorialRepositionDemoBaseOffset = 0;
+  const TUTORIAL_REPOSITION_DEMO_AMPLITUDE_PX = 26;
+
+  function stopTutorialRepositionDemo(restore = true) {
+    if (tutorialRepositionDemoRaf) {
+      window.cancelAnimationFrame(tutorialRepositionDemoRaf);
+      tutorialRepositionDemoRaf = null;
+    }
+    if (restore) {
+      positionManager.setPromptlyCenterOffsetX(tutorialRepositionDemoBaseOffset);
+      observers?.scheduleUpdate();
+    }
+  }
+
+  function startTutorialRepositionDemo() {
+    stopTutorialRepositionDemo(false);
+    tutorialRepositionDemoBaseOffset = positionManager.getPromptlyCenterOffsetX();
+    const startedAt = performance.now();
+
+    const tick = (now) => {
+      if (!tutorial?.isActive() || tutorial.getStepId() !== "drag") {
+        stopTutorialRepositionDemo(true);
+        return;
+      }
+      const elapsedSec = (now - startedAt) / 1000;
+      const offset = Math.sin(elapsedSec * 2.4) * TUTORIAL_REPOSITION_DEMO_AMPLITUDE_PX;
+      positionManager.setPromptlyCenterOffsetX(
+        Math.max(
+          MAX_DRAG_LEFT_PX,
+          Math.min(MAX_DRAG_RIGHT_PX, Math.round(tutorialRepositionDemoBaseOffset + offset))
+        )
+      );
+      observers?.scheduleUpdate();
+      tutorialRepositionDemoRaf = window.requestAnimationFrame(tick);
+    };
+
+    tutorialRepositionDemoRaf = window.requestAnimationFrame(tick);
+  }
+
+  function handleTutorialStepEnter(stepId) {
+    if (stepId === "improve") {
+      resetTutorialImproveSendTracking();
+    }
+    if (stepId === "buttons" || stepId === "improve" || stepId === "auto" || stepId === "generate") {
+      isOpen = true;
+      ui.setOpen(true);
+      observers?.scheduleUpdate();
+    }
+    if (stepId === "settings") {
+      ui.setSettingsOpen(false);
+    }
+    if (stepId === "auto" && autoAdjustOnSend) {
+      tutorial?.notifyAutoEnabled();
+    }
+    if (stepId === "drag") {
+      startTutorialRepositionDemo();
+    }
+  }
+
+  function handleTutorialStepExit(stepId) {
+    if (stepId === "drag") {
+      stopTutorialRepositionDemo(true);
+    }
+  }
+
+  function handleTutorialStepSkip(stepId) {
+    resetTutorialImproveSendTracking();
+    if (stepId === "settings") {
+      ui.setSettingsOpen(false);
+    }
+    if (stepId === "drag") {
+      stopTutorialRepositionDemo(true);
+    }
+    if (stepId === "improve") {
+      promptLifecycleState.hasPromptlyRewrite = false;
+      promptLifecycleState.improveMutedByCompose = false;
+      promptLifecycleState.furtherImproveChoices = null;
+      promptLifecycleState.appliedFurtherImproveIds = new Set();
+      promptLifecycleState.hideImprovePromptSection = false;
+      observers?.scheduleUpdate();
+    }
+  }
+
+  async function maybeStartTutorial(options = {}) {
+    if (!tutorial) {
+      return;
+    }
+    const force = !!options.force;
+    if (tutorial.isActive()) {
+      if (!force) {
+        return;
+      }
+      await tutorial.restart();
+      return;
+    }
+    if (!force && (await tutorial.isCompleted())) {
+      return;
+    }
+    if (ui.isSignedOut()) {
+      return;
+    }
+    if (!allowDisplay) {
+      window.setTimeout(() => {
+        void maybeStartTutorial(options);
+      }, 400);
+      return;
+    }
+    await tutorial.start({ force });
+  }
+
+  function restartTutorialDebug() {
+    ui.setSettingsOpen(false);
+    void maybeStartTutorial({ force: true });
+  }
 
   function clearComposePopupAutoCloseTimer() {
     if (composePopupAutoCloseTimer != null) {
@@ -402,6 +555,32 @@
     return fallback();
   }
 
+  async function getPromptlyStatisticsUrl() {
+    const fallback = async () => {
+      const values = await chrome.storage.sync.get(["proxyBaseUrl"]);
+      const baseUrl = normalizeProxyBaseUrl(values.proxyBaseUrl);
+      return `${baseUrl.replace(/\/$/, "")}/account/statistics`;
+    };
+    try {
+      const response = await new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage({ type: "PROMPTLY_GET_STATISTICS_URL" }, (resp) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+          resolve(resp || {});
+        });
+      });
+      const url = String(response?.data?.url || "").trim();
+      if (url) {
+        return url;
+      }
+    } catch (_error) {
+      // Fall back to plain statistics page URL.
+    }
+    return fallback();
+  }
+
   const positionManager = new PositionManager();
   positionManager.setContextWindowWidth(BASE_CONTEXT_WINDOW_WIDTH);
   function syncComposeContextWidth() {
@@ -658,11 +837,16 @@
         );
         ui.setSignedOut(false);
         ui.setSettingsAccountEmail(String(result?.chromeEmail || "").trim());
-        ui.showRepositionHint();
+        if (!tutorial?.isActive()) {
+          ui.showRepositionHint();
+        }
         if (result?.chromeEmail) {
           refreshCreditsFromServer();
           startCreditsPolling();
         }
+        window.setTimeout(() => {
+          void maybeStartTutorial();
+        }, 700);
       } catch (error) {
         ui.showErrorToast(mapPromptlyErrorToToast(String(error?.message || error)));
         await applySignedOutState(true);
@@ -689,6 +873,16 @@
     },
     onManageAccount: async () => {
       window.open(await getPromptlyAccountUrl(), "_blank");
+    },
+    onOpenStatistics: async () => {
+      window.open(await getPromptlyStatisticsUrl(), "_blank");
+    },
+    onTutorialDebugStart: restartTutorialDebug,
+    onTutorialSettingsOpened: () => {
+      tutorial?.notifySettingsOpened();
+    },
+    onTutorialSettingsClosed: () => {
+      tutorial?.notifySettingsClosed();
     },
     onPromptlySignOut: async () => {
       try {
@@ -737,6 +931,9 @@
       observers.scheduleUpdate();
     },
     onFurtherImproveAppend: ({ id, snippet }) => {
+      if (tutorial?.isActive() && !tutorial.allows("further-improve")) {
+        return false;
+      }
       const fid = String(id || "").trim();
       const snip = String(snippet || "").trim();
       if (!fid || !snip) {
@@ -772,6 +969,7 @@
       if (reduceMotion) {
         refreshOpenPopupFromHost(host);
         observers.scheduleUpdate();
+        tutorial?.notifyFurtherImproveApplied();
         return true;
       }
       suppressOpenPopupSetContentUntilMs = Date.now() + FURTHER_IMPROVE_CURTAIN_MS;
@@ -779,6 +977,7 @@
         suppressOpenPopupSetContentUntilMs = 0;
         refreshOpenPopupFromHost(host);
         observers.scheduleUpdate();
+        tutorial?.notifyFurtherImproveApplied();
       }, FURTHER_IMPROVE_CURTAIN_MS);
       return true;
     },
@@ -790,6 +989,10 @@
       }
       const mode = String(payload.mode || "improve");
       const isComposeMode = mode === "compose";
+      const tutorialAction = isComposeMode ? "generate" : "improve";
+      if (tutorial?.isActive() && !tutorial.allows(tutorialAction)) {
+        return;
+      }
       if (!isOpen) {
         ui.setTabStatus("rewriting");
       }
@@ -879,6 +1082,7 @@
               closePopup();
             }, COMPOSE_SUCCESS_PANEL_AUTO_CLOSE_MS);
           }
+          tutorial?.notifyGenerateSuccess();
         } else {
           promptLifecycleState.improveMutedByCompose = false;
           const wc = String(optimizedPrompt || "")
@@ -887,6 +1091,7 @@
             .filter(Boolean).length;
           promptLifecycleState.furtherImproveChoices = pickFurtherImproveOptions(wc);
           promptLifecycleState.appliedFurtherImproveIds = new Set();
+          tutorial?.notifyImproveSuccess();
         }
         if (!isOpen) {
           ui.setTabStatus(isComposeMode ? "strong" : "improved");
@@ -953,9 +1158,13 @@
       autoAdjustOnSend = !autoAdjustOnSend;
       persistAutoSendPreference();
       ui.setAutoSendEnabled(autoAdjustOnSend);
+      if (autoAdjustOnSend) {
+        tutorial?.notifyAutoEnabled();
+      }
       observers.scheduleUpdate();
     },
     onDragStart: () => {
+      stopTutorialRepositionDemo(false);
       dragStartOffsetX = positionManager.getPromptlyCenterOffsetX();
     },
     onDragMove: (deltaX) => {
@@ -977,6 +1186,19 @@
       }
     }
   });
+  if (window.PromptlyTutorial) {
+    tutorial = new window.PromptlyTutorial({
+      root: ui.getRootElement(),
+      onStepEnter: handleTutorialStepEnter,
+      onStepExit: handleTutorialStepExit,
+      onStepSkip: handleTutorialStepSkip,
+      onComplete: () => {
+        stopTutorialRepositionDemo(true);
+        observers.scheduleUpdate();
+      }
+    });
+    ui.setTutorialActionGate((action) => tutorial.allows(action));
+  }
   ui.setVisualStyle(savedVisualStyle);
   ui.setVisualColor(savedVisualColor);
 
@@ -1139,6 +1361,9 @@
         applyCreditsToUi(cachedCredits);
       }
       await applySignedInStateFromSession(session, { loadCredits: true, loadAccountStatus: true });
+      window.setTimeout(() => {
+        void maybeStartTutorial();
+      }, 900);
     } catch (error) {
       if (isExtensionContextInvalidatedMessage(String(error?.message || error))) {
         ui.showToast("Promptly updated — refresh this page (⌘R / Ctrl+R) to reconnect.", {
@@ -1218,14 +1443,17 @@
         return false;
       }
       const words = text.split(/\s+/).filter(Boolean).length;
-      return (
+      const sent =
         window.PromptlyHostActivityListener?.recordPromptSend?.({
           source,
           charEstimate: chars,
           wordEstimate: Math.min(12000, words),
           clickedSendConfirmed: true
-        }) === true
-      );
+        }) === true;
+      if (sent) {
+        tutorial?.notifyPromptSent();
+      }
+      return sent;
     } catch (_e) {
       return false;
     }
@@ -2645,6 +2873,9 @@
 
     const currentPromptText = getPromptText(currentTarget);
     syncPromptLifecycleState(currentPromptText);
+    const promptAnalysis = analyzePrompt(currentPromptText);
+    tutorial?.reconcileImproveStep(promptAnalysis, currentPromptText);
+    syncTutorialImproveSendFromComposer(currentPromptText);
     const anchorRect = getAnchorRectForTarget(currentTarget);
     const rect =
       site === "claude"
@@ -2654,7 +2885,7 @@
           : anchorRect;
     ui.setTheme(inferThemeFromTarget(currentTarget));
     if (isOpen && Date.now() >= suppressOpenPopupSetContentUntilMs) {
-      ui.setContent(analyzePrompt(currentPromptText));
+      ui.setContent(promptAnalysis);
     }
 
     const popupHeight = ui.getPopupHeight();
@@ -2738,6 +2969,15 @@
       currentTarget &&
       (event.target === currentTarget || currentTarget.contains(event.target))
     ) {
+      if (tutorialBlocksNativeSend()) {
+        event.preventDefault();
+        event.stopPropagation();
+        ui.showToast("Complete the tutorial steps in Promptly before sending.", {
+          tone: "info",
+          durationMs: 2800
+        });
+        return;
+      }
       window.setTimeout(() => recordTelemetryPromptSend("native_enter"), 80);
     }
   }
@@ -2915,11 +3155,25 @@
       isLikelySendButton(event.target) &&
       currentTarget
     ) {
+      if (tutorialBlocksNativeSend()) {
+        event.preventDefault();
+        event.stopPropagation();
+        ui.showToast("Complete the tutorial steps in Promptly before sending.", {
+          tone: "info",
+          durationMs: 2800
+        });
+        return;
+      }
       window.setTimeout(() => recordTelemetryPromptSend("native_click"), 80);
     }
   }
 
   function handleDocumentSubmit(event) {
+    if (tutorialBlocksNativeSend()) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     if (!autoAdjustOnSend || bypassNextAutoSendInterception) {
       return;
     }

@@ -34,6 +34,7 @@
       this.onRepositionHintTest = onRepositionHintTest;
       this.onFurtherImproveAppend =
         typeof onFurtherImproveAppend === "function" ? onFurtherImproveAppend : null;
+      this.tutorialActionGate = null;
       this.furtherImproveGridVisible = false;
       this.root = this.doc.createElement("section");
       this.root.className = "promptly-popup";
@@ -127,6 +128,9 @@
         event.stopPropagation();
         notePromptlyDraftInteraction();
         if (this.autoAdjustButton.disabled) {
+          return;
+        }
+        if (!this.canTutorialAction("improve")) {
           return;
         }
         if (typeof this.onAutoAdjustClick === "function") {
@@ -270,6 +274,9 @@
         event.preventDefault();
         event.stopPropagation();
         notePromptlyDraftInteraction();
+        if (!this.canTutorialAction("generate")) {
+          return;
+        }
         const userInstruction = String(this.rewriteInstructionInput?.value || "").trim();
         if (
           this.composePromptWritten &&
@@ -312,6 +319,9 @@
           if (chip.getAttribute("aria-disabled") === "true") {
             return;
           }
+          if (!this.canTutorialAction("further-improve")) {
+            return;
+          }
           event.preventDefault();
           event.stopPropagation();
           if (typeof event.stopImmediatePropagation === "function") {
@@ -337,6 +347,9 @@
           }
           const chip = event.target.closest?.(".promptly-further-improve-chip");
           if (!chip || !this.furtherImproveGrid.contains(chip) || chip.getAttribute("aria-disabled") === "true") {
+            return;
+          }
+          if (!this.canTutorialAction("further-improve")) {
             return;
           }
           event.preventDefault();
@@ -601,6 +614,17 @@
           });
         }
       }
+    }
+
+    canTutorialAction(action) {
+      if (typeof this.tutorialActionGate !== "function") {
+        return true;
+      }
+      return this.tutorialActionGate(action);
+    }
+
+    setTutorialActionGate(gateFn) {
+      this.tutorialActionGate = typeof gateFn === "function" ? gateFn : null;
     }
 
     setDirection(direction) {

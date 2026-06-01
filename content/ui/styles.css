@@ -563,6 +563,32 @@
   font-size: 10px;
 }
 
+.promptly-settings-statistics-btn {
+  all: unset;
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  cursor: pointer;
+  border-radius: 8px;
+  border: 1px solid #e0ddd6;
+  background: #faf8f4;
+  color: #111111;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  white-space: nowrap;
+  padding: 7px 9px;
+  margin-top: 8px;
+}
+
+.promptly-settings-statistics-btn:hover {
+  border-color: #111111;
+}
+
+.promptly-settings-statistics-btn[hidden] {
+  display: none;
+}
+
 .promptly-settings-account-actions {
   display: flex;
   flex-wrap: wrap;
@@ -2034,4 +2060,398 @@
 
 .promptly-strength-fill[data-level="high"] {
   background: #22c55e;
+}
+
+/* ── First-time tutorial panel (viewport top-right, square) ── */
+
+.promptly-tutorial-panel {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  width: 440px;
+  min-height: 280px;
+  max-height: 400px;
+  height: fit-content;
+  padding: 14px 16px 12px;
+  border-radius: 4px;
+  border: 2px solid #e0ddd6;
+  background-color: #fdfdfc;
+  color: #111111;
+  box-shadow: 0 8px 32px rgba(17, 17, 17, 0.1);
+  z-index: 55;
+  display: flex;
+  flex-direction: column;
+  font-family: "Open Sans", "Noto Sans", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  pointer-events: auto;
+  transition: right 220ms ease, opacity 180ms ease, transform 180ms ease, height 180ms ease;
+  overflow: hidden;
+}
+
+.promptly-root.is-tutorial-panel-left .promptly-tutorial-panel {
+  right: 490px;
+}
+
+.promptly-tutorial-panel[aria-hidden="true"] {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-8px);
+}
+
+.promptly-root.is-tutorial-active .promptly-tutorial-panel[aria-hidden="false"] {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.promptly-tutorial-progress {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
+.promptly-tutorial-progress-bar {
+  flex: 1;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(17, 17, 17, 0.12);
+  transition: background 180ms ease;
+}
+
+.promptly-tutorial-progress-bar.is-active {
+  background: rgba(17, 17, 17, 0.28);
+}
+
+.promptly-tutorial-progress-bar.is-current {
+  background: #111111;
+}
+
+.promptly-tutorial-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: visible;
+  padding-right: 2px;
+}
+
+.promptly-tutorial-panel.promptly-tutorial-panel-controls .promptly-tutorial-body {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.promptly-tutorial-title {
+  margin: 0 0 10px;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.promptly-tutorial-copy {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #334155;
+}
+
+.promptly-tutorial-copy p {
+  margin: 0 0 8px;
+}
+
+.promptly-tutorial-copy p:last-child {
+  margin-bottom: 0;
+}
+
+.promptly-tutorial-muted {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.promptly-tutorial-hint {
+  margin-top: 10px !important;
+  font-weight: 600;
+  text-align: center;
+  color: #111111;
+}
+
+.promptly-tutorial-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 12px;
+  flex-shrink: 0;
+}
+
+.promptly-tutorial-footer-end {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.promptly-tutorial-skip {
+  all: unset;
+  box-sizing: border-box;
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  cursor: pointer;
+  padding: 7px 4px;
+  line-height: 1.2;
+}
+
+.promptly-tutorial-skip:hover {
+  color: #334155;
+}
+
+.promptly-tutorial-skip[hidden] {
+  display: none;
+}
+
+.promptly-tutorial-back,
+.promptly-tutorial-next {
+  all: unset;
+  box-sizing: border-box;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+  line-height: 1.2;
+}
+
+.promptly-tutorial-back {
+  color: #475569;
+  border: 1px solid rgba(17, 17, 17, 0.14);
+}
+
+.promptly-tutorial-back:hover {
+  background: rgba(17, 17, 17, 0.04);
+}
+
+.promptly-tutorial-back[hidden] {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.promptly-tutorial-next {
+  background: #111111;
+  color: #ffffff;
+}
+
+.promptly-tutorial-next:hover:not(:disabled) {
+  background: #2a2a2a;
+}
+
+.promptly-tutorial-next:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.promptly-tutorial-controls-preview {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.promptly-tutorial-preview-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid rgba(17, 17, 17, 0.08);
+  border-radius: 4px;
+  background: rgba(17, 17, 17, 0.02);
+}
+
+.promptly-tutorial-preview-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.promptly-tutorial-preview-visual {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.promptly-tutorial-preview-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #334155;
+  line-height: 1.3;
+}
+
+.promptly-tutorial-preview-desc {
+  margin-top: 3px;
+  font-size: 10px;
+  line-height: 1.4;
+  color: #64748b;
+}
+
+.promptly-tutorial-preview-chip-wrap {
+  flex: 0 0 auto;
+  width: 122px;
+}
+
+.promptly-tutorial-step-visual {
+  display: flex;
+  justify-content: center;
+  margin: 12px 0 10px;
+}
+
+.promptly-tutorial-preview-chip-wrap-step {
+  width: 148px;
+}
+
+.promptly-tutorial-step-visual .promptly-auto-button.promptly-tutorial-preview-chip {
+  display: block;
+  width: 100%;
+  margin: 0;
+  pointer-events: none;
+  cursor: default;
+}
+
+.promptly-tutorial-success-check {
+  display: flex;
+  justify-content: center;
+  margin: 14px 0 4px;
+  color: #059669;
+}
+
+.promptly-tutorial-success-check svg {
+  width: 96px;
+  height: 96px;
+}
+
+.promptly-tutorial-controls-preview .promptly-auto-button.promptly-tutorial-preview-chip,
+.promptly-tutorial-controls-preview .promptly-rewrite-send.promptly-tutorial-preview-chip {
+  display: block;
+  width: 100%;
+  margin: 0;
+  pointer-events: none;
+  cursor: default;
+}
+
+.promptly-tutorial-preview-tab-strip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 5px 8px;
+  border-radius: 8px 8px 0 0;
+  background: var(--promptly-tab-bg);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  flex: 0 0 auto;
+}
+
+.promptly-tutorial-preview-tab-strip .promptly-tab-auto-label {
+  display: inline-block;
+}
+
+.promptly-tutorial-preview-tab-strip .promptly-tab-auto-switch {
+  display: inline-block;
+}
+
+.promptly-tutorial-preview-tab-strip .promptly-tab-credit-wrap {
+  display: inline-flex;
+}
+
+.promptly-tutorial-preview-tab-strip .promptly-tab-settings {
+  display: inline-flex;
+}
+
+.promptly-tutorial-preview-tab-strip .promptly-tab-settings-icon {
+  display: block;
+  width: 13px;
+  height: 13px;
+  object-fit: contain;
+  filter: brightness(0) invert(1);
+  opacity: 0.95;
+}
+
+.promptly-tutorial-preview-credit-meter {
+  --promptly-credit-progress: 33%;
+}
+
+.promptly-tutorial-further-improve-hint {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 8px;
+  justify-content: center;
+  margin: 12px 0 8px;
+  width: 100%;
+}
+
+.promptly-tutorial-further-improve-hint .promptly-tutorial-preview-fi-chip,
+.promptly-tutorial-further-improve-hint .promptly-further-improve-chip:nth-child(odd),
+.promptly-tutorial-further-improve-hint .promptly-further-improve-chip:nth-child(even) {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  margin: 0 !important;
+  pointer-events: none;
+  cursor: default;
+}
+
+/* Tutorial improve sub-phases */
+
+.promptly-root.is-tutorial-active.is-tutorial-improve-phase-initial .promptly-further-improve-chip,
+.promptly-root.is-tutorial-active.is-tutorial-improve-phase-send .promptly-further-improve-chip {
+  opacity: 0.38;
+  pointer-events: none !important;
+}
+
+.promptly-root.is-tutorial-active.is-tutorial-improve-phase-further .promptly-auto-button,
+.promptly-root.is-tutorial-active.is-tutorial-improve-phase-further .promptly-rewrite-send,
+.promptly-root.is-tutorial-active.is-tutorial-improve-phase-send .promptly-auto-button,
+.promptly-root.is-tutorial-active.is-tutorial-improve-phase-send .promptly-rewrite-send {
+  opacity: 0.38;
+  pointer-events: none !important;
+}
+
+/* Tutorial step locks — dim and disable controls not allowed on current step */
+
+.promptly-root.is-tutorial-active.is-tutorial-step-improve .promptly-rewrite-send,
+.promptly-root.is-tutorial-active.is-tutorial-step-improve .promptly-tab-auto-switch,
+.promptly-root.is-tutorial-active.is-tutorial-step-improve .promptly-tab-auto-label,
+.promptly-root.is-tutorial-active.is-tutorial-step-improve .promptly-tab-settings,
+.promptly-root.is-tutorial-active.is-tutorial-step-auto .promptly-auto-button,
+.promptly-root.is-tutorial-active.is-tutorial-step-auto .promptly-rewrite-send,
+.promptly-root.is-tutorial-active.is-tutorial-step-auto .promptly-tab-settings,
+.promptly-root.is-tutorial-active.is-tutorial-step-generate .promptly-auto-button,
+.promptly-root.is-tutorial-active.is-tutorial-step-generate .promptly-tab-auto-switch,
+.promptly-root.is-tutorial-active.is-tutorial-step-generate .promptly-tab-auto-label,
+.promptly-root.is-tutorial-active.is-tutorial-step-generate .promptly-tab-settings,
+.promptly-root.is-tutorial-active.is-tutorial-step-drag .promptly-auto-button,
+.promptly-root.is-tutorial-active.is-tutorial-step-drag .promptly-rewrite-send,
+.promptly-root.is-tutorial-active.is-tutorial-step-drag .promptly-tab-auto-switch,
+.promptly-root.is-tutorial-active.is-tutorial-step-drag .promptly-tab-auto-label,
+.promptly-root.is-tutorial-active.is-tutorial-step-drag .promptly-tab-settings,
+.promptly-root.is-tutorial-active.is-tutorial-step-settings .promptly-auto-button,
+.promptly-root.is-tutorial-active.is-tutorial-step-settings .promptly-rewrite-send,
+.promptly-root.is-tutorial-active.is-tutorial-step-settings .promptly-tab-auto-switch,
+.promptly-root.is-tutorial-active.is-tutorial-step-settings .promptly-tab-auto-label {
+  opacity: 0.38;
+  pointer-events: none !important;
+}
+
+.promptly-root.is-tutorial-active.is-tutorial-step-welcome .promptly-tab,
+.promptly-root.is-tutorial-active.is-tutorial-step-welcome .promptly-popup-mask,
+.promptly-root.is-tutorial-active.is-tutorial-step-buttons .promptly-tab,
+.promptly-root.is-tutorial-active.is-tutorial-step-buttons .promptly-popup-mask,
+.promptly-root.is-tutorial-active.is-tutorial-step-done .promptly-tab,
+.promptly-root.is-tutorial-active.is-tutorial-step-done .promptly-popup-mask {
+  pointer-events: none !important;
+}
+
+.promptly-root.is-tutorial-active.is-tutorial-step-settings.is-settings-open .promptly-settings-panel {
+  z-index: 52;
+}
+
+.promptly-root.is-tutorial-active .promptly-settings-panel {
+  z-index: 52;
 }

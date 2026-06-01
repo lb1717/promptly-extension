@@ -608,13 +608,14 @@ function buildApiUrl(baseUrl, path) {
   return `${normalizedBase}${p}`;
 }
 
-async function buildManageAccountUrl() {
+async function buildExtensionAuthUrl(path = "/account") {
   const baseUrl = await getManagedProxyBaseUrl();
-  const accountUrl = `${baseUrl.replace(/\/$/, "")}/account`;
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const targetUrl = `${baseUrl.replace(/\/$/, "")}${normalizedPath}`;
   try {
     const session = await getPromptlySession({ requireFreshToken: true });
     if (!session.signedIn || !session.idToken) {
-      return accountUrl;
+      return targetUrl;
     }
     const response = await fetch(buildApiUrl(baseUrl, "/api/account/extension-auth-link"), {
       method: "POST",
@@ -627,16 +628,20 @@ async function buildManageAccountUrl() {
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
-      return accountUrl;
+      return targetUrl;
     }
     const customToken = String(body?.customToken || "").trim();
     if (!customToken) {
-      return accountUrl;
+      return targetUrl;
     }
-    return `${accountUrl}#promptly_ext_custom_token=${encodeURIComponent(customToken)}`;
+    return `${targetUrl}#promptly_ext_custom_token=${encodeURIComponent(customToken)}`;
   } catch (_error) {
-    return accountUrl;
+    return targetUrl;
   }
+}
+
+async function buildManageAccountUrl() {
+  return buildExtensionAuthUrl("/account");
 }
 
 function buildFirebaseRequestUri(authDomain) {
@@ -1148,6 +1153,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       "PROMPTLY_ENSURE_CHROME_SIGNIN",
       "PROMPTLY_GET_ACCOUNT_STATUS",
       "PROMPTLY_GET_MANAGE_ACCOUNT_URL",
+      "PROMPTLY_GET_STATISTICS_URL",
       "PROMPTLY_CLEAR_SESSION"
     ].includes(message.type)
   ) {
@@ -1288,6 +1294,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
       if (message.type === "PROMPTLY_GET_MANAGE_ACCOUNT_URL") {
         const url = await buildManageAccountUrl();
+        sendResponse({ ok: true, data: { url } });
+        return;
+      }
+
+      if (message.type === "PROMPTLY_GET_STATISTICS_URL") {
+        const url = await buildExtensionAuthUrl("/account/statistics");
         sendResponse({ ok: true, data: { url } });
         return;
       }

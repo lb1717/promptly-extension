@@ -125,6 +125,7 @@
       onSignIn,
       onLoadSettingsAccount,
       onManageAccount,
+      onOpenStatistics,
       onPromptlySignOut,
       onRefreshCredits,
       onVisualStyleChange,
@@ -132,7 +133,10 @@
       onDragStart,
       onDragMove,
       onDragEnd,
-      onFurtherImproveAppend
+      onFurtherImproveAppend,
+      onTutorialDebugStart,
+      onTutorialSettingsClosed,
+      onTutorialSettingsOpened
     }) {
       this.onToggle = onToggle;
       this.onSuggestionClick = onSuggestionClick;
@@ -143,6 +147,8 @@
       this.onSignIn = onSignIn;
       this.onLoadSettingsAccount = onLoadSettingsAccount;
       this.onManageAccount = onManageAccount;
+      this.onOpenStatistics =
+        typeof onOpenStatistics === "function" ? onOpenStatistics : null;
       this.onPromptlySignOut =
         typeof onPromptlySignOut === "function" ? onPromptlySignOut : null;
       this.onRefreshCredits = typeof onRefreshCredits === "function" ? onRefreshCredits : null;
@@ -154,6 +160,13 @@
       this.onDragStart = onDragStart;
       this.onDragMove = onDragMove;
       this.onDragEnd = onDragEnd;
+      this.onTutorialDebugStart =
+        typeof onTutorialDebugStart === "function" ? onTutorialDebugStart : null;
+      this.onTutorialSettingsClosed =
+        typeof onTutorialSettingsClosed === "function" ? onTutorialSettingsClosed : null;
+      this.onTutorialSettingsOpened =
+        typeof onTutorialSettingsOpened === "function" ? onTutorialSettingsOpened : null;
+      this.tutorialActionGate = null;
       this.isOpen = false;
       this.isVisible = false;
       this.dragState = null;
@@ -274,6 +287,9 @@
       const runToggleAutoSend = (event) => {
         event.preventDefault();
         event.stopPropagation();
+        if (!this.canTutorialAction("auto")) {
+          return;
+        }
         if (typeof this.onToggleAutoSend === "function") {
           this.onToggleAutoSend();
         }
@@ -318,7 +334,14 @@
       const runToggleSettings = (event) => {
         event.preventDefault();
         event.stopPropagation();
-        this.setSettingsOpen(!this.root.classList.contains("is-settings-open"));
+        const opening = !this.root.classList.contains("is-settings-open");
+        if (opening && !this.canTutorialAction("settings")) {
+          return;
+        }
+        this.setSettingsOpen(opening);
+        if (!opening && typeof this.onTutorialSettingsClosed === "function") {
+          this.onTutorialSettingsClosed();
+        }
       };
       this.settingsButton.addEventListener("click", runToggleSettings);
       this.settingsButton.addEventListener("keydown", (event) => {
@@ -355,6 +378,9 @@
         }
         // Signed out: disable dragging entirely (clicks should trigger sign-in).
         if (this.root.classList.contains("is-signed-out")) {
+          return;
+        }
+        if (!this.canTutorialAction("drag")) {
           return;
         }
         // If the pointerdown originates from an interactive control inside the tab,
@@ -438,6 +464,9 @@
           this.suppressNextClick = false;
           return;
         }
+        if (!this.canTutorialAction("tab-toggle")) {
+          return;
+        }
         this.onToggle();
       });
       this.tabButton.addEventListener("keydown", (event) => {
@@ -448,6 +477,9 @@
         event.stopPropagation();
         if (this.root.classList.contains("is-signed-out")) {
           runSignInFlow(event);
+          return;
+        }
+        if (!this.canTutorialAction("tab-toggle")) {
           return;
         }
         this.onToggle();
@@ -509,6 +541,7 @@
         "<div class='promptly-settings-tier-badge' hidden>Free</div>" +
         "<button type='button' class='promptly-settings-account-btn'>Manage subscription</button>" +
         "</div>" +
+        "<button type='button' class='promptly-settings-statistics-btn' hidden>My Statistics</button>" +
         "</div>" +
         "<div class='promptly-settings-section promptly-settings-section-account-sliders'>" +
         "<div class='promptly-settings-sliders-wrap'>" +
@@ -553,7 +586,9 @@
         "</div>" +
         "</div>";
       this.settingsEmailEl = this.settingsPanel.querySelector(".promptly-settings-email");
+      this.settingsTitleEl = this.settingsPanel.querySelector(".promptly-settings-title");
       this.settingsTierEl = this.settingsPanel.querySelector(".promptly-settings-tier-badge");
+      this.settingsStatisticsBtn = this.settingsPanel.querySelector(".promptly-settings-statistics-btn");
       this.settingsAccountBtn = this.settingsPanel.querySelector(".promptly-settings-account-btn");
       this.settingsSignOutBtn = this.settingsPanel.querySelector(".promptly-settings-sign-out-btn");
       this.settingsEmailTapTimes = [];
@@ -607,6 +642,9 @@
         event.preventDefault();
         event.stopPropagation();
         this.setSettingsOpen(false);
+        if (typeof this.onTutorialSettingsClosed === "function") {
+          this.onTutorialSettingsClosed();
+        }
       });
       this.settingsAccountBtn.addEventListener("click", (event) => {
         event.preventDefault();
@@ -615,6 +653,32 @@
           this.onManageAccount();
         }
       });
+      if (this.settingsStatisticsBtn) {
+        this.settingsStatisticsBtn.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (typeof this.onOpenStatistics === "function") {
+            this.onOpenStatistics();
+          }
+        });
+      }
+      this.settingsTitleTapTimes = [];
+      if (this.settingsTitleEl) {
+        this.settingsTitleEl.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (typeof this.onTutorialDebugStart !== "function") {
+            return;
+          }
+          const now = Date.now();
+          this.settingsTitleTapTimes = this.settingsTitleTapTimes.filter((ts) => now - ts <= 900);
+          this.settingsTitleTapTimes.push(now);
+          if (this.settingsTitleTapTimes.length >= 3) {
+            this.settingsTitleTapTimes = [];
+            this.onTutorialDebugStart();
+          }
+        });
+      }
       if (this.settingsSignOutBtn) {
         this.settingsSignOutBtn.addEventListener("click", (event) => {
           event.preventDefault();
@@ -707,6 +771,10 @@
         }
       });
       this.host.remove();
+    }
+
+    getRootElement() {
+      return this.root;
     }
 
     containsNode(node) {
@@ -875,10 +943,27 @@
         "<span class='promptly-credit-line promptly-credit-line-muted'>Hover again to retry</span>";
     }
 
+    canTutorialAction(action) {
+      if (typeof this.tutorialActionGate !== "function") {
+        return true;
+      }
+      return this.tutorialActionGate(action);
+    }
+
+    setTutorialActionGate(gateFn) {
+      this.tutorialActionGate = typeof gateFn === "function" ? gateFn : null;
+      if (typeof this.popup?.setTutorialActionGate === "function") {
+        this.popup.setTutorialActionGate(this.tutorialActionGate);
+      }
+    }
+
     async setSettingsOpen(isOpen) {
       this.root.classList.toggle("is-settings-open", !!isOpen);
       this.settingsPanel.setAttribute("aria-hidden", isOpen ? "false" : "true");
       this.settingsButton.setAttribute("aria-expanded", isOpen ? "true" : "false");
+      if (isOpen && typeof this.onTutorialSettingsOpened === "function") {
+        this.onTutorialSettingsOpened();
+      }
       if (!isOpen) {
         return;
       }
@@ -909,9 +994,15 @@
         if (this.settingsTierEl) {
           this.settingsTierEl.hidden = true;
         }
+        if (this.settingsStatisticsBtn) {
+          this.settingsStatisticsBtn.hidden = true;
+        }
         return;
       }
       this.settingsEmailEl.textContent = safe;
+      if (this.settingsStatisticsBtn) {
+        this.settingsStatisticsBtn.hidden = false;
+      }
     }
 
     setSettingsTierBadge(tier) {
