@@ -166,9 +166,6 @@ export async function adminCreateSalesLink(input: CreateSalesLinkInput): Promise
   const offerTitle = String(input.offerTitle || "").trim();
   const offerDescription = String(input.offerDescription || "").trim();
   const tier = normalizePaidTier(String(input.tier || ""));
-  if (!recipientName) {
-    throw new Error("Recipient name is required.");
-  }
   if (!offerTitle) {
     throw new Error("Offer headline is required.");
   }
@@ -261,9 +258,7 @@ export async function adminUpdateSalesLink(
   const update: Record<string, unknown> = { updatedAt: FieldValue.serverTimestamp() };
 
   if (typeof patch.recipientName === "string") {
-    const name = patch.recipientName.trim();
-    if (!name) throw new Error("Recipient name cannot be empty.");
-    update.recipientName = name;
+    update.recipientName = patch.recipientName.trim();
   }
   if (typeof patch.offerTitle === "string") {
     const title = patch.offerTitle.trim();

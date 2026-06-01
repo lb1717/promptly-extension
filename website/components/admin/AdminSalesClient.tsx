@@ -219,7 +219,7 @@ export function AdminSalesClient() {
           <h2 className="text-sm font-semibold uppercase tracking-wider text-violet-300/90">New invite link</h2>
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
             <label className="block text-sm">
-              <span className="mb-1 block text-violet-200/80">Recipient name (shown on welcome step)</span>
+              <span className="mb-1 block text-violet-200/80">Recipient name (optional — shown on welcome step)</span>
               <input
                 value={recipientName}
                 onChange={(e) => setRecipientName(e.target.value)}
@@ -380,7 +380,7 @@ export function AdminSalesClient() {
               {links.map((link) => (
                 <tr key={link.id} className="border-b border-violet-500/10 text-violet-100/90">
                   <td className="py-3 pr-4">
-                    <div className="font-medium text-white">{link.recipientName}</div>
+                    <div className="font-medium text-white">{link.recipientName.trim() || "—"}</div>
                     <div className="text-xs text-violet-300/60">{formatDate(link.createdAt)}</div>
                   </td>
                   <td className="py-3 pr-4">{tierLabel(link.tier)}</td>

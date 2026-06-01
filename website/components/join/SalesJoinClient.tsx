@@ -42,6 +42,11 @@ function advanceAfterAccountAuth(goToStep: (next: number) => void) {
   goToStep(PLAN_STEP);
 }
 
+function salesWelcomeTitle(recipientName: string): string {
+  const name = recipientName.trim();
+  return name ? `Welcome, ${name}` : "Welcome!";
+}
+
 type PublicSalesLink = {
   slug: string;
   recipientName: string;
@@ -407,7 +412,7 @@ export function SalesJoinClient({ slug }: { slug: string }) {
 
   const stepTitle = useMemo(() => {
     if (!link) return "";
-    if (step === 1) return `Welcome, ${link.recipientName}`;
+    if (step === 1) return salesWelcomeTitle(link.recipientName);
     if (step === 2) return "Create your account";
     if (step === 3) return "Your plan";
     return "Install Promptly";
@@ -474,8 +479,8 @@ export function SalesJoinClient({ slug }: { slug: string }) {
         {step === 1 ? (
           <div className="mt-6 space-y-4">
             <p className="text-sm leading-relaxed text-muted">
-              Thanks for using Promptly{link.recipientName ? `, ${link.recipientName}` : ""}. We&apos;ve prepared a
-              personalized setup just for you — account, plan, and browser extension in a few quick steps.
+              Thanks for using Promptly{link.recipientName.trim() ? `, ${link.recipientName.trim()}` : ""}. We&apos;ve
+              prepared a personalized setup just for you — account, plan, and browser extension in a few quick steps.
             </p>
             <button
               type="button"
@@ -636,7 +641,7 @@ export function SalesJoinClient({ slug }: { slug: string }) {
         {step === 4 ? (
           <div className="mt-6 space-y-4">
             <p className="text-sm text-muted">
-              You&apos;re all set{link.recipientName ? `, ${link.recipientName}` : ""}. Install Promptly in your browser
+              You&apos;re all set{link.recipientName.trim() ? `, ${link.recipientName.trim()}` : ""}. Install Promptly
               to start improving prompts in ChatGPT, Claude, and Gemini.
             </p>
             <a
