@@ -21,8 +21,8 @@ type SalesLink = {
 
 const TIERS = [
   { value: "enterprise", label: "Enterprise ($70/mo)" },
-  { value: "pro", label: "Pro ($2.99/mo)" },
-  { value: "student", label: "Student ($1.49/mo)" }
+  { value: "pro", label: "Pro ($20/mo)" },
+  { value: "student", label: "Student ($9.99/mo)" }
 ] as const;
 
 function tierLabel(tier: string) {

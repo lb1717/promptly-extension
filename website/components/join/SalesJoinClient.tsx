@@ -25,6 +25,7 @@ import { EmailVerificationNotice } from "@/components/auth/EmailVerificationNoti
 import { listenForGoogleSignInReturn, signInWithGoogleInteractive } from "@/lib/firebaseGoogleAuth";
 import { canProceedWithEmailAccount } from "@/lib/emailVerification";
 import { useEmailVerificationStatus } from "@/lib/useEmailVerificationStatus";
+import { planDetailsForTier } from "@/lib/plans";
 
 type PublicSalesLink = {
   slug: string;
@@ -43,32 +44,6 @@ type CheckoutStatus = {
   loading: boolean;
   stripeConfigured: boolean;
   tierAvailable: boolean;
-};
-
-const PLAN_DETAILS: Record<
-  PublicSalesLink["tier"],
-  { name: string; price: string; details: string[] }
-> = {
-  enterprise: {
-    name: "Enterprise",
-    price: "$70.00/mo",
-    details: [
-      "Research-grade intelligence prompt engineering",
-      "Highest model quality available",
-      "Fastest model quality available",
-      "Extensive AI usage statistics"
-    ]
-  },
-  pro: {
-    name: "Promptly Pro",
-    price: "$2.99/mo",
-    details: ["Daily usage tokens: 25× Free", "Model quality: higher than Free", "Model speed: faster than Free"]
-  },
-  student: {
-    name: "Student",
-    price: "$1.49/mo",
-    details: ["Pro-level capabilities at student pricing", "Daily usage tokens: 25× Free"]
-  }
 };
 
 const STEPS = ["Welcome", "Account", "Plan", "Install"] as const;
@@ -129,7 +104,7 @@ export function SalesJoinClient({ slug }: { slug: string }) {
   const hasAutoAdvancedRef = useRef(false);
   const prevUserRef = useRef<User | null>(null);
 
-  const planInfo = link ? PLAN_DETAILS[link.tier] : null;
+  const planInfo = link ? planDetailsForTier(link.tier) : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -622,7 +597,7 @@ export function SalesJoinClient({ slug }: { slug: string }) {
 
             <article className="rounded-xl border border-line bg-cream-dark p-4">
               <h3 className="text-lg font-semibold text-ink">{planInfo.name}</h3>
-              <p className="mt-1 text-sm font-semibold text-muted">{planInfo.price}</p>
+              <p className="mt-1 text-sm font-semibold text-muted">{planInfo.priceDisplay}</p>
               <ul className="mt-3 space-y-1.5 text-xs text-muted">
                 {planInfo.details.map((item) => (
                   <li key={item} className="flex items-start gap-2">

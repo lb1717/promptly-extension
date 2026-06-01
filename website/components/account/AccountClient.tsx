@@ -34,6 +34,7 @@ import {
 import { EmailVerificationNotice } from "@/components/auth/EmailVerificationNotice";
 import { listenForGoogleSignInReturn, signInWithGoogleInteractive } from "@/lib/firebaseGoogleAuth";
 import { useEmailVerificationStatus } from "@/lib/useEmailVerificationStatus";
+import { ACCOUNT_PLANS, isPaidPlanKey, type PaidPlanKey } from "@/lib/plans";
 
 function formatJoinDate(user: User | null): string {
   if (!user?.metadata?.creationTime) return "—";
@@ -146,62 +147,6 @@ type AccountUsageStatsPayload = {
   }>;
 };
 
-const ACCOUNT_PLANS = [
-  {
-    key: "free",
-    name: "Free",
-    price: "$0.00/mo",
-    subtitle: "Single prompt improvement for minimal everyday usage or trials.",
-    details: [
-      "Core models and functionality",
-      "Daily limited tokens"
-    ],
-    idealFor: "casual users, beginners, and quick prompt edits",
-    available: true
-  },
-  {
-    key: "pro",
-    name: "Promptly Pro",
-    price: "$2.99/mo",
-    subtitle: "Better quality and speed for frequent use",
-    details: [
-      "7-day free trial (card required)",
-      "Daily usage tokens: 25× Free",
-      "Model quality: higher than Free",
-      "Model speed: faster than Free"
-    ],
-    idealFor: "frequent users and builders",
-    available: false
-  },
-  {
-    key: "enterprise",
-    name: "Enterprise",
-    price: "$70.00/mo",
-    subtitle: "Maximum capability, speed, and reliability",
-    details: [
-      "Research-grade intelligence prompt engineering",
-      "Highest model quality available",
-      "Fastest model quality available",
-      "Extensive AI usage statistics"
-    ],
-    idealFor: "industry professionals and researchers",
-    available: true
-  },
-  {
-    key: "student",
-    name: "Student",
-    price: "$1.49/mo",
-    subtitle: "Pro-level capabilities at student pricing",
-    details: [
-      "7-day free trial (card required)",
-      "Daily usage tokens: 25× Free",
-      "All features included in Pro",
-      "Discounted price versus Pro"
-    ],
-    idealFor: "students learning, building, and experimenting",
-    available: false
-  }
-] as const;
 
 export function AccountClient({ extensionMode = false }: { extensionMode?: boolean }) {
   const searchParams = useSearchParams();
@@ -1108,8 +1053,8 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
             <div className="mt-6 grid gap-4 lg:grid-cols-2">
               {ACCOUNT_PLANS.filter((plan) => plan.available).map((plan) => {
                 const isCurrent = currentTierKey === plan.key;
-                const isPopular = plan.key === "enterprise";
-                const paidTier = plan.key === "enterprise";
+                const isPopular = Boolean(plan.featured);
+                const paidTier = isPaidPlanKey(plan.key);
                 const canCheckoutPaidTier = Boolean(user && billing?.stripeConfigured && paidTier && !isCurrent);
 
                 return (
@@ -1134,7 +1079,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                       </span>
                     ) : null}
                     <h3 className="text-lg font-semibold text-ink">{plan.name}</h3>
-                    <p className="mt-1 text-sm font-semibold text-muted">{plan.price}</p>
+                    <p className="mt-1 text-sm font-semibold text-muted">{plan.priceDisplay}</p>
                     <p className="mt-2 text-xs text-faint">{plan.subtitle}</p>
                     <ul className="mt-3 min-h-[5.75rem] flex-1 space-y-1.5 text-xs leading-relaxed text-muted">
                       {plan.details.map((item) => (
@@ -1144,9 +1089,6 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                         </li>
                       ))}
                     </ul>
-                    <p className="mt-3 text-[11px] text-faint">
-                      <span className="font-semibold text-muted">Ideal for:</span> {plan.idealFor}
-                    </p>
 
                     <div className="mt-auto pt-4">
                       {isCurrent ? (
@@ -1162,7 +1104,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                           type="button"
                           onClick={() =>
                             user &&
-                            startStripeCheckoutForTier(user, "enterprise")
+                            startStripeCheckoutForTier(user, plan.key as PaidPlanKey)
                           }
                           disabled={checkoutBusyTier !== null}
                           className="inline-flex w-full items-center justify-center rounded-lg bg-ink px-3 py-2 text-xs font-semibold text-cream hover:bg-neutral-800 disabled:opacity-60"

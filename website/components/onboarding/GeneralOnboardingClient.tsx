@@ -27,35 +27,9 @@ import { EmailVerificationNotice } from "@/components/auth/EmailVerificationNoti
 import { AI_TRY_TARGETS } from "@/components/onboarding/AiServiceLogos";
 import { canProceedWithEmailAccount } from "@/lib/emailVerification";
 import { useEmailVerificationStatus } from "@/lib/useEmailVerificationStatus";
+import { ONBOARDING_PLANS, type PaidPlanKey, type PlanKey } from "@/lib/plans";
 
 const STEPS = ["Start", "Account", "Plan", "Install", "Done"] as const;
-
-const ONBOARDING_PLANS = [
-  {
-    key: "free" as const,
-    name: "Free",
-    price: "$0.00/mo",
-    subtitle: "Try Promptly with daily token limits.",
-    details: ["Core models and functionality", "Daily limited tokens"],
-    available: true,
-    paid: false
-  },
-  {
-    key: "enterprise" as const,
-    name: "Enterprise",
-    price: "$70.00/mo",
-    subtitle: "Maximum capability for professionals.",
-    details: [
-      "Research-grade prompt engineering",
-      "Highest model quality and speed",
-      "Extensive AI usage statistics"
-    ],
-    available: true,
-    paid: true
-  }
-];
-
-type PlanKey = (typeof ONBOARDING_PLANS)[number]["key"];
 
 type BillingPayload = {
   subscriptionTier: string;
@@ -338,7 +312,7 @@ export function GeneralOnboardingClient() {
     }
   }
 
-  async function startCheckout(tier: "enterprise") {
+  async function startCheckout(tier: PaidPlanKey) {
     if (!user) return;
     setCheckoutBusy(true);
     setError("");
@@ -363,7 +337,7 @@ export function GeneralOnboardingClient() {
     const plan = ONBOARDING_PLANS.find((p) => p.key === selectedPlan);
     if (!plan) return;
     if (plan.paid) {
-      if (currentTier === "enterprise") {
+      if (currentTier === plan.key) {
         goToStep(4);
         return;
       }
@@ -371,7 +345,7 @@ export function GeneralOnboardingClient() {
         setError("Stripe checkout is not configured on this server.");
         return;
       }
-      await startCheckout("enterprise");
+      await startCheckout(plan.key as PaidPlanKey);
       return;
     }
     goToStep(4);
@@ -392,7 +366,7 @@ export function GeneralOnboardingClient() {
   }
 
   const stepTitle = useMemo(() => {
-    if (step === 1) return "Get started with Promptly";
+    if (step === 1) return "Get Started in 30 seconds";
     if (step === 2) return "Create your account";
     if (step === 3) return "Choose your plan";
     if (step === 4) return "Install Promptly";
@@ -400,7 +374,7 @@ export function GeneralOnboardingClient() {
   }, [step]);
 
   return (
-    <div className="mx-auto w-full max-w-lg px-4 py-10 pb-24">
+    <div className="mx-auto w-full max-w-xl px-4 py-10 pb-24">
       <div className="mb-8">
         <div className="flex items-center justify-between gap-1">
           {STEPS.map((label, index) => {
@@ -430,9 +404,11 @@ export function GeneralOnboardingClient() {
       </div>
 
       <div className="rounded-2xl border border-line bg-cream p-6 shadow-card sm:p-8">
-        <p className="text-xs font-medium uppercase tracking-[0.16em] text-faint">
-          {step === 1 ? "About 30 seconds" : `Step ${step} of ${STEPS.length}`}
-        </p>
+        {step !== 1 ? (
+          <p className="text-xs font-medium uppercase tracking-[0.16em] text-faint">
+            {`Step ${step} of ${STEPS.length}`}
+          </p>
+        ) : null}
         <h1 className="mt-2 text-2xl font-semibold text-ink">{stepTitle}</h1>
 
         {error ? (
@@ -448,9 +424,6 @@ export function GeneralOnboardingClient() {
 
         {step === 1 ? (
           <div className="mt-6 space-y-5">
-            <p className="text-sm leading-relaxed text-muted">
-              Improve every prompt in ChatGPT, Claude, and Gemini — clearer intent, better structure, one click.
-            </p>
             <ul className="space-y-2 text-sm text-muted">
               <li className="flex gap-2">
                 <span className="text-faint">1.</span>
@@ -462,7 +435,7 @@ export function GeneralOnboardingClient() {
               </li>
               <li className="flex gap-2">
                 <span className="text-faint">3.</span>
-                <span>Install the browser extension</span>
+                <span>Install Promptly</span>
               </li>
             </ul>
             <button
@@ -509,6 +482,16 @@ export function GeneralOnboardingClient() {
                 </button>
               </div>
               <div className="mt-3 space-y-2">
+                {emailAuthMode === "register" ? (
+                  <input
+                    type="text"
+                    autoComplete="name"
+                    placeholder="Name"
+                    value={emailAuthName}
+                    onChange={(e) => setEmailAuthName(e.target.value)}
+                    className="w-full rounded-lg border border-line bg-cream px-3 py-2 text-sm text-ink outline-none"
+                  />
+                ) : null}
                 <input
                   type="email"
                   autoComplete="email"
@@ -517,16 +500,6 @@ export function GeneralOnboardingClient() {
                   onChange={(e) => setEmailAuthEmail(e.target.value)}
                   className="w-full rounded-lg border border-line bg-cream px-3 py-2 text-sm text-ink outline-none"
                 />
-                {emailAuthMode === "register" ? (
-                  <input
-                    type="text"
-                    autoComplete="name"
-                    placeholder="Full name"
-                    value={emailAuthName}
-                    onChange={(e) => setEmailAuthName(e.target.value)}
-                    className="w-full rounded-lg border border-line bg-cream px-3 py-2 text-sm text-ink outline-none"
-                  />
-                ) : null}
                 <input
                   type="password"
                   autoComplete={emailAuthMode === "signin" ? "current-password" : "new-password"}
@@ -550,7 +523,11 @@ export function GeneralOnboardingClient() {
                 type="button"
                 onClick={emailAuthMode === "signin" ? handleEmailPasswordSignIn : handleEmailRegister}
                 disabled={busy}
-                className="mt-3 inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:opacity-60"
+                className={`mt-3 inline-flex w-full items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold disabled:opacity-60 ${
+                  emailAuthMode === "register"
+                    ? "border border-ink bg-cream text-ink hover:bg-cream-dark"
+                    : "bg-ink text-cream hover:bg-neutral-800"
+                }`}
               >
                 {busy ? "Working…" : emailAuthMode === "signin" ? "Sign in & continue" : "Create account"}
               </button>
@@ -580,7 +557,7 @@ export function GeneralOnboardingClient() {
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <p className="font-semibold text-ink">{plan.name}</p>
-                        <p className="text-sm font-medium text-muted">{plan.price}</p>
+                        <p className="text-sm font-medium text-muted">{plan.priceDisplay}</p>
                       </div>
                       {isCurrent ? (
                         <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-emerald-800">
@@ -609,7 +586,7 @@ export function GeneralOnboardingClient() {
             >
               {checkoutBusy
                 ? "Redirecting to Stripe…"
-                : selectedPlan === "enterprise" && currentTier !== "enterprise"
+                : selectedPlan !== "free" && currentTier !== selectedPlan
                   ? "Continue to payment"
                   : "Continue"}
             </button>

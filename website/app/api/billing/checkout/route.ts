@@ -44,12 +44,6 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
-    if (!salesLink && paidTier !== "enterprise") {
-      return NextResponse.json(
-        { error: "This plan is not currently available for checkout." },
-        { status: 400 }
-      );
-    }
     const priceId = getStripePriceIdForTier(paidTier);
     if (!priceId) {
       return NextResponse.json(
