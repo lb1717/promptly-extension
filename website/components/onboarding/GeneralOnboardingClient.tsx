@@ -15,7 +15,7 @@ import {
 } from "firebase/auth";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   preflightEmailRegistration,
   resolveEmailRegistrationError,
@@ -106,6 +106,9 @@ export function GeneralOnboardingClient() {
   const [emailAuthPassword, setEmailAuthPassword] = useState("");
   const [emailAuthPassword2, setEmailAuthPassword2] = useState("");
   const [emailAuthName, setEmailAuthName] = useState("");
+
+  const hasAutoAdvancedRef = useRef(false);
+  const prevUserRef = useRef<User | null>(null);
 
   const edgeUrl = SITE.edgeAddonsUrl || SITE.browserExtensionTargets.find((t) => t.key === "edge")?.installUrl;
 
@@ -203,14 +206,20 @@ export function GeneralOnboardingClient() {
 
     if (step === 5) return;
 
-    if (user && step < 3 && canProceedWithEmailAccount(user)) {
-      if (verificationUiStatus === "verified") return;
-      goToStep(3);
-      return;
-    }
+    const justSignedIn = Boolean(user && !prevUserRef.current);
+    prevUserRef.current = user;
 
     if (!user && step > 2) {
       goToStep(2);
+      return;
+    }
+
+    if (!user || !canProceedWithEmailAccount(user) || step >= 3) return;
+
+    if (justSignedIn || !hasAutoAdvancedRef.current) {
+      if (verificationUiStatus === "verified") return;
+      hasAutoAdvancedRef.current = true;
+      goToStep(3);
     }
   }, [user, authLoading, checkoutResult, goToStep, step, verificationUiStatus]);
 

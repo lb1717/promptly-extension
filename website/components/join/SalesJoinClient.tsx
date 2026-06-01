@@ -14,7 +14,7 @@ import {
 } from "firebase/auth";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   preflightEmailRegistration,
   resolveEmailRegistrationError,
@@ -125,6 +125,9 @@ export function SalesJoinClient({ slug }: { slug: string }) {
     notifyVerified,
     resetVerificationStatus
   } = useEmailVerificationStatus(user);
+
+  const hasAutoAdvancedRef = useRef(false);
+  const prevUserRef = useRef<User | null>(null);
 
   const planInfo = link ? PLAN_DETAILS[link.tier] : null;
 
@@ -248,10 +251,24 @@ export function SalesJoinClient({ slug }: { slug: string }) {
       return;
     }
 
-    if (user && canProceedWithEmailAccount(user)) {
+    const justSignedIn = Boolean(user && !prevUserRef.current);
+    prevUserRef.current = user;
+
+    if (user && !canProceedWithEmailAccount(user) && step > 2) {
+      setStep(2);
+      try {
+        window.localStorage.setItem(stepStorageKey(slug), "2");
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+
+    if (user && canProceedWithEmailAccount(user) && step < 3) {
       if (verificationUiStatus === "verified") {
-        // Delay step change briefly so the green verified notice is visible.
-      } else {
+        // Delayed advance handled by the effect below.
+      } else if (justSignedIn || !hasAutoAdvancedRef.current) {
+        hasAutoAdvancedRef.current = true;
         setStep(3);
         try {
           window.localStorage.setItem(stepStorageKey(slug), "3");
@@ -260,16 +277,6 @@ export function SalesJoinClient({ slug }: { slug: string }) {
         }
         return;
       }
-    }
-
-    if (user && !canProceedWithEmailAccount(user)) {
-      setStep(2);
-      try {
-        window.localStorage.setItem(stepStorageKey(slug), "2");
-      } catch {
-        /* ignore */
-      }
-      return;
     }
 
     if (!user) {
@@ -282,7 +289,7 @@ export function SalesJoinClient({ slug }: { slug: string }) {
         /* ignore */
       }
     }
-  }, [link, user, authLoading, linkLoading, billing, checkoutResult, slug, verificationUiStatus]);
+  }, [link, user, authLoading, linkLoading, billing, checkoutResult, slug, verificationUiStatus, step]);
 
   useEffect(() => {
     if (verificationUiStatus !== "verified" || !user || step !== 2 || !link) return;
