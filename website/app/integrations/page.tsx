@@ -5,7 +5,9 @@ import { Footer } from "@/components/Footer";
 import { buildPageMetadata } from "@/lib/seo";
 
 export const metadata = buildPageMetadata({
-  title: "Coding agent integrations",
+  title: "Connect Claude Code, Cursor & Codex",
+  description:
+    "Install Promptly for Claude Code, Cursor, and Codex. Pair your account, track prompts and screen time, and view coding-agent stats on your Promptly dashboard.",
   path: "/integrations",
   noIndex: true
 });
