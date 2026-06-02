@@ -6,6 +6,7 @@ import type { User } from "firebase/auth";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { telemetryCli, type OsId } from "./integrationOs";
 
 type IdeTool = "claude_code" | "cursor" | "codex";
 
@@ -24,11 +25,8 @@ function normalizeTool(raw: string | null): IdeTool {
   return "claude_code";
 }
 
-const TELEMETRY_CLI =
-  "node $HOME/integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs";
-
-function loginCommand(tool: IdeTool, code: string): string {
-  return `${TELEMETRY_CLI} login ${code} --tool ${tool}`;
+function loginCommand(tool: IdeTool, code: string, os: OsId): string {
+  return `${telemetryCli(os)} login ${code} --tool ${tool}`;
 }
 
 export function IntegrationsAuthClient({ initialTool }: { initialTool?: string | null }) {
@@ -45,6 +43,7 @@ export function IntegrationsAuthClient({ initialTool }: { initialTool?: string |
   const [busy, setBusy] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedLogin, setCopiedLogin] = useState(false);
+  const [activeOs, setActiveOs] = useState<OsId>("mac");
 
   useEffect(() => {
     const auth = getFirebaseAuth();
@@ -112,7 +111,7 @@ export function IntegrationsAuthClient({ initialTool }: { initialTool?: string |
   async function copyLogin() {
     if (!pairCode) return;
     try {
-      await navigator.clipboard.writeText(loginCommand(tool, pairCode));
+      await navigator.clipboard.writeText(loginCommand(tool, pairCode, activeOs));
       setCopiedLogin(true);
       window.setTimeout(() => setCopiedLogin(false), 2000);
     } catch {
@@ -121,7 +120,7 @@ export function IntegrationsAuthClient({ initialTool }: { initialTool?: string |
   }
 
   const toolLabel = TOOL_LABELS[tool];
-  const loginCmd = pairCode ? loginCommand(tool, pairCode) : null;
+  const loginCmd = pairCode ? loginCommand(tool, pairCode, activeOs) : null;
 
   return (
     <div className="mx-auto w-full max-w-lg rounded-2xl border border-line bg-cream p-6 shadow-card sm:p-8">
@@ -174,15 +173,33 @@ export function IntegrationsAuthClient({ initialTool }: { initialTool?: string |
               </div>
 
               <div className="rounded-xl border border-line bg-white/60 p-4">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm font-medium text-ink">Run in Terminal</p>
-                  <button
-                    type="button"
-                    onClick={() => void copyLogin()}
-                    className="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-ink hover:bg-cream"
-                  >
-                    {copiedLogin ? "Copied" : "Copy command"}
-                  </button>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-medium text-ink">
+                    Run in {activeOs === "mac" ? "Terminal" : "Terminal / PowerShell"}
+                  </p>
+                  <div className="flex gap-1">
+                    {(["mac", "windows"] as const).map((os) => (
+                      <button
+                        key={os}
+                        type="button"
+                        onClick={() => setActiveOs(os)}
+                        className={`rounded-md border px-2 py-0.5 text-[10px] font-medium ${
+                          activeOs === os
+                            ? "border-ink bg-ink text-cream"
+                            : "border-line text-muted hover:text-ink"
+                        }`}
+                      >
+                        {os === "mac" ? "Mac" : "Windows"}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => void copyLogin()}
+                      className="ml-1 shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-ink hover:bg-cream"
+                    >
+                      {copiedLogin ? "Copied" : "Copy"}
+                    </button>
+                  </div>
                 </div>
                 <pre className="mt-3 overflow-x-auto whitespace-pre-wrap rounded-lg bg-ink p-3 font-mono text-xs leading-relaxed text-cream">
                   {loginCmd}
@@ -192,7 +209,7 @@ export function IntegrationsAuthClient({ initialTool }: { initialTool?: string |
                   <Link href="/integrations" className="underline hover:text-ink">
                     setup guide
                   </Link>
-                  . Then paste this in Terminal and press Enter.
+                  . Then paste this and press Enter.
                 </p>
               </div>
             </>

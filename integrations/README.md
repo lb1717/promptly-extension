@@ -12,8 +12,8 @@ Connect **Claude Code**, **Cursor**, and **Codex** to your Promptly account. Tra
 ## Quick install
 
 1. Download [promptly-coding-agents.zip](https://promptly-labs.com/downloads/promptly-coding-agents.zip)
-2. Unzip to your home folder (creates `$HOME/integrations`)
-3. Follow [promptly-labs.com/integrations](https://promptly-labs.com/integrations) for your app
+2. Unzip to your user folder (creates `~/integrations` on Mac or `%USERPROFILE%\integrations` on Windows)
+3. Follow [promptly-labs.com/integrations](https://promptly-labs.com/integrations) — pick **Mac** or **Windows** and your coding agent
 
 ### Claude Code
 

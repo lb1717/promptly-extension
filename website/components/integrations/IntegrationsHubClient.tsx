@@ -7,8 +7,9 @@ import {
   CodexSetup,
   CursorSetup,
   PLUGIN_PACK_URL,
-  TELEMETRY_CLI,
-  type IdeToolId
+  telemetryCli,
+  type IdeToolId,
+  type OsId
 } from "./integrationSteps";
 
 const TOOL_TABS: { id: IdeToolId; label: string; accent: string }[] = [
@@ -17,20 +18,28 @@ const TOOL_TABS: { id: IdeToolId; label: string; accent: string }[] = [
   { id: "codex", label: "Codex", accent: "#10A37F" }
 ];
 
+const OS_TABS: { id: OsId; label: string }[] = [
+  { id: "mac", label: "Mac" },
+  { id: "windows", label: "Windows" }
+];
+
 export function IntegrationsHubClient() {
   const [activeTool, setActiveTool] = useState<IdeToolId>("codex");
+  const [activeOs, setActiveOs] = useState<OsId>("mac");
   const activeMeta = useMemo(() => TOOL_TABS.find((t) => t.id === activeTool)!, [activeTool]);
   const pairUrl = `/auth/integrations?tool=${activeTool}`;
-  const loginCmd = `${TELEMETRY_CLI} login YOUR_CODE --tool ${activeTool}`;
-  const statusCmd = `${TELEMETRY_CLI} status`;
+  const loginCmd = `${telemetryCli(activeOs)} login YOUR_CODE --tool ${activeTool}`;
+  const statusCmd = `${telemetryCli(activeOs)} status`;
+
+  const setupProps = { os: activeOs, pairUrl, loginCmd, statusCmd };
 
   const setup =
     activeTool === "codex" ? (
-      <CodexSetup pairUrl={pairUrl} loginCmd={loginCmd} statusCmd={statusCmd} />
+      <CodexSetup {...setupProps} />
     ) : activeTool === "claude_code" ? (
-      <ClaudeCodeSetup pairUrl={pairUrl} loginCmd={loginCmd} statusCmd={statusCmd} />
+      <ClaudeCodeSetup {...setupProps} />
     ) : (
-      <CursorSetup pairUrl={pairUrl} loginCmd={loginCmd} statusCmd={statusCmd} />
+      <CursorSetup {...setupProps} />
     );
 
   return (
@@ -41,7 +50,7 @@ export function IntegrationsHubClient() {
           Connect Claude Code, Cursor &amp; Codex
         </h1>
         <p className="mx-auto mt-3 max-w-lg text-sm leading-relaxed text-muted">
-          Download the plugin pack from Promptly, install for your app, then connect with a pairing code.
+          Download the plugin pack, install for your app, then connect with a pairing code.
         </p>
         <p className="mx-auto mt-2 text-xs text-faint">
           Plugin pack:{" "}
@@ -52,7 +61,31 @@ export function IntegrationsHubClient() {
       </div>
 
       <section className="mt-10">
-        <div className="flex flex-wrap justify-center gap-2" role="tablist" aria-label="Coding agent">
+        <p className="text-center text-xs font-medium uppercase tracking-wide text-faint">Your computer</p>
+        <div className="mt-2 flex flex-wrap justify-center gap-2" role="tablist" aria-label="Operating system">
+          {OS_TABS.map((tab) => {
+            const selected = tab.id === activeOs;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                onClick={() => setActiveOs(tab.id)}
+                className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                  selected
+                    ? "border-ink bg-ink text-cream"
+                    : "border-line bg-cream text-muted hover:border-ink/30 hover:text-ink"
+                }`}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <p className="mt-6 text-center text-xs font-medium uppercase tracking-wide text-faint">Coding agent</p>
+        <div className="mt-2 flex flex-wrap justify-center gap-2" role="tablist" aria-label="Coding agent">
           {TOOL_TABS.map((tab) => {
             const selected = tab.id === activeTool;
             return (
@@ -78,10 +111,12 @@ export function IntegrationsHubClient() {
         <div
           className="mt-6 rounded-2xl border border-line bg-cream p-6 shadow-card sm:p-8"
           role="tabpanel"
-          aria-label={`${activeMeta.label} setup`}
+          aria-label={`${activeMeta.label} setup on ${activeOs}`}
         >
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-4">
-            <h2 className="text-lg font-semibold text-ink">{activeMeta.label}</h2>
+            <h2 className="text-lg font-semibold text-ink">
+              {activeMeta.label} · {activeOs === "mac" ? "Mac" : "Windows"}
+            </h2>
             <Link
               href={`/auth/integrations?tool=${activeTool}`}
               className="rounded-lg bg-ink px-3 py-1.5 text-xs font-semibold text-cream hover:bg-neutral-800"
@@ -96,7 +131,7 @@ export function IntegrationsHubClient() {
       <section className="mt-8 rounded-2xl border border-line bg-cream-dark p-4 text-sm text-muted">
         <p>
           <strong className="text-ink">Requirements:</strong> Node.js 18+ (<code className="text-ink">node --version</code>
-          ), and the Codex CLI if you use Codex (<code className="text-ink">codex --version</code>).
+          ). Codex users also need the Codex CLI (<code className="text-ink">codex --version</code>).
         </p>
         <p className="mt-2">
           <strong className="text-ink">Privacy:</strong> We track prompt counts and time only — never prompt text.
