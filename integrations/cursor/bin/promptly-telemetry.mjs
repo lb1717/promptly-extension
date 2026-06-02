@@ -63,15 +63,21 @@ function parseArgs(argv) {
   const args = [...argv];
   const command = args.shift() || "help";
   const flags = {};
-  while (args[0]?.startsWith("--")) {
-    const key = args.shift().slice(2);
-    if (args[0] && !args[0].startsWith("--")) {
-      flags[key] = args.shift();
+  const rest = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg.startsWith("--")) {
+      const key = arg.slice(2);
+      if (i + 1 < args.length && !args[i + 1].startsWith("--")) {
+        flags[key] = args[++i];
+      } else {
+        flags[key] = true;
+      }
     } else {
-      flags[key] = true;
+      rest.push(arg);
     }
   }
-  flags._rest = args;
+  flags._rest = rest;
   return { command, flags };
 }
 
@@ -242,8 +248,12 @@ async function cmdHook(flags) {
 async function cmdLogin(flags) {
   const code = String(flags._rest[0] || flags.code || "").trim();
   const tool = normalizeTool(flags.tool);
-  if (!code || !tool) {
-    console.error("Usage: promptly-telemetry login <CODE> --tool claude_code|cursor|codex");
+  if (!code) {
+    console.error("Usage: promptly-telemetry login --tool claude_code|cursor|codex <CODE>");
+    process.exit(1);
+  }
+  if (!tool) {
+    console.error("Missing --tool. Usage: promptly-telemetry login --tool codex <CODE>");
     process.exit(1);
   }
   const apiUrl = (flags["api-url"] || DEFAULT_API_URL).replace(/\/$/, "");

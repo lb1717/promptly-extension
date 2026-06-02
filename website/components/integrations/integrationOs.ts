@@ -176,11 +176,11 @@ export function telemetryCliPowerShell(): string {
 }
 
 export function loginCommand(os: OsId, tool: string, code: string): string {
-  return `${telemetryCli(os)} login ${code} --tool ${tool}`;
+  return `${telemetryCli(os)} login --tool ${tool} ${code}`;
 }
 
 export function loginCommandPowerShell(tool: string, code: string): string {
-  return `${telemetryCliPowerShell()} login ${code} --tool ${tool}`;
+  return `${telemetryCliPowerShell()} login --tool ${tool} ${code}`;
 }
 
 export function statusCommand(os: OsId): string {
@@ -192,11 +192,15 @@ export function statusCommandPowerShell(): string {
 }
 
 export function connectCommands(os: OsId, tool: string, code: string): string[] {
-  return [loginCommand(os, tool, code), statusCommand(os)];
+  const login = loginCommand(os, tool, code);
+  const status = statusCommand(os);
+  return [`${login} && ${status}`];
 }
 
 export function connectCommandsPowerShell(tool: string, code: string): string[] {
-  return [loginCommandPowerShell(tool, code), statusCommandPowerShell()];
+  const login = loginCommandPowerShell(tool, code);
+  const status = statusCommandPowerShell();
+  return [`${login}; if ($LASTEXITCODE -eq 0) { ${status} }`];
 }
 
 export function verifyConnectionCommands(os: OsId): string[] {

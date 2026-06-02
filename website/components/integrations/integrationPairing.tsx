@@ -8,10 +8,6 @@ import { CopyBlock } from "./integrationCopyBlock";
 import {
   connectCommands,
   connectCommandsPowerShell,
-  loginCommand,
-  loginCommandPowerShell,
-  statusCommand,
-  statusCommandPowerShell,
   type IdeToolId,
   type OsId
 } from "./integrationOs";
@@ -194,9 +190,7 @@ export function ConnectAccountStep({
               {terminalLabel ?? (isWindows ? "Command Prompt / PowerShell" : "Terminal")}
             </div>
             <pre className="p-3 font-mono text-xs leading-relaxed text-faint">
-              {loginCommand(os, tool, "YOUR_CODE")}
-              {"\n"}
-              {statusCommand(os)}
+              {connectCommands(os, tool, "YOUR_CODE")[0]}
             </pre>
             <p className="border-t border-line px-3 py-2 text-xs text-faint">
               Connect account above to fill in your real code.
@@ -225,9 +219,9 @@ export function ConnectAccountStep({
 
         <StepValidation
           items={[
-            'Last line shows Connected to Promptly as your@email.com',
+            'Shows Connected to Promptly as your@email.com',
             'Status output includes "connected": true',
-            'If not, click "New code" and run again before the code expires'
+            'If you see "Usage: login", re-run step 2 to get the latest plugin pack, then try again'
           ]}
         />
 
