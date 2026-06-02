@@ -7,7 +7,7 @@ type IdeToolId = "claude_code" | "cursor" | "codex";
 type Where = "terminal" | "claude_code" | "cursor_app" | "browser";
 
 const PLUGIN_PACK_URL = "https://promptly-labs.com/downloads/promptly-coding-agents.zip";
-const INTEGRATIONS_DIR = "~/integrations";
+const INTEGRATIONS_DIR = "$HOME/integrations";
 const TELEMETRY_CLI = `node ${INTEGRATIONS_DIR}/packages/telemetry-cli/bin/promptly-telemetry.mjs`;
 
 const TOOL_TABS: { id: IdeToolId; label: string; accent: string }[] = [
@@ -106,31 +106,29 @@ function ToolSetup({ tool, label }: { tool: IdeToolId; label: string }) {
   const statusCmd = `${TELEMETRY_CLI} status`;
 
   const downloadSteps = (
-    <>
-      <Step
-        n={1}
-        title="Download the plugin pack"
-        where="terminal"
-        commands={[
-          `curl -L -o ~/promptly.zip ${PLUGIN_PACK_URL}`,
-          "unzip -o ~/promptly.zip -d ~",
-          `cd ${INTEGRATIONS_DIR}`
-        ]}
-      >
-        <p>
-          This puts the Promptly plugins in <code className="text-ink">{INTEGRATIONS_DIR}</code>. You only do this
-          once.
-        </p>
-        <p className="mt-2">
-          Or{" "}
-          <a href={PLUGIN_PACK_URL} className="font-medium text-ink underline hover:no-underline">
-            download the zip
-          </a>{" "}
-          manually and unzip it into your home folder so you have an <code className="text-ink">integrations</code>{" "}
-          folder.
-        </p>
-      </Step>
-    </>
+    <Step
+      n={1}
+      title="Download the plugin pack"
+      where="terminal"
+      commands={[
+        `curl -L -o "$HOME/promptly.zip" ${PLUGIN_PACK_URL}`,
+        'unzip -o "$HOME/promptly.zip" -d "$HOME"',
+        `ls "${INTEGRATIONS_DIR}/.claude-plugin/marketplace.json"`
+      ]}
+    >
+      <p>
+        This creates <code className="text-ink">{INTEGRATIONS_DIR}</code> on your Mac. The last command should print
+        the marketplace file path — if it does, the download worked.
+      </p>
+      <p className="mt-2">
+        Or{" "}
+        <a href={PLUGIN_PACK_URL} className="font-medium text-ink underline hover:no-underline">
+          download the zip in your browser
+        </a>{" "}
+        and unzip it into your home folder so you have an <code className="text-ink">integrations</code> folder at{" "}
+        <code className="text-ink">{INTEGRATIONS_DIR}</code>.
+      </p>
+    </Step>
   );
 
   if (tool === "codex") {
@@ -139,27 +137,37 @@ function ToolSetup({ tool, label }: { tool: IdeToolId; label: string }) {
         {downloadSteps}
         <Step
           n={2}
+          title="Register the Promptly marketplace in Codex"
+          where="terminal"
+          commands={[`codex plugin marketplace add "${INTEGRATIONS_DIR}"`, "codex plugin marketplace list"]]}
+        >
+          Run in <strong className="text-ink">Terminal</strong> — not in the Codex chat. The list command should show{" "}
+          <code className="text-ink">promptly-labs</code>.
+        </Step>
+        <Step
+          n={3}
           title="Install the Codex plugin"
           where="terminal"
           commands={[
-            `codex plugin marketplace add ${INTEGRATIONS_DIR}`,
-            "codex plugin install promptly-codex@promptly-labs"
+            "codex plugin add promptly-codex@promptly-labs",
+            "codex plugin list"
           ]}
         >
-          Run these in <strong className="text-ink">Terminal</strong> — not inside the Codex chat. If Codex asks to
-          trust plugin hooks, accept.
+          If <code className="text-ink">codex plugin add</code> is not found, try{" "}
+          <code className="text-ink">codex plugin install promptly-codex@promptly-labs</code>. Restart Codex if the
+          plugin does not appear. Accept hook trust if prompted.
         </Step>
-        <Step n={3} title="Connect your Promptly account" where="browser">
+        <Step n={4} title="Connect your Promptly account" where="browser">
           <p>
             <Link href={pairUrl} className="font-medium text-ink underline hover:no-underline">
               Sign in and get a pairing code
             </Link>
-            , then run the login command below in Terminal (replace <code className="text-ink">YOUR_CODE</code>).
+            , then run in Terminal (replace <code className="text-ink">YOUR_CODE</code>):
           </p>
           <CopyBlock lines={[loginCmd]} label="Terminal" />
           <CopyBlock lines={[statusCmd]} label="Should show Connected" />
         </Step>
-        <Step n={4} title="Use Codex normally">
+        <Step n={5} title="Use Codex normally">
           Open Codex and send prompts. Stats appear under{" "}
           <Link href="/account/statistics" className="font-medium text-ink underline hover:no-underline">
             Statistics → Coding agents
@@ -184,8 +192,8 @@ function ToolSetup({ tool, label }: { tool: IdeToolId; label: string }) {
             ["/reload-plugins"]
           ]}
         >
-          Open <strong className="text-ink">Claude Code</strong> and paste each line below into the chat box, one at a
-          time, pressing Enter after each. If asked to trust hooks, allow.
+          Open <strong className="text-ink">Claude Code</strong> and paste each line into the chat, one at a time,
+          pressing Enter after each. If asked to trust hooks, allow.
         </Step>
         <Step n={3} title="Connect your Promptly account" where="browser">
           <p>
@@ -217,7 +225,7 @@ function ToolSetup({ tool, label }: { tool: IdeToolId; label: string }) {
         where="terminal"
         commands={[
           "mkdir -p ~/.cursor/plugins/local",
-          `cp -R ${INTEGRATIONS_DIR}/cursor ~/.cursor/plugins/local/promptly-cursor`
+          `cp -R "${INTEGRATIONS_DIR}/cursor" ~/.cursor/plugins/local/promptly-cursor`
         ]}
       >
         Then in Cursor press{" "}
@@ -259,8 +267,13 @@ export function IntegrationsHubClient() {
           Connect Claude Code, Cursor &amp; Codex
         </h1>
         <p className="mx-auto mt-3 max-w-lg text-sm leading-relaxed text-muted">
-          Download the plugin pack once, install for your app, then connect with a pairing code. Same Promptly account
-          as the browser extension.
+          Download the plugin pack from Promptly, install for your app, then connect with a pairing code.
+        </p>
+        <p className="mx-auto mt-2 text-xs text-faint">
+          Plugin pack:{" "}
+          <a href={PLUGIN_PACK_URL} className="underline hover:text-ink">
+            promptly-coding-agents.zip
+          </a>
         </p>
       </div>
 
@@ -308,8 +321,8 @@ export function IntegrationsHubClient() {
 
       <section className="mt-8 rounded-2xl border border-line bg-cream-dark p-4 text-sm text-muted">
         <p>
-          <strong className="text-ink">Need Node.js?</strong> The plugin uses Node 18+. Check with{" "}
-          <code className="text-ink">node --version</code> in Terminal.
+          <strong className="text-ink">Requirements:</strong> Node.js 18+ (<code className="text-ink">node --version</code>
+          ), and the Codex CLI if you use Codex (<code className="text-ink">codex --version</code>).
         </p>
         <p className="mt-2">
           <strong className="text-ink">Privacy:</strong> We track prompt counts and time only — never prompt text.

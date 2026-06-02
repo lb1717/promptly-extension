@@ -11,42 +11,43 @@ Connect **Claude Code**, **Cursor**, and **Codex** to your Promptly account. Tra
 
 ## Quick install
 
-Download the plugin pack from [promptly-labs.com/downloads/promptly-coding-agents.zip](https://promptly-labs.com/downloads/promptly-coding-agents.zip), unzip to your home folder (creates `~/integrations`), then follow [promptly-labs.com/integrations](https://promptly-labs.com/integrations).
+1. Download [promptly-coding-agents.zip](https://promptly-labs.com/downloads/promptly-coding-agents.zip)
+2. Unzip to your home folder (creates `$HOME/integrations`)
+3. Follow [promptly-labs.com/integrations](https://promptly-labs.com/integrations) for your app
 
 ### Claude Code
 
 ```bash
-# After cloning https://github.com/promptly-labs/Promptly — or use your local repo path:
-/plugin marketplace add ./integrations
+# After unzip to $HOME/integrations:
+/plugin marketplace add $HOME/integrations
 /plugin install promptly-claude-code@promptly-labs
 /reload-plugins
 ```
 
-Install steps also live at [promptly-labs.com/integrations](https://promptly-labs.com/integrations).
-
 ### Codex
 
 ```bash
-codex plugin marketplace add ./integrations
-codex plugin install promptly-codex@promptly-labs
+codex plugin marketplace add "$HOME/integrations"
+codex plugin add promptly-codex@promptly-labs
+# or: codex plugin install promptly-codex@promptly-labs
 ```
 
 ### Cursor
 
 ```bash
 mkdir -p ~/.cursor/plugins/local
-cp -R integrations/cursor ~/.cursor/plugins/local/promptly-cursor
+cp -R "$HOME/integrations/cursor" ~/.cursor/plugins/local/promptly-cursor
 # Restart Cursor (Developer: Reload Window)
 ```
 
 ## Connect your account
 
-1. Open [promptly-labs.com/auth/integrations?tool=claude_code](https://promptly-labs.com/auth/integrations) (or `cursor` / `codex`).
+1. Open [promptly-labs.com/auth/integrations](https://promptly-labs.com/auth/integrations) (use `?tool=cursor` or `?tool=codex` as needed).
 2. Sign in and copy the **8-character pairing code**.
 3. Run:
 
 ```bash
-node integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs login ABCD1234 --tool claude_code
+node "$HOME/integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs" login ABCD1234 --tool claude_code
 ```
 
 Or use the Promptly MCP tool `promptly_login` after enabling the plugin MCP server.
@@ -94,7 +95,12 @@ integrations/
 ├── claude-code/              # Claude Code plugin bundle
 ├── cursor/                   # Cursor plugin bundle
 ├── codex/                    # Codex plugin bundle
-└── marketplace/              # Marketplace manifest for /plugin marketplace add
+├── .claude-plugin/           # Marketplace manifest (Claude Code + Codex legacy)
+└── .agents/plugins/          # Marketplace manifest (Codex native path)
 ```
 
-When updating the CLI, copy `packages/telemetry-cli/bin/promptly-telemetry.mjs` into each plugin `bin/` directory.
+When updating the CLI, copy `packages/telemetry-cli/bin/promptly-telemetry.mjs` into each plugin `bin/` directory, then rebuild the zip:
+
+```bash
+cd website && npm run prebuild
+```

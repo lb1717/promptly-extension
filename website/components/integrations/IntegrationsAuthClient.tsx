@@ -25,7 +25,7 @@ function normalizeTool(raw: string | null): IdeTool {
 }
 
 const TELEMETRY_CLI =
-  "node ~/integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs";
+  "node $HOME/integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs";
 
 function loginCommand(tool: IdeTool, code: string): string {
   return `${TELEMETRY_CLI} login ${code} --tool ${tool}`;

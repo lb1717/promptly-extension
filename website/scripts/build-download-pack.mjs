@@ -3,7 +3,7 @@
  * Bundle integrations/ into website/public/downloads/promptly-coding-agents.zip
  */
 import { ZipArchive } from "archiver";
-import { createWriteStream, existsSync, mkdirSync } from "fs";
+import { cpSync, createWriteStream, existsSync, mkdirSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 
@@ -11,6 +11,8 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const integrationsDir = join(repoRoot, "integrations");
 const outDir = join(repoRoot, "website/public/downloads");
 const zipPath = join(outDir, "promptly-coding-agents.zip");
+const marketplaceSrc = join(integrationsDir, ".claude-plugin/marketplace.json");
+const marketplaceCodex = join(integrationsDir, ".agents/plugins/marketplace.json");
 
 if (!existsSync(integrationsDir)) {
   console.error("[promptly] integrations/ not found — cannot build plugin pack");
@@ -18,6 +20,8 @@ if (!existsSync(integrationsDir)) {
 }
 
 mkdirSync(outDir, { recursive: true });
+mkdirSync(dirname(marketplaceCodex), { recursive: true });
+cpSync(marketplaceSrc, marketplaceCodex);
 
 await new Promise((resolve, reject) => {
   const output = createWriteStream(zipPath);
