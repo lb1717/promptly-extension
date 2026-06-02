@@ -1,0 +1,9 @@
+{
+  "name": "promptly-cursor",
+  "description": "Track prompts and screen time in Cursor with your Promptly account",
+  "version": "1.0.0",
+  "author": {
+    "name": "Promptly Labs"
+  },
+  "homepage": "https://promptly-labs.com/integrations"
+}

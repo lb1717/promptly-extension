@@ -1,0 +1,9 @@
+{
+  "name": "promptly-claude-code",
+  "description": "Track prompts and screen time in Claude Code with your Promptly account",
+  "version": "1.0.0",
+  "author": {
+    "name": "Promptly Labs"
+  },
+  "homepage": "https://promptly-labs.com/integrations"
+}

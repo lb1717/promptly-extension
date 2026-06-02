@@ -931,12 +931,20 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                 <p className="mt-1 text-xs text-faint">Last 7 days — summary only</p>
               </div>
               {!extensionMode ? (
-                <Link
-                  href="/account/statistics"
-                  className="inline-flex shrink-0 items-center justify-center rounded-lg border border-line bg-cream-dark px-3 py-2 text-xs font-semibold text-ink hover:bg-cream-dark"
-                >
-                  See full statistics
-                </Link>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  <Link
+                    href="/integrations"
+                    className="inline-flex items-center justify-center rounded-lg border border-line bg-cream-dark px-3 py-2 text-xs font-semibold text-ink hover:bg-cream"
+                  >
+                    Coding agents
+                  </Link>
+                  <Link
+                    href="/account/statistics"
+                    className="inline-flex items-center justify-center rounded-lg border border-line bg-cream-dark px-3 py-2 text-xs font-semibold text-ink hover:bg-cream-dark"
+                  >
+                    See full statistics
+                  </Link>
+                </div>
               ) : (
                 <Link
                   href="/account/statistics"

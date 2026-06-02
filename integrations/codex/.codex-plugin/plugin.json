@@ -1,0 +1,11 @@
+{
+  "name": "promptly-codex",
+  "description": "Track prompts and screen time in Codex with your Promptly account",
+  "version": "1.0.0",
+  "author": {
+    "name": "Promptly Labs"
+  },
+  "homepage": "https://promptly-labs.com/integrations",
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": "./.mcp.json"
+}

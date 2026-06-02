@@ -1,0 +1,36 @@
+{
+  "name": "promptly-labs",
+  "owner": {
+    "name": "Promptly Labs",
+    "url": "https://promptly-labs.com"
+  },
+  "plugins": [
+    {
+      "name": "promptly-claude-code",
+      "source": "./claude-code",
+      "description": "Promptly telemetry for Claude Code",
+      "version": "1.0.0",
+      "author": { "name": "Promptly Labs" },
+      "category": "productivity",
+      "tags": ["promptly", "telemetry", "claude-code"]
+    },
+    {
+      "name": "promptly-cursor",
+      "source": "./cursor",
+      "description": "Promptly telemetry for Cursor",
+      "version": "1.0.0",
+      "author": { "name": "Promptly Labs" },
+      "category": "productivity",
+      "tags": ["promptly", "telemetry", "cursor"]
+    },
+    {
+      "name": "promptly-codex",
+      "source": "./codex",
+      "description": "Promptly telemetry for Codex",
+      "version": "1.0.0",
+      "author": { "name": "Promptly Labs" },
+      "category": "productivity",
+      "tags": ["promptly", "telemetry", "codex"]
+    }
+  ]
+}

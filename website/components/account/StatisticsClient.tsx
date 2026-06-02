@@ -28,6 +28,10 @@ const COLOR_UNKNOWN = "#64748b";
 /** Promptly accent for “Improve / rewrite” bars. */
 const COLOR_PROMPTLY = "#ab68ff";
 const COLOR_NATIVE_WEB = "#22d3ee";
+/** Coding agents — separate from web chat palette */
+const COLOR_CLAUDE_CODE = "#D97757";
+const COLOR_CURSOR_IDE = "#00D8FF";
+const COLOR_CODEX = "#10A37F";
 const CHART_FONT_FAMILY = "var(--font-roboto-chart), Roboto, sans-serif";
 /** All chart axis ticks — dates, counts, units, and category labels on axes. */
 const CHART_Y_TICK = { fill: "#5C5C5C", fontSize: 10, fontFamily: CHART_FONT_FAMILY };
@@ -77,6 +81,75 @@ type HostPassiveLite = {
   query_newest_first?: boolean;
   likely_truncated: boolean;
 };
+
+type IdeStatsPayload = {
+  range_days: number;
+  granularity: "day" | "week";
+  totals: {
+    prompts: { claude_code: number; cursor: number; codex: number };
+    screen_time_minutes: { claude_code: number; cursor: number; codex: number };
+    engagement_minutes: { drafting: number; waiting: number; reading_idle: number };
+  };
+  prompt_timeline: Array<{
+    bucket: string;
+    claude_code: number;
+    cursor: number;
+    codex: number;
+    total: number;
+  }>;
+  screen_time_timeline: Array<{
+    bucket: string;
+    claude_code_minutes: number;
+    cursor_minutes: number;
+    codex_minutes: number;
+    drafting_minutes: number;
+    waiting_minutes: number;
+    reading_idle_minutes: number;
+  }>;
+  connected_tools: Array<{ tool: string; device_count: number; last_seen_at_ms: number | null }>;
+  events_docs_in_query: number;
+  index_missing: boolean;
+  likely_truncated: boolean;
+  footnotes: string[];
+};
+
+function emptyIdeStats(days: number, granularity: "day" | "week"): IdeStatsPayload {
+  const tl = Array.from({ length: days }, (_, i) => {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() - (days - i - 1));
+    return { bucket: d.toISOString().slice(0, 10) };
+  });
+  return {
+    range_days: days,
+    granularity,
+    totals: {
+      prompts: { claude_code: 0, cursor: 0, codex: 0 },
+      screen_time_minutes: { claude_code: 0, cursor: 0, codex: 0 },
+      engagement_minutes: { drafting: 0, waiting: 0, reading_idle: 0 }
+    },
+    prompt_timeline: tl.map((row) => ({
+      bucket: row.bucket,
+      claude_code: 0,
+      cursor: 0,
+      codex: 0,
+      total: 0
+    })),
+    screen_time_timeline: tl.map((row) => ({
+      bucket: row.bucket,
+      claude_code_minutes: 0,
+      cursor_minutes: 0,
+      codex_minutes: 0,
+      drafting_minutes: 0,
+      waiting_minutes: 0,
+      reading_idle_minutes: 0
+    })),
+    connected_tools: [],
+    events_docs_in_query: 0,
+    index_missing: false,
+    likely_truncated: false,
+    footnotes: []
+  };
+}
 
 type CombinedTotals = {
   prompts_estimate: number;
@@ -724,13 +797,19 @@ export function StatisticsClient() {
   const [stats, setStats] = useState<ExtendedStatsPayload | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [statsError, setStatsError] = useState("");
+  const [ideStats, setIdeStats] = useState<IdeStatsPayload | null>(null);
+  const [ideStatsLoading, setIdeStatsLoading] = useState(false);
+  const [ideStatsError, setIdeStatsError] = useState("");
 
   const placeholderStats = useMemo(
     () => buildPlaceholderExtendedStats(days, granularity),
     [days, granularity]
   );
 
+  const placeholderIdeStats = useMemo(() => emptyIdeStats(days, granularity), [days, granularity]);
+
   const displayStats = user ? stats ?? placeholderStats : null;
+  const displayIdeStats = user ? ideStats ?? placeholderIdeStats : null;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -790,10 +869,35 @@ export function StatisticsClient() {
     }
   }, []);
 
+  const loadIdeStats = useCallback(async (current: User | null, d: number, g: "day" | "week") => {
+    if (!current) {
+      setIdeStats(null);
+      return;
+    }
+    setIdeStatsLoading(true);
+    setIdeStatsError("");
+    try {
+      const token = await current.getIdToken(false);
+      const res = await fetch(`/api/account/stats/ide?days=${encodeURIComponent(String(d))}&granularity=${g}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error || `Request failed (${res.status})`);
+      }
+      setIdeStats(data as IdeStatsPayload);
+    } catch (e) {
+      setIdeStatsError(String(e instanceof Error ? e.message : e));
+    } finally {
+      setIdeStatsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!user || loading) return;
     void loadExtended(user, days, granularity);
-  }, [user, loading, days, granularity, loadExtended]);
+    void loadIdeStats(user, days, granularity);
+  }, [user, loading, days, granularity, loadExtended, loadIdeStats]);
 
   const stackedTimeline = useMemo(() => {
     if (!displayStats?.combined_prompt_timeline) return [];
@@ -803,6 +907,30 @@ export function StatisticsClient() {
       label: g === "week" ? `wk ${formatShortDay(row.bucket)}` : formatShortDay(row.bucket)
     }));
   }, [displayStats]);
+
+  const idePromptTimeline = useMemo(() => {
+    if (!displayIdeStats?.prompt_timeline) return [];
+    const g = displayIdeStats.granularity;
+    return displayIdeStats.prompt_timeline.map((row) => ({
+      ...row,
+      label: g === "week" ? `wk ${formatShortDay(row.bucket)}` : formatShortDay(row.bucket)
+    }));
+  }, [displayIdeStats]);
+
+  const ideScreenTimeline = useMemo(() => {
+    if (!displayIdeStats?.screen_time_timeline) return [];
+    const g = displayIdeStats.granularity;
+    return displayIdeStats.screen_time_timeline.map((row) => ({
+      ...row,
+      label: g === "week" ? `wk ${formatShortDay(row.bucket)}` : formatShortDay(row.bucket)
+    }));
+  }, [displayIdeStats]);
+
+  const ideHasActivity = useMemo(() => {
+    if (!displayIdeStats) return false;
+    const p = displayIdeStats.totals.prompts;
+    return p.claude_code + p.cursor + p.codex > 0;
+  }, [displayIdeStats]);
 
   const latencyChartRows = useMemo(() => {
     if (!displayStats?.latency_comparison_ai) return [];
@@ -1578,6 +1706,124 @@ export function StatisticsClient() {
                 </tbody>
               </table>
             </div>
+          </section>
+
+          <section className="mb-8 rounded-2xl border border-violet-200/80 bg-cream p-4 shadow-card sm:p-5">
+            <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">Coding agents</h2>
+                <p className="mt-1 text-xs text-muted">
+                  Claude Code, Cursor, and Codex — separate from web chat statistics above.
+                </p>
+              </div>
+              <Link
+                href="/integrations"
+                className="text-xs font-medium text-violet-700 underline hover:text-violet-900"
+              >
+                Install & connect
+              </Link>
+            </div>
+
+            {ideStatsError ? (
+              <p className="mb-4 text-sm text-red-700">{ideStatsError}</p>
+            ) : null}
+            {ideStatsLoading && !ideStats ? (
+              <p className="text-sm text-muted">Loading coding-agent statistics…</p>
+            ) : null}
+
+            {!ideHasActivity ? (
+              <p className="text-sm text-muted">
+                No coding-agent activity yet. Install a connector from{" "}
+                <Link href="/integrations" className="underline hover:text-ink">
+                  integrations
+                </Link>
+                , connect your account, and send prompts in Claude Code, Cursor, or Codex.
+              </p>
+            ) : (
+              <div className="space-y-6">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-xl border border-line bg-white/70 p-3">
+                    <p className="text-[11px] font-medium uppercase text-faint">Claude Code prompts</p>
+                    <p className="mt-1 text-2xl font-bold tabular-nums text-ink">
+                      {displayIdeStats?.totals.prompts.claude_code.toLocaleString() ?? "0"}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-line bg-white/70 p-3">
+                    <p className="text-[11px] font-medium uppercase text-faint">Cursor prompts</p>
+                    <p className="mt-1 text-2xl font-bold tabular-nums text-ink">
+                      {displayIdeStats?.totals.prompts.cursor.toLocaleString() ?? "0"}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-line bg-white/70 p-3">
+                    <p className="text-[11px] font-medium uppercase text-faint">Codex prompts</p>
+                    <p className="mt-1 text-2xl font-bold tabular-nums text-ink">
+                      {displayIdeStats?.totals.prompts.codex.toLocaleString() ?? "0"}
+                    </p>
+                  </div>
+                </div>
+
+                {idePromptTimeline.length ? (
+                  <div>
+                    <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">Prompts over time</h3>
+                    <div className="h-56 w-full statistics-charts">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={idePromptTimeline} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#E0DDD6" />
+                          <XAxis dataKey="label" tick={CHART_X_DATE_TICK} stroke={CHART_X_DATE_STROKE} />
+                          <YAxis tick={CHART_Y_TICK} allowDecimals={false} />
+                          <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
+                          <Legend wrapperStyle={CHART_LEGEND_STYLE} />
+                          <Bar dataKey="claude_code" name="Claude Code" stackId="ide" fill={COLOR_CLAUDE_CODE} />
+                          <Bar dataKey="cursor" name="Cursor" stackId="ide" fill={COLOR_CURSOR_IDE} />
+                          <Bar dataKey="codex" name="Codex" stackId="ide" fill={COLOR_CODEX} radius={[2, 2, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                ) : null}
+
+                {ideScreenTimeline.some(
+                  (r) => r.claude_code_minutes + r.cursor_minutes + r.codex_minutes > 0
+                ) ? (
+                  <div>
+                    <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">Screen time (minutes)</h3>
+                    <div className="h-56 w-full statistics-charts">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={ideScreenTimeline} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#E0DDD6" />
+                          <XAxis dataKey="label" tick={CHART_X_DATE_TICK} stroke={CHART_X_DATE_STROKE} />
+                          <YAxis tick={CHART_Y_TICK} />
+                          <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
+                          <Legend wrapperStyle={CHART_LEGEND_STYLE} />
+                          <Bar
+                            dataKey="claude_code_minutes"
+                            name="Claude Code"
+                            stackId="scr"
+                            fill={COLOR_CLAUDE_CODE}
+                          />
+                          <Bar dataKey="cursor_minutes" name="Cursor" stackId="scr" fill={COLOR_CURSOR_IDE} />
+                          <Bar
+                            dataKey="codex_minutes"
+                            name="Codex"
+                            stackId="scr"
+                            fill={COLOR_CODEX}
+                            radius={[2, 2, 0, 0]}
+                          />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                ) : null}
+
+                {displayIdeStats?.footnotes?.length ? (
+                  <ul className="list-disc space-y-1 pl-5 text-[11px] text-faint">
+                    {displayIdeStats.footnotes.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            )}
           </section>
 
           <footer className="rounded-2xl border border-line bg-cream-dark p-5 text-[11px] leading-relaxed text-faint">

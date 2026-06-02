@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from "crypto";
 import {
   FieldPath,
   FieldValue,
@@ -57,6 +58,13 @@ export const OPTIMIZE_EVENTS_QUERY_LIMIT = 5000;
 /** Passive listener sends on ChatGPT / Claude / Gemini (no Promptly optimize required). Indexed by uid + utcDay like optimize events. */
 const HOST_LLM_EVENTS_COLLECTION = "promptly_host_llm_events";
 export const HOST_LLM_EVENTS_QUERY_LIMIT = 5000;
+/** IDE / CLI agent telemetry (Claude Code, Cursor, Codex) — separate from web extension stats. */
+const IDE_EVENTS_COLLECTION = "promptly_ide_events";
+export const IDE_EVENTS_QUERY_LIMIT = 5000;
+const INTEGRATION_PAIR_CODES_COLLECTION = "promptly_integration_pair_codes";
+const INTEGRATION_DEVICES_COLLECTION = "promptly_integration_devices";
+const INTEGRATION_PAIR_TTL_MS = 10 * 60 * 1000;
+const IDE_CLIENT_HEADERS = new Set(["promptly-claude-code", "promptly-cursor", "promptly-codex"]);
 /** Max telemetry text length from browser (host model picker label scrape). */
 const TELEMETRY_HOST_MODEL_MAX_CHARS = 120;
 const GOOGLE_ACCESS_TOKEN_CACHE_TTL_MS = 45 * 60 * 1000;
@@ -851,6 +859,689 @@ export async function persistHostLlmActivityEvents(user: PromptlyUser, rows: Hos
 }
 
 export type AccountStatsExtendedGranularity = "day" | "week";
+
+export type PromptlyIdeTool = "claude_code" | "cursor" | "codex";
+
+export type IdeInteractionKind = "send" | "engagement_segment";
+
+export type IdeActivityEventInput = {
+  tool: PromptlyIdeTool;
+  interactionKind: IdeInteractionKind;
+  composerCharEstimate: number | null;
+  composerWordEstimate: number | null;
+  modelLabelSanitized: string | null;
+  modelBucket: string;
+  hostResponseLatencyMs: number | null;
+  engagementCategory: HostEngagementCategory | null;
+  engagementDurationMs: number | null;
+  clientOccurredMs: number;
+};
+
+export function normalizePromptlyIdeTool(rawValue: unknown): PromptlyIdeTool | null {
+  const value = String(rawValue || "")
+    .trim()
+    .toLowerCase()
+    .replace(/-/g, "_");
+  if (value === "claude_code" || value === "cursor" || value === "codex") {
+    return value;
+  }
+  return null;
+}
+
+function hashIntegrationSecret(raw: string): string {
+  return createHash("sha256").update(raw).digest("hex");
+}
+
+function generatePairCode(): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const bytes = randomBytes(8);
+  let code = "";
+  for (let i = 0; i < 8; i += 1) {
+    code += alphabet[bytes[i]! % alphabet.length];
+  }
+  return code;
+}
+
+function generateDeviceToken(): string {
+  return `pt_${randomBytes(32).toString("base64url")}`;
+}
+
+export async function createIntegrationPairCode(
+  user: PromptlyUser,
+  tool: PromptlyIdeTool
+): Promise<{ code: string; expiresAt: string }> {
+  const db = getFirebaseAdminDb();
+  const code = generatePairCode();
+  const expiresAtMs = Date.now() + INTEGRATION_PAIR_TTL_MS;
+  await db.collection(INTEGRATION_PAIR_CODES_COLLECTION).doc(code).set({
+    code,
+    uid: user.uid,
+    email: user.email || null,
+    tool,
+    expiresAtMs,
+    createdAt: FieldValue.serverTimestamp()
+  });
+  return { code, expiresAt: new Date(expiresAtMs).toISOString() };
+}
+
+export async function exchangeIntegrationPairCode(params: {
+  code: string;
+  tool: PromptlyIdeTool;
+  deviceLabel?: string | null;
+}): Promise<{ deviceToken: string; uid: string; email: string | null; tool: PromptlyIdeTool }> {
+  const normalizedCode = String(params.code || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+  if (normalizedCode.length !== 8) {
+    throw new Error("Invalid pairing code");
+  }
+  const tool = normalizePromptlyIdeTool(params.tool);
+  if (!tool) {
+    throw new Error("Invalid tool");
+  }
+
+  const db = getFirebaseAdminDb();
+  const pairRef = db.collection(INTEGRATION_PAIR_CODES_COLLECTION).doc(normalizedCode);
+  const pairSnap = await pairRef.get();
+  if (!pairSnap.exists) {
+    throw new Error("Pairing code not found or expired");
+  }
+  const pair = pairSnap.data() as Record<string, unknown>;
+  const expiresAtMs = Number(pair.expiresAtMs || 0);
+  if (!Number.isFinite(expiresAtMs) || expiresAtMs < Date.now()) {
+    await pairRef.delete().catch(() => undefined);
+    throw new Error("Pairing code expired");
+  }
+  const pairTool = normalizePromptlyIdeTool(pair.tool);
+  if (pairTool !== tool) {
+    throw new Error("Pairing code was issued for a different tool");
+  }
+  const uid = String(pair.uid || "").trim();
+  if (!uid) {
+    throw new Error("Invalid pairing record");
+  }
+
+  const deviceToken = generateDeviceToken();
+  const tokenHash = hashIntegrationSecret(deviceToken);
+  const deviceRef = db.collection(INTEGRATION_DEVICES_COLLECTION).doc();
+  await deviceRef.set({
+    uid,
+    email: typeof pair.email === "string" ? pair.email : null,
+    tool,
+    tokenHash,
+    deviceLabel: String(params.deviceLabel || "").trim().slice(0, 120) || null,
+    createdAt: FieldValue.serverTimestamp(),
+    lastSeenAt: FieldValue.serverTimestamp(),
+    revoked: false
+  });
+  await pairRef.delete().catch(() => undefined);
+
+  return {
+    deviceToken,
+    uid,
+    email: typeof pair.email === "string" ? pair.email : null,
+    tool
+  };
+}
+
+async function resolveUserFromIntegrationDeviceToken(token: string): Promise<PromptlyUser | null> {
+  const raw = String(token || "").trim();
+  if (!raw.startsWith("pt_") || raw.length < 16) {
+    return null;
+  }
+  const tokenHash = hashIntegrationSecret(raw);
+  const db = getFirebaseAdminDb();
+  const snap = await db
+    .collection(INTEGRATION_DEVICES_COLLECTION)
+    .where("tokenHash", "==", tokenHash)
+    .where("revoked", "==", false)
+    .limit(1)
+    .get();
+  if (snap.empty) {
+    return null;
+  }
+  const doc = snap.docs[0]!;
+  const data = doc.data() as Record<string, unknown>;
+  const uid = String(data.uid || "").trim();
+  if (!uid) {
+    return null;
+  }
+  await doc.ref.set({ lastSeenAt: FieldValue.serverTimestamp() }, { merge: true });
+  return upsertPromptlyUser(uid, normalizeUserEmail(data.email), { provider: "ide-integration" });
+}
+
+export async function listIntegrationDevices(user: PromptlyUser) {
+  const db = getFirebaseAdminDb();
+  const snap = await db
+    .collection(INTEGRATION_DEVICES_COLLECTION)
+    .where("uid", "==", user.uid)
+    .where("revoked", "==", false)
+    .limit(50)
+    .get();
+  return snap.docs.map((doc) => {
+    const raw = doc.data() as Record<string, unknown>;
+    return {
+      id: doc.id,
+      tool: normalizePromptlyIdeTool(raw.tool) || "claude_code",
+      deviceLabel: typeof raw.deviceLabel === "string" ? raw.deviceLabel : null,
+      lastSeenAtMs: firestoreMillis(raw.lastSeenAt)
+    };
+  });
+}
+
+export async function revokeIntegrationDevice(user: PromptlyUser, deviceId: string): Promise<boolean> {
+  const db = getFirebaseAdminDb();
+  const ref = db.collection(INTEGRATION_DEVICES_COLLECTION).doc(String(deviceId || "").trim());
+  const snap = await ref.get();
+  if (!snap.exists) {
+    return false;
+  }
+  const raw = snap.data() as Record<string, unknown>;
+  if (String(raw.uid || "") !== user.uid) {
+    throw new Error("Forbidden");
+  }
+  await ref.set({ revoked: true, revokedAt: FieldValue.serverTimestamp() }, { merge: true });
+  return true;
+}
+
+export async function requireIdeTelemetryUser(request: Request): Promise<{ ok: true; user: PromptlyUser }> {
+  const clientHeader = String(request.headers.get("x-promptly-client") || "")
+    .trim()
+    .toLowerCase();
+  if (!IDE_CLIENT_HEADERS.has(clientHeader)) {
+    throw new Error("Missing or invalid x-promptly-client header");
+  }
+
+  const rawToken = readFirebaseToken(request);
+  if (rawToken) {
+    if (rawToken.startsWith("pt_")) {
+      const user = await resolveUserFromIntegrationDeviceToken(rawToken);
+      if (user) {
+        return { ok: true, user };
+      }
+      throw new Error("Invalid device token");
+    }
+    const decoded = await getFirebaseAdminAuth().verifyIdToken(rawToken, true);
+    const email = normalizeUserEmail(decoded.email);
+    const canonicalUid = email ? await resolveCanonicalUidForEmail(email, decoded.uid) : decoded.uid;
+    const user = await upsertPromptlyUser(canonicalUid, email, { provider: "firebase" });
+    return { ok: true, user };
+  }
+
+  throw new Error("Missing authorization token");
+}
+
+/**
+ * Validates one IDE telemetry row. Never accepts prompt text.
+ */
+export function normalizeIdeActivityEventInput(raw: Record<string, unknown>): IdeActivityEventInput | null {
+  const tool = normalizePromptlyIdeTool(raw.tool ?? raw.ide_tool ?? raw.service);
+  if (!tool) {
+    return null;
+  }
+
+  let interactionKind: IdeInteractionKind = "send";
+  const rawKind = raw.interaction_kind ?? raw.interactionKind ?? "send";
+  if (typeof rawKind === "string") {
+    const k = rawKind.trim().toLowerCase();
+    if (k === "engagement_segment" || k === "engagement") {
+      interactionKind = "engagement_segment";
+    }
+  }
+
+  if (interactionKind === "engagement_segment") {
+    let engagementCategory: HostEngagementCategory | null = null;
+    const catRaw = raw.engagement_category ?? raw.engagementCategory;
+    if (typeof catRaw === "string") {
+      const c = catRaw.trim().toLowerCase();
+      if (c === "drafting" || c === "waiting" || c === "reading_idle") {
+        engagementCategory = c;
+      }
+    }
+    if (!engagementCategory) {
+      return null;
+    }
+    let engagementDurationMs: number | null = null;
+    const durRaw = raw.duration_ms ?? raw.durationMs ?? raw.engagementDurationMs ?? raw.engagement_duration_ms;
+    if (typeof durRaw === "number" && Number.isFinite(durRaw)) {
+      const v = Math.max(0, Math.floor(durRaw));
+      if (v >= 2000 && v <= 1_800_000) {
+        engagementDurationMs = v;
+      }
+    }
+    if (!engagementDurationMs) {
+      return null;
+    }
+    let clientOccurredMs = Date.now();
+    const com = raw.client_occurred_ms ?? raw.clientOccurredMs;
+    if (typeof com === "number" && Number.isFinite(com)) {
+      clientOccurredMs = Math.max(0, Math.floor(com));
+    }
+    return {
+      tool,
+      interactionKind,
+      composerCharEstimate: null,
+      composerWordEstimate: null,
+      modelLabelSanitized: null,
+      modelBucket: "unknown",
+      hostResponseLatencyMs: null,
+      engagementCategory,
+      engagementDurationMs,
+      clientOccurredMs
+    };
+  }
+
+  let composerCharEstimate: number | null = null;
+  const rawCcNum =
+    typeof raw.composer_char_estimate === "number" && Number.isFinite(raw.composer_char_estimate)
+      ? raw.composer_char_estimate
+      : typeof raw.composerCharEstimate === "number" && Number.isFinite(raw.composerCharEstimate)
+        ? raw.composerCharEstimate
+        : null;
+  if (rawCcNum !== null) {
+    composerCharEstimate = Math.min(CREDIT_MAX_PROMPT_CHARS, Math.max(0, Math.floor(Number(rawCcNum))));
+  }
+  if (!composerCharEstimate || composerCharEstimate < 1) {
+    composerCharEstimate = 1;
+  }
+
+  let composerWordEstimate: number | null = null;
+  const ww =
+    typeof raw.composer_word_estimate === "number" && Number.isFinite(raw.composer_word_estimate)
+      ? raw.composer_word_estimate
+      : typeof raw.composerWordEstimate === "number" && Number.isFinite(raw.composerWordEstimate)
+        ? raw.composerWordEstimate
+        : null;
+  if (typeof ww === "number" && Number.isFinite(ww)) {
+    composerWordEstimate = Math.min(12000, Math.max(0, Math.floor(ww)));
+  }
+
+  let modelLabelSanitized: string | null = null;
+  const labelRaw =
+    typeof raw.model_label === "string"
+      ? raw.model_label
+      : typeof raw.modelLabel === "string"
+        ? raw.modelLabel
+        : typeof raw.host_model_label === "string"
+          ? raw.host_model_label
+          : raw.hostModelLabel;
+  if (typeof labelRaw === "string") {
+    let label = String(labelRaw)
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, TELEMETRY_HOST_MODEL_MAX_CHARS);
+    if (!/https?:\/\//i.test(label) && label) {
+      modelLabelSanitized = label;
+    }
+  }
+
+  let modelBucket = "unknown";
+  const bucketRaw =
+    typeof raw.model_bucket === "string"
+      ? raw.model_bucket
+      : typeof raw.modelBucket === "string"
+        ? raw.modelBucket
+        : typeof raw.host_model_bucket === "string"
+          ? raw.host_model_bucket
+          : raw.hostModelBucket;
+  if (typeof bucketRaw === "string" && bucketRaw.trim()) {
+    modelBucket = String(bucketRaw)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48) || "unknown";
+  } else if (modelLabelSanitized) {
+    modelBucket =
+      modelLabelSanitized
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 48) || "unknown";
+  }
+
+  let hostResponseLatencyMs: number | null = null;
+  const hlRaw = raw.host_response_latency_ms ?? raw.hostResponseLatencyMs;
+  if (typeof hlRaw === "number" && Number.isFinite(hlRaw)) {
+    const v = Math.floor(hlRaw);
+    if (v > 0 && v <= 1_800_000) {
+      hostResponseLatencyMs = v;
+    }
+  }
+
+  let clientOccurredMs = Date.now();
+  const com = raw.client_occurred_ms ?? raw.clientOccurredMs;
+  if (typeof com === "number" && Number.isFinite(com)) {
+    clientOccurredMs = Math.max(0, Math.floor(com));
+  }
+
+  return {
+    tool,
+    interactionKind,
+    composerCharEstimate,
+    composerWordEstimate,
+    modelLabelSanitized,
+    modelBucket,
+    hostResponseLatencyMs,
+    engagementCategory: null,
+    engagementDurationMs: null,
+    clientOccurredMs
+  };
+}
+
+export async function persistIdeActivityEvents(user: PromptlyUser, rows: IdeActivityEventInput[]): Promise<number> {
+  if (!rows.length) return 0;
+  const db = getFirebaseAdminDb();
+  const writer = db.bulkWriter();
+  let queued = 0;
+  const now = Date.now();
+  for (const row of rows) {
+    if (row.clientOccurredMs <= 0 || row.clientOccurredMs > now + 2 * 86400000 || row.clientOccurredMs < now - 400 * 86400000) {
+      continue;
+    }
+    const utcDay = utcDayFromMs(row.clientOccurredMs);
+    const ref = db.collection(IDE_EVENTS_COLLECTION).doc();
+    writer.set(ref, {
+      telemetrySchemaVersion: row.interactionKind === "engagement_segment" ? 1 : 1,
+      uid: user.uid,
+      email: user.email || null,
+      utcDay,
+      occurredAt: FieldValue.serverTimestamp(),
+      source: "ide_connector",
+      interactionKind: row.interactionKind,
+      tool: row.tool,
+      composerCharEstimate: row.composerCharEstimate,
+      composerWordEstimate: row.composerWordEstimate,
+      modelLabelSanitized: row.modelLabelSanitized,
+      modelBucket: row.modelBucket,
+      hostResponseLatencyMs: row.hostResponseLatencyMs,
+      clientOccurredMs: row.clientOccurredMs,
+      ...(row.engagementCategory ? { engagementCategory: row.engagementCategory } : {}),
+      ...(typeof row.engagementDurationMs === "number" ? { engagementDurationMs: row.engagementDurationMs } : {})
+    });
+    queued += 1;
+  }
+  await writer.close();
+  return queued;
+}
+
+type IdeToolCounts = Record<PromptlyIdeTool, number>;
+
+function emptyIdeToolCounts(): IdeToolCounts {
+  return { claude_code: 0, cursor: 0, codex: 0 };
+}
+
+type IdeEngagementMsByCategory = {
+  drafting: IdeToolCounts;
+  waiting: IdeToolCounts;
+  reading_idle: IdeToolCounts;
+};
+
+function emptyIdeEngagementMsByCategory(): IdeEngagementMsByCategory {
+  return {
+    drafting: emptyIdeToolCounts(),
+    waiting: emptyIdeToolCounts(),
+    reading_idle: emptyIdeToolCounts()
+  };
+}
+
+export type AccountIdeStatsPayload = {
+  range_days: number;
+  granularity: AccountStatsExtendedGranularity;
+  start_day: string;
+  end_day: string;
+  totals: {
+    prompts: IdeToolCounts;
+    screen_time_minutes: IdeToolCounts;
+    engagement_minutes: {
+      drafting: number;
+      waiting: number;
+      reading_idle: number;
+    };
+  };
+  prompt_timeline: Array<{
+    bucket: string;
+    claude_code: number;
+    cursor: number;
+    codex: number;
+    total: number;
+  }>;
+  screen_time_timeline: Array<{
+    bucket: string;
+    claude_code_minutes: number;
+    cursor_minutes: number;
+    codex_minutes: number;
+    drafting_minutes: number;
+    waiting_minutes: number;
+    reading_idle_minutes: number;
+  }>;
+  connected_tools: Array<{
+    tool: PromptlyIdeTool;
+    device_count: number;
+    last_seen_at_ms: number | null;
+  }>;
+  events_docs_in_query: number;
+  index_missing: boolean;
+  likely_truncated: boolean;
+  footnotes: string[];
+};
+
+export async function getAccountIdeUsageStats(
+  user: PromptlyUser,
+  days: number,
+  granularity: AccountStatsExtendedGranularity = "day"
+): Promise<AccountIdeStatsPayload> {
+  const rangeDays = Math.max(1, Math.min(90, Math.floor(days || 14)));
+  const recentDays = getRecentDays(rangeDays);
+  const startDay = recentDays[0]!;
+  const endDay = recentDays[recentDays.length - 1]!;
+  const db = getFirebaseAdminDb();
+
+  const queryIdeEvents = async (): Promise<{
+    docs: QueryDocumentSnapshot<DocumentData>[];
+    indexMissing: boolean;
+    usedDesc: boolean;
+  }> => {
+    const runDesc = () =>
+      db
+        .collection(IDE_EVENTS_COLLECTION)
+        .where("uid", "==", user.uid)
+        .where("utcDay", ">=", startDay)
+        .where("utcDay", "<=", endDay)
+        .orderBy("utcDay", "desc")
+        .orderBy(FieldPath.documentId(), "desc")
+        .limit(IDE_EVENTS_QUERY_LIMIT)
+        .get();
+    const runAsc = () =>
+      db
+        .collection(IDE_EVENTS_COLLECTION)
+        .where("uid", "==", user.uid)
+        .where("utcDay", ">=", startDay)
+        .where("utcDay", "<=", endDay)
+        .orderBy("utcDay", "asc")
+        .limit(IDE_EVENTS_QUERY_LIMIT)
+        .get();
+    try {
+      const snap = await runDesc();
+      return { docs: snap.docs, indexMissing: false, usedDesc: true };
+    } catch (err) {
+      const message = String(err instanceof Error ? err.message : err);
+      if (/FAILED_PRECONDITION|requires an index|9 FAILED_PRECONDITION/i.test(message)) {
+        try {
+          const snap = await runAsc();
+          return { docs: snap.docs, indexMissing: false, usedDesc: false };
+        } catch (err2) {
+          const m2 = String(err2 instanceof Error ? err2.message : err2);
+          if (/FAILED_PRECONDITION|requires an index|9 FAILED_PRECONDITION/i.test(m2)) {
+            return { docs: [], indexMissing: true, usedDesc: false };
+          }
+          throw err2;
+        }
+      }
+      throw err;
+    }
+  };
+
+  const [eventsResult, devices] = await Promise.all([queryIdeEvents(), listIntegrationDevices(user)]);
+
+  type DayScratch = {
+    bucket_day: string;
+    sends: IdeToolCounts;
+    screen_time_ms: IdeToolCounts;
+    engagement_ms: IdeEngagementMsByCategory;
+  };
+
+  const bucketKeyForDay = (utcYmd: string) =>
+    granularity === "week" ? isoWeekMondayUtcDay(utcYmd) : utcYmd;
+
+  const buckets = new Set<string>();
+  for (const d of recentDays) {
+    buckets.add(bucketKeyForDay(d));
+  }
+  const byBucket = new Map<string, DayScratch>();
+  for (const b of buckets) {
+    byBucket.set(b, {
+      bucket_day: b,
+      sends: emptyIdeToolCounts(),
+      screen_time_ms: emptyIdeToolCounts(),
+      engagement_ms: emptyIdeEngagementMsByCategory()
+    });
+  }
+
+  const promptTotals = emptyIdeToolCounts();
+  const screenTotals = emptyIdeToolCounts();
+  const engagementTotalsMs = { drafting: 0, waiting: 0, reading_idle: 0 };
+
+  for (const doc of eventsResult.docs) {
+    const raw = doc.data() as Record<string, unknown>;
+    const utcDay = readAnalyticsUtcDay(raw);
+    if (!utcDay) continue;
+    const bucket = bucketKeyForDay(utcDay);
+    if (!byBucket.has(bucket)) continue;
+    const row = byBucket.get(bucket)!;
+    const tool = normalizePromptlyIdeTool(raw.tool);
+    if (!tool) continue;
+
+    const ik = String(raw.interactionKind ?? raw.interaction_kind ?? "send").toLowerCase();
+    const isEngagement = ik === "engagement_segment" || ik === "engagement";
+
+    if (isEngagement) {
+      let cat: HostEngagementCategory | null = null;
+      const catRaw = raw.engagementCategory ?? raw.engagement_category;
+      if (typeof catRaw === "string") {
+        const c = catRaw.trim().toLowerCase();
+        if (c === "drafting" || c === "waiting" || c === "reading_idle") {
+          cat = c;
+        }
+      }
+      const durRaw = raw.engagementDurationMs ?? raw.engagement_duration_ms ?? raw.duration_ms ?? raw.durationMs;
+      const durMs =
+        typeof durRaw === "number" && Number.isFinite(durRaw) ? Math.floor(durRaw) : null;
+      if (cat && durMs !== null && durMs >= 2000) {
+        row.engagement_ms[cat][tool] += durMs;
+        row.screen_time_ms[tool] += durMs;
+        screenTotals[tool] += durMs;
+        engagementTotalsMs[cat] += durMs;
+      }
+      continue;
+    }
+
+    row.sends[tool] += 1;
+    promptTotals[tool] += 1;
+
+    const hlRaw = raw.hostResponseLatencyMs ?? raw.host_response_latency_ms;
+    const hlMs =
+      typeof hlRaw === "number" && Number.isFinite(hlRaw) ? Math.floor(hlRaw) : null;
+    if (hlMs !== null && hlMs > 0) {
+      row.engagement_ms.waiting[tool] += hlMs;
+      row.screen_time_ms[tool] += hlMs;
+      screenTotals[tool] += hlMs;
+      engagementTotalsMs.waiting += hlMs;
+    }
+  }
+
+  const sortedBuckets = Array.from(byBucket.values()).sort((a, b) => a.bucket_day.localeCompare(b.bucket_day));
+
+  const connectedByTool: Record<PromptlyIdeTool, { count: number; lastSeen: number | null }> = {
+    claude_code: { count: 0, lastSeen: null },
+    cursor: { count: 0, lastSeen: null },
+    codex: { count: 0, lastSeen: null }
+  };
+  for (const d of devices) {
+    const slot = connectedByTool[d.tool];
+    slot.count += 1;
+    if (d.lastSeenAtMs && (slot.lastSeen === null || d.lastSeenAtMs > slot.lastSeen)) {
+      slot.lastSeen = d.lastSeenAtMs;
+    }
+  }
+
+  const footnotes: string[] = [];
+  if (eventsResult.indexMissing) {
+    footnotes.push(
+      "Deploy promptly_ide_events Firestore indexes (uid + utcDay) before coding-agent charts populate."
+    );
+  }
+  if (eventsResult.docs.length >= IDE_EVENTS_QUERY_LIMIT) {
+    footnotes.push("Coding-agent event query hit the server cap; narrow the date range for full accuracy.");
+  }
+
+  return {
+    range_days: rangeDays,
+    granularity,
+    start_day: startDay,
+    end_day: endDay,
+    totals: {
+      prompts: promptTotals,
+      screen_time_minutes: {
+        claude_code: msToStatMinutes(screenTotals.claude_code),
+        cursor: msToStatMinutes(screenTotals.cursor),
+        codex: msToStatMinutes(screenTotals.codex)
+      },
+      engagement_minutes: {
+        drafting: msToStatMinutes(engagementTotalsMs.drafting),
+        waiting: msToStatMinutes(engagementTotalsMs.waiting),
+        reading_idle: msToStatMinutes(engagementTotalsMs.reading_idle)
+      }
+    },
+    prompt_timeline: sortedBuckets.map((row) => ({
+      bucket: row.bucket_day,
+      claude_code: row.sends.claude_code,
+      cursor: row.sends.cursor,
+      codex: row.sends.codex,
+      total: row.sends.claude_code + row.sends.cursor + row.sends.codex
+    })),
+    screen_time_timeline: sortedBuckets.map((row) => ({
+      bucket: row.bucket_day,
+      claude_code_minutes: msToStatMinutes(row.screen_time_ms.claude_code),
+      cursor_minutes: msToStatMinutes(row.screen_time_ms.cursor),
+      codex_minutes: msToStatMinutes(row.screen_time_ms.codex),
+      drafting_minutes: msToStatMinutes(
+        row.engagement_ms.drafting.claude_code +
+          row.engagement_ms.drafting.cursor +
+          row.engagement_ms.drafting.codex
+      ),
+      waiting_minutes: msToStatMinutes(
+        row.engagement_ms.waiting.claude_code +
+          row.engagement_ms.waiting.cursor +
+          row.engagement_ms.waiting.codex
+      ),
+      reading_idle_minutes: msToStatMinutes(
+        row.engagement_ms.reading_idle.claude_code +
+          row.engagement_ms.reading_idle.cursor +
+          row.engagement_ms.reading_idle.codex
+      )
+    })),
+    connected_tools: (["claude_code", "cursor", "codex"] as PromptlyIdeTool[]).map((tool) => ({
+      tool,
+      device_count: connectedByTool[tool].count,
+      last_seen_at_ms: connectedByTool[tool].lastSeen
+    })),
+    events_docs_in_query: eventsResult.docs.length,
+    index_missing: eventsResult.indexMissing,
+    likely_truncated: eventsResult.docs.length >= IDE_EVENTS_QUERY_LIMIT,
+    footnotes
+  };
+}
 
 function isoWeekMondayUtcDay(utcYmd: string): string {
   const parts = utcYmd.split("-").map((x) => Number(x));
