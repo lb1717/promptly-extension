@@ -28,9 +28,39 @@ const COLOR_UNKNOWN = "#64748b";
 /** Promptly accent for “Improve / rewrite” bars. */
 const COLOR_PROMPTLY = "#ab68ff";
 const COLOR_NATIVE_WEB = "#22d3ee";
+const CHART_FONT_FAMILY = "var(--font-roboto-chart), Roboto, sans-serif";
+/** All chart axis ticks — dates, counts, units, and category labels on axes. */
+const CHART_Y_TICK = { fill: "#5C5C5C", fontSize: 10, fontFamily: CHART_FONT_FAMILY };
+const CHART_Y_TICK_11 = { fill: "#5C5C5C", fontSize: 11, fontFamily: CHART_FONT_FAMILY };
 /** Date / bucket labels on chart X axes (cream card backgrounds). */
-const CHART_X_DATE_TICK = { fill: "#2a2a2a", fontSize: 11, fontWeight: 600 as const };
+const CHART_X_DATE_TICK = {
+  fill: "#2a2a2a",
+  fontSize: 11,
+  fontWeight: 600 as const,
+  fontFamily: CHART_FONT_FAMILY
+};
 const CHART_X_DATE_STROKE = "#525252";
+const CHART_AXIS_LABEL = (value: string, fill = "#5C5C5C") => ({
+  value,
+  angle: -90 as const,
+  position: "insideLeft" as const,
+  fill,
+  style: { fontFamily: CHART_FONT_FAMILY }
+});
+const CHART_TOOLTIP_STYLE = {
+  background: "#FAF8F4",
+  border: "1px solid #E0DDD6",
+  color: "#111111",
+  fontFamily: CHART_FONT_FAMILY
+};
+const CHART_TOOLTIP_DARK_STYLE = {
+  background: "#161018",
+  border: "1px solid rgba(139,92,246,0.4)",
+  fontFamily: CHART_FONT_FAMILY
+};
+const CHART_LEGEND_STYLE = { fontSize: 11, paddingTop: 8, fontFamily: CHART_FONT_FAMILY };
+const CHART_AXIS_TICK_LIGHT = { fill: "#f9f8ff", fontSize: 10, fontFamily: CHART_FONT_FAMILY };
+const CHART_AXIS_TICK_LIGHT_PLAIN = { fill: "#f9f8ff", fontFamily: CHART_FONT_FAMILY };
 /** Derived score emphasis (readable on cream cards). */
 const COLOR_SCORE_GREEN = "#15803d";
 
@@ -675,9 +705,9 @@ function ModeMiniChart({
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} layout="vertical" margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
-          <XAxis type="number" stroke="#8A8A8A" />
-          <YAxis dataKey="name" type="category" width={92} stroke="#8A8A8A" tick={{ fill: "#5C5C5C", fontSize: 11 }} />
-          <Tooltip contentStyle={{ background: "#161018", border: "1px solid rgba(139,92,246,0.4)" }} />
+          <XAxis type="number" stroke="#8A8A8A" tick={CHART_Y_TICK} />
+          <YAxis dataKey="name" type="category" width={92} stroke="#8A8A8A" tick={CHART_Y_TICK_11} />
+          <Tooltip contentStyle={CHART_TOOLTIP_DARK_STYLE} />
           <Bar dataKey="prompts" name="Runs" radius={[0, 6, 6, 0]} fill="#a78bfa" />
         </BarChart>
       </ResponsiveContainer>
@@ -1020,7 +1050,7 @@ export function StatisticsClient() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 py-6 pb-16">
+    <div className="statistics-charts mx-auto w-full max-w-6xl px-4 py-6 pb-16">
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-semibold text-ink">Prompt statistics</h1>
         <div className="flex flex-wrap items-center gap-2">
@@ -1115,12 +1145,12 @@ export function StatisticsClient() {
                 <BarChart data={stackedTimeline} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
                   <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
-                  <YAxis stroke="#8A8A8A" allowDecimals={false} width={32} tick={{ fontSize: 10 }} />
+                  <YAxis stroke="#8A8A8A" allowDecimals={false} width={32} tick={CHART_Y_TICK} />
                   <Tooltip
-                    contentStyle={{ background: "#FAF8F4", border: "1px solid #E0DDD6", color: "#111111" }}
+                    contentStyle={CHART_TOOLTIP_STYLE}
                     cursor={{ fill: "rgba(255,255,255,0.04)" }}
                   />
-                  <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
+                  <Legend wrapperStyle={CHART_LEGEND_STYLE} />
                   <Bar dataKey="prompts_gemini" name="Gemini" stackId="stack" fill={COLOR_GEMINI} radius={[2, 2, 0, 0]} />
                   <Bar dataKey="prompts_claude" name="Claude" stackId="stack" fill={COLOR_CLAUDE} />
                   <Bar dataKey="prompts_chatgpt" name="ChatGPT" stackId="stack" fill={COLOR_CHATGPT} />
@@ -1145,16 +1175,16 @@ export function StatisticsClient() {
                         barCategoryGap="28%"
                       >
                         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" horizontal={false} />
-                        <XAxis type="number" stroke="#8A8A8A" tick={{ fill: "#5C5C5C", fontSize: 10 }} unit=" min" />
+                        <XAxis type="number" stroke="#8A8A8A" tick={CHART_Y_TICK} unit=" min" />
                         <YAxis
                           type="category"
                           dataKey="service"
                           stroke="#8A8A8A"
-                          tick={{ fill: "#5C5C5C", fontSize: 11 }}
+                          tick={CHART_Y_TICK_11}
                           width={72}
                         />
                         <Tooltip
-                          contentStyle={{ background: "#FAF8F4", border: "1px solid #E0DDD6", color: "#111111" }}
+                          contentStyle={CHART_TOOLTIP_STYLE}
                           formatter={(value: number) => [`${value} min`, "Screen time"]}
                         />
                         <Bar dataKey="minutes" name="Screen time" radius={[0, 4, 4, 0]} barSize={16}>
@@ -1179,12 +1209,12 @@ export function StatisticsClient() {
                       <BarChart data={engagementTimelineRows.filter((row) => row.has_data)} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
                         <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
-                        <YAxis stroke="#8A8A8A" allowDecimals tick={{ fontSize: 10 }} unit=" min" width={36} />
+                        <YAxis stroke="#8A8A8A" allowDecimals tick={CHART_Y_TICK} unit=" min" width={36} />
                         <Tooltip
-                          contentStyle={{ background: "#FAF8F4", border: "1px solid #E0DDD6", color: "#111111" }}
+                          contentStyle={CHART_TOOLTIP_STYLE}
                           formatter={(value: number, name: string) => [`${value} min`, name]}
                         />
-                        <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
+                        <Legend wrapperStyle={CHART_LEGEND_STYLE} />
                         <Bar dataKey="drafting_minutes" name="Drafting prompt" stackId="time" fill={COLOR_DRAFTING} />
                         <Bar dataKey="waiting_minutes" name="Waiting for AI" stackId="time" fill={COLOR_NATIVE_WEB} />
                         <Bar
@@ -1271,22 +1301,22 @@ export function StatisticsClient() {
                         barGap={4}
                       >
                         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" horizontal={false} />
-                        <XAxis type="number" stroke="#8A8A8A" tick={{ fill: "#5C5C5C", fontSize: 10 }} unit="s" />
+                        <XAxis type="number" stroke="#8A8A8A" tick={CHART_Y_TICK} unit="s" />
                         <YAxis
                           type="category"
                           dataKey="model"
                           stroke="#8A8A8A"
-                          tick={{ fill: "#5C5C5C", fontSize: 11 }}
+                          tick={CHART_Y_TICK_11}
                           width={72}
                         />
                         <Tooltip
-                          contentStyle={{ background: "#FAF8F4", border: "1px solid #E0DDD6", color: "#111111" }}
+                          contentStyle={CHART_TOOLTIP_STYLE}
                           formatter={(value: number, name: string) => {
                             if (typeof value !== "number" || value <= 0) return ["—", name];
                             return [`${value}s`, name];
                           }}
                         />
-                        <Legend wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
+                        <Legend wrapperStyle={CHART_LEGEND_STYLE_COMPACT} />
                         <Bar dataKey="avg_drafting_s" name="Avg drafting (s)" fill="#c084fc" radius={[0, 4, 4, 0]} barSize={12}>
                           {modelTimeChartRows.map((entry, idx) => (
                             <Cell key={`draft-${idx}`} fillOpacity={entry.drafting_missing ? 0.2 : 0.95} />
@@ -1321,18 +1351,18 @@ export function StatisticsClient() {
                     <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
                     <YAxis
                       stroke="#8A8A8A"
-                      tick={{ fill: "#5C5C5C" }}
+                      tick={CHART_Y_TICK_11}
                       allowDecimals
-                      label={{ value: "Avg min / send", angle: -90, position: "insideLeft", fill: "#5C5C5C" }}
+                      label={CHART_AXIS_LABEL("Avg min / send")}
                     />
                     <Tooltip
-                      contentStyle={{ background: "#FAF8F4", border: "1px solid #E0DDD6", color: "#111111" }}
+                      contentStyle={CHART_TOOLTIP_STYLE}
                       formatter={(value: number, name: string) => {
                         if (typeof value !== "number" || value <= 0) return ["—", name];
                         return [`${value} min`, name];
                       }}
                     />
-                    <Legend />
+                    <Legend wrapperStyle={CHART_LEGEND_STYLE} />
                     <Bar dataKey="avg_draft_minutes" name="Avg drafting" fill="#c084fc" radius={[4, 4, 0, 0]} />
                     <Bar dataKey="avg_waiting_minutes" name="Avg waiting for AI" fill={COLOR_NATIVE_WEB} radius={[4, 4, 0, 0]} />
                   </BarChart>
@@ -1360,10 +1390,10 @@ export function StatisticsClient() {
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={latencyChartRows} margin={{ top: 8, right: 12, bottom: 56, left: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
-                  <XAxis dataKey="ai" stroke="#8A8A8A" tick={{ fill: "#5C5C5C", fontSize: 11 }} />
-                  <YAxis stroke="#8A8A8A" tick={{ fill: "#5C5C5C" }} label={{ value: "Seconds (avg)", angle: -90, position: "insideLeft", fill: "#5C5C5C" }} />
-                  <Tooltip contentStyle={{ background: "#FAF8F4", border: "1px solid #E0DDD6", color: "#111111" }} />
-                  <Legend />
+                  <XAxis dataKey="ai" stroke="#8A8A8A" tick={CHART_Y_TICK_11} />
+                  <YAxis stroke="#8A8A8A" tick={CHART_Y_TICK_11} label={CHART_AXIS_LABEL("Seconds (avg)")} />
+                  <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
+                  <Legend wrapperStyle={CHART_LEGEND_STYLE} />
                   <Bar dataKey="promptly_rewrite_s" name="Promptly rewrite (avg s)" radius={[8, 8, 0, 0]} fill={COLOR_PROMPTLY}>
                     {latencyChartRows.map((entry, idx) => (
                       <Cell key={`p-${idx}`} fillOpacity={entry.promptly_missing ? 0.2 : 0.95} />
@@ -1406,12 +1436,12 @@ export function StatisticsClient() {
                       <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
                       <YAxis
                         stroke="#8A8A8A"
-                        tick={{ fill: "#5C5C5C" }}
+                        tick={CHART_Y_TICK_11}
                         allowDecimals
-                        label={{ value: "Avg words", angle: -90, position: "insideLeft", fill: "#5C5C5C" }}
+                        label={CHART_AXIS_LABEL("Avg words")}
                       />
                       <Tooltip
-                        contentStyle={{ background: "#FAF8F4", border: "1px solid #E0DDD6", color: "#111111" }}
+                        contentStyle={CHART_TOOLTIP_STYLE}
                         formatter={(value: number, name: string, item) => {
                           const payload = item?.payload as {
                             samples?: number;
@@ -1424,7 +1454,7 @@ export function StatisticsClient() {
                           return [`${value} words (${runs.toLocaleString()} runs)`, name];
                         }}
                       />
-                      <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
+                      <Legend wrapperStyle={CHART_LEGEND_STYLE} />
                       <Bar
                         dataKey="avg_words_before_display"
                         name="Before Promptly"
@@ -1454,9 +1484,9 @@ export function StatisticsClient() {
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={composerCompareData} layout="vertical" margin={{ left: 32, top: 8 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                    <XAxis type="number" stroke="#8A8A8A" />
-                    <YAxis dataKey="label" type="category" width={148} stroke="#8A8A8A" tick={{ fill: "#5C5C5C", fontSize: 10 }} />
-                    <Tooltip contentStyle={{ background: "#FAF8F4", border: "1px solid #E0DDD6", color: "#111111" }} />
+                    <XAxis type="number" stroke="#8A8A8A" tick={CHART_Y_TICK} />
+                    <YAxis dataKey="label" type="category" width={148} stroke="#8A8A8A" tick={CHART_Y_TICK} />
+                    <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
                     <Bar dataKey="chars" radius={[0, 6, 6, 0]} fill="#c084fc">
                       {composerCompareData.map((c, idx) => (
                         <Cell key={idx} fillOpacity={c.muted ? 0.35 : 0.95} />
@@ -1476,10 +1506,10 @@ export function StatisticsClient() {
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={pathwayCompareData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
-                    <XAxis dataKey="pathway" stroke="#bfb7ff" tick={{ fill: "#f9f8ff", fontSize: 10 }} />
-                    <YAxis stroke="#bfb7ff" allowDecimals={false} />
-                    <Tooltip contentStyle={{ background: "#FAF8F4", border: "1px solid #E0DDD6", color: "#111111" }} />
-                    <Legend />
+                    <XAxis dataKey="pathway" stroke="#bfb7ff" tick={CHART_AXIS_TICK_LIGHT} />
+                    <YAxis stroke="#bfb7ff" allowDecimals={false} tick={CHART_AXIS_TICK_LIGHT_PLAIN} />
+                    <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
+                    <Legend wrapperStyle={CHART_LEGEND_STYLE} />
                     <Bar dataKey="Gemini" name="Gemini" stackId="a" fill={COLOR_GEMINI} />
                     <Bar dataKey="Claude" name="Claude" stackId="a" fill={COLOR_CLAUDE} />
                     <Bar dataKey="ChatGPT" name="ChatGPT" stackId="a" fill={COLOR_CHATGPT} />
@@ -1508,8 +1538,8 @@ export function StatisticsClient() {
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
                     <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
-                    <YAxis stroke="#8A8A8A" />
-                    <Tooltip contentStyle={{ background: "#FAF8F4", border: "1px solid #E0DDD6", color: "#111111" }} />
+                    <YAxis stroke="#8A8A8A" tick={CHART_Y_TICK} />
+                    <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
                     <Bar dataKey="billed_promptly_tokens" fill="#9333ea" name="Promptly billed tokens / bucket" radius={[4, 4, 0, 0]} maxBarSize={32} />
                   </BarChart>
                 </ResponsiveContainer>

@@ -15,6 +15,19 @@ body {
   color: #111111;
 }
 
+.statistics-charts svg text,
+.statistics-charts .recharts-cartesian-axis-tick-value,
+.statistics-charts .recharts-cartesian-axis-label,
+.statistics-charts .recharts-legend-item-text,
+.statistics-charts .recharts-default-tooltip,
+.statistics-charts .recharts-tooltip-wrapper,
+.statistics-charts .recharts-tooltip-label,
+.statistics-charts .recharts-tooltip-item-name,
+.statistics-charts .recharts-tooltip-item-value,
+.statistics-charts .recharts-label {
+  font-family: var(--font-roboto-chart), Roboto, sans-serif !important;
+}
+
 .promptly-cta-shine::after {
   content: "";
   position: absolute;

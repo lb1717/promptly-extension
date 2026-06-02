@@ -582,6 +582,8 @@ export type HostLlmActivityEventInput = {
   engagementDurationMs?: number | null;
   /** Client Date.now() when send was observed (sets utcDay for bucketing). */
   clientOccurredMs: number;
+  /** Client-only label on passive send rows (e.g. auto_adjust_click) — used to dedupe prompt volume. */
+  telemetrySource?: string | null;
   /** Stored as top-level Firestore field `source` (passive batch vs mirrored optimize). */
   ingestSource?: "passive_listener" | "optimize_api";
   /** Present when ingestSource === optimize_api. */
@@ -781,6 +783,12 @@ export function normalizeHostLlmActivityEventInput(raw: Record<string, unknown>)
     draftActiveMs = v <= 7_200_000 ? v : null;
   }
 
+  let telemetrySource: string | null = null;
+  const tsRaw = raw.telemetry_source ?? raw.telemetrySource;
+  if (typeof tsRaw === "string" && tsRaw.trim()) {
+    telemetrySource = tsRaw.trim().slice(0, 48);
+  }
+
   return {
     service: svc,
     composerCharEstimate,
@@ -794,7 +802,8 @@ export function normalizeHostLlmActivityEventInput(raw: Record<string, unknown>)
     streamVisualActiveMs,
     draftDurationMs,
     draftActiveMs,
-    clientOccurredMs
+    clientOccurredMs,
+    telemetrySource
   };
 }
 
@@ -832,7 +841,8 @@ export async function persistHostLlmActivityEvents(user: PromptlyUser, rows: Hos
       clientOccurredMs: row.clientOccurredMs,
       ...(row.engagementCategory ? { engagementCategory: row.engagementCategory } : {}),
       ...(typeof row.engagementDurationMs === "number" ? { engagementDurationMs: row.engagementDurationMs } : {}),
-      ...(row.optimizeEngineMode ? { optimizeEngineMode: row.optimizeEngineMode } : {})
+      ...(row.optimizeEngineMode ? { optimizeEngineMode: row.optimizeEngineMode } : {}),
+      ...(row.telemetrySource ? { telemetrySource: row.telemetrySource } : {})
     });
     queued += 1;
   }
@@ -1238,9 +1248,16 @@ export async function getAccountUsageStatsExtended(
     if (isComposer) {
       row.composer_input_events += 1;
     } else {
+      const telemetrySourceRaw = raw.telemetrySource ?? raw.telemetry_source;
+      const telemetrySource =
+        typeof telemetrySourceRaw === "string" ? telemetrySourceRaw.trim().toLowerCase() : "";
+      const isAutoAdjustNativeSend = /^auto_adjust_/.test(telemetrySource);
+
       row.sends += 1;
       if (isMirror) {
         row.mirror_send_by_service[svc] += 1;
+      } else if (isAutoAdjustNativeSend) {
+        // Auto-adjust already counts via optimize telemetry; skip duplicate native send.
       } else {
         row.native_send_by_service[svc] += 1;
         if (typeof cc === "number" && cc > 0) {
@@ -3959,10 +3976,53 @@ export async function getCreditsForUser(user: PromptlyUser, request: Request) {
   };
 }
 
+async function queryDailyOptimizePromptCountsByDay(
+  uid: string,
+  recentDays: string[]
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>(recentDays.map((d) => [d, 0]));
+  if (!recentDays.length) {
+    return counts;
+  }
+  const startDay = recentDays[0]!;
+  const endDay = recentDays[recentDays.length - 1]!;
+  const db = getFirebaseAdminDb();
+  try {
+    const snap = await db
+      .collection(OPTIMIZE_EVENTS_COLLECTION)
+      .where("uid", "==", uid)
+      .where("utcDay", ">=", startDay)
+      .where("utcDay", "<=", endDay)
+      .orderBy("utcDay")
+      .limit(OPTIMIZE_EVENTS_QUERY_LIMIT)
+      .get();
+    for (const doc of snap.docs) {
+      const day = readAnalyticsUtcDay(doc.data() as Record<string, unknown>);
+      if (day && counts.has(day)) {
+        counts.set(day, (counts.get(day) || 0) + 1);
+      }
+    }
+  } catch (err) {
+    console.warn(
+      "[getAccountUsageStats] optimize events query failed:",
+      String(err instanceof Error ? err.message : err)
+    );
+  }
+  return counts;
+}
+
 export async function getAccountUsageStats(user: PromptlyUser, days: number) {
   const rangeDays = Math.max(1, Math.min(60, Math.floor(days || 14)));
   const recentDays = getRecentDays(rangeDays);
-  const usageRows = await Promise.all(recentDays.map((day) => getDailyUsage(user.uid, day, user.dailyTokenLimit)));
+  const weeklyLimit = weeklyTokenLimitFromDaily(user.dailyTokenLimit);
+  const weekKeyForDay = (day: string) => getUtcWeekKey(new Date(`${day}T12:00:00.000Z`));
+  const uniqueWeekKeys = [...new Set(recentDays.map(weekKeyForDay))];
+  const weekUsageByKey = new Map(
+    await Promise.all(
+      uniqueWeekKeys.map(async (weekKey) => [weekKey, await getDailyUsage(user.uid, weekKey, weeklyLimit)] as const)
+    )
+  );
+  const dailyPromptCounts = await queryDailyOptimizePromptCountsByDay(user.uid, recentDays);
 
   let totalPrompts = 0;
   let totalTokens = 0;
@@ -3976,8 +4036,7 @@ export async function getAccountUsageStats(user: PromptlyUser, days: number) {
   let responseTimeTotalMs = 0;
   let responseTimeCount = 0;
 
-  const timeline = usageRows.map((row) => {
-    totalPrompts += row.promptsImproved;
+  for (const row of weekUsageByKey.values()) {
     totalTokens += row.used;
     autoPrompts += row.auto;
     manualPrompts += row.manual;
@@ -3988,19 +4047,28 @@ export async function getAccountUsageStats(user: PromptlyUser, days: number) {
     unknownPrompts += row.unknown;
     responseTimeTotalMs += row.responseTimeTotalMs;
     responseTimeCount += row.responseTimeCount;
+  }
+
+  const timeline = recentDays.map((day) => {
+    const prompts = dailyPromptCounts.get(day) || 0;
+    totalPrompts += prompts;
+    const weekRow = weekUsageByKey.get(weekKeyForDay(day));
+    const isWeekStart = day === weekKeyForDay(day);
     return {
-      day: row.day,
-      prompts: row.promptsImproved,
-      tokens: row.used
+      day,
+      prompts,
+      tokens: isWeekStart ? weekRow?.used || 0 : 0
     };
   });
 
-  const activeDays = usageRows.filter((row) => row.promptsImproved > 0).length;
+  const activeDays = recentDays.filter((day) => (dailyPromptCounts.get(day) || 0) > 0).length;
   const avgPromptsPerActiveDay = activeDays > 0 ? totalPrompts / activeDays : 0;
   const avgTokensPerPrompt = totalPrompts > 0 ? totalTokens / totalPrompts : 0;
   const averageResponseTimeMs = responseTimeCount > 0 ? responseTimeTotalMs / responseTimeCount : 0;
 
-  const busiest = [...usageRows].sort((a, b) => (b.promptsImproved === a.promptsImproved ? b.used - a.used : b.promptsImproved - a.promptsImproved))[0];
+  const busiest = [...recentDays]
+    .map((day) => ({ day, prompts: dailyPromptCounts.get(day) || 0 }))
+    .sort((a, b) => b.prompts - a.prompts)[0];
 
   return {
     ok: true as const,
@@ -4026,7 +4094,7 @@ export async function getAccountUsageStats(user: PromptlyUser, days: number) {
     streaks: {
       active_days: activeDays,
       busiest_day: busiest?.day || null,
-      busiest_day_prompts: busiest?.promptsImproved || 0
+      busiest_day_prompts: busiest?.prompts || 0
     },
     timeline
   };

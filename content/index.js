@@ -51,7 +51,50 @@
   let dragStartOffsetX = 0;
   let composeWidthExpanded = false;
   /** Teardown for passive host-site send/latency telemetry (runs even when Promptly optimize is unused). */
+  /** @type {(() => void) | null} */
   let stopHostPassiveListener = null;
+
+  function claimPassiveListenerSlot(siteKey) {
+    try {
+      const root = window.top;
+      root.__promptlyPassiveListenerSlots = root.__promptlyPassiveListenerSlots || {};
+      if (root.__promptlyPassiveListenerSlots[siteKey]) {
+        return false;
+      }
+      root.__promptlyPassiveListenerSlots[siteKey] = window;
+      return true;
+    } catch (_e) {
+      return window.self === window.top;
+    }
+  }
+
+  function releasePassiveListenerSlot(siteKey) {
+    try {
+      const root = window.top;
+      if (root.__promptlyPassiveListenerSlots?.[siteKey] === window) {
+        delete root.__promptlyPassiveListenerSlots[siteKey];
+      }
+    } catch (_e) {
+      /* ignore */
+    }
+  }
+
+  function ensureHostPassiveListener() {
+    if (stopHostPassiveListener || destroyed || !currentTarget) {
+      return;
+    }
+    if (typeof window.PromptlyHostActivityListener?.install !== "function") {
+      return;
+    }
+    if (!claimPassiveListenerSlot(site)) {
+      return;
+    }
+    stopHostPassiveListener = window.PromptlyHostActivityListener.install({
+      site,
+      getPromptTarget: () => currentTarget,
+      readComposer: readHostComposerForTelemetry
+    });
+  }
   let composePopupAutoCloseTimer = null;
   /** While > Date.now(), `sync` skips `ui.setContent` so further-improve chip curtain animation is not torn down. */
   let suppressOpenPopupSetContentUntilMs = 0;
@@ -2865,6 +2908,7 @@
       currentTarget = nextTarget;
       lastPlacementSignature = null;
       observers.bindTarget(currentTarget);
+      ensureHostPassiveListener();
     }
 
     if (!currentTarget || !isTargetVisible(currentTarget)) {
@@ -3021,7 +3065,8 @@
     return button.getAttribute("type") === "submit";
   }
 
-  function triggerSendAfterAdjust(trigger) {
+  function triggerSendAfterAdjust(trigger, options = {}) {
+    const skipSendTelemetry = options.skipSendTelemetry === true;
     bypassNextAutoSendInterception = true;
     window.setTimeout(() => {
       bypassNextAutoSendInterception = false;
@@ -3029,7 +3074,9 @@
 
     if (trigger.type === "click" && trigger.button) {
       trigger.button.click();
-      window.setTimeout(() => recordTelemetryPromptSend("auto_adjust_click"), 80);
+      if (!skipSendTelemetry) {
+        window.setTimeout(() => recordTelemetryPromptSend("auto_adjust_click"), 80);
+      }
       return;
     }
 
@@ -3044,7 +3091,9 @@
       cancelable: true
     });
     currentTarget.dispatchEvent(enterEvent);
-    window.setTimeout(() => recordTelemetryPromptSend("auto_adjust_enter"), 80);
+    if (!skipSendTelemetry) {
+      window.setTimeout(() => recordTelemetryPromptSend("auto_adjust_enter"), 80);
+    }
   }
 
   async function runAutoAdjustThenSend(trigger) {
@@ -3125,7 +3174,9 @@
         ui.setAutoAdjustLoading(false);
         observers.scheduleUpdate();
         if (!blockSend) {
-          window.requestAnimationFrame(() => triggerSendAfterAdjust(trigger));
+          window.requestAnimationFrame(() =>
+            triggerSendAfterAdjust(trigger, { skipSendTelemetry: didApplyOptimizedPrompt })
+          );
           return;
         }
         ui.setAutoAdjustLoading(false, "Sign in first", true, "improve");
@@ -3213,6 +3264,7 @@
       stopHostPassiveListener();
       stopHostPassiveListener = null;
     }
+    releasePassiveListenerSlot(site);
     ui.destroy();
   }
 
@@ -3224,13 +3276,6 @@
     ui.setSettingsOpen(true);
     observers.scheduleUpdate();
   });
-  if (typeof window.PromptlyHostActivityListener?.install === "function") {
-    stopHostPassiveListener = window.PromptlyHostActivityListener.install({
-      site,
-      getPromptTarget: () => currentTarget,
-      readComposer: readHostComposerForTelemetry
-    });
-  }
   document.addEventListener("pointerdown", handlePointerDown, true);
   document.addEventListener("click", handleDocumentClick, true);
   document.addEventListener("submit", handleDocumentSubmit, true);
