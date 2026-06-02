@@ -2,13 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import {
-  ClaudeCodeSetup,
-  CodexSetup,
-  CursorSetup,
-  PLUGIN_PACK_URL,
-  type IdeToolId
-} from "./integrationSteps";
+import { ClaudeCodeSetup, CodexSetup, CursorSetup, PLUGIN_PACK_URL, type IdeToolId } from "./integrationSteps";
 import type { OsId } from "./integrationOs";
 
 const TOOL_TABS: { id: IdeToolId; label: string; accent: string }[] = [
@@ -26,8 +20,7 @@ export function IntegrationsHubClient() {
   const [activeTool, setActiveTool] = useState<IdeToolId>("codex");
   const [activeOs, setActiveOs] = useState<OsId>("mac");
   const activeMeta = useMemo(() => TOOL_TABS.find((t) => t.id === activeTool)!, [activeTool]);
-  const pairUrl = `/auth/integrations?tool=${activeTool}`;
-  const setupProps = { os: activeOs, pairUrl, tool: activeTool };
+  const setupProps = { os: activeOs, tool: activeTool };
 
   const setup =
     activeTool === "codex" ? (
@@ -46,7 +39,7 @@ export function IntegrationsHubClient() {
           Connect Claude Code, Cursor &amp; Codex
         </h1>
         <p className="mx-auto mt-3 max-w-lg text-sm leading-relaxed text-muted">
-          Each step checks prerequisites, installs what&apos;s missing, and verifies success.
+          Five steps per agent. Each step tells you exactly what success looks like before you move on.
         </p>
         <p className="mx-auto mt-2 text-xs text-faint">
           Plugin pack:{" "}
@@ -109,16 +102,13 @@ export function IntegrationsHubClient() {
           role="tabpanel"
           aria-label={`${activeMeta.label} setup on ${activeOs}`}
         >
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-4">
+          <div className="border-b border-line pb-4">
             <h2 className="text-lg font-semibold text-ink">
               {activeMeta.label} · {activeOs === "mac" ? "Mac" : "Windows"}
             </h2>
-            <Link
-              href={`/auth/integrations?tool=${activeTool}`}
-              className="rounded-lg bg-ink px-3 py-1.5 text-xs font-semibold text-cream hover:bg-neutral-800"
-            >
-              Get pairing code
-            </Link>
+            <p className="mt-1 text-sm text-muted">
+              Do each step in order. Don&apos;t skip ahead until the green checklist matches what you see.
+            </p>
           </div>
           {setup}
         </div>
@@ -126,9 +116,8 @@ export function IntegrationsHubClient() {
 
       <section className="mt-8 rounded-2xl border border-line bg-cream-dark p-4 text-sm text-muted">
         <p>
-          <strong className="text-ink">Tip:</strong> Step 1 installs Node.js-dependent tools automatically (e.g.{" "}
-          <code className="text-ink">npm install -g @openai/codex</code>). If you still see{" "}
-          <code className="text-ink">command not found</code>, close Terminal and open a new window, then rerun step 1.
+          <strong className="text-ink">Desktop app only?</strong> Codex and Claude Code still need a one-time CLI install
+          for plugin setup — step 1 handles that. Cursor only needs the app plus the file copy in step 3.
         </p>
         <p className="mt-2">
           <strong className="text-ink">Privacy:</strong> We track prompt counts and time only — never prompt text.
