@@ -1812,11 +1812,11 @@ export function StatisticsClient() {
               <p className="text-sm text-muted">
                 {ideAnyConnected ? (
                   <>
-                    Your agent is connected but no prompts are recorded in this range yet. Run step 5 on{" "}
+                    Your agent is connected but no prompts are recorded in this range yet. Finish step 6 on{" "}
                     <Link href="/integrations" className="underline hover:text-ink">
                       integrations
                     </Link>{" "}
-                    (<code className="text-ink">test-send</code>), send a prompt in your agent, then refresh this page.
+                    (trust hooks / reload the app), run the step 5 test if needed, then send a prompt and refresh.
                   </>
                 ) : (
                   <>

@@ -114,18 +114,84 @@ function ReloadWindowHint({ os }: { os: OsId }) {
   if (os === "mac") {
     return (
       <>
-        In Cursor press{" "}
+        Press{" "}
         <kbd className="rounded border border-line bg-cream-dark px-1.5 py-0.5 font-mono text-xs">Cmd+Shift+P</kbd>,
-        type <strong className="text-ink">Reload Window</strong>, Enter.
+        type <strong className="text-ink">Reload Window</strong>, and press Enter.
       </>
     );
   }
   return (
     <>
-      In Cursor press{" "}
+      Press{" "}
       <kbd className="rounded border border-line bg-cream-dark px-1.5 py-0.5 font-mono text-xs">Ctrl+Shift+P</kbd>,
-      type <strong className="text-ink">Reload Window</strong>, Enter.
+      type <strong className="text-ink">Reload Window</strong>, and press Enter.
     </>
+  );
+}
+
+function LiveTrackingStep({ n, tool, os }: { n: number; tool: IdeToolId; os: OsId }) {
+  if (tool === "codex") {
+    return (
+      <Step n={n} title="Trust hooks and restart Codex" where="cursor_app" whereLabel="Codex">
+        <p>
+          Step 5 confirms your account is linked. <strong className="text-ink">Real Codex prompts only count after this:</strong>
+        </p>
+        <ol className="mt-2 list-decimal space-y-2 pl-5">
+          <li>
+            <strong className="text-ink">Quit Codex completely</strong> and open it again (desktop app or{" "}
+            <code className="text-ink">codex</code> in Terminal).
+          </li>
+          <li>
+            In Codex, type <code className="text-ink">/hooks</code> and{" "}
+            <strong className="text-ink">trust every Promptly hook</strong>. Without this, prompts are not tracked.
+          </li>
+          <li>Send any prompt in Codex — it should appear under Statistics → Coding agents within a minute.</li>
+        </ol>
+      </Step>
+    );
+  }
+
+  if (tool === "claude_code") {
+    return (
+      <Step n={n} title="Allow hooks and restart Claude Code" where="claude_code">
+        <p>
+          Step 5 confirms your account is linked. <strong className="text-ink">Live tracking needs hook permission:</strong>
+        </p>
+        <ol className="mt-2 list-decimal space-y-2 pl-5">
+          <li>
+            In Claude Code, run <code className="text-ink">/reload-plugins</code>.
+          </li>
+          <li>
+            If Claude asks to allow hooks from Promptly, choose <strong className="text-ink">Allow</strong> or{" "}
+            <strong className="text-ink">Trust</strong>.
+          </li>
+          <li>
+            If Claude was already open during setup, exit and run <code className="text-ink">claude</code> again.
+          </li>
+          <li>Send a prompt — it should appear under Statistics → Coding agents.</li>
+        </ol>
+      </Step>
+    );
+  }
+
+  return (
+    <Step n={n} title="Reload Cursor and send a prompt" where="cursor_app" whereLabel="Cursor">
+      <p>
+        Step 5 confirms your account is linked. <strong className="text-ink">Cursor needs a reload to pick up hooks:</strong>
+      </p>
+      <ol className="mt-2 list-decimal space-y-2 pl-5">
+        <li>
+          <ReloadWindowHint os={os} />
+        </li>
+        <li>
+          If Cursor asks to allow hooks from the Promptly plugin, choose <strong className="text-ink">Allow</strong>.
+        </li>
+        <li>
+          Open <strong className="text-ink">Agent</strong> or <strong className="text-ink">Composer</strong> and send a
+          prompt — it should appear under Statistics → Coding agents.
+        </li>
+      </ol>
+    </Step>
   );
 }
 
@@ -202,15 +268,14 @@ export function CodexSetup({ os, tool }: SetupProps) {
           '"Promptly plugin installed" at the end'
         ]}
       >
-        Run in {terminalWhereLabel(os)}, not inside the Codex chat. In Codex, open{" "}
-        <strong className="text-ink">/hooks</strong> and trust Promptly hooks if asked, then restart Codex.
+        Run in {terminalWhereLabel(os)}, not inside the Codex chat.
       </Step>
 
       <ConnectAccountStep n={4} os={os} tool={tool} />
 
       <Step
         n={5}
-        title="Verify Promptly is tracking"
+        title="Verify your account link"
         where="terminal"
         whereLabel={terminalWhereLabel(os)}
         commands={
@@ -221,18 +286,16 @@ export function CodexSetup({ os, tool }: SetupProps) {
         validation={[
           '"Test prompt uploaded" in Terminal',
           'Status still shows "connected": true',
-          "Codex shows Connected on Statistics → Coding agents within a minute"
+          "Codex shows Connected on Statistics → Coding agents"
         ]}
       >
         <p>
-          The test command uploads one prompt to Promptly directly (no Codex prompt needed). Then send a real prompt in
-          Codex and check{" "}
-          <Link href="/account/statistics" className="font-medium text-ink underline hover:no-underline">
-            Statistics → Coding agents
-          </Link>
-          .
+          This uploads one test prompt to confirm Promptly sees your account. It does{" "}
+          <strong className="text-ink">not</strong> replace step 6 — real Codex prompts still need trusted hooks.
         </p>
       </Step>
+
+      <LiveTrackingStep n={6} tool={tool} os={os} />
     </ol>
   );
 }
@@ -309,7 +372,7 @@ export function ClaudeCodeSetup({ os, tool }: SetupProps) {
 
       <Step
         n={5}
-        title="Verify Promptly is tracking"
+        title="Verify your account link"
         where="terminal"
         whereLabel={terminalWhereLabel(os)}
         commands={
@@ -322,12 +385,12 @@ export function ClaudeCodeSetup({ os, tool }: SetupProps) {
           "Claude Code shows Connected on Statistics → Coding agents"
         ]}
       >
-        Run the test, then send a prompt in Claude Code and check{" "}
-        <Link href="/account/statistics" className="font-medium text-ink underline hover:no-underline">
-          Statistics → Coding agents
-        </Link>
-        .
+        <p>
+          Confirms Promptly sees your account. Complete step 6 so live Claude Code prompts are tracked automatically.
+        </p>
       </Step>
+
+      <LiveTrackingStep n={6} tool={tool} os={os} />
     </ol>
   );
 }
@@ -387,16 +450,16 @@ export function CursorSetup({ os, tool }: SetupProps) {
             ? windowsShellBlocks(cursorInstallCommands("windows"), cursorInstallCommandsPowerShell())
             : cursorInstallCommands("mac")
         }
-        validation={['"Cursor plugin OK" at the end', "Reload Window completes without errors"]}
+        validation={['"Cursor plugin OK" at the end']}
       >
-        <ReloadWindowHint os={os} />
+        <p className="mt-2">You will reload Cursor again in step 6 after connecting your account.</p>
       </Step>
 
       <ConnectAccountStep n={4} os={os} tool={tool} />
 
       <Step
         n={5}
-        title="Verify Promptly is tracking"
+        title="Verify your account link"
         where="terminal"
         whereLabel={terminalWhereLabel(os)}
         commands={
@@ -409,12 +472,10 @@ export function CursorSetup({ os, tool }: SetupProps) {
           "Cursor shows Connected on Statistics → Coding agents"
         ]}
       >
-        Run the test, then use Agent/Composer once and check{" "}
-        <Link href="/account/statistics" className="font-medium text-ink underline hover:no-underline">
-          Statistics → Coding agents
-        </Link>
-        .
+        <p>Confirms Promptly sees your account. Complete step 6 so Agent/Composer prompts are tracked.</p>
       </Step>
+
+      <LiveTrackingStep n={6} tool={tool} os={os} />
     </ol>
   );
 }

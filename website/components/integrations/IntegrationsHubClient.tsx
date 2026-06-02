@@ -39,7 +39,7 @@ export function IntegrationsHubClient() {
           Connect Claude Code, Cursor &amp; Codex
         </h1>
         <p className="mx-auto mt-3 max-w-lg text-sm leading-relaxed text-muted">
-          Five steps per agent. Each step tells you exactly what success looks like before you move on.
+          Six steps per agent — the last one is in your coding app (trust hooks / reload). Each step tells you what success looks like before you move on.
         </p>
         <p className="mx-auto mt-2 text-xs text-faint">
           Plugin pack:{" "}
