@@ -1351,6 +1351,12 @@ export type AccountIdeStatsPayload = {
     device_count: number;
     last_seen_at_ms: number | null;
   }>;
+  model_buckets: Array<{
+    tool: PromptlyIdeTool;
+    bucket: string;
+    label: string | null;
+    prompts: number;
+  }>;
   events_docs_in_query: number;
   index_missing: boolean;
   likely_truncated: boolean;
@@ -1442,6 +1448,10 @@ export async function getAccountIdeUsageStats(
   const promptTotals = emptyIdeToolCounts();
   const screenTotals = emptyIdeToolCounts();
   const engagementTotalsMs = { drafting: 0, waiting: 0, reading_idle: 0 };
+  const modelBucketAgg = new Map<
+    string,
+    { tool: PromptlyIdeTool; bucket: string; label: string | null; prompts: number }
+  >();
 
   for (const doc of eventsResult.docs) {
     const raw = doc.data() as Record<string, unknown>;
@@ -1479,6 +1489,22 @@ export async function getAccountIdeUsageStats(
 
     row.sends[tool] += 1;
     promptTotals[tool] += 1;
+
+    const mb = String(raw.modelBucket ?? raw.model_bucket ?? "unknown")
+      .trim()
+      .slice(0, 48) || "unknown";
+    const labelRaw = raw.modelLabelSanitized ?? raw.model_label ?? raw.modelLabel;
+    const label =
+      typeof labelRaw === "string" && labelRaw.trim() && !/https?:\/\//i.test(labelRaw)
+        ? String(labelRaw).replace(/\s+/g, " ").trim().slice(0, 120)
+        : null;
+    const modelKey = `${tool}:${mb}`;
+    const modelPrev = modelBucketAgg.get(modelKey) || { tool, bucket: mb, label, prompts: 0 };
+    modelPrev.prompts += 1;
+    if (!modelPrev.label && label) {
+      modelPrev.label = label;
+    }
+    modelBucketAgg.set(modelKey, modelPrev);
 
     const hlRaw = raw.hostResponseLatencyMs ?? raw.host_response_latency_ms;
     const hlMs =
@@ -1567,6 +1593,9 @@ export async function getAccountIdeUsageStats(
       device_count: connectedByTool[tool].count,
       last_seen_at_ms: connectedByTool[tool].lastSeen
     })),
+    model_buckets: [...modelBucketAgg.values()]
+      .filter((row) => row.prompts > 0)
+      .sort((a, b) => b.prompts - a.prompts || a.tool.localeCompare(b.tool)),
     events_docs_in_query: eventsResult.docs.length,
     index_missing: eventsResult.indexMissing,
     likely_truncated: eventsResult.docs.length >= IDE_EVENTS_QUERY_LIMIT,

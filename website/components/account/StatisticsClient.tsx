@@ -33,16 +33,30 @@ const COLOR_CLAUDE_CODE = "#D97757";
 const COLOR_CURSOR_IDE = "#00D8FF";
 const COLOR_CODEX = "#10A37F";
 
-const IDE_AGENT_CARDS: Array<{ key: "claude_code" | "cursor" | "codex"; label: string }> = [
-  { key: "claude_code", label: "Claude Code" },
-  { key: "cursor", label: "Cursor" },
-  { key: "codex", label: "Codex" }
-];
+const IDE_AGENT_LABELS: Record<string, string> = {
+  claude_code: "Claude Code",
+  cursor: "Cursor",
+  codex: "Codex"
+};
+
+function formatIdeModelLabel(row: { bucket: string; label: string | null }): string {
+  if (row.label?.trim()) return row.label.trim();
+  if (row.bucket === "unknown") return "Unknown model";
+  if (row.bucket === "test-send") return "Connection test";
+  return row.bucket.replace(/-/g, " ");
+}
 
 function formatIdeLastSeen(ms: number | null | undefined): string {
   if (!ms) return "Not synced yet";
   return new Date(ms).toLocaleString();
 }
+
+const IDE_AGENT_CARDS: Array<{ key: "claude_code" | "cursor" | "codex"; label: string }> = [
+  { key: "claude_code", label: IDE_AGENT_LABELS.claude_code },
+  { key: "cursor", label: IDE_AGENT_LABELS.cursor },
+  { key: "codex", label: IDE_AGENT_LABELS.codex }
+];
+
 const CHART_FONT_FAMILY = "var(--font-roboto-chart), Roboto, sans-serif";
 /** All chart axis ticks — dates, counts, units, and category labels on axes. */
 const CHART_Y_TICK = { fill: "#5C5C5C", fontSize: 10, fontFamily: CHART_FONT_FAMILY };
@@ -118,6 +132,7 @@ type IdeStatsPayload = {
     reading_idle_minutes: number;
   }>;
   connected_tools: Array<{ tool: string; device_count: number; last_seen_at_ms: number | null }>;
+  model_buckets: Array<{ tool: string; bucket: string; label: string | null; prompts: number }>;
   events_docs_in_query: number;
   index_missing: boolean;
   likely_truncated: boolean;
@@ -155,6 +170,7 @@ function emptyIdeStats(days: number, granularity: "day" | "week"): IdeStatsPaylo
       reading_idle_minutes: 0
     })),
     connected_tools: [],
+    model_buckets: [],
     events_docs_in_query: 0,
     index_missing: false,
     likely_truncated: false,
@@ -957,6 +973,29 @@ export function StatisticsClient() {
   const ideAnyConnected = useMemo(() => {
     return IDE_AGENT_CARDS.some((agent) => (ideConnectionByTool.get(agent.key)?.device_count ?? 0) > 0);
   }, [ideConnectionByTool]);
+
+  const ideModelsByTool = useMemo(() => {
+    const rows = displayIdeStats?.model_buckets ?? [];
+    const grouped = new Map<string, typeof rows>();
+    for (const row of rows) {
+      const list = grouped.get(row.tool) ?? [];
+      list.push(row);
+      grouped.set(row.tool, list);
+    }
+    for (const [tool, list] of grouped) {
+      grouped.set(
+        tool,
+        [...list].sort((a, b) => b.prompts - a.prompts || formatIdeModelLabel(a).localeCompare(formatIdeModelLabel(b)))
+      );
+    }
+    return grouped;
+  }, [displayIdeStats]);
+
+  const ideHasKnownModels = useMemo(() => {
+    return (displayIdeStats?.model_buckets ?? []).some(
+      (row) => row.prompts > 0 && row.bucket !== "unknown" && row.bucket !== "test-send"
+    );
+  }, [displayIdeStats]);
 
   const latencyChartRows = useMemo(() => {
     if (!displayStats?.latency_comparison_ai) return [];
@@ -1824,7 +1863,7 @@ export function StatisticsClient() {
                     <Link href="/integrations" className="underline hover:text-ink">
                       integrations
                     </Link>
-                    , connect your account, and run the tracking test in step 5.
+                    , connect your account, run the step 5 test, then complete step 6 in your coding app.
                   </>
                 )}
               </p>
@@ -1850,6 +1889,54 @@ export function StatisticsClient() {
                     </p>
                   </div>
                 </div>
+
+                {IDE_AGENT_CARDS.map((agent) => {
+                  const toolRows = ideModelsByTool.get(agent.key) ?? [];
+                  const toolTotal = displayIdeStats?.totals.prompts[agent.key] ?? 0;
+                  if (!toolRows.length || toolTotal <= 0) return null;
+                  return (
+                    <div key={agent.key}>
+                      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">
+                        {agent.label} · models used
+                      </h3>
+                      <div className="overflow-x-auto rounded-xl border border-line">
+                        <table className="min-w-full border-collapse text-left text-sm">
+                          <thead className="border-b border-line bg-cream-dark/80 text-[10px] uppercase tracking-wide text-muted">
+                            <tr>
+                              <th className="px-4 py-2 font-semibold">Model</th>
+                              <th className="px-4 py-2 font-semibold">Prompts</th>
+                              <th className="px-4 py-2 font-semibold">Share</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {toolRows.map((row) => {
+                              const share = toolTotal > 0 ? Math.round((row.prompts / toolTotal) * 1000) / 10 : 0;
+                              return (
+                                <tr key={`${row.tool}-${row.bucket}`} className="border-b border-line last:border-0">
+                                  <td className="px-4 py-2 font-mono text-xs text-ink">
+                                    {formatIdeModelLabel(row)}
+                                  </td>
+                                  <td className="px-4 py-2 tabular-nums text-ink">{row.prompts.toLocaleString()}</td>
+                                  <td className="px-4 py-2 tabular-nums text-muted">{share}%</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {!ideHasKnownModels && ideHasActivity ? (
+                  <p className="text-xs text-muted">
+                    Model names appear here once your agent reports them on each prompt. Re-download the plugin pack from{" "}
+                    <Link href="/integrations" className="underline hover:text-ink">
+                      integrations
+                    </Link>{" "}
+                    if you connected before this update, then send new prompts in Codex, Claude Code, or Cursor.
+                  </p>
+                ) : null}
 
                 {idePromptTimeline.length ? (
                   <div>

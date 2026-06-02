@@ -50,6 +50,38 @@ function countWords(text) {
   return t.split(/\s+/).filter(Boolean).length;
 }
 
+function slugToModelBucket(label) {
+  return (
+    String(label)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48) || "unknown"
+  );
+}
+
+/** Reads active model slug/name from hook stdin (Codex `model`, etc.). Never uploads prompt text. */
+function extractModelMeta(input) {
+  const raw =
+    input.model ??
+    input.model_slug ??
+    input.modelSlug ??
+    input.active_model ??
+    input.activeModel ??
+    input.model_name ??
+    input.modelName ??
+    input.modelLabel ??
+    input.model_label;
+  if (typeof raw !== "string" || !raw.trim()) {
+    return { model_label: null, model_bucket: "unknown" };
+  }
+  const label = String(raw).replace(/\s+/g, " ").trim().slice(0, 120);
+  if (!label || /https?:\/\//i.test(label)) {
+    return { model_label: null, model_bucket: "unknown" };
+  }
+  return { model_label: label, model_bucket: slugToModelBucket(label) };
+}
+
 function normalizeTool(raw) {
   const v = String(raw || "")
     .trim()
@@ -179,7 +211,8 @@ function hookEventToTelemetry(input, tool) {
       interaction_kind: "send",
       composer_word_estimate: words || 1,
       composer_char_estimate: chars || 1,
-      client_occurred_ms: now
+      client_occurred_ms: now,
+      ...extractModelMeta(input)
     };
   }
 
@@ -313,7 +346,9 @@ async function cmdTestSend(flags) {
     interaction_kind: "send",
     composer_word_estimate: 1,
     composer_char_estimate: 4,
-    client_occurred_ms: Date.now()
+    client_occurred_ms: Date.now(),
+    model_label: "test-send",
+    model_bucket: "test-send"
   });
   const clientHeader = flags.client || TOOL_CLIENT[tool];
   const result = await flushQueue(tool, clientHeader);
