@@ -59,6 +59,7 @@ const CHART_TOOLTIP_DARK_STYLE = {
   fontFamily: CHART_FONT_FAMILY
 };
 const CHART_LEGEND_STYLE = { fontSize: 11, paddingTop: 8, fontFamily: CHART_FONT_FAMILY };
+const CHART_LEGEND_STYLE_COMPACT = { fontSize: 11, paddingTop: 4, fontFamily: CHART_FONT_FAMILY };
 const CHART_AXIS_TICK_LIGHT = { fill: "#f9f8ff", fontSize: 10, fontFamily: CHART_FONT_FAMILY };
 const CHART_AXIS_TICK_LIGHT_PLAIN = { fill: "#f9f8ff", fontFamily: CHART_FONT_FAMILY };
 /** Derived score emphasis (readable on cream cards). */
