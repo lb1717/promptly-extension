@@ -24,15 +24,11 @@ function normalizeTool(raw: string | null): IdeTool {
   return "claude_code";
 }
 
-function buildAgentPrompt(tool: IdeTool, label: string, code: string): string {
-  return `Set up Promptly on ${label} for me.
+const TELEMETRY_CLI =
+  "node ~/integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs";
 
-My pairing code: ${code}
-(Get a new code at promptly-labs.com/auth/integrations?tool=${tool} if it expired.)
-
-Please install Promptly if needed, connect my account with that code (tool: ${tool}), and confirm I'm connected. Use the Promptly MCP tools (promptly_login, promptly_status) if you have them.
-
-Only track metadata — prompt counts and time, not prompt content. Tell me when you're done.`;
+function loginCommand(tool: IdeTool, code: string): string {
+  return `${TELEMETRY_CLI} login ${code} --tool ${tool}`;
 }
 
 export function IntegrationsAuthClient({ initialTool }: { initialTool?: string | null }) {
@@ -48,7 +44,7 @@ export function IntegrationsAuthClient({ initialTool }: { initialTool?: string |
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
-  const [copiedPrompt, setCopiedPrompt] = useState(false);
+  const [copiedLogin, setCopiedLogin] = useState(false);
 
   useEffect(() => {
     const auth = getFirebaseAuth();
@@ -113,26 +109,26 @@ export function IntegrationsAuthClient({ initialTool }: { initialTool?: string |
     }
   }
 
-  async function copyPrompt() {
+  async function copyLogin() {
     if (!pairCode) return;
     try {
-      await navigator.clipboard.writeText(buildAgentPrompt(tool, TOOL_LABELS[tool], pairCode));
-      setCopiedPrompt(true);
-      window.setTimeout(() => setCopiedPrompt(false), 2000);
+      await navigator.clipboard.writeText(loginCommand(tool, pairCode));
+      setCopiedLogin(true);
+      window.setTimeout(() => setCopiedLogin(false), 2000);
     } catch {
-      setCopiedPrompt(false);
+      setCopiedLogin(false);
     }
   }
 
   const toolLabel = TOOL_LABELS[tool];
-  const agentPrompt = pairCode ? buildAgentPrompt(tool, toolLabel, pairCode) : null;
+  const loginCmd = pairCode ? loginCommand(tool, pairCode) : null;
 
   return (
     <div className="mx-auto w-full max-w-lg rounded-2xl border border-line bg-cream p-6 shadow-card sm:p-8">
       <img src="/images/promptly-logo.png" alt="Promptly" className="mx-auto h-10 w-auto object-contain" />
       <h1 className="mt-6 text-center text-xl font-semibold text-ink">Connect {toolLabel}</h1>
       <p className="mt-2 text-center text-sm text-muted">
-        Sign in, copy your code, then paste the ready-made message into {toolLabel}.
+        Sign in, copy your code, then run the login command in Terminal.
       </p>
 
       {loading ? (
@@ -179,20 +175,24 @@ export function IntegrationsAuthClient({ initialTool }: { initialTool?: string |
 
               <div className="rounded-xl border border-line bg-white/60 p-4">
                 <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm font-medium text-ink">Paste into {toolLabel}</p>
+                  <p className="text-sm font-medium text-ink">Run in Terminal</p>
                   <button
                     type="button"
-                    onClick={() => void copyPrompt()}
+                    onClick={() => void copyLogin()}
                     className="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-ink hover:bg-cream"
                   >
-                    {copiedPrompt ? "Copied" : "Copy message"}
+                    {copiedLogin ? "Copied" : "Copy command"}
                   </button>
                 </div>
-                <pre className="mt-3 max-h-48 overflow-y-auto whitespace-pre-wrap rounded-lg bg-ink p-3 font-mono text-[11px] leading-relaxed text-cream">
-                  {agentPrompt}
+                <pre className="mt-3 overflow-x-auto whitespace-pre-wrap rounded-lg bg-ink p-3 font-mono text-xs leading-relaxed text-cream">
+                  {loginCmd}
                 </pre>
                 <p className="mt-3 text-xs text-faint">
-                  Open {toolLabel}, start a chat, paste this message, and press Enter. The agent handles the rest.
+                  Install the plugin first if you haven&apos;t — see the{" "}
+                  <Link href="/integrations" className="underline hover:text-ink">
+                    setup guide
+                  </Link>
+                  . Then paste this in Terminal and press Enter.
                 </p>
               </div>
             </>

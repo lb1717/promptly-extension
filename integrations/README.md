@@ -11,6 +11,8 @@ Connect **Claude Code**, **Cursor**, and **Codex** to your Promptly account. Tra
 
 ## Quick install
 
+Download the plugin pack from [promptly-labs.com/downloads/promptly-coding-agents.zip](https://promptly-labs.com/downloads/promptly-coding-agents.zip), unzip to your home folder (creates `~/integrations`), then follow [promptly-labs.com/integrations](https://promptly-labs.com/integrations).
+
 ### Claude Code
 
 ```bash

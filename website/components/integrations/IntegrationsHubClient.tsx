@@ -1,9 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 
 type IdeToolId = "claude_code" | "cursor" | "codex";
+type Where = "terminal" | "claude_code" | "cursor_app" | "browser";
+
+const PLUGIN_PACK_URL = "https://promptly-labs.com/downloads/promptly-coding-agents.zip";
+const INTEGRATIONS_DIR = "~/integrations";
+const TELEMETRY_CLI = `node ${INTEGRATIONS_DIR}/packages/telemetry-cli/bin/promptly-telemetry.mjs`;
 
 const TOOL_TABS: { id: IdeToolId; label: string; accent: string }[] = [
   { id: "claude_code", label: "Claude Code", accent: "#D97757" },
@@ -11,18 +16,15 @@ const TOOL_TABS: { id: IdeToolId; label: string; accent: string }[] = [
   { id: "codex", label: "Codex", accent: "#10A37F" }
 ];
 
-function buildAgentPrompt(tool: IdeToolId, label: string): string {
-  return `Set up Promptly on ${label} for me.
+const WHERE_LABEL: Record<Where, string> = {
+  terminal: "Terminal",
+  claude_code: "Claude Code chat",
+  cursor_app: "Cursor",
+  browser: "Browser"
+};
 
-My pairing code: YOUR_CODE
-(Get a new code at promptly-labs.com/auth/integrations?tool=${tool} if it expired.)
-
-Please install Promptly if needed, connect my account with that code (tool: ${tool}), and confirm I'm connected. Use the Promptly MCP tools (promptly_login, promptly_status) if you have them.
-
-Only track metadata — prompt counts and time, not prompt content. Tell me when you're done.`;
-}
-
-function CopyBlock({ text, label }: { text: string; label?: string }) {
+function CopyBlock({ lines, label }: { lines: string[]; label?: string }) {
+  const text = lines.join("\n");
   const [copied, setCopied] = useState(false);
 
   const copy = useCallback(async () => {
@@ -36,13 +38,13 @@ function CopyBlock({ text, label }: { text: string; label?: string }) {
   }, [text]);
 
   return (
-    <div className="relative overflow-hidden rounded-xl border border-line bg-ink">
+    <div className="relative mt-2 overflow-hidden rounded-xl border border-line bg-ink">
       {label ? (
         <div className="border-b border-white/10 px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-white/50">
           {label}
         </div>
       ) : null}
-      <pre className="overflow-x-auto whitespace-pre-wrap p-4 pr-20 font-mono text-xs leading-relaxed text-cream">
+      <pre className="overflow-x-auto whitespace-pre-wrap p-3 pr-20 font-mono text-xs leading-relaxed text-cream">
         {text}
       </pre>
       <button
@@ -56,62 +58,191 @@ function CopyBlock({ text, label }: { text: string; label?: string }) {
   );
 }
 
-function ToolSetup({ tool, label }: { tool: IdeToolId; label: string }) {
-  const pairUrl = `/auth/integrations?tool=${tool}`;
-  const prompt = buildAgentPrompt(tool, label);
+function Step({
+  n,
+  title,
+  where,
+  children,
+  commands
+}: {
+  n: number;
+  title: string;
+  where?: Where;
+  children: ReactNode;
+  commands?: string[] | string[][];
+}) {
+  const commandGroups = commands
+    ? Array.isArray(commands[0])
+      ? (commands as string[][])
+      : [commands as string[]]
+    : [];
 
   return (
-    <ol className="mt-6 space-y-8">
-      <li className="flex gap-4">
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-ink text-xs font-bold text-cream">
-          1
-        </span>
-        <div className="min-w-0 flex-1">
-          <h3 className="font-semibold text-ink">Get your pairing code</h3>
-          <p className="mt-1 text-sm text-muted">
-            Sign in to Promptly and copy the 8-character code. Codes expire after about 10 minutes.
-          </p>
-          <Link
-            href={pairUrl}
-            className="mt-3 inline-flex items-center justify-center rounded-xl bg-ink px-4 py-2 text-sm font-semibold text-cream hover:bg-neutral-800"
-          >
-            Connect account
-          </Link>
+    <li className="flex gap-4 pb-8 last:pb-0">
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-ink text-xs font-bold text-cream">
+        {n}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="font-semibold text-ink">{title}</h3>
+          {where ? (
+            <span className="rounded-md bg-cream-dark px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-faint">
+              {WHERE_LABEL[where]}
+            </span>
+          ) : null}
         </div>
-      </li>
+        <div className="mt-1 text-sm leading-relaxed text-muted">{children}</div>
+        {commandGroups.map((lines, i) => (
+          <CopyBlock key={i} lines={lines} />
+        ))}
+      </div>
+    </li>
+  );
+}
 
-      <li className="flex gap-4">
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-ink text-xs font-bold text-cream">
-          2
-        </span>
-        <div className="min-w-0 flex-1">
-          <h3 className="font-semibold text-ink">Paste into {label}</h3>
-          <p className="mt-1 text-sm text-muted">
-            Open {label}, start a chat, and paste the message below. Replace{" "}
-            <code className="text-ink">YOUR_CODE</code> with your pairing code — the agent handles install and
-            connect.
-          </p>
-          <div className="mt-3">
-            <CopyBlock text={prompt} label={`Paste in ${label}`} />
-          </div>
-        </div>
-      </li>
+function ToolSetup({ tool, label }: { tool: IdeToolId; label: string }) {
+  const pairUrl = `/auth/integrations?tool=${tool}`;
+  const loginCmd = `${TELEMETRY_CLI} login YOUR_CODE --tool ${tool}`;
+  const statusCmd = `${TELEMETRY_CLI} status`;
 
-      <li className="flex gap-4">
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-cream-dark text-xs font-bold text-faint">
-          ✓
-        </span>
-        <div className="min-w-0 flex-1">
-          <h3 className="font-semibold text-ink">Use {label} as normal</h3>
-          <p className="mt-1 text-sm text-muted">
-            Tracking runs in the background. View stats under{" "}
-            <Link href="/account/statistics" className="font-medium text-ink underline hover:no-underline">
-              Statistics → Coding agents
+  const downloadSteps = (
+    <>
+      <Step
+        n={1}
+        title="Download the plugin pack"
+        where="terminal"
+        commands={[
+          `curl -L -o ~/promptly.zip ${PLUGIN_PACK_URL}`,
+          "unzip -o ~/promptly.zip -d ~",
+          `cd ${INTEGRATIONS_DIR}`
+        ]}
+      >
+        <p>
+          This puts the Promptly plugins in <code className="text-ink">{INTEGRATIONS_DIR}</code>. You only do this
+          once.
+        </p>
+        <p className="mt-2">
+          Or{" "}
+          <a href={PLUGIN_PACK_URL} className="font-medium text-ink underline hover:no-underline">
+            download the zip
+          </a>{" "}
+          manually and unzip it into your home folder so you have an <code className="text-ink">integrations</code>{" "}
+          folder.
+        </p>
+      </Step>
+    </>
+  );
+
+  if (tool === "codex") {
+    return (
+      <ol className="mt-6 list-none space-y-0">
+        {downloadSteps}
+        <Step
+          n={2}
+          title="Install the Codex plugin"
+          where="terminal"
+          commands={[
+            `codex plugin marketplace add ${INTEGRATIONS_DIR}`,
+            "codex plugin install promptly-codex@promptly-labs"
+          ]}
+        >
+          Run these in <strong className="text-ink">Terminal</strong> — not inside the Codex chat. If Codex asks to
+          trust plugin hooks, accept.
+        </Step>
+        <Step n={3} title="Connect your Promptly account" where="browser">
+          <p>
+            <Link href={pairUrl} className="font-medium text-ink underline hover:no-underline">
+              Sign in and get a pairing code
             </Link>
-            .
+            , then run the login command below in Terminal (replace <code className="text-ink">YOUR_CODE</code>).
           </p>
-        </div>
-      </li>
+          <CopyBlock lines={[loginCmd]} label="Terminal" />
+          <CopyBlock lines={[statusCmd]} label="Should show Connected" />
+        </Step>
+        <Step n={4} title="Use Codex normally">
+          Open Codex and send prompts. Stats appear under{" "}
+          <Link href="/account/statistics" className="font-medium text-ink underline hover:no-underline">
+            Statistics → Coding agents
+          </Link>
+          .
+        </Step>
+      </ol>
+    );
+  }
+
+  if (tool === "claude_code") {
+    return (
+      <ol className="mt-6 list-none space-y-0">
+        {downloadSteps}
+        <Step
+          n={2}
+          title="Install the Claude Code plugin"
+          where="claude_code"
+          commands={[
+            [`/plugin marketplace add ${INTEGRATIONS_DIR}`],
+            ["/plugin install promptly-claude-code@promptly-labs"],
+            ["/reload-plugins"]
+          ]}
+        >
+          Open <strong className="text-ink">Claude Code</strong> and paste each line below into the chat box, one at a
+          time, pressing Enter after each. If asked to trust hooks, allow.
+        </Step>
+        <Step n={3} title="Connect your Promptly account" where="browser">
+          <p>
+            <Link href={pairUrl} className="font-medium text-ink underline hover:no-underline">
+              Sign in and get a pairing code
+            </Link>
+            , then run in Terminal:
+          </p>
+          <CopyBlock lines={[loginCmd]} label="Terminal" />
+          <CopyBlock lines={[statusCmd]} label="Should show Connected" />
+        </Step>
+        <Step n={4} title="Use Claude Code normally">
+          Send prompts as usual. View stats under{" "}
+          <Link href="/account/statistics" className="font-medium text-ink underline hover:no-underline">
+            Statistics → Coding agents
+          </Link>
+          .
+        </Step>
+      </ol>
+    );
+  }
+
+  return (
+    <ol className="mt-6 list-none space-y-0">
+      {downloadSteps}
+      <Step
+        n={2}
+        title="Install the Cursor plugin"
+        where="terminal"
+        commands={[
+          "mkdir -p ~/.cursor/plugins/local",
+          `cp -R ${INTEGRATIONS_DIR}/cursor ~/.cursor/plugins/local/promptly-cursor`
+        ]}
+      >
+        Then in Cursor press{" "}
+        <kbd className="rounded border border-line bg-cream-dark px-1.5 py-0.5 font-mono text-xs">Cmd+Shift+P</kbd>{" "}
+        (Mac) or{" "}
+        <kbd className="rounded border border-line bg-cream-dark px-1.5 py-0.5 font-mono text-xs">Ctrl+Shift+P</kbd>{" "}
+        (Windows), type <strong className="text-ink">Reload Window</strong>, and press Enter.
+      </Step>
+      <Step n={3} title="Connect your Promptly account" where="browser">
+        <p>
+          <Link href={pairUrl} className="font-medium text-ink underline hover:no-underline">
+            Sign in and get a pairing code
+          </Link>
+          , then run in Terminal:
+        </p>
+        <CopyBlock lines={[loginCmd]} label="Terminal" />
+        <CopyBlock lines={[statusCmd]} label="Should show Connected" />
+      </Step>
+      <Step n={4} title="Use Cursor Agent normally">
+        Use Composer or Agent as usual. Stats appear under{" "}
+        <Link href="/account/statistics" className="font-medium text-ink underline hover:no-underline">
+          Statistics → Coding agents
+        </Link>
+        .
+      </Step>
     </ol>
   );
 }
@@ -127,8 +258,9 @@ export function IntegrationsHubClient() {
         <h1 className="mt-2 text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
           Connect Claude Code, Cursor &amp; Codex
         </h1>
-        <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-muted">
-          Two steps: get a code, paste one message into your agent. It installs and connects for you.
+        <p className="mx-auto mt-3 max-w-lg text-sm leading-relaxed text-muted">
+          Download the plugin pack once, install for your app, then connect with a pairing code. Same Promptly account
+          as the browser extension.
         </p>
       </div>
 
@@ -161,17 +293,34 @@ export function IntegrationsHubClient() {
           role="tabpanel"
           aria-label={`${activeMeta.label} setup`}
         >
-          <h2 className="text-lg font-semibold text-ink">{activeMeta.label}</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-4">
+            <h2 className="text-lg font-semibold text-ink">{activeMeta.label}</h2>
+            <Link
+              href={`/auth/integrations?tool=${activeTool}`}
+              className="rounded-lg bg-ink px-3 py-1.5 text-xs font-semibold text-cream hover:bg-neutral-800"
+            >
+              Get pairing code
+            </Link>
+          </div>
           <ToolSetup tool={activeTool} label={activeMeta.label} />
         </div>
       </section>
 
+      <section className="mt-8 rounded-2xl border border-line bg-cream-dark p-4 text-sm text-muted">
+        <p>
+          <strong className="text-ink">Need Node.js?</strong> The plugin uses Node 18+. Check with{" "}
+          <code className="text-ink">node --version</code> in Terminal.
+        </p>
+        <p className="mt-2">
+          <strong className="text-ink">Privacy:</strong> We track prompt counts and time only — never prompt text.
+        </p>
+      </section>
+
       <p className="mt-8 text-center text-xs text-faint">
-        We never store prompt text — only counts and time.{" "}
+        Browser extension for ChatGPT, Claude &amp; Gemini →{" "}
         <Link href="/get-started" className="underline hover:text-ink">
-          Browser extension
-        </Link>{" "}
-        for ChatGPT, Claude &amp; Gemini.
+          Get started
+        </Link>
       </p>
     </div>
   );

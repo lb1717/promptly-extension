@@ -10,6 +10,13 @@ const nextConfig = {
       {
         source: "/:path*",
         headers: [{ key: "X-Content-Type-Options", value: "nosniff" }]
+      },
+      {
+        source: "/downloads/:path*",
+        headers: [
+          { key: "Cache-Control", value: "public, max-age=3600" },
+          { key: "Access-Control-Allow-Origin", value: "*" }
+        ]
       }
     ];
   }
