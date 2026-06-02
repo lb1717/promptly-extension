@@ -297,6 +297,33 @@ function cmdOpenLogin(flags) {
   console.log(`${base}/auth/integrations?tool=${tool}`);
 }
 
+async function cmdTestSend(flags) {
+  const tool = normalizeTool(flags.tool);
+  if (!tool) {
+    console.error("Usage: promptly-telemetry test-send --tool claude_code|cursor|codex");
+    process.exit(1);
+  }
+  const creds = getCredentials();
+  if (!creds?.device_token) {
+    console.error("Not connected. Run login first.");
+    process.exit(1);
+  }
+  enqueueEvent({
+    tool,
+    interaction_kind: "send",
+    composer_word_estimate: 1,
+    composer_char_estimate: 4,
+    client_occurred_ms: Date.now()
+  });
+  const clientHeader = flags.client || TOOL_CLIENT[tool];
+  const result = await flushQueue(tool, clientHeader);
+  if (!result.ok) {
+    console.error(result.error || "Upload failed");
+    process.exit(1);
+  }
+  console.log(`Test prompt uploaded for ${tool}. Check Statistics → Coding agents on promptly-labs.com.`);
+}
+
 async function main() {
   const { command, flags } = parseArgs(process.argv.slice(2));
   switch (command) {
@@ -309,6 +336,9 @@ async function main() {
     case "status":
       cmdStatus();
       break;
+    case "test-send":
+      await cmdTestSend(flags);
+      break;
     case "open-login":
       cmdOpenLogin(flags);
       break;
@@ -320,7 +350,8 @@ async function main() {
 
 Commands:
   hook --tool <tool>          Process hook stdin and upload events
-  login <code> --tool <tool>  Exchange pairing code for device token
+  login --tool <tool> <CODE>  Exchange pairing code for device token
+  test-send --tool <tool>     Upload one test prompt (verify stats pipeline)
   status                      Show connection status
   open-login --tool <tool>    Print sign-in URL
   flush --tool <tool>         Flush queued events`);

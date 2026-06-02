@@ -32,6 +32,17 @@ const COLOR_NATIVE_WEB = "#22d3ee";
 const COLOR_CLAUDE_CODE = "#D97757";
 const COLOR_CURSOR_IDE = "#00D8FF";
 const COLOR_CODEX = "#10A37F";
+
+const IDE_AGENT_CARDS: Array<{ key: "claude_code" | "cursor" | "codex"; label: string }> = [
+  { key: "claude_code", label: "Claude Code" },
+  { key: "cursor", label: "Cursor" },
+  { key: "codex", label: "Codex" }
+];
+
+function formatIdeLastSeen(ms: number | null | undefined): string {
+  if (!ms) return "Not synced yet";
+  return new Date(ms).toLocaleString();
+}
 const CHART_FONT_FAMILY = "var(--font-roboto-chart), Roboto, sans-serif";
 /** All chart axis ticks — dates, counts, units, and category labels on axes. */
 const CHART_Y_TICK = { fill: "#5C5C5C", fontSize: 10, fontFamily: CHART_FONT_FAMILY };
@@ -932,6 +943,21 @@ export function StatisticsClient() {
     return p.claude_code + p.cursor + p.codex > 0;
   }, [displayIdeStats]);
 
+  const ideConnectionByTool = useMemo(() => {
+    const map = new Map<string, { device_count: number; last_seen_at_ms: number | null }>();
+    for (const row of displayIdeStats?.connected_tools ?? []) {
+      map.set(row.tool, {
+        device_count: row.device_count,
+        last_seen_at_ms: row.last_seen_at_ms
+      });
+    }
+    return map;
+  }, [displayIdeStats]);
+
+  const ideAnyConnected = useMemo(() => {
+    return IDE_AGENT_CARDS.some((agent) => (ideConnectionByTool.get(agent.key)?.device_count ?? 0) > 0);
+  }, [ideConnectionByTool]);
+
   const latencyChartRows = useMemo(() => {
     if (!displayStats?.latency_comparison_ai) return [];
     return displayStats.latency_comparison_ai
@@ -1731,13 +1757,76 @@ export function StatisticsClient() {
               <p className="text-sm text-muted">Loading coding-agent statistics…</p>
             ) : null}
 
+            <div className="mb-5 grid gap-3 sm:grid-cols-3">
+              {IDE_AGENT_CARDS.map((agent) => {
+                const conn = ideConnectionByTool.get(agent.key);
+                const connected = (conn?.device_count ?? 0) > 0;
+                const prompts = displayIdeStats?.totals.prompts[agent.key] ?? 0;
+                return (
+                  <div
+                    key={agent.key}
+                    className={`rounded-xl border p-3 ${
+                      connected ? "border-emerald-300/80 bg-emerald-50/60" : "border-line bg-white/70"
+                    }`}
+                  >
+                    <p className="text-[11px] font-medium uppercase text-faint">{agent.label}</p>
+                    <p className={`mt-1 text-sm font-semibold ${connected ? "text-emerald-900" : "text-muted"}`}>
+                      {connected ? "Connected" : "Not connected"}
+                    </p>
+                    {connected ? (
+                      <p className="mt-1 text-[10px] text-muted">
+                        Last sync {formatIdeLastSeen(conn?.last_seen_at_ms)}
+                        {conn && conn.device_count > 1 ? ` · ${conn.device_count} devices` : null}
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-[10px] text-faint">
+                        <Link href={`/integrations`} className="underline hover:text-ink">
+                          Set up
+                        </Link>
+                      </p>
+                    )}
+                    <p className="mt-2 text-xs text-muted">
+                      <span className="font-medium tabular-nums text-ink">{prompts.toLocaleString()}</span> prompts in
+                      range
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+
+            {displayIdeStats?.index_missing ? (
+              <p className="mb-4 rounded-lg border border-amber-300/60 bg-amber-50/80 px-3 py-2 text-xs text-amber-950">
+                Statistics indexes are still deploying. Prompt counts may show zero temporarily even after you connect.
+              </p>
+            ) : null}
+
+            {displayIdeStats?.footnotes?.length ? (
+              <ul className="mb-4 list-disc space-y-1 pl-5 text-[11px] text-faint">
+                {displayIdeStats.footnotes.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            ) : null}
+
             {!ideHasActivity ? (
               <p className="text-sm text-muted">
-                No coding-agent activity yet. Install a connector from{" "}
-                <Link href="/integrations" className="underline hover:text-ink">
-                  integrations
-                </Link>
-                , connect your account, and send prompts in Claude Code, Cursor, or Codex.
+                {ideAnyConnected ? (
+                  <>
+                    Your agent is connected but no prompts are recorded in this range yet. Run step 5 on{" "}
+                    <Link href="/integrations" className="underline hover:text-ink">
+                      integrations
+                    </Link>{" "}
+                    (<code className="text-ink">test-send</code>), send a prompt in your agent, then refresh this page.
+                  </>
+                ) : (
+                  <>
+                    No coding-agent activity yet. Install a connector from{" "}
+                    <Link href="/integrations" className="underline hover:text-ink">
+                      integrations
+                    </Link>
+                    , connect your account, and run the tracking test in step 5.
+                  </>
+                )}
               </p>
             ) : (
               <div className="space-y-6">
@@ -1813,14 +1902,6 @@ export function StatisticsClient() {
                       </ResponsiveContainer>
                     </div>
                   </div>
-                ) : null}
-
-                {displayIdeStats?.footnotes?.length ? (
-                  <ul className="list-disc space-y-1 pl-5 text-[11px] text-faint">
-                    {displayIdeStats.footnotes.map((line) => (
-                      <li key={line}>{line}</li>
-                    ))}
-                  </ul>
                 ) : null}
               </div>
             )}

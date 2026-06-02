@@ -1003,31 +1003,62 @@ async function resolveUserFromIntegrationDeviceToken(token: string): Promise<Pro
   }
   const doc = snap.docs[0]!;
   const data = doc.data() as Record<string, unknown>;
-  const uid = String(data.uid || "").trim();
-  if (!uid) {
+  const storedUid = String(data.uid || "").trim();
+  if (!storedUid) {
     return null;
   }
-  await doc.ref.set({ lastSeenAt: FieldValue.serverTimestamp() }, { merge: true });
-  return upsertPromptlyUser(uid, normalizeUserEmail(data.email), { provider: "ide-integration" });
+  const email = normalizeUserEmail(data.email);
+  const canonicalUid = email ? await resolveCanonicalUidForEmail(email, storedUid) : storedUid;
+  await doc.ref.set({ lastSeenAt: FieldValue.serverTimestamp(), uid: canonicalUid, email }, { merge: true });
+  return upsertPromptlyUser(canonicalUid, email, { provider: "ide-integration" });
 }
 
 export async function listIntegrationDevices(user: PromptlyUser) {
   const db = getFirebaseAdminDb();
-  const snap = await db
+  const seen = new Map<string, { id: string; tool: PromptlyIdeTool; deviceLabel: string | null; lastSeenAtMs: number | null }>();
+
+  const ingest = (doc: QueryDocumentSnapshot<DocumentData>) => {
+    const raw = doc.data() as Record<string, unknown>;
+    const tool = normalizePromptlyIdeTool(raw.tool) || "claude_code";
+    const lastSeenAtMs = firestoreMillis(raw.lastSeenAt);
+    const existing = seen.get(doc.id);
+    if (!existing || (lastSeenAtMs ?? 0) >= (existing.lastSeenAtMs ?? 0)) {
+      seen.set(doc.id, {
+        id: doc.id,
+        tool,
+        deviceLabel: typeof raw.deviceLabel === "string" ? raw.deviceLabel : null,
+        lastSeenAtMs
+      });
+    }
+  };
+
+  const byUid = await db
     .collection(INTEGRATION_DEVICES_COLLECTION)
     .where("uid", "==", user.uid)
     .where("revoked", "==", false)
     .limit(50)
     .get();
-  return snap.docs.map((doc) => {
-    const raw = doc.data() as Record<string, unknown>;
-    return {
-      id: doc.id,
-      tool: normalizePromptlyIdeTool(raw.tool) || "claude_code",
-      deviceLabel: typeof raw.deviceLabel === "string" ? raw.deviceLabel : null,
-      lastSeenAtMs: firestoreMillis(raw.lastSeenAt)
-    };
-  });
+  for (const doc of byUid.docs) {
+    ingest(doc);
+  }
+
+  if (user.email) {
+    const byEmail = await db
+      .collection(INTEGRATION_DEVICES_COLLECTION)
+      .where("email", "==", user.email)
+      .where("revoked", "==", false)
+      .limit(50)
+      .get();
+    for (const doc of byEmail.docs) {
+      const raw = doc.data() as Record<string, unknown>;
+      if (String(raw.uid || "") !== user.uid) {
+        await doc.ref.set({ uid: user.uid }, { merge: true }).catch(() => undefined);
+      }
+      ingest(doc);
+    }
+  }
+
+  return Array.from(seen.values());
 }
 
 export async function revokeIntegrationDevice(user: PromptlyUser, deviceId: string): Promise<boolean> {

@@ -6,7 +6,6 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/promptly-telemetry.mjs\" hook --tool claude_code",
-            "async": true,
             "timeout": 15
           }
         ]
@@ -18,7 +17,6 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/promptly-telemetry.mjs\" hook --tool claude_code",
-            "async": true,
             "timeout": 15
           }
         ]
@@ -30,7 +28,6 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/promptly-telemetry.mjs\" hook --tool claude_code",
-            "async": true,
             "timeout": 15
           }
         ]
@@ -42,7 +39,6 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/promptly-telemetry.mjs\" hook --tool claude_code",
-            "async": true,
             "timeout": 15
           }
         ]

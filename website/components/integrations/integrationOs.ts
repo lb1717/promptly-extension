@@ -211,6 +211,14 @@ export function verifyConnectionPowerShell(): string[] {
   return [statusCommandPowerShell()];
 }
 
+export function testTrackingCommands(os: OsId, tool: string): string[] {
+  return [`${telemetryCli(os)} test-send --tool ${tool}`, statusCommand(os)];
+}
+
+export function testTrackingPowerShell(tool: string): string[] {
+  return [`${telemetryCliPowerShell()} test-send --tool ${tool}`, statusCommandPowerShell()];
+}
+
 export function claudeMarketplaceCommand(os: OsId): string {
   return os === "mac"
     ? "/plugin marketplace add $HOME/integrations"

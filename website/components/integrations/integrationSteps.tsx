@@ -19,8 +19,8 @@ import {
   nodeCheckPowerShell,
   NODE_INSTALL_URL,
   PLUGIN_PACK_URL,
-  verifyConnectionCommands,
-  verifyConnectionPowerShell,
+  testTrackingCommands,
+  testTrackingPowerShell,
   type IdeToolId,
   type OsId
 } from "./integrationOs";
@@ -202,7 +202,8 @@ export function CodexSetup({ os, tool }: SetupProps) {
           '"Promptly plugin installed" at the end'
         ]}
       >
-        Run in {terminalWhereLabel(os)}, not inside the Codex chat. Accept hook trust if prompted, then restart Codex.
+        Run in {terminalWhereLabel(os)}, not inside the Codex chat. In Codex, open{" "}
+        <strong className="text-ink">/hooks</strong> and trust Promptly hooks if asked, then restart Codex.
       </Step>
 
       <ConnectAccountStep n={4} os={os} tool={tool} />
@@ -214,19 +215,23 @@ export function CodexSetup({ os, tool }: SetupProps) {
         whereLabel={terminalWhereLabel(os)}
         commands={
           isWindows
-            ? windowsShellBlocks(verifyConnectionCommands("windows"), verifyConnectionPowerShell())
-            : verifyConnectionCommands("mac")
+            ? windowsShellBlocks(testTrackingCommands("windows", tool), testTrackingPowerShell(tool))
+            : testTrackingCommands("mac", tool)
         }
         validation={[
-          'Status shows "connected": true',
-          "After one prompt in Codex, activity appears under Statistics → Coding agents"
+          '"Test prompt uploaded" in Terminal',
+          'Status still shows "connected": true',
+          "Codex shows Connected on Statistics → Coding agents within a minute"
         ]}
       >
-        Send any prompt in Codex, then check{" "}
-        <Link href="/account/statistics" className="font-medium text-ink underline hover:no-underline">
-          Statistics → Coding agents
-        </Link>
-        . Counts may take a minute to update.
+        <p>
+          The test command uploads one prompt to Promptly directly (no Codex prompt needed). Then send a real prompt in
+          Codex and check{" "}
+          <Link href="/account/statistics" className="font-medium text-ink underline hover:no-underline">
+            Statistics → Coding agents
+          </Link>
+          .
+        </p>
       </Step>
     </ol>
   );
@@ -309,15 +314,15 @@ export function ClaudeCodeSetup({ os, tool }: SetupProps) {
         whereLabel={terminalWhereLabel(os)}
         commands={
           isWindows
-            ? windowsShellBlocks(verifyConnectionCommands("windows"), verifyConnectionPowerShell())
-            : verifyConnectionCommands("mac")
+            ? windowsShellBlocks(testTrackingCommands("windows", tool), testTrackingPowerShell(tool))
+            : testTrackingCommands("mac", tool)
         }
         validation={[
-          'Status shows "connected": true',
-          "After one prompt in Claude Code, activity appears under Statistics → Coding agents"
+          '"Test prompt uploaded" in Terminal',
+          "Claude Code shows Connected on Statistics → Coding agents"
         ]}
       >
-        Send any prompt, then check{" "}
+        Run the test, then send a prompt in Claude Code and check{" "}
         <Link href="/account/statistics" className="font-medium text-ink underline hover:no-underline">
           Statistics → Coding agents
         </Link>
@@ -396,15 +401,15 @@ export function CursorSetup({ os, tool }: SetupProps) {
         whereLabel={terminalWhereLabel(os)}
         commands={
           isWindows
-            ? windowsShellBlocks(verifyConnectionCommands("windows"), verifyConnectionPowerShell())
-            : verifyConnectionCommands("mac")
+            ? windowsShellBlocks(testTrackingCommands("windows", tool), testTrackingPowerShell(tool))
+            : testTrackingCommands("mac", tool)
         }
         validation={[
-          'Status shows "connected": true',
-          "After one Agent/Composer prompt, activity appears under Statistics → Coding agents"
+          '"Test prompt uploaded" in Terminal',
+          "Cursor shows Connected on Statistics → Coding agents"
         ]}
       >
-        Use Agent or Composer once, then check{" "}
+        Run the test, then use Agent/Composer once and check{" "}
         <Link href="/account/statistics" className="font-medium text-ink underline hover:no-underline">
           Statistics → Coding agents
         </Link>

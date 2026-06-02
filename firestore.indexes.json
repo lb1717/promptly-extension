@@ -60,6 +60,14 @@
         { "fieldPath": "uid", "order": "ASCENDING" },
         { "fieldPath": "revoked", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "promptly_integration_devices",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "email", "order": "ASCENDING" },
+        { "fieldPath": "revoked", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []
