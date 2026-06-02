@@ -6,7 +6,7 @@ import type { User } from "firebase/auth";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { telemetryCli, type OsId } from "./integrationOs";
+import { loginCommand, loginCommandPowerShell, type OsId } from "./integrationOs";
 
 type IdeTool = "claude_code" | "cursor" | "codex";
 
@@ -23,10 +23,6 @@ function normalizeTool(raw: string | null): IdeTool {
     .replace(/-/g, "_");
   if (v === "cursor" || v === "codex") return v;
   return "claude_code";
-}
-
-function loginCommand(tool: IdeTool, code: string, os: OsId): string {
-  return `${telemetryCli(os)} login ${code} --tool ${tool}`;
 }
 
 export function IntegrationsAuthClient({ initialTool }: { initialTool?: string | null }) {
@@ -111,7 +107,7 @@ export function IntegrationsAuthClient({ initialTool }: { initialTool?: string |
   async function copyLogin() {
     if (!pairCode) return;
     try {
-      await navigator.clipboard.writeText(loginCommand(tool, pairCode, activeOs));
+      await navigator.clipboard.writeText(loginCommand(activeOs, tool, pairCode));
       setCopiedLogin(true);
       window.setTimeout(() => setCopiedLogin(false), 2000);
     } catch {
@@ -120,7 +116,9 @@ export function IntegrationsAuthClient({ initialTool }: { initialTool?: string |
   }
 
   const toolLabel = TOOL_LABELS[tool];
-  const loginCmd = pairCode ? loginCommand(tool, pairCode, activeOs) : null;
+  const loginCmd = pairCode ? loginCommand(activeOs, tool, pairCode) : null;
+  const loginCmdPs =
+    pairCode && activeOs === "windows" ? loginCommandPowerShell(tool, pairCode) : null;
 
   return (
     <div className="mx-auto w-full max-w-lg rounded-2xl border border-line bg-cream p-6 shadow-card sm:p-8">
@@ -204,6 +202,14 @@ export function IntegrationsAuthClient({ initialTool }: { initialTool?: string |
                 <pre className="mt-3 overflow-x-auto whitespace-pre-wrap rounded-lg bg-ink p-3 font-mono text-xs leading-relaxed text-cream">
                   {loginCmd}
                 </pre>
+                {loginCmdPs ? (
+                  <>
+                    <p className="mt-3 text-xs font-medium text-muted">PowerShell</p>
+                    <pre className="mt-1 overflow-x-auto whitespace-pre-wrap rounded-lg bg-ink p-3 font-mono text-xs leading-relaxed text-cream">
+                      {loginCmdPs}
+                    </pre>
+                  </>
+                ) : null}
                 <p className="mt-3 text-xs text-faint">
                   Install the plugin first if you haven&apos;t — see the{" "}
                   <Link href="/integrations" className="underline hover:text-ink">

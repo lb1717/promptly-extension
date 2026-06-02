@@ -7,10 +7,9 @@ import {
   CodexSetup,
   CursorSetup,
   PLUGIN_PACK_URL,
-  telemetryCli,
-  type IdeToolId,
-  type OsId
+  type IdeToolId
 } from "./integrationSteps";
+import type { OsId } from "./integrationOs";
 
 const TOOL_TABS: { id: IdeToolId; label: string; accent: string }[] = [
   { id: "claude_code", label: "Claude Code", accent: "#D97757" },
@@ -28,10 +27,7 @@ export function IntegrationsHubClient() {
   const [activeOs, setActiveOs] = useState<OsId>("mac");
   const activeMeta = useMemo(() => TOOL_TABS.find((t) => t.id === activeTool)!, [activeTool]);
   const pairUrl = `/auth/integrations?tool=${activeTool}`;
-  const loginCmd = `${telemetryCli(activeOs)} login YOUR_CODE --tool ${activeTool}`;
-  const statusCmd = `${telemetryCli(activeOs)} status`;
-
-  const setupProps = { os: activeOs, pairUrl, loginCmd, statusCmd };
+  const setupProps = { os: activeOs, pairUrl, tool: activeTool };
 
   const setup =
     activeTool === "codex" ? (
@@ -50,7 +46,7 @@ export function IntegrationsHubClient() {
           Connect Claude Code, Cursor &amp; Codex
         </h1>
         <p className="mx-auto mt-3 max-w-lg text-sm leading-relaxed text-muted">
-          Download the plugin pack, install for your app, then connect with a pairing code.
+          Each step checks prerequisites, installs what&apos;s missing, and verifies success.
         </p>
         <p className="mx-auto mt-2 text-xs text-faint">
           Plugin pack:{" "}
@@ -130,8 +126,9 @@ export function IntegrationsHubClient() {
 
       <section className="mt-8 rounded-2xl border border-line bg-cream-dark p-4 text-sm text-muted">
         <p>
-          <strong className="text-ink">Requirements:</strong> Node.js 18+ (<code className="text-ink">node --version</code>
-          ). Codex users also need the Codex CLI (<code className="text-ink">codex --version</code>).
+          <strong className="text-ink">Tip:</strong> Step 1 installs Node.js-dependent tools automatically (e.g.{" "}
+          <code className="text-ink">npm install -g @openai/codex</code>). If you still see{" "}
+          <code className="text-ink">command not found</code>, close Terminal and open a new window, then rerun step 1.
         </p>
         <p className="mt-2">
           <strong className="text-ink">Privacy:</strong> We track prompt counts and time only — never prompt text.
