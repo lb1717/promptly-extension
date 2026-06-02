@@ -24,6 +24,17 @@ function normalizeTool(raw: string | null): IdeTool {
   return "claude_code";
 }
 
+function buildAgentPrompt(tool: IdeTool, label: string, code: string): string {
+  return `Set up Promptly on ${label} for me.
+
+My pairing code: ${code}
+(Get a new code at promptly-labs.com/auth/integrations?tool=${tool} if it expired.)
+
+Please install Promptly if needed, connect my account with that code (tool: ${tool}), and confirm I'm connected. Use the Promptly MCP tools (promptly_login, promptly_status) if you have them.
+
+Only track metadata — prompt counts and time, not prompt content. Tell me when you're done.`;
+}
+
 export function IntegrationsAuthClient({ initialTool }: { initialTool?: string | null }) {
   const searchParams = useSearchParams();
   const tool = useMemo(
@@ -36,7 +47,8 @@ export function IntegrationsAuthClient({ initialTool }: { initialTool?: string |
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copiedCode, setCopiedCode] = useState(false);
+  const [copiedPrompt, setCopiedPrompt] = useState(false);
 
   useEffect(() => {
     const auth = getFirebaseAuth();
@@ -94,21 +106,33 @@ export function IntegrationsAuthClient({ initialTool }: { initialTool?: string |
     if (!pairCode) return;
     try {
       await navigator.clipboard.writeText(pairCode);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
+      setCopiedCode(true);
+      window.setTimeout(() => setCopiedCode(false), 2000);
     } catch {
-      setCopied(false);
+      setCopiedCode(false);
+    }
+  }
+
+  async function copyPrompt() {
+    if (!pairCode) return;
+    try {
+      await navigator.clipboard.writeText(buildAgentPrompt(tool, TOOL_LABELS[tool], pairCode));
+      setCopiedPrompt(true);
+      window.setTimeout(() => setCopiedPrompt(false), 2000);
+    } catch {
+      setCopiedPrompt(false);
     }
   }
 
   const toolLabel = TOOL_LABELS[tool];
+  const agentPrompt = pairCode ? buildAgentPrompt(tool, toolLabel, pairCode) : null;
 
   return (
     <div className="mx-auto w-full max-w-lg rounded-2xl border border-line bg-cream p-6 shadow-card sm:p-8">
       <img src="/images/promptly-logo.png" alt="Promptly" className="mx-auto h-10 w-auto object-contain" />
       <h1 className="mt-6 text-center text-xl font-semibold text-ink">Connect {toolLabel}</h1>
       <p className="mt-2 text-center text-sm text-muted">
-        Sign in to Promptly, then use the pairing code in your terminal or MCP tool.
+        Sign in, copy your code, then paste the ready-made message into {toolLabel}.
       </p>
 
       {loading ? (
@@ -137,32 +161,44 @@ export function IntegrationsAuthClient({ initialTool }: { initialTool?: string |
             Signed in as <span className="font-medium text-ink">{user.email}</span>
           </p>
           {pairCode ? (
-            <div className="rounded-xl border border-line bg-cream-dark p-4 text-center">
-              <p className="text-xs font-medium uppercase tracking-wide text-faint">Pairing code</p>
-              <p className="mt-2 font-mono text-3xl font-bold tracking-[0.35em] text-ink">{pairCode}</p>
-              {expiresAt ? (
-                <p className="mt-2 text-xs text-faint">Expires {new Date(expiresAt).toLocaleTimeString()}</p>
-              ) : null}
-              <button
-                type="button"
-                onClick={() => void copyCode()}
-                className="mt-4 rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-ink hover:bg-cream"
-              >
-                {copied ? "Copied" : "Copy code"}
-              </button>
-            </div>
+            <>
+              <div className="rounded-xl border border-line bg-cream-dark p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-faint">Pairing code</p>
+                <p className="mt-2 font-mono text-3xl font-bold tracking-[0.35em] text-ink">{pairCode}</p>
+                {expiresAt ? (
+                  <p className="mt-2 text-xs text-faint">Expires {new Date(expiresAt).toLocaleTimeString()}</p>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => void copyCode()}
+                  className="mt-4 rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-ink hover:bg-cream"
+                >
+                  {copiedCode ? "Copied" : "Copy code"}
+                </button>
+              </div>
+
+              <div className="rounded-xl border border-line bg-white/60 p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-medium text-ink">Paste into {toolLabel}</p>
+                  <button
+                    type="button"
+                    onClick={() => void copyPrompt()}
+                    className="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-ink hover:bg-cream"
+                  >
+                    {copiedPrompt ? "Copied" : "Copy message"}
+                  </button>
+                </div>
+                <pre className="mt-3 max-h-48 overflow-y-auto whitespace-pre-wrap rounded-lg bg-ink p-3 font-mono text-[11px] leading-relaxed text-cream">
+                  {agentPrompt}
+                </pre>
+                <p className="mt-3 text-xs text-faint">
+                  Open {toolLabel}, start a chat, paste this message, and press Enter. The agent handles the rest.
+                </p>
+              </div>
+            </>
           ) : (
             <p className="text-center text-sm text-muted">{busy ? "Generating code…" : "No code yet"}</p>
           )}
-          <div className="rounded-xl border border-line bg-white/60 p-4 text-sm text-muted">
-            <p className="font-medium text-ink">In your terminal:</p>
-            <pre className="mt-2 overflow-x-auto rounded-lg bg-ink px-3 py-2 text-xs text-cream">
-              {`promptly-telemetry login ${pairCode || "CODE"} --tool ${tool}`}
-            </pre>
-            <p className="mt-3 text-xs text-faint">
-              Or ask your agent to use the Promptly MCP tool <code className="text-ink">promptly_login</code>.
-            </p>
-          </div>
           <button
             type="button"
             disabled={busy}
@@ -178,7 +214,7 @@ export function IntegrationsAuthClient({ initialTool }: { initialTool?: string |
 
       <p className="mt-6 text-center text-xs text-faint">
         <Link href="/integrations" className="underline hover:text-ink">
-          Install instructions
+          Setup guide
         </Link>
         {" · "}
         <Link href="/account/statistics" className="underline hover:text-ink">
