@@ -15,8 +15,8 @@ const marketplaceSrc = join(integrationsDir, ".claude-plugin/marketplace.json");
 const marketplaceCodex = join(integrationsDir, ".agents/plugins/marketplace.json");
 
 if (!existsSync(integrationsDir)) {
-  console.error("[promptly] integrations/ not found — cannot build plugin pack");
-  process.exit(1);
+  console.warn("[promptly] integrations/ not found — keeping committed zip in public/downloads");
+  process.exit(0);
 }
 
 mkdirSync(outDir, { recursive: true });
