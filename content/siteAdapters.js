@@ -617,6 +617,48 @@
     return claudeComposerIsStackedAboveInput(target, anchor, anchorRect, surfaceRect);
   }
 
+  /** Simple attachment check for a manual vertical nudge (filename testids, Remove buttons, thumbnails). */
+  function claudeHasUploadedAttachment(target) {
+    const input = getClaudeChatInput(target);
+    const scope = input?.closest("form");
+    if (!scope) {
+      return false;
+    }
+
+    for (const btn of scope.querySelectorAll('button[aria-label^="Remove "]')) {
+      if (isClaudeElementVisible(btn)) {
+        return true;
+      }
+    }
+
+    for (const node of scope.querySelectorAll("[data-testid]")) {
+      if (!claudeDataTestIdLooksLikeAttachment(node.getAttribute("data-testid"))) {
+        continue;
+      }
+      if (isClaudeElementVisible(node)) {
+        return true;
+      }
+    }
+
+    for (const thumb of scope.querySelectorAll('[class*="group/thumbnail"]')) {
+      if (isClaudeElementVisible(thumb)) {
+        return true;
+      }
+    }
+
+    for (const img of scope.querySelectorAll('img[src*="/files/"]')) {
+      if (!isClaudeElementVisible(img)) {
+        continue;
+      }
+      const src = String(img.getAttribute("src") || "");
+      if (src.includes("thumbnail") || src.includes("/files/")) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   function getClaudeComposerChromeTop(input, fallbackTop) {
     const chrome = getClaudeComposerChromeElement(input);
     if (chrome && typeof chrome.getBoundingClientRect === "function") {
@@ -641,20 +683,7 @@
     }
     const input = getClaudeChatInput(target);
     if (input) {
-      const hasAttachmentStrip = !!getClaudeAttachmentStripElement(input);
-      if (hasAttachmentStrip) {
-        const chrome = getClaudeComposerChromeElement(input);
-        if (chrome) {
-          return chrome;
-        }
-        const form = input.closest("form");
-        if (form) {
-          return form;
-        }
-      }
-
       const inputRect = input.getBoundingClientRect();
-      const maxTopGapPx = hasAttachmentStrip ? 220 : 56;
       const ancestors = [];
       for (
         let node = input.parentElement, depth = 0;
@@ -672,7 +701,7 @@
         const widthCloseToInput = rect.width >= inputRect.width * 0.85 && rect.width <= inputRect.width + 220;
         const bottomNearInput = rect.bottom >= inputRect.bottom - 12 && rect.bottom <= inputRect.bottom + 96;
         const topGapPx = inputRect.top - rect.top;
-        const topNotFarAbove = topGapPx >= -4 && topGapPx <= maxTopGapPx;
+        const topNotFarAbove = topGapPx >= -4 && topGapPx <= 56;
         if (widthCloseToInput && bottomNearInput && topNotFarAbove) {
           ancestors.push({ node, rect, topGapPx });
         }
@@ -681,18 +710,13 @@
         }
       }
       if (ancestors.length > 0) {
-        if (hasAttachmentStrip) {
-          // Thumbnail row is a sibling above the input — use the outer composer shell.
-          ancestors.sort((a, b) => b.topGapPx - a.topGapPx);
-        } else {
-          // Prefer the innermost shell hugging the input (new-chat composers can be much taller).
-          ancestors.sort((a, b) => {
-            if (a.topGapPx !== b.topGapPx) {
-              return a.topGapPx - b.topGapPx;
-            }
-            return a.rect.height - b.rect.height;
-          });
-        }
+        // Prefer the innermost shell hugging the input (new-chat composers can be much taller).
+        ancestors.sort((a, b) => {
+          if (a.topGapPx !== b.topGapPx) {
+            return a.topGapPx - b.topGapPx;
+          }
+          return a.rect.height - b.rect.height;
+        });
         return ancestors[0].node;
       }
 
@@ -732,23 +756,15 @@
         : null;
 
     let top = anchorRect.top;
-    const attachmentStripTop = getClaudeAttachmentStripTop(input);
     if (homeGreeting) {
       top = getClaudeComposerChromeTop(input, anchorRect.top);
       top -= 4;
-    } else if (attachmentStripTop != null) {
-      top = attachmentStripTop;
     } else if (surfaceRect && surfaceRect.width >= 80 && surfaceRect.height >= 12) {
       const gapAboveEditor = surfaceRect.top - anchorRect.top;
       const growthBelowEditor = anchorRect.bottom - surfaceRect.bottom;
-      const stackedAbove =
-        claudeComposerIsStackedAboveInput(target, anchor, anchorRect, surfaceRect);
       const tallBelow = growthBelowEditor > 28 && gapAboveEditor <= 12;
 
-      if (stackedAbove) {
-        // Attachments / chips sit above the editor — pin to outer chrome, not the input row.
-        top = getClaudeComposerChromeTop(input, anchorRect.top);
-      } else if (tallBelow) {
+      if (tallBelow) {
         // Multiline growth inside the editor only — keep the tab on the typing surface.
         top = surfaceRect.top;
       }
@@ -903,8 +919,7 @@
     getAnchorElement,
     getClaudeAnchorPlacementRect,
     claudeShowsHomeGreeting,
-    claudeComposerIsStackedAboveInput,
-    claudeComposerIsStackedForTarget,
+    claudeHasUploadedAttachment,
     getSessionVerificationHints
   };
 })();

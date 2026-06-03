@@ -20,6 +20,8 @@
   const CLAUDE_PLACEMENT_TOP_OFFSET_PX = -14;
   /** Greeting-screen tweak on top of siteAdapters chrome anchor (positive = down). */
   const CLAUDE_HOME_GREETING_TOP_OFFSET_PX = 18;
+  /** Claude attachment thumbnails (~120px row) — fixed manual lift (negative = up). */
+  const CLAUDE_ATTACHMENT_TOP_OFFSET_PX = -108;
   /** Gemini-only: nudge anchor top downward slightly for better chatbox alignment (px). */
   const GEMINI_PLACEMENT_TOP_OFFSET_PX = 1;
   /** After Generate Prompt succeeds with the panel open, collapse back to tab-only (ms). */
@@ -2958,11 +2960,11 @@
       site === "claude" &&
       typeof adapters.claudeShowsHomeGreeting === "function" &&
       adapters.claudeShowsHomeGreeting();
-    const claudeComposerStacked =
+    const claudeHasAttachment =
       site === "claude" &&
       !claudeHomeGreeting &&
-      typeof adapters.claudeComposerIsStackedForTarget === "function" &&
-      adapters.claudeComposerIsStackedForTarget(currentTarget);
+      typeof adapters.claudeHasUploadedAttachment === "function" &&
+      adapters.claudeHasUploadedAttachment(currentTarget);
     const rect =
       site === "claude"
         ? {
@@ -2970,7 +2972,8 @@
             top:
               anchorRect.top +
               CLAUDE_PLACEMENT_TOP_OFFSET_PX +
-              (claudeHomeGreeting ? CLAUDE_HOME_GREETING_TOP_OFFSET_PX : 0)
+              (claudeHomeGreeting ? CLAUDE_HOME_GREETING_TOP_OFFSET_PX : 0) +
+              (claudeHasAttachment ? CLAUDE_ATTACHMENT_TOP_OFFSET_PX : 0)
           }
         : site === "gemini"
           ? { ...anchorRect, top: anchorRect.top + GEMINI_PLACEMENT_TOP_OFFSET_PX }
@@ -2989,7 +2992,7 @@
       isOpen ? 1 : 0,
       Math.round(positionManager.getPromptlyCenterOffsetX()),
       claudeHomeGreeting ? 1 : 0,
-      claudeComposerStacked ? 1 : 0
+      claudeHasAttachment ? 1 : 0
     ].join("|");
 
     if (placementSig !== lastPlacementSignature) {
