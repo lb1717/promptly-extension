@@ -441,6 +441,71 @@
     return false;
   }
 
+  function claudeComposerHasAttachmentStack(input, anchor) {
+    const root =
+      (anchor instanceof Element && anchor) || input?.closest("form") || getClaudeChatInput(input)?.parentElement;
+    if (!root || !input) {
+      return false;
+    }
+    const inputTop = input.getBoundingClientRect().top;
+    const rootTop = root.getBoundingClientRect().top;
+    const attachmentSelectors = [
+      '[data-testid*="attachment"]',
+      '[data-testid*="file"]',
+      '[class*="attachment"]',
+      '[class*="Attachment"]'
+    ];
+    for (const selector of attachmentSelectors) {
+      let nodes = [];
+      try {
+        nodes = root.querySelectorAll(selector);
+      } catch (_e) {
+        continue;
+      }
+      for (const node of nodes) {
+        if (!isClaudeElementVisible(node)) {
+          continue;
+        }
+        const rect = node.getBoundingClientRect();
+        if (rect.height < 10 || rect.width < 10) {
+          continue;
+        }
+        if (rect.bottom <= inputTop + 6 && rect.top >= rootTop - 8) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function claudeComposerIsStackedAboveInput(target, anchor, anchorRect, surfaceRect) {
+    if (!surfaceRect || surfaceRect.width < 80) {
+      return false;
+    }
+    const gapAboveEditor = surfaceRect.top - anchorRect.top;
+    if (gapAboveEditor > 18) {
+      return true;
+    }
+    const input = getClaudeChatInput(target);
+    return claudeComposerHasAttachmentStack(input, anchor);
+  }
+
+  function claudeComposerIsStackedForTarget(target) {
+    if (!isElement(target)) {
+      return false;
+    }
+    const anchor = getAnchorElementForClaude(target);
+    const anchorRect =
+      anchor && typeof anchor.getBoundingClientRect === "function"
+        ? anchor.getBoundingClientRect()
+        : null;
+    const surfaceRect = getPromptSurfaceRect(target) || target.getBoundingClientRect();
+    if (!anchorRect) {
+      return false;
+    }
+    return claudeComposerIsStackedAboveInput(target, anchor, anchorRect, surfaceRect);
+  }
+
   function getClaudeComposerChromeTop(input, fallbackTop) {
     if (!input) {
       return fallbackTop;
@@ -556,8 +621,17 @@
       top = getClaudeComposerChromeTop(input, anchorRect.top);
       top -= 4;
     } else if (surfaceRect && surfaceRect.width >= 80 && surfaceRect.height >= 12) {
-      const tallShell = anchorRect.height - surfaceRect.height > 32;
-      if (tallShell) {
+      const gapAboveEditor = surfaceRect.top - anchorRect.top;
+      const growthBelowEditor = anchorRect.bottom - surfaceRect.bottom;
+      const stackedAbove =
+        claudeComposerIsStackedAboveInput(target, anchor, anchorRect, surfaceRect);
+      const tallBelow = growthBelowEditor > 28 && gapAboveEditor <= 12;
+
+      if (stackedAbove) {
+        // Attachments / chips sit above the editor — pin to outer chrome, not the input row.
+        top = getClaudeComposerChromeTop(input, anchorRect.top);
+      } else if (tallBelow) {
+        // Multiline growth inside the editor only — keep the tab on the typing surface.
         top = surfaceRect.top;
       }
     }
@@ -711,6 +785,8 @@
     getAnchorElement,
     getClaudeAnchorPlacementRect,
     claudeShowsHomeGreeting,
+    claudeComposerIsStackedAboveInput,
+    claudeComposerIsStackedForTarget,
     getSessionVerificationHints
   };
 })();

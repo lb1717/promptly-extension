@@ -2932,6 +2932,11 @@
       site === "claude" &&
       typeof adapters.claudeShowsHomeGreeting === "function" &&
       adapters.claudeShowsHomeGreeting();
+    const claudeComposerStacked =
+      site === "claude" &&
+      !claudeHomeGreeting &&
+      typeof adapters.claudeComposerIsStackedForTarget === "function" &&
+      adapters.claudeComposerIsStackedForTarget(currentTarget);
     const rect =
       site === "claude"
         ? {
@@ -2957,7 +2962,8 @@
       Math.round(popupHeight),
       isOpen ? 1 : 0,
       Math.round(positionManager.getPromptlyCenterOffsetX()),
-      claudeHomeGreeting ? 1 : 0
+      claudeHomeGreeting ? 1 : 0,
+      claudeComposerStacked ? 1 : 0
     ].join("|");
 
     if (placementSig !== lastPlacementSignature) {
