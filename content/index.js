@@ -43,6 +43,9 @@
   /** Skip applyPlacement when anchor geometry + open state unchanged (reduces jitter from inner scroll/input). */
   let lastPlacementSignature = null;
   let allowDisplay = false;
+  let displayDelayElapsed = false;
+  let displayDelayTimer = null;
+  let hasPlacementReady = false;
   let autoAdjustInFlight = false;
   let autoAdjustOnSend = false;
   let autoModeBlockedByTokens = false;
@@ -241,7 +244,7 @@
     if (ui.isSignedOut()) {
       return;
     }
-    if (!allowDisplay) {
+    if (!promptlyCanShow()) {
       window.setTimeout(() => {
         void maybeStartTutorial(options);
       }, 400);
@@ -1254,16 +1257,37 @@
     // Gemini's composer animates heavily on load; disable continuous tracking
     // to prevent post-appear vertical drifting.
     enableContinuousPositionTracking: site !== "gemini",
+    enableHeightPositionTracking: site === "claude",
     getAnchorElement:
       typeof adapters.getAnchorElement === "function"
         ? (target) => adapters.getAnchorElement(target)
         : null
   });
-  const unlockDisplayTimer = window.setTimeout(() => {
-    allowDisplay = true;
-    observers.scheduleUpdate();
+  function tryUnlockPromptlyDisplay() {
+    if (!displayDelayElapsed || !ui.isUiReady() || allowDisplay) {
+      if (displayDelayElapsed && ui.isUiReady() && allowDisplay) {
+        observers.scheduleUpdate();
+      }
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        allowDisplay = true;
+        observers.scheduleUpdate();
+      });
+    });
+  }
+
+  displayDelayTimer = window.setTimeout(() => {
+    displayDelayElapsed = true;
+    tryUnlockPromptlyDisplay();
   }, UI_DISPLAY_DELAY_MS);
+  void ui.whenUiReady().then(() => tryUnlockPromptlyDisplay());
   ui.setAutoSendEnabled(autoAdjustOnSend);
+
+  function promptlyCanShow() {
+    return allowDisplay && ui.isUiReady() && hasPlacementReady;
+  }
 
   function isPromptlyAuthSessionError(message) {
     const lowered = String(message || "").toLowerCase();
@@ -2912,12 +2936,14 @@
     if (nextTarget !== currentTarget) {
       currentTarget = nextTarget;
       lastPlacementSignature = null;
+      hasPlacementReady = false;
       observers.bindTarget(currentTarget);
       ensureHostPassiveListener();
     }
 
     if (!currentTarget || !isTargetVisible(currentTarget)) {
       lastPlacementSignature = null;
+      hasPlacementReady = false;
       ui.setVisible(false);
       return;
     }
@@ -2971,8 +2997,9 @@
       const placement = positionManager.compute(rect, popupHeight, isOpen);
       ui.setDirection(placement.direction);
       ui.applyPlacement(placement);
+      hasPlacementReady = true;
     }
-    ui.setVisible(allowDisplay);
+    ui.setVisible(promptlyCanShow());
   }
 
   function closePopup() {
@@ -3274,7 +3301,10 @@
     window.clearTimeout(visibilityCreditsRefreshTimer);
     visibilityCreditsRefreshTimer = null;
     stopCreditsPolling();
-    window.clearTimeout(unlockDisplayTimer);
+    if (displayDelayTimer) {
+      window.clearTimeout(displayDelayTimer);
+      displayDelayTimer = null;
+    }
     observers.stop();
     document.removeEventListener("pointerdown", handlePointerDown, true);
     document.removeEventListener("click", handleDocumentClick, true);

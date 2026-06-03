@@ -49,8 +49,15 @@
   --promptly-tab-bg: linear-gradient(135deg, #111827, #030712);
 }
 
+.promptly-root.is-ui-booting {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
 .promptly-root.is-host-visible {
   opacity: 1;
+  visibility: visible;
 }
 
 .promptly-root[data-theme="dark"] {
