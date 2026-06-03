@@ -16,8 +16,8 @@
   const UI_DISPLAY_DELAY_MS = 300;
   const BASE_CONTEXT_WINDOW_WIDTH = 330;
   const EXPANDED_CONTEXT_WINDOW_MULTIPLIER = 1.5;
-  /** Claude-only: nudge anchor top upward so the tab sits flush on the prompt shell (px). */
-  const CLAUDE_PLACEMENT_TOP_OFFSET_PX = 24;
+  /** Claude-only: small nudge so the tab sits flush on the prompt shell (px). */
+  const CLAUDE_PLACEMENT_TOP_OFFSET_PX = 6;
   /** Gemini-only: nudge anchor top downward slightly for better chatbox alignment (px). */
   const GEMINI_PLACEMENT_TOP_OFFSET_PX = 1;
   /** After Generate Prompt succeeds with the panel open, collapse back to tab-only (ms). */
@@ -2872,6 +2872,12 @@
 
   function getAnchorRectForTarget(target) {
     const anchor = adapters.getAnchorElement ? adapters.getAnchorElement(target) : target;
+    if (site === "claude" && typeof adapters.getClaudeAnchorPlacementRect === "function") {
+      const claudeRect = adapters.getClaudeAnchorPlacementRect(target, anchor);
+      if (claudeRect) {
+        return claudeRect;
+      }
+    }
     const anchorRect = anchor && typeof anchor.getBoundingClientRect === "function"
       ? anchor.getBoundingClientRect()
       : null;

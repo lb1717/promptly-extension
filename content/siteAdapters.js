@@ -389,13 +389,21 @@
     );
   }
 
+  function getClaudeChatInput(target) {
+    if (!target || !isElement(target)) {
+      return null;
+    }
+    return (
+      target.closest('[data-testid="chat-input"]') ||
+      (target.getAttribute("data-testid") === "chat-input" ? target : null)
+    );
+  }
+
   function getAnchorElementForClaude(target) {
     if (!target || !isElement(target)) {
       return target;
     }
-    const input =
-      target.closest('[data-testid="chat-input"]') ||
-      (target.getAttribute("data-testid") === "chat-input" ? target : null);
+    const input = getClaudeChatInput(target);
     if (input) {
       const inputRect = input.getBoundingClientRect();
       const ancestors = [];
@@ -413,17 +421,24 @@
         }
         // Keep candidates close to the input geometry so we avoid huge page wrappers.
         const widthCloseToInput = rect.width >= inputRect.width * 0.85 && rect.width <= inputRect.width + 220;
-        const bottomNearInput = rect.bottom >= inputRect.bottom - 12 && rect.bottom <= inputRect.bottom + 96;
-        const topNotFarAbove = rect.top <= inputRect.top + 8 && rect.top >= inputRect.top - 220;
+        const bottomNearInput = rect.bottom >= inputRect.bottom - 12 && rect.bottom <= inputRect.bottom + 48;
+        const topGapPx = inputRect.top - rect.top;
+        const topNotFarAbove = topGapPx >= -4 && topGapPx <= 56;
         if (widthCloseToInput && bottomNearInput && topNotFarAbove) {
-          ancestors.push({ node, rect });
+          ancestors.push({ node, rect, topGapPx });
         }
         if (node.tagName === "FORM") {
           break;
         }
       }
       if (ancestors.length > 0) {
-        ancestors.sort((a, b) => (a.rect.top === b.rect.top ? a.rect.height - b.rect.height : a.rect.top - b.rect.top));
+        // Prefer the innermost shell hugging the input (new-chat composers can be much taller).
+        ancestors.sort((a, b) => {
+          if (a.topGapPx !== b.topGapPx) {
+            return a.topGapPx - b.topGapPx;
+          }
+          return a.rect.height - b.rect.height;
+        });
         return ancestors[0].node;
       }
 
@@ -439,6 +454,38 @@
       }
     }
     return target.closest("form") || target;
+  }
+
+  /**
+   * Claude new-chat layouts stack starter UI above the editor inside a tall composer shell.
+   * Pin Promptly to the editable row top/width, not the outer card top.
+   */
+  function getClaudeAnchorPlacementRect(target, anchor) {
+    if (!isElement(target) || !isElement(anchor)) {
+      return null;
+    }
+    const anchorRect = anchor.getBoundingClientRect();
+    if (anchorRect.width < 120 || anchorRect.height < 20) {
+      return null;
+    }
+    const writeSurface = getPromptWriteSurface(target);
+    const surfaceRect =
+      writeSurface && typeof writeSurface.getBoundingClientRect === "function"
+        ? writeSurface.getBoundingClientRect()
+        : null;
+    if (!surfaceRect || surfaceRect.width < 80 || surfaceRect.height < 12) {
+      return {
+        left: anchorRect.left,
+        width: anchorRect.width,
+        top: anchorRect.top
+      };
+    }
+    const tallShell = anchorRect.height - surfaceRect.height > 32;
+    return {
+      left: anchorRect.left,
+      width: anchorRect.width,
+      top: tallShell ? surfaceRect.top : anchorRect.top
+    };
   }
 
   function getAnchorElement(target) {
@@ -581,6 +628,7 @@
     getPromptElementForGemini,
     getPromptElementUniversal,
     getAnchorElement,
+    getClaudeAnchorPlacementRect,
     getSessionVerificationHints
   };
 })();
