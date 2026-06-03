@@ -26,7 +26,8 @@ export const PUBLIC_SITEMAP_ROUTES: Array<{ path: string; changeFrequency: Sitem
   { path: "/labs", changeFrequency: "monthly", priority: 0.8 },
   { path: "/research", changeFrequency: "monthly", priority: 0.75 },
   { path: "/papers", changeFrequency: "monthly", priority: 0.6 },
-  { path: "/privacy", changeFrequency: "yearly", priority: 0.3 }
+  { path: "/privacy", changeFrequency: "yearly", priority: 0.3 },
+  { path: "/help", changeFrequency: "monthly", priority: 0.35 }
 ];
 
 export function getSiteUrl(): string {

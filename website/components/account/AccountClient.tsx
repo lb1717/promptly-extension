@@ -35,8 +35,6 @@ import { EmailVerificationNotice } from "@/components/auth/EmailVerificationNoti
 import { listenForGoogleSignInReturn, signInWithGoogleInteractive } from "@/lib/firebaseGoogleAuth";
 import { useEmailVerificationStatus } from "@/lib/useEmailVerificationStatus";
 import { ACCOUNT_PLANS, isPaidPlanKey, type PaidPlanKey } from "@/lib/plans";
-import { AccountHelpSection } from "@/components/account/AccountHelpSection";
-
 function formatJoinDate(user: User | null): string {
   if (!user?.metadata?.creationTime) return "—";
   try {
@@ -641,8 +639,6 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
 
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-10 pb-24">
-      {!extensionMode ? <AccountHelpSection className="mb-6" /> : null}
-
       {!user ? (
         <div className="mx-auto flex min-h-[calc(100dvh-12rem)] w-full max-w-sm flex-col items-center justify-center">
           {loading ? (

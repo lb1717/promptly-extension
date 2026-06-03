@@ -18,22 +18,30 @@ function HelpAccordion({ items }: { items: { q: string; a: string }[] }) {
   );
 }
 
-export function AccountHelpSection({ className = "" }: { className?: string }) {
+export function AccountHelpSection({
+  className = "",
+  showHeading = true
+}: {
+  className?: string;
+  showHeading?: boolean;
+}) {
   return (
     <section
       className={`rounded-2xl border border-line bg-cream p-5 backdrop-blur-md sm:p-6 ${className}`.trim()}
-      aria-labelledby="account-help-heading"
+      aria-labelledby={showHeading ? "account-help-heading" : undefined}
     >
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h2 id="account-help-heading" className="text-lg font-semibold tracking-tight text-ink">
-            Help
-          </h2>
-          <p className="mt-1 text-sm text-muted">
-            Quick answers and fixes if Promptly is not showing or not working in your browser.
-          </p>
-        </div>
-        <div className="flex shrink-0 flex-wrap gap-2 text-xs">
+        {showHeading ? (
+          <div>
+            <h2 id="account-help-heading" className="text-lg font-semibold tracking-tight text-ink">
+              Help
+            </h2>
+            <p className="mt-1 text-sm text-muted">
+              Quick answers and fixes if Promptly is not showing or not working in your browser.
+            </p>
+          </div>
+        ) : null}
+        <div className={`flex shrink-0 flex-wrap gap-2 text-xs ${showHeading ? "" : "sm:ml-auto"}`}>
           <Link
             href={SITE.getStartedPath}
             className="inline-flex items-center justify-center rounded-lg border border-line bg-cream-dark px-3 py-2 font-semibold text-ink hover:bg-cream"
