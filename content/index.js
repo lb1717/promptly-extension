@@ -17,7 +17,9 @@
   const BASE_CONTEXT_WINDOW_WIDTH = 330;
   const EXPANDED_CONTEXT_WINDOW_MULTIPLIER = 1.5;
   /** Claude-only: small nudge so the tab sits flush on the prompt shell (px). */
-  const CLAUDE_PLACEMENT_TOP_OFFSET_PX = 6;
+  const CLAUDE_PLACEMENT_TOP_OFFSET_PX = 0;
+  /** Extra lift on Claude empty-state greeting screens (applied in siteAdapters). */
+  const CLAUDE_HOME_GREETING_TOP_OFFSET_PX = -6;
   /** Gemini-only: nudge anchor top downward slightly for better chatbox alignment (px). */
   const GEMINI_PLACEMENT_TOP_OFFSET_PX = 1;
   /** After Generate Prompt succeeds with the panel open, collapse back to tab-only (ms). */
@@ -2926,9 +2928,19 @@
     tutorial?.reconcileImproveStep(promptAnalysis, currentPromptText);
     syncTutorialImproveSendFromComposer(currentPromptText);
     const anchorRect = getAnchorRectForTarget(currentTarget);
+    const claudeHomeGreeting =
+      site === "claude" &&
+      typeof adapters.claudeShowsHomeGreeting === "function" &&
+      adapters.claudeShowsHomeGreeting();
     const rect =
       site === "claude"
-        ? { ...anchorRect, top: anchorRect.top + CLAUDE_PLACEMENT_TOP_OFFSET_PX }
+        ? {
+            ...anchorRect,
+            top:
+              anchorRect.top +
+              CLAUDE_PLACEMENT_TOP_OFFSET_PX +
+              (claudeHomeGreeting ? CLAUDE_HOME_GREETING_TOP_OFFSET_PX : 0)
+          }
         : site === "gemini"
           ? { ...anchorRect, top: anchorRect.top + GEMINI_PLACEMENT_TOP_OFFSET_PX }
           : anchorRect;
@@ -2944,7 +2956,8 @@
       Math.round(rect.width),
       Math.round(popupHeight),
       isOpen ? 1 : 0,
-      Math.round(positionManager.getPromptlyCenterOffsetX())
+      Math.round(positionManager.getPromptlyCenterOffsetX()),
+      claudeHomeGreeting ? 1 : 0
     ].join("|");
 
     if (placementSig !== lastPlacementSignature) {

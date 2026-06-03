@@ -389,6 +389,80 @@
     );
   }
 
+  /** Matches Claude empty-state greetings like "Good morning, Leo" (wording varies by time/day). */
+  const CLAUDE_HOME_GREETING_TEXT_RE =
+    /^(?:Good\s+(?:morning|afternoon|evening)|Happy\s+(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)|Welcome\s+back|Back\s+at\s+it|Hello)(?:[,.!?]|\s)/i;
+
+  function isClaudeElementVisible(el) {
+    if (!isElement(el) || !el.isConnected) {
+      return false;
+    }
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 8 || rect.height < 6) {
+      return false;
+    }
+    const style = window.getComputedStyle(el);
+    if (style.display === "none" || style.visibility === "hidden") {
+      return false;
+    }
+    return Number(style.opacity || 1) > 0;
+  }
+
+  function claudeThreadHasUserMessages() {
+    return !!document.querySelector(
+      '[data-testid="user-message"], [data-testid="human-message"], .font-user-message'
+    );
+  }
+
+  function claudeShowsHomeGreeting() {
+    if (claudeThreadHasUserMessages()) {
+      return false;
+    }
+    const spans = document.querySelectorAll("span.whitespace-nowrap.select-none");
+    for (const span of spans) {
+      if (!isClaudeElementVisible(span)) {
+        continue;
+      }
+      if (span.closest('[data-testid="chat-input"], form')) {
+        continue;
+      }
+      const text = String(span.textContent || "").trim();
+      if (!text || text.length > 96) {
+        continue;
+      }
+      if (CLAUDE_HOME_GREETING_TEXT_RE.test(text)) {
+        return true;
+      }
+      // Other short personalized empty-state lines (e.g. "Hey, Leo").
+      if (text.length >= 6 && text.length <= 72 && /^[A-Z]/.test(text) && /,\s*\S/.test(text)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function getClaudeComposerChromeTop(input, fallbackTop) {
+    if (!input) {
+      return fallbackTop;
+    }
+    let node = input.parentElement;
+    for (let depth = 0; node && depth < 14; node = node.parentElement, depth += 1) {
+      if (typeof node.getBoundingClientRect !== "function") {
+        continue;
+      }
+      const rect = node.getBoundingClientRect();
+      if (rect.width < 120 || rect.height < 28) {
+        continue;
+      }
+      const style = window.getComputedStyle(node);
+      const radius = parseFloat(style.borderTopLeftRadius || "0");
+      if (Number.isFinite(radius) && radius >= 6) {
+        return rect.top;
+      }
+    }
+    return fallbackTop;
+  }
+
   function getClaudeChatInput(target) {
     if (!target || !isElement(target)) {
       return null;
@@ -458,7 +532,8 @@
 
   /**
    * Claude new-chat layouts stack starter UI above the editor inside a tall composer shell.
-   * Pin Promptly to the editable row top/width, not the outer card top.
+   * Empty-state greetings (e.g. "Good morning, Leo") use a centered composer — pin to the
+   * rounded chrome top and lift slightly so the tab sits flush on the visible chat bar.
    */
   function getClaudeAnchorPlacementRect(target, anchor) {
     if (!isElement(target) || !isElement(anchor)) {
@@ -468,23 +543,29 @@
     if (anchorRect.width < 120 || anchorRect.height < 20) {
       return null;
     }
+    const input = getClaudeChatInput(target);
+    const homeGreeting = claudeShowsHomeGreeting();
     const writeSurface = getPromptWriteSurface(target);
     const surfaceRect =
       writeSurface && typeof writeSurface.getBoundingClientRect === "function"
         ? writeSurface.getBoundingClientRect()
         : null;
-    if (!surfaceRect || surfaceRect.width < 80 || surfaceRect.height < 12) {
-      return {
-        left: anchorRect.left,
-        width: anchorRect.width,
-        top: anchorRect.top
-      };
+
+    let top = anchorRect.top;
+    if (homeGreeting) {
+      top = getClaudeComposerChromeTop(input, anchorRect.top);
+      top -= 10;
+    } else if (surfaceRect && surfaceRect.width >= 80 && surfaceRect.height >= 12) {
+      const tallShell = anchorRect.height - surfaceRect.height > 32;
+      if (tallShell) {
+        top = surfaceRect.top;
+      }
     }
-    const tallShell = anchorRect.height - surfaceRect.height > 32;
+
     return {
       left: anchorRect.left,
       width: anchorRect.width,
-      top: tallShell ? surfaceRect.top : anchorRect.top
+      top
     };
   }
 
@@ -629,6 +710,7 @@
     getPromptElementUniversal,
     getAnchorElement,
     getClaudeAnchorPlacementRect,
+    claudeShowsHomeGreeting,
     getSessionVerificationHints
   };
 })();
