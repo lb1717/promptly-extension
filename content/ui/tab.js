@@ -23,6 +23,27 @@
     return "free";
   }
 
+  const MANAGE_SUBSCRIPTION_BTN_LABEL = "Manage subscription";
+  const UPGRADE_PLAN_BTN_LABEL = "Upgrade Plan";
+
+  function isCreditUsageAtPlanMax(credits) {
+    if (!credits || typeof credits !== "object") {
+      return false;
+    }
+    if (credits.hard_exhausted === true) {
+      return true;
+    }
+    const max = Math.max(1, Number(credits.max || 1));
+    const used = Math.min(max, Math.max(0, Number(credits.used || 0)));
+    if (used >= max) {
+      return true;
+    }
+    if (credits.remaining != null) {
+      return Math.max(0, Number(credits.remaining) || 0) <= 0 && used > 0;
+    }
+    return false;
+  }
+
   function setTickHighlight(ticksRoot, level) {
     if (!(ticksRoot instanceof Element)) {
       return;
@@ -173,9 +194,8 @@
       this.suppressNextClick = false;
       this.tabStatusResetTimer = null;
       this.tabStatusPrepTimer = null;
-      this.repositionHintTimer = null;
-      this.repositionHintSeenStorageKey = "promptly_reposition_hint_seen_v1";
       this.settingsPlanTier = "free";
+      this.lastCreditUsage = null;
       this.settingsSliderUpgradeTimers = {};
 
       this.host = document.createElement("div");
@@ -498,9 +518,6 @@
             this.onLayoutChange();
           }
         },
-        () => {
-          this.showRepositionHint({ force: true });
-        },
         (payload) => {
           if (typeof this.onFurtherImproveAppend === "function") {
             return this.onFurtherImproveAppend(payload);
@@ -516,12 +533,6 @@
       this.errorToast.setAttribute("role", "status");
       this.errorToast.textContent = "";
       this.errorToastTimer = null;
-      this.repositionHint = document.createElement("div");
-      this.repositionHint.className = "promptly-tab-reposition-hint";
-      this.repositionHint.setAttribute("role", "status");
-      this.repositionHint.innerHTML =
-        "<span class='promptly-tab-reposition-text'>Slide to reposition</span>" +
-        "<span class='promptly-tab-reposition-arrow' aria-hidden='true'>←────→</span>";
       this.settingsPanel = document.createElement("aside");
       this.settingsPanel.className = "promptly-settings-panel";
       this.settingsPanel.setAttribute("aria-hidden", "true");
@@ -541,7 +552,7 @@
         "<div class='promptly-settings-tier-badge' hidden>Free</div>" +
         "<button type='button' class='promptly-settings-account-btn'>Manage subscription</button>" +
         "</div>" +
-        "<button type='button' class='promptly-settings-statistics-btn' hidden>My Statistics</button>" +
+        "<button type='button' class='promptly-settings-statistics-btn' hidden>My AI-usage Statistics</button>" +
         "</div>" +
         "<div class='promptly-settings-section promptly-settings-section-account-sliders'>" +
         "<div class='promptly-settings-sliders-wrap'>" +
@@ -742,7 +753,7 @@
         event.stopPropagation();
       });
       // Attach toast to the tab itself so it follows the tab's translate3d placement.
-      this.tabButton.append(this.errorToast, this.repositionHint);
+      this.tabButton.append(this.errorToast);
       this.root.append(this.popupMask, this.tabButton, this.settingsPanel);
       this.setTabStatus("idle");
       this.shadowRoot.append(styleLink, this.root);
@@ -759,10 +770,6 @@
       if (this.errorToastTimer) {
         window.clearTimeout(this.errorToastTimer);
         this.errorToastTimer = null;
-      }
-      if (this.repositionHintTimer) {
-        window.clearTimeout(this.repositionHintTimer);
-        this.repositionHintTimer = null;
       }
       Object.keys(this.settingsSliderUpgradeTimers || {}).forEach((key) => {
         const timer = this.settingsSliderUpgradeTimers[key];
@@ -875,6 +882,8 @@
     resetCreditUsageDisplay() {
       this.creditUsageLoaded = false;
       this.creditUsageFetchedAt = 0;
+      this.lastCreditUsage = null;
+      this.syncManageSubscriptionButton(null);
       if (this.creditUsageMeter) {
         this.creditUsageMeter.style.setProperty("--promptly-credit-progress", "2%");
       }
@@ -1022,6 +1031,22 @@
       this.settingsTierEl.hidden = false;
       this.settingsPlanTier = normalized;
       this.hideSettingsSliderUpgradePrompts();
+      this.syncManageSubscriptionButton(this.lastCreditUsage);
+    }
+
+    isTopPlanTier() {
+      return this.settingsPlanTier === "enterprise";
+    }
+
+    syncManageSubscriptionButton(credits) {
+      if (!this.settingsAccountBtn) {
+        return;
+      }
+      const atMax = isCreditUsageAtPlanMax(credits);
+      const showUpgrade = atMax && !this.isTopPlanTier();
+      this.settingsAccountBtn.textContent = showUpgrade
+        ? UPGRADE_PLAN_BTN_LABEL
+        : MANAGE_SUBSCRIPTION_BTN_LABEL;
     }
 
     hideSettingsSliderUpgradePrompts() {
@@ -1165,36 +1190,6 @@
       this.showToast(message, { tone: "error" });
     }
 
-    showRepositionHint(options = {}) {
-      if (!this.repositionHint) {
-        return;
-      }
-      const force = !!options?.force;
-      if (!force) {
-        try {
-          const seen = String(window.localStorage.getItem(this.repositionHintSeenStorageKey) || "");
-          if (seen === "1") {
-            return;
-          }
-          window.localStorage.setItem(this.repositionHintSeenStorageKey, "1");
-        } catch (_error) {
-          // Ignore storage errors; still show once for this session.
-        }
-      }
-      if (this.repositionHintTimer) {
-        window.clearTimeout(this.repositionHintTimer);
-        this.repositionHintTimer = null;
-      }
-      this.repositionHint.classList.remove("is-replay");
-      // Force reflow so the arrow animation can replay.
-      void this.repositionHint.offsetWidth;
-      this.repositionHint.classList.add("is-visible", "is-replay");
-      this.repositionHintTimer = window.setTimeout(() => {
-        this.repositionHint.classList.remove("is-visible", "is-replay");
-        this.repositionHintTimer = null;
-      }, 3600);
-    }
-
     setCreditUsage(credits) {
       if (!credits || !this.creditUsageMeter || !this.creditUsageTooltip) {
         return;
@@ -1231,6 +1226,8 @@
         resetLine;
       this.creditUsageLoaded = true;
       this.creditUsageFetchedAt = Date.now();
+      this.lastCreditUsage = credits;
+      this.syncManageSubscriptionButton(credits);
     }
 
     setTabStatus(status) {

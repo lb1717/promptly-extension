@@ -36,8 +36,7 @@
     {
       id: "settings",
       stepClass: "is-tutorial-step-settings",
-      locks: ["improve", "generate", "auto"],
-      panelPosition: "left-of-settings"
+      locks: ["improve", "generate", "auto"]
     },
     {
       id: "done",
@@ -395,7 +394,6 @@
       STEP_META.forEach((meta) => {
         this.root.classList.remove(meta.stepClass);
       });
-      this.root.classList.remove("is-tutorial-panel-left");
       ["initial", "further", "send", "complete"].forEach((phase) => {
         this.root.classList.remove(`is-tutorial-improve-phase-${phase}`);
       });
@@ -413,7 +411,6 @@
       STEP_META.forEach((meta) => {
         this.root.classList.remove(meta.stepClass);
       });
-      this.root.classList.remove("is-tutorial-panel-left");
       ["initial", "further", "send", "complete"].forEach((phase) => {
         this.root.classList.remove(`is-tutorial-improve-phase-${phase}`);
       });
@@ -503,8 +500,6 @@
         this.root.classList.toggle(meta.stepClass, meta.id === this.getStepId());
       });
       const meta = STEP_META[this.stepIndex];
-      const leftOfSettings = meta?.panelPosition === "left-of-settings" && this.settingsOpened;
-      this.root.classList.toggle("is-tutorial-panel-left", !!leftOfSettings);
       ["initial", "further", "send", "complete"].forEach((phase) => {
         this.root.classList.toggle(
           `is-tutorial-improve-phase-${phase}`,

@@ -880,9 +880,6 @@
         );
         ui.setSignedOut(false);
         ui.setSettingsAccountEmail(String(result?.chromeEmail || "").trim());
-        if (!tutorial?.isActive()) {
-          ui.showRepositionHint();
-        }
         if (result?.chromeEmail) {
           refreshCreditsFromServer();
           startCreditsPolling();

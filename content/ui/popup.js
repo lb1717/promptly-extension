@@ -23,7 +23,6 @@
       onSuggestionClick,
       onAutoAdjustClick,
       onLayoutHintChange,
-      onRepositionHintTest,
       onFurtherImproveAppend
     ) {
       this.rootNode = rootNode;
@@ -31,7 +30,6 @@
       this.onSuggestionClick = onSuggestionClick;
       this.onAutoAdjustClick = onAutoAdjustClick;
       this.onLayoutHintChange = onLayoutHintChange;
-      this.onRepositionHintTest = onRepositionHintTest;
       this.onFurtherImproveAppend =
         typeof onFurtherImproveAppend === "function" ? onFurtherImproveAppend : null;
       this.tutorialActionGate = null;
@@ -226,12 +224,6 @@
           }
         }
         this.updateComposeFocusMode();
-        if (
-          String(this.rewriteInstructionInput.value || "").trim().toLowerCase() === "repostesting" &&
-          typeof this.onRepositionHintTest === "function"
-        ) {
-          this.onRepositionHintTest();
-        }
       });
       this.rewriteInstructionInput.addEventListener("keydown", (event) => {
         if (event.key !== "Enter") {

@@ -671,13 +671,18 @@ export function GeneralOnboardingClient() {
               <p className="text-sm text-emerald-700">Extension detected — you&apos;re connected.</p>
             ) : null}
 
-            {!storeLinkClicked ? (
+            {!storeLinkClicked && !extensionDetected ? (
               <p className="text-center text-xs text-faint">Add Promptly to Chrome or Edge above to continue.</p>
+            ) : null}
+            {extensionDetected && !storeLinkClicked ? (
+              <p className="text-center text-xs text-faint">
+                Already installed — you can finish setup without opening the store again.
+              </p>
             ) : null}
             <button
               type="button"
               onClick={() => goToStep(5)}
-              disabled={!storeLinkClicked}
+              disabled={!storeLinkClicked && !extensionDetected}
               className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {extensionDetected ? "Finish setup" : "I've installed — finish setup"}

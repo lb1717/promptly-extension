@@ -177,13 +177,13 @@ export function DemoSection() {
   return (
     <section id="how-it-works" className="overflow-x-hidden px-3 pb-5 pt-4 sm:px-4 sm:pb-8 sm:pt-8">
       <div className="mx-auto max-w-6xl">
-        <div className="relative mx-auto max-w-5xl rounded-2xl border border-line bg-cream px-3 pb-4 pt-14 shadow-card sm:rounded-3xl sm:px-8 sm:pb-8 sm:pt-20">
+        <div className="relative mx-auto max-w-5xl rounded-2xl border border-line bg-cream px-3 pb-4 pt-16 shadow-card sm:rounded-3xl sm:px-8 sm:pb-8 sm:pt-20">
           <div
             ref={promptBoxRef}
             className="relative mx-auto max-w-[980px] rounded-[18px] border border-slate-300/70 bg-white px-3 py-3 shadow-[0_12px_30px_rgba(2,6,23,0.12)] sm:rounded-[26px] sm:px-5 sm:py-4"
           >
-            <div className="flex items-center gap-2 sm:gap-4">
-              <p className="flex-1 pl-1 text-left text-[13px] leading-snug text-slate-800 sm:pl-[10px] sm:text-[24px] sm:leading-tight">
+            <div className="flex min-w-0 items-center gap-2 sm:gap-4">
+              <p className="min-w-0 flex-1 break-words pl-1 text-left text-[13px] leading-snug text-slate-800 sm:pl-[10px] sm:text-[24px] sm:leading-tight">
                 {showImproved ? (
                   <motion.span
                     key={`improved-inline-${improvedRevealKey}`}
@@ -248,7 +248,7 @@ export function DemoSection() {
             ) : null}
 
             <motion.div
-              className="absolute -top-10 right-2 flex h-9 w-[180px] items-center gap-1.5 overflow-hidden rounded-t-lg rounded-bl-none bg-ink px-2 text-[10px] text-cream shadow-card sm:-top-[51px] sm:right-[40px] sm:h-[49px] sm:w-[320px] sm:gap-3 sm:rounded-t-xl sm:px-4 sm:text-[14px]"
+              className="absolute -top-10 right-[14%] flex h-9 w-[168px] items-center gap-1 overflow-hidden rounded-t-lg rounded-bl-none bg-ink px-2 text-[10px] text-cream shadow-card sm:-top-[51px] sm:right-[40px] sm:h-[49px] sm:w-[320px] sm:gap-3 sm:rounded-t-xl sm:px-4 sm:text-[14px]"
             >
               {tabShineActive ? (
                 <motion.span
@@ -258,15 +258,15 @@ export function DemoSection() {
                   transition={{ duration: 1.8, ease: "easeInOut" }}
                 />
               ) : null}
-              <span className="relative z-10 inline-flex h-full w-[120px] flex-none items-center overflow-hidden font-semibold leading-none sm:w-[210px]">
+              <span className="relative z-10 inline-flex h-full w-[114px] flex-none items-center overflow-hidden font-semibold leading-none sm:w-[210px]">
                 <span className="invisible inline-flex items-center gap-2 whitespace-nowrap">
-                  <span>Prompt Improved</span>
-                  <span className="inline-block h-3.5 w-3.5" aria-hidden />
+                  <span className="leading-none">Prompt Improved</span>
+                  <span className="inline-block h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" aria-hidden />
                 </span>
                 <AnimatePresence mode="wait" initial={false}>
                   <motion.span
                     key={tabText}
-                    className="absolute inset-x-0 top-[40%] inline-flex -translate-y-1/2 items-center gap-2 whitespace-nowrap sm:top-[37%]"
+                    className="absolute inset-0 flex items-center gap-2 whitespace-nowrap"
                     initial={{ y: 22, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}
                     exit={{ y: -22, opacity: 0 }}
@@ -274,16 +274,16 @@ export function DemoSection() {
                   >
                     {tabText === "Prompt Improved" ? (
                       <>
-                        <span>Prompt Improved</span>
+                        <span className="leading-none">Prompt Improved</span>
                         <img
                           src="/images/green-check.png"
                           alt=""
                           aria-hidden="true"
-                          className="h-3.5 w-3.5 rounded-[3px] object-contain"
+                          className="block h-3.5 w-3.5 shrink-0 rounded-[3px] object-contain sm:h-4 sm:w-4"
                         />
                       </>
                     ) : (
-                      <span>{tabText}</span>
+                      <span className="leading-none">{tabText}</span>
                     )}
                   </motion.span>
                 </AnimatePresence>
