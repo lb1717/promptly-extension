@@ -21,7 +21,7 @@
   /** Greeting-screen tweak on top of siteAdapters chrome anchor (positive = down). */
   const CLAUDE_HOME_GREETING_TOP_OFFSET_PX = 18;
   /** Claude attachment thumbnails (~120px row) — fixed manual lift (negative = up). */
-  const CLAUDE_ATTACHMENT_TOP_OFFSET_PX = -108;
+  const CLAUDE_ATTACHMENT_TOP_OFFSET_PX = -144;
   /** Gemini-only: nudge anchor top downward slightly for better chatbox alignment (px). */
   const GEMINI_PLACEMENT_TOP_OFFSET_PX = 1;
   /** After Generate Prompt succeeds with the panel open, collapse back to tab-only (ms). */
@@ -1361,10 +1361,33 @@
     throw lastError || new Error("Not signed in");
   }
 
-  async function applySignedOutState(isSignedOut) {
+  async function readLocalHasPersistedRefreshToken() {
+    return new Promise((resolve) => {
+      if (!chrome?.storage?.local) {
+        resolve(false);
+        return;
+      }
+      chrome.storage.local.get(["promptlyFirebaseIdentity"], (data) => {
+        if (chrome.runtime.lastError) {
+          resolve(false);
+          return;
+        }
+        const refreshToken = String(data?.promptlyFirebaseIdentity?.refreshToken || "").trim();
+        resolve(Boolean(refreshToken));
+      });
+    });
+  }
+
+  async function applySignedOutState(isSignedOut, options = {}) {
     if (!isSignedOut) {
       ui.setSignedOut(false);
       return;
+    }
+    if (options.force !== true) {
+      const hasRefresh = await readLocalHasPersistedRefreshToken();
+      if (hasRefresh) {
+        return;
+      }
     }
     ui.setSignedOut(true);
     ui.setSettingsAccountEmail("");
@@ -2937,7 +2960,6 @@
       adapters.claudeShowsHomeGreeting();
     const claudeHasAttachment =
       site === "claude" &&
-      !claudeHomeGreeting &&
       typeof adapters.claudeHasUploadedAttachment === "function" &&
       adapters.claudeHasUploadedAttachment(currentTarget);
     const rect =

@@ -19,6 +19,7 @@ import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AutoDismissNoticeBar } from "@/components/ui/AutoDismissNoticeBar";
 import {
+  buildExtensionSessionPayload,
   getPromptlyExtensionCandidateIds,
   rememberPromptlyExtensionId,
   sendPromptlyExtensionMessageToCandidates
@@ -304,17 +305,11 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
       return;
     }
     try {
-      const idToken = await current.getIdToken(true);
-      const payload: Record<string, unknown> = {
-        type: "PROMPTLY_WEBSITE_SESSION_SYNC",
-        idToken,
-        email: current.email || "",
-        uid: current.uid,
-        expiresAtSec: Math.floor(Date.now() / 1000) + 3300
-      };
+      const extras: Record<string, string> = {};
       if (signinCsrfFromUrl) {
-        payload.signin_csrf = signinCsrfFromUrl;
+        extras.signin_csrf = signinCsrfFromUrl;
       }
+      const payload = await buildExtensionSessionPayload(current, extras);
       const { response } = await sendPromptlyExtensionMessageToCandidates(candidateIds, payload);
       const r = response as { ok?: boolean } | undefined;
       if (r && r.ok === false) {

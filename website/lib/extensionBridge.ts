@@ -1,5 +1,6 @@
 "use client";
 
+import type { User } from "firebase/auth";
 import { BROWSER_EXTENSION_TARGETS } from "@/lib/constants";
 
 type ExternalRuntime = {
@@ -113,27 +114,47 @@ export async function sendPromptlyExtensionMessageToCandidates(
   throw new Error(errors[0] || "Promptly extension not reachable");
 }
 
-type ExtensionSessionUser = {
-  getIdToken: (forceRefresh?: boolean) => Promise<string>;
-  email: string | null;
-  uid: string;
+type FirebaseUserWithRefresh = User & {
+  refreshToken?: string;
+  stsTokenManager?: { refreshToken?: string };
 };
 
+function readFirebaseRefreshToken(user: User): string {
+  const internal = user as FirebaseUserWithRefresh;
+  return String(internal.refreshToken || internal.stsTokenManager?.refreshToken || "").trim();
+}
+
+/** Build extension session payload including long-lived Firebase refresh token. */
+export async function buildExtensionSessionPayload(
+  user: User,
+  extras: Record<string, string> = {}
+): Promise<Record<string, unknown>> {
+  const [idToken, idTokenResult] = await Promise.all([user.getIdToken(false), user.getIdTokenResult()]);
+  const refreshToken = readFirebaseRefreshToken(user);
+  const expiresAtSec = Math.floor(new Date(idTokenResult.expirationTime).getTime() / 1000);
+  return {
+    type: "PROMPTLY_WEBSITE_SESSION_SYNC",
+    idToken,
+    refreshToken,
+    email: user.email || "",
+    uid: user.uid,
+    expiresAtSec:
+      Number.isFinite(expiresAtSec) && expiresAtSec > Math.floor(Date.now() / 1000)
+        ? expiresAtSec
+        : Math.floor(Date.now() / 1000) + 3600,
+    ...extras
+  };
+}
+
 /** Push Firebase session to the installed extension (returns false if extension not reachable). */
-export async function syncWebsiteSessionToExtension(user: ExtensionSessionUser): Promise<boolean> {
+export async function syncWebsiteSessionToExtension(user: User): Promise<boolean> {
   const candidateIds = getPromptlyExtensionCandidateIds();
   if (!candidateIds.length) {
     return false;
   }
   try {
-    const idToken = await user.getIdToken(true);
-    const { response } = await sendPromptlyExtensionMessageToCandidates(candidateIds, {
-      type: "PROMPTLY_WEBSITE_SESSION_SYNC",
-      idToken,
-      email: user.email || "",
-      uid: user.uid,
-      expiresAtSec: Math.floor(Date.now() / 1000) + 3300
-    });
+    const payload = await buildExtensionSessionPayload(user);
+    const { response } = await sendPromptlyExtensionMessageToCandidates(candidateIds, payload);
     const r = response as { ok?: boolean } | undefined;
     return r?.ok !== false;
   } catch {
