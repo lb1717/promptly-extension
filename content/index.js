@@ -16,10 +16,10 @@
   const UI_DISPLAY_DELAY_MS = 300;
   const BASE_CONTEXT_WINDOW_WIDTH = 330;
   const EXPANDED_CONTEXT_WINDOW_MULTIPLIER = 1.5;
-  /** Claude-only: small nudge so the tab sits flush on the prompt shell (px). */
-  const CLAUDE_PLACEMENT_TOP_OFFSET_PX = 0;
-  /** Extra lift on Claude empty-state greeting screens (applied in siteAdapters). */
-  const CLAUDE_HOME_GREETING_TOP_OFFSET_PX = -6;
+  /** Claude-only: nudge tab onto the prompt shell in regular chats (negative = up). */
+  const CLAUDE_PLACEMENT_TOP_OFFSET_PX = -12;
+  /** Greeting-screen tweak on top of siteAdapters chrome anchor (positive = down). */
+  const CLAUDE_HOME_GREETING_TOP_OFFSET_PX = 8;
   /** Gemini-only: nudge anchor top downward slightly for better chatbox alignment (px). */
   const GEMINI_PLACEMENT_TOP_OFFSET_PX = 1;
   /** After Generate Prompt succeeds with the panel open, collapse back to tab-only (ms). */

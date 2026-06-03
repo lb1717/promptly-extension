@@ -533,7 +533,7 @@
   /**
    * Claude new-chat layouts stack starter UI above the editor inside a tall composer shell.
    * Empty-state greetings (e.g. "Good morning, Leo") use a centered composer — pin to the
-   * rounded chrome top and lift slightly so the tab sits flush on the visible chat bar.
+   * rounded chrome top with a light upward nudge so the tab sits flush on the visible chat bar.
    */
   function getClaudeAnchorPlacementRect(target, anchor) {
     if (!isElement(target) || !isElement(anchor)) {
@@ -554,7 +554,7 @@
     let top = anchorRect.top;
     if (homeGreeting) {
       top = getClaudeComposerChromeTop(input, anchorRect.top);
-      top -= 10;
+      top -= 4;
     } else if (surfaceRect && surfaceRect.width >= 80 && surfaceRect.height >= 12) {
       const tallShell = anchorRect.height - surfaceRect.height > 32;
       if (tallShell) {

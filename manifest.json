@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Promptly Labs",
-  "version": "1.3.3",
+  "version": "1.3.4",
   "description": "Prompt optimization tool integrated with ChatGPT, Claude, and Gemini.",
   "permissions": [
     "storage",
