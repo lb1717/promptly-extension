@@ -4,11 +4,13 @@
       onUpdate,
       onTargetEvent,
       enableContinuousPositionTracking = true,
+      enableHeightPositionTracking = false,
       getAnchorElement = null
     }) {
       this.onUpdate = onUpdate;
       this.onTargetEvent = onTargetEvent;
       this.enableContinuousPositionTracking = enableContinuousPositionTracking;
+      this.enableHeightPositionTracking = enableHeightPositionTracking === true;
       this.getAnchorElement = typeof getAnchorElement === "function" ? getAnchorElement : null;
       this.trackingRoot = null;
       this.target = null;

@@ -441,7 +441,118 @@
     return false;
   }
 
+  /** Claude uses the uploaded filename as data-testid on thumbnail cells (e.g. "Resume OLD.pdf"). */
+  const CLAUDE_ATTACHMENT_DATA_TESTID_RE =
+    /\.(pdf|png|jpe?g|gif|webp|svg|docx?|txt|csv|xlsx?|pptx?|md|zip|heic|mov|mp4|mp3)$/i;
+
+  function claudeDataTestIdLooksLikeAttachment(testId) {
+    const tid = String(testId || "").trim();
+    if (!tid || tid === "chat-input") {
+      return false;
+    }
+    if (CLAUDE_ATTACHMENT_DATA_TESTID_RE.test(tid)) {
+      return true;
+    }
+    return tid.includes(".") && !/\s/.test(tid) && tid.length <= 120;
+  }
+
+  function getClaudeComposerChromeElement(input) {
+    if (!input) {
+      return null;
+    }
+    let node = input.parentElement;
+    for (let depth = 0; node && depth < 16; node = node.parentElement, depth += 1) {
+      if (typeof node.getBoundingClientRect !== "function") {
+        continue;
+      }
+      const rect = node.getBoundingClientRect();
+      if (rect.width < 120 || rect.height < 28) {
+        continue;
+      }
+      const style = window.getComputedStyle(node);
+      const radius = parseFloat(style.borderTopLeftRadius || "0");
+      if (Number.isFinite(radius) && radius >= 6) {
+        return node;
+      }
+    }
+    return input.closest("form");
+  }
+
+  function getClaudeAttachmentStripElement(input) {
+    const scope = input?.closest("form");
+    if (!scope || !input) {
+      return null;
+    }
+    const inputTop = input.getBoundingClientRect().top;
+
+    for (const node of scope.querySelectorAll("[data-testid]")) {
+      if (!claudeDataTestIdLooksLikeAttachment(node.getAttribute("data-testid"))) {
+        continue;
+      }
+      if (!isClaudeElementVisible(node)) {
+        continue;
+      }
+      const rect = node.getBoundingClientRect();
+      if (rect.bottom > inputTop + 8) {
+        continue;
+      }
+      const strip =
+        node.closest("div.overflow-x-auto") ||
+        node.closest('[class*="group/thumbnail"]')?.parentElement;
+      if (strip instanceof Element && isClaudeElementVisible(strip)) {
+        const stripRect = strip.getBoundingClientRect();
+        if (stripRect.height >= 32 && stripRect.width >= 80) {
+          return strip;
+        }
+      }
+    }
+
+    for (const btn of scope.querySelectorAll('button[aria-label^="Remove "]')) {
+      if (!isClaudeElementVisible(btn)) {
+        continue;
+      }
+      const strip = btn.closest("div.overflow-x-auto");
+      if (strip instanceof Element && isClaudeElementVisible(strip)) {
+        const stripRect = strip.getBoundingClientRect();
+        if (stripRect.bottom <= inputTop + 8 && stripRect.height >= 32) {
+          return strip;
+        }
+      }
+    }
+
+    for (const row of scope.querySelectorAll("div.flex.flex-row.overflow-x-auto")) {
+      if (!isClaudeElementVisible(row)) {
+        continue;
+      }
+      const rowRect = row.getBoundingClientRect();
+      if (rowRect.bottom <= inputTop + 8 && rowRect.height >= 32 && row.querySelector("img")) {
+        return row;
+      }
+    }
+
+    return null;
+  }
+
+  function getClaudeAttachmentStripTop(input) {
+    const strip = getClaudeAttachmentStripElement(input);
+    if (!strip) {
+      return null;
+    }
+    const chrome = getClaudeComposerChromeElement(input);
+    const stripRect = strip.getBoundingClientRect();
+    if (chrome) {
+      const chromeRect = chrome.getBoundingClientRect();
+      if (chromeRect.top <= stripRect.top + 6) {
+        return chromeRect.top;
+      }
+    }
+    return stripRect.top;
+  }
+
   function claudeComposerHasAttachmentStack(input, anchor) {
+    if (getClaudeAttachmentStripElement(input)) {
+      return true;
+    }
     const root =
       (anchor instanceof Element && anchor) || input?.closest("form") || getClaudeChatInput(input)?.parentElement;
     if (!root || !input) {
@@ -451,7 +562,7 @@
     const rootTop = root.getBoundingClientRect().top;
     const attachmentSelectors = [
       '[data-testid*="attachment"]',
-      '[data-testid*="file"]',
+      '[class*="group/thumbnail"]',
       '[class*="attachment"]',
       '[class*="Attachment"]'
     ];
@@ -470,7 +581,7 @@
         if (rect.height < 10 || rect.width < 10) {
           continue;
         }
-        if (rect.bottom <= inputTop + 6 && rect.top >= rootTop - 8) {
+        if (rect.bottom <= inputTop + 8 && rect.top >= rootTop - 8) {
           return true;
         }
       }
@@ -507,23 +618,9 @@
   }
 
   function getClaudeComposerChromeTop(input, fallbackTop) {
-    if (!input) {
-      return fallbackTop;
-    }
-    let node = input.parentElement;
-    for (let depth = 0; node && depth < 14; node = node.parentElement, depth += 1) {
-      if (typeof node.getBoundingClientRect !== "function") {
-        continue;
-      }
-      const rect = node.getBoundingClientRect();
-      if (rect.width < 120 || rect.height < 28) {
-        continue;
-      }
-      const style = window.getComputedStyle(node);
-      const radius = parseFloat(style.borderTopLeftRadius || "0");
-      if (Number.isFinite(radius) && radius >= 6) {
-        return rect.top;
-      }
+    const chrome = getClaudeComposerChromeElement(input);
+    if (chrome && typeof chrome.getBoundingClientRect === "function") {
+      return chrome.getBoundingClientRect().top;
     }
     return fallbackTop;
   }
@@ -544,7 +641,20 @@
     }
     const input = getClaudeChatInput(target);
     if (input) {
+      const hasAttachmentStrip = !!getClaudeAttachmentStripElement(input);
+      if (hasAttachmentStrip) {
+        const chrome = getClaudeComposerChromeElement(input);
+        if (chrome) {
+          return chrome;
+        }
+        const form = input.closest("form");
+        if (form) {
+          return form;
+        }
+      }
+
       const inputRect = input.getBoundingClientRect();
+      const maxTopGapPx = hasAttachmentStrip ? 220 : 56;
       const ancestors = [];
       for (
         let node = input.parentElement, depth = 0;
@@ -560,9 +670,9 @@
         }
         // Keep candidates close to the input geometry so we avoid huge page wrappers.
         const widthCloseToInput = rect.width >= inputRect.width * 0.85 && rect.width <= inputRect.width + 220;
-        const bottomNearInput = rect.bottom >= inputRect.bottom - 12 && rect.bottom <= inputRect.bottom + 48;
+        const bottomNearInput = rect.bottom >= inputRect.bottom - 12 && rect.bottom <= inputRect.bottom + 96;
         const topGapPx = inputRect.top - rect.top;
-        const topNotFarAbove = topGapPx >= -4 && topGapPx <= 56;
+        const topNotFarAbove = topGapPx >= -4 && topGapPx <= maxTopGapPx;
         if (widthCloseToInput && bottomNearInput && topNotFarAbove) {
           ancestors.push({ node, rect, topGapPx });
         }
@@ -571,13 +681,18 @@
         }
       }
       if (ancestors.length > 0) {
-        // Prefer the innermost shell hugging the input (new-chat composers can be much taller).
-        ancestors.sort((a, b) => {
-          if (a.topGapPx !== b.topGapPx) {
-            return a.topGapPx - b.topGapPx;
-          }
-          return a.rect.height - b.rect.height;
-        });
+        if (hasAttachmentStrip) {
+          // Thumbnail row is a sibling above the input — use the outer composer shell.
+          ancestors.sort((a, b) => b.topGapPx - a.topGapPx);
+        } else {
+          // Prefer the innermost shell hugging the input (new-chat composers can be much taller).
+          ancestors.sort((a, b) => {
+            if (a.topGapPx !== b.topGapPx) {
+              return a.topGapPx - b.topGapPx;
+            }
+            return a.rect.height - b.rect.height;
+          });
+        }
         return ancestors[0].node;
       }
 
@@ -617,9 +732,12 @@
         : null;
 
     let top = anchorRect.top;
+    const attachmentStripTop = getClaudeAttachmentStripTop(input);
     if (homeGreeting) {
       top = getClaudeComposerChromeTop(input, anchorRect.top);
       top -= 4;
+    } else if (attachmentStripTop != null) {
+      top = attachmentStripTop;
     } else if (surfaceRect && surfaceRect.width >= 80 && surfaceRect.height >= 12) {
       const gapAboveEditor = surfaceRect.top - anchorRect.top;
       const growthBelowEditor = anchorRect.bottom - surfaceRect.bottom;
