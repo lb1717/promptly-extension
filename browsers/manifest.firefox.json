@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Promptly Labs",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "Prompt optimization tool integrated with ChatGPT, Claude, and Gemini.",
   "browser_specific_settings": {
     "gecko": {
@@ -13,8 +13,7 @@
     "storage",
     "identity",
     "identity.email",
-    "tabs",
-    "alarms"
+    "tabs"
   ],
   "externally_connectable": {
     "matches": [

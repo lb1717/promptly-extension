@@ -6,24 +6,6 @@ if (typeof globalThis.browser !== "undefined" && typeof globalThis.chrome === "u
 const DEFAULT_PROXY_BASE_URL = "https://promptly-labs.com";
 const GOOGLE_ACCESS_TOKEN_BUFFER_SEC = 60;
 const FIREBASE_ID_TOKEN_BUFFER_SEC = 60;
-const FIREBASE_REFRESH_ALARM = "promptly-firebase-token-refresh";
-const FIREBASE_REFRESH_LEAD_SEC = 300;
-
-async function scheduleFirebaseTokenRefresh(identity) {
-  if (!chrome.alarms?.create) {
-    return;
-  }
-  const refreshToken = String(identity?.refreshToken || "").trim();
-  const expiresAtSec = Number(identity?.expiresAtSec || 0);
-  if (!refreshToken || !Number.isFinite(expiresAtSec) || expiresAtSec <= 0) {
-    return;
-  }
-  const refreshAtSec = Math.max(
-    Math.floor(Date.now() / 1000) + 60,
-    expiresAtSec - FIREBASE_ID_TOKEN_BUFFER_SEC - FIREBASE_REFRESH_LEAD_SEC
-  );
-  await chrome.alarms.create(FIREBASE_REFRESH_ALARM, { when: refreshAtSec * 1000 }).catch(() => {});
-}
 
 async function persistFirebaseIdentity(identity) {
   const nextIdentity = identity && typeof identity === "object" ? identity : null;
@@ -31,31 +13,7 @@ async function persistFirebaseIdentity(identity) {
     return null;
   }
   await chrome.storage.local.set({ promptlyFirebaseIdentity: nextIdentity });
-  await scheduleFirebaseTokenRefresh(nextIdentity);
   return nextIdentity;
-}
-
-async function ensureFirebaseTokenFreshness() {
-  try {
-    const cached = await chrome.storage.local.get(["promptlyFirebaseIdentity"]);
-    const identity = cached?.promptlyFirebaseIdentity || null;
-    if (!identity?.refreshToken) {
-      return;
-    }
-    const refreshed = await getFirebaseIdentityForApi(false);
-    await scheduleFirebaseTokenRefresh(refreshed);
-  } catch (_error) {
-    const cached = await chrome.storage.local.get(["promptlyFirebaseIdentity"]);
-    await scheduleFirebaseTokenRefresh(cached?.promptlyFirebaseIdentity || null);
-  }
-}
-
-if (chrome.alarms?.onAlarm) {
-  chrome.alarms.onAlarm.addListener((alarm) => {
-    if (alarm?.name === FIREBASE_REFRESH_ALARM) {
-      void ensureFirebaseTokenFreshness();
-    }
-  });
 }
 
 const DEFAULT_FIREBASE_WEB_API_KEY = "AIzaSyChQ2kiTwunWs9ElDYkU7Cz-i8I9dw29NI";
@@ -1177,12 +1135,10 @@ chrome.runtime.onInstalled.addListener(async () => {
       String(existing.firebaseOAuthWebClientId || "").trim() || DEFAULT_FIREBASE_WEB_OAUTH_CLIENT_ID
   };
   await chrome.storage.sync.set(next);
-  void ensureFirebaseTokenFreshness();
 });
 
 chrome.runtime.onStartup.addListener(async () => {
   await getManagedProxyBaseUrl();
-  void ensureFirebaseTokenFreshness();
 });
 
 if (chrome.action && chrome.tabs && typeof chrome.tabs.create === "function") {
@@ -1222,9 +1178,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message.type === "PROMPTLY_CLEAR_SESSION") {
         await chrome.storage.local.remove(["promptlyFirebaseIdentity"]);
         await clearWebAuthSessionCache();
-        if (chrome.alarms?.clear) {
-          await chrome.alarms.clear(FIREBASE_REFRESH_ALARM).catch(() => {});
-        }
         clearCreditsCache();
         sendResponse({ ok: true });
         return;
