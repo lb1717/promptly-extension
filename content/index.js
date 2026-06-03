@@ -45,9 +45,6 @@
   /** Skip applyPlacement when anchor geometry + open state unchanged (reduces jitter from inner scroll/input). */
   let lastPlacementSignature = null;
   let allowDisplay = false;
-  let displayDelayElapsed = false;
-  let displayDelayTimer = null;
-  let hasPlacementReady = false;
   let autoAdjustInFlight = false;
   let autoAdjustOnSend = false;
   let autoModeBlockedByTokens = false;
@@ -246,7 +243,7 @@
     if (ui.isSignedOut()) {
       return;
     }
-    if (!promptlyCanShow()) {
+    if (!allowDisplay) {
       window.setTimeout(() => {
         void maybeStartTutorial(options);
       }, 400);
@@ -1265,31 +1262,11 @@
         ? (target) => adapters.getAnchorElement(target)
         : null
   });
-  function tryUnlockPromptlyDisplay() {
-    if (!displayDelayElapsed || !ui.isUiReady() || allowDisplay) {
-      if (displayDelayElapsed && ui.isUiReady() && allowDisplay) {
-        observers.scheduleUpdate();
-      }
-      return;
-    }
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        allowDisplay = true;
-        observers.scheduleUpdate();
-      });
-    });
-  }
-
-  displayDelayTimer = window.setTimeout(() => {
-    displayDelayElapsed = true;
-    tryUnlockPromptlyDisplay();
+  const unlockDisplayTimer = window.setTimeout(() => {
+    allowDisplay = true;
+    observers.scheduleUpdate();
   }, UI_DISPLAY_DELAY_MS);
-  void ui.whenUiReady().then(() => tryUnlockPromptlyDisplay());
   ui.setAutoSendEnabled(autoAdjustOnSend);
-
-  function promptlyCanShow() {
-    return allowDisplay && ui.isUiReady() && hasPlacementReady;
-  }
 
   function isPromptlyAuthSessionError(message) {
     const lowered = String(message || "").toLowerCase();
@@ -2938,7 +2915,6 @@
     if (nextTarget !== currentTarget) {
       currentTarget = nextTarget;
       lastPlacementSignature = null;
-      hasPlacementReady = false;
       observers.bindTarget(currentTarget);
       ensureHostPassiveListener();
     }

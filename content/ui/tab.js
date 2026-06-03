@@ -198,11 +198,6 @@
       this.tutorialActionGate = null;
       this.isOpen = false;
       this.isVisible = false;
-      this.uiReady = false;
-      this.uiReadyPromise = new Promise((resolve) => {
-        this.uiReadyResolve = resolve;
-      });
-      this.uiReadyFallbackTimer = null;
       this.dragState = null;
       this.suppressNextClick = false;
       this.tabStatusResetTimer = null;
