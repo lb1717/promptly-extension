@@ -54,6 +54,14 @@
     });
   }
 
+  /** Drop legacy in-tab hint nodes if an older build left them in the shadow tree. */
+  function removeStaleRepositionHint(root) {
+    if (!(root instanceof Element)) {
+      return;
+    }
+    root.querySelectorAll(".promptly-tab-reposition-hint").forEach((node) => node.remove());
+  }
+
   function setSliderProgressFill(sliderEl) {
     if (!(sliderEl instanceof HTMLInputElement)) {
       return;
@@ -754,6 +762,7 @@
       });
       // Attach toast to the tab itself so it follows the tab's translate3d placement.
       this.tabButton.append(this.errorToast);
+      removeStaleRepositionHint(this.root);
       this.root.append(this.popupMask, this.tabButton, this.settingsPanel);
       this.setTabStatus("idle");
       this.shadowRoot.append(styleLink, this.root);
@@ -761,6 +770,7 @@
     }
 
     destroy() {
+      removeStaleRepositionHint(this.root);
       if (this.tabStatusResetTimer) {
         window.clearTimeout(this.tabStatusResetTimer);
       }
