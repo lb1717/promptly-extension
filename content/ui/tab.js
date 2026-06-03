@@ -220,31 +220,11 @@
       styleLink.rel = "stylesheet";
       const extVersion = chrome.runtime.getManifest().version;
       styleLink.href = `${chrome.runtime.getURL("content/ui/styles.css")}?v=${encodeURIComponent(extVersion)}`;
-      const markUiReady = () => {
-        if (this.uiReady) {
-          return;
-        }
-        this.uiReady = true;
-        this.root.classList.remove("is-ui-booting");
-        this.root.style.removeProperty("opacity");
-        this.root.style.removeProperty("visibility");
-        this.root.style.removeProperty("pointer-events");
-        if (typeof this.uiReadyResolve === "function") {
-          this.uiReadyResolve();
-          this.uiReadyResolve = null;
-        }
-      };
-      styleLink.addEventListener("load", markUiReady);
-      styleLink.addEventListener("error", markUiReady);
-      this.uiReadyFallbackTimer = window.setTimeout(markUiReady, 5000);
 
       this.root = document.createElement("div");
-      this.root.className = "promptly-root is-ui-booting";
+      this.root.className = "promptly-root";
       this.root.dataset.promptlyUi = "true";
       this.root.dataset.theme = "light";
-      this.root.style.opacity = "0";
-      this.root.style.visibility = "hidden";
-      this.root.style.pointerEvents = "none";
 
       // Use a non-button container to avoid nested interactive elements inside a <button>,
       // which can cause click/gesture events (like Sign in) to be dropped in some browsers.
@@ -833,9 +813,6 @@
     }
 
     setVisible(visible) {
-      if (visible && !this.uiReady) {
-        return;
-      }
       if (visible === this.isVisible) {
         return;
       }
@@ -844,11 +821,9 @@
         this.host.style.display = "block";
         this.host.style.pointerEvents = "auto";
         window.requestAnimationFrame(() => {
-          window.requestAnimationFrame(() => {
-            if (this.isVisible && this.uiReady) {
-              this.root.classList.add("is-host-visible");
-            }
-          });
+          if (this.isVisible) {
+            this.root.classList.add("is-host-visible");
+          }
         });
         return;
       }

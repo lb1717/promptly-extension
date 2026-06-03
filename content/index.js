@@ -2921,7 +2921,6 @@
 
     if (!currentTarget || !isTargetVisible(currentTarget)) {
       lastPlacementSignature = null;
-      hasPlacementReady = false;
       ui.setVisible(false);
       return;
     }
@@ -2976,9 +2975,8 @@
       const placement = positionManager.compute(rect, popupHeight, isOpen);
       ui.setDirection(placement.direction);
       ui.applyPlacement(placement);
-      hasPlacementReady = true;
     }
-    ui.setVisible(promptlyCanShow());
+    ui.setVisible(allowDisplay);
   }
 
   function closePopup() {
@@ -3280,10 +3278,7 @@
     window.clearTimeout(visibilityCreditsRefreshTimer);
     visibilityCreditsRefreshTimer = null;
     stopCreditsPolling();
-    if (displayDelayTimer) {
-      window.clearTimeout(displayDelayTimer);
-      displayDelayTimer = null;
-    }
+    window.clearTimeout(unlockDisplayTimer);
     observers.stop();
     document.removeEventListener("pointerdown", handlePointerDown, true);
     document.removeEventListener("click", handleDocumentClick, true);
