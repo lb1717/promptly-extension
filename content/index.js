@@ -17,9 +17,9 @@
   const BASE_CONTEXT_WINDOW_WIDTH = 330;
   const EXPANDED_CONTEXT_WINDOW_MULTIPLIER = 1.5;
   /** Claude-only: nudge tab onto the prompt shell in regular chats (negative = up). */
-  const CLAUDE_PLACEMENT_TOP_OFFSET_PX = -12;
+  const CLAUDE_PLACEMENT_TOP_OFFSET_PX = -14;
   /** Greeting-screen tweak on top of siteAdapters chrome anchor (positive = down). */
-  const CLAUDE_HOME_GREETING_TOP_OFFSET_PX = 8;
+  const CLAUDE_HOME_GREETING_TOP_OFFSET_PX = 18;
   /** Gemini-only: nudge anchor top downward slightly for better chatbox alignment (px). */
   const GEMINI_PLACEMENT_TOP_OFFSET_PX = 1;
   /** After Generate Prompt succeeds with the panel open, collapse back to tab-only (ms). */
