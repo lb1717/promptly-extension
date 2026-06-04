@@ -22,7 +22,7 @@ import type { User } from "firebase/auth";
 
 type Status = "loading" | "ready" | "working" | "done" | "cancelled" | "error";
 
-const REDIRECT_WAIT_MS = 20_000;
+const REDIRECT_WAIT_MS = 12_000;
 
 export function GoogleSignInCallbackClient() {
   const searchParams = useSearchParams();
@@ -30,7 +30,6 @@ export function GoogleSignInCallbackClient() {
   const [status, setStatus] = useState<Status>("loading");
   const [errorMessage, setErrorMessage] = useState("");
   const finishedRef = useRef(false);
-  const bootstrappedRef = useRef(false);
 
   const finishSuccess = useCallback(async (user: User) => {
     if (finishedRef.current) return;
@@ -75,9 +74,6 @@ export function GoogleSignInCallbackClient() {
   }, [finishError]);
 
   useEffect(() => {
-    if (bootstrappedRef.current) return;
-    bootstrappedRef.current = true;
-
     let cancelled = false;
 
     (async () => {
@@ -93,6 +89,9 @@ export function GoogleSignInCallbackClient() {
         if (!returning) {
           const openedFromSite = Boolean(window.opener && !window.opener.closed);
           if (openedFromSite) {
+            if (!cancelled) {
+              setStatus("working");
+            }
             await handleContinueWithGoogle();
           } else if (!cancelled) {
             setStatus("ready");
@@ -100,7 +99,10 @@ export function GoogleSignInCallbackClient() {
           return;
         }
 
-        setStatus("loading");
+        if (!cancelled) {
+          setStatus("loading");
+        }
+
         const result = await consumeGoogleSignInRedirectResult();
         if (cancelled || finishedRef.current) return;
 
@@ -114,21 +116,15 @@ export function GoogleSignInCallbackClient() {
           return;
         }
 
-        const hadPendingRedirect = wasGoogleRedirectPending();
-        if (hadPendingRedirect) {
+        if (wasGoogleRedirectPending()) {
           const user = await waitForAuthenticatedUser(REDIRECT_WAIT_MS);
           if (cancelled || finishedRef.current) return;
           if (user) {
             await finishSuccess(user);
             return;
           }
-
-          const isLocalhost =
-            window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
           finishCancelled(
-            isLocalhost
-              ? "Google sign-in did not complete. For local dev, add http://localhost:3000 to Firebase Authentication → Settings → Authorized domains, and add the localhost redirect URI on your Google OAuth web client (see ACCOUNT_SETUP.md)."
-              : "Google sign-in was cancelled or could not be verified. Close this tab and try again from Promptly."
+            "Google sign-in did not complete. Close this tab, return to Promptly, and try Sign in with Google again."
           );
           return;
         }

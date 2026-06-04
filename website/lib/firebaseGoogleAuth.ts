@@ -1,22 +1,24 @@
 import {
   getRedirectResult,
   onAuthStateChanged,
+  signInWithPopup,
   signInWithRedirect,
   type User,
   type UserCredential
 } from "firebase/auth";
+import { getFirebaseErrorCode } from "@/lib/firebaseAuthAccountHints";
 import { getFirebaseAuth, getGoogleProvider } from "@/lib/firebaseClient";
 
 export const PROMPTLY_GOOGLE_SIGN_IN_DONE = "PROMPTLY_GOOGLE_SIGN_IN_DONE";
 export const PROMPTLY_GOOGLE_SIGN_IN_ERROR = "PROMPTLY_GOOGLE_SIGN_IN_ERROR";
 
 const REDIRECT_PENDING_KEY = "promptly_google_redirect_pending";
+const REDIRECT_PENDING_MAX_AGE_MS = 15 * 60 * 1000;
+const REDIRECT_RESULT_TIMEOUT_MS = 15_000;
 
-let redirectResultPromise: Promise<UserCredential | null> | null = null;
 let redirectFlowStarted = false;
 
 export function resetGoogleRedirectAuthState(): void {
-  redirectResultPromise = null;
   redirectFlowStarted = false;
 }
 
@@ -63,10 +65,24 @@ export type GoogleSignInFlowResult =
   | { status: "opened-tab" }
   | { status: "cancelled" };
 
-/** Opens Google sign-in in a new tab; the original page listens for completion via postMessage. */
+/**
+ * Prefer an in-page popup (fast, works on the account page). If blocked, open /auth/google in a new tab.
+ */
 export async function signInWithGoogleInteractive(returnTo?: string): Promise<GoogleSignInFlowResult> {
-  openGoogleSignInInNewTab(returnTo);
-  return { status: "opened-tab" };
+  const auth = getFirebaseAuth();
+  const provider = getGoogleProvider();
+
+  try {
+    const cred = await signInWithPopup(auth, provider);
+    return { status: "success", user: cred.user };
+  } catch (error) {
+    const code = getFirebaseErrorCode(error);
+    if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") {
+      return { status: "cancelled" };
+    }
+    openGoogleSignInInNewTab(returnTo);
+    return { status: "opened-tab" };
+  }
 }
 
 export function markGoogleRedirectPending(): void {
@@ -81,7 +97,14 @@ export function clearGoogleRedirectPending(): void {
 
 export function wasGoogleRedirectPending(): boolean {
   if (typeof window === "undefined") return false;
-  return Boolean(window.sessionStorage.getItem(REDIRECT_PENDING_KEY));
+  const raw = window.sessionStorage.getItem(REDIRECT_PENDING_KEY);
+  if (!raw) return false;
+  const startedAt = Number(raw);
+  if (!Number.isFinite(startedAt) || Date.now() - startedAt > REDIRECT_PENDING_MAX_AGE_MS) {
+    clearGoogleRedirectPending();
+    return false;
+  }
+  return true;
 }
 
 export async function startGoogleSignInRedirect(): Promise<void> {
@@ -91,11 +114,24 @@ export async function startGoogleSignInRedirect(): Promise<void> {
   await signInWithRedirect(getFirebaseAuth(), getGoogleProvider());
 }
 
-export async function consumeGoogleSignInRedirectResult(): Promise<UserCredential | null> {
-  if (!redirectResultPromise) {
-    redirectResultPromise = getRedirectResult(getFirebaseAuth());
+export async function consumeGoogleSignInRedirectResult(
+  timeoutMs = REDIRECT_RESULT_TIMEOUT_MS
+): Promise<UserCredential | null> {
+  const auth = getFirebaseAuth();
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    return await Promise.race([
+      getRedirectResult(auth),
+      new Promise<null>((resolve) => {
+        timeoutId = setTimeout(() => resolve(null), timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
   }
-  return redirectResultPromise;
 }
 
 export function waitForAuthenticatedUser(timeoutMs: number): Promise<User | null> {
