@@ -137,12 +137,17 @@
         }
         const rect = el.getBoundingClientRect();
         const prev = this.lastTrackedRect;
+        const heightMoved =
+          this.enableHeightPositionTracking &&
+          prev &&
+          Math.abs(rect.height - prev.height) > 6;
         // Ignore height-only noise (inner multiline scroll / padding) — only top/left/width move the shell.
         if (
           !prev ||
           Math.abs(rect.top - prev.top) > 0.5 ||
           Math.abs(rect.left - prev.left) > 0.5 ||
-          Math.abs(rect.width - prev.width) > 0.5
+          Math.abs(rect.width - prev.width) > 0.5 ||
+          heightMoved
         ) {
           this.lastTrackedRect = {
             top: rect.top,

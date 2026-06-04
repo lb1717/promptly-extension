@@ -1,21 +1,27 @@
 "use client";
 
 import { getFirebaseAuth } from "@/lib/firebaseClient";
-import { onAuthStateChanged, signInWithCustomToken, signOut } from "firebase/auth";
+import { onAuthStateChanged, signInWithCustomToken } from "firebase/auth";
 import Link from "next/link";
 import type { User } from "firebase/auth";
+import { StatisticsPrintReport } from "@/components/account/StatisticsPrintReport";
 import { AutoDismissNoticeBar } from "@/components/ui/AutoDismissNoticeBar";
+import { buildStatisticsReportData, downloadStatisticsReportPdf } from "@/lib/statisticsReport";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
+  ComposedChart,
   Legend,
+  Line,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
-  YAxis,
-  Cell
+  YAxis
 } from "recharts";
 
 /** OpenAI system green (distinct from Gemini blue). ChatGPT visuals often skew turquoise but this reads clearly on dark UI. */
@@ -89,10 +95,10 @@ const CHART_TOOLTIP_DARK_STYLE = {
 };
 const CHART_LEGEND_STYLE = { fontSize: 11, paddingTop: 8, fontFamily: CHART_FONT_FAMILY };
 const CHART_LEGEND_STYLE_COMPACT = { fontSize: 11, paddingTop: 4, fontFamily: CHART_FONT_FAMILY };
-const CHART_AXIS_TICK_LIGHT = { fill: "#f9f8ff", fontSize: 10, fontFamily: CHART_FONT_FAMILY };
-const CHART_AXIS_TICK_LIGHT_PLAIN = { fill: "#f9f8ff", fontFamily: CHART_FONT_FAMILY };
 /** Derived score emphasis (readable on cream cards). */
 const COLOR_SCORE_GREEN = "#15803d";
+const COLOR_VOLUME_DELTA_DOWN = "#dc2626";
+const COLOR_VOLUME_TREND = "#525252";
 
 type PromptlySvc = "chatgpt" | "claude" | "gemini" | "unknown";
 
@@ -791,6 +797,295 @@ function FadeInUpliftPercent({
   );
 }
 
+type PromptVolumeAiKey = "claude" | "gemini" | "chatgpt" | "other";
+
+type PromptVolumeAiFilterState = Record<PromptVolumeAiKey, boolean>;
+
+const PROMPT_VOLUME_AI_FILTERS: Array<{
+  key: PromptVolumeAiKey;
+  label: string;
+  color: string;
+  dataKey: keyof CombinedPromptBucket;
+  legendName: string;
+}> = [
+  { key: "chatgpt", label: "ChatGPT", color: COLOR_CHATGPT, dataKey: "prompts_chatgpt", legendName: "ChatGPT" },
+  { key: "claude", label: "Claude", color: COLOR_CLAUDE, dataKey: "prompts_claude", legendName: "Claude" },
+  { key: "gemini", label: "Gemini", color: COLOR_GEMINI, dataKey: "prompts_gemini", legendName: "Gemini" },
+  { key: "other", label: "Other", color: COLOR_UNKNOWN, dataKey: "prompts_unknown", legendName: "Other" }
+];
+
+const DEFAULT_PROMPT_VOLUME_AI_FILTERS: PromptVolumeAiFilterState = {
+  claude: true,
+  gemini: true,
+  chatgpt: true,
+  other: true
+};
+
+function promptVolumeBucketTotal(
+  row: CombinedPromptBucket,
+  filters: PromptVolumeAiFilterState
+): number {
+  let total = 0;
+  for (const filter of PROMPT_VOLUME_AI_FILTERS) {
+    if (!filters[filter.key]) continue;
+    total += Math.max(0, Number(row[filter.dataKey] ?? 0) || 0);
+  }
+  return total;
+}
+
+/** Smooths daily totals into a curved trend (moving average + bidirectional EMA blend). */
+function smoothTrendValues(values: number[]): number[] {
+  const n = values.length;
+  if (n === 0) return [];
+  if (n === 1) return [Math.max(0, Math.round((values[0] ?? 0) * 10) / 10)];
+
+  const half = n >= 9 ? 2 : 1;
+  const smoothed = values.map((_, i) => {
+    let sum = 0;
+    let count = 0;
+    for (let j = Math.max(0, i - half); j <= Math.min(n - 1, i + half); j++) {
+      sum += values[j] ?? 0;
+      count++;
+    }
+    return count > 0 ? sum / count : 0;
+  });
+
+  const alpha = 0.38;
+  const forward: number[] = [];
+  let f = smoothed[0] ?? 0;
+  for (let i = 0; i < n; i++) {
+    const v = smoothed[i] ?? 0;
+    f = i === 0 ? v : alpha * v + (1 - alpha) * f;
+    forward.push(f);
+  }
+
+  const backward: number[] = new Array(n);
+  let b = smoothed[n - 1] ?? 0;
+  for (let i = n - 1; i >= 0; i--) {
+    const v = smoothed[i] ?? 0;
+    b = i === n - 1 ? v : alpha * v + (1 - alpha) * b;
+    backward[i] = b;
+  }
+
+  return forward.map((fv, i) =>
+    Math.max(0, Math.round(((fv + (backward[i] ?? fv)) / 2) * 10) / 10)
+  );
+}
+
+type PromptVolumePeriodChange = {
+  percent: number;
+  currentTotal: number;
+  priorTotal: number;
+  /** Human-readable comparison window for screen readers / title */
+  comparisonLabel: string;
+};
+
+/**
+ * Compares prompt volume in the recent segment vs the prior segment.
+ * Uses the selected range length when enough buckets exist; otherwise last 7 vs prior 7, then half-and-half.
+ */
+function promptVolumeSegmentBuckets(rangeDays: number, granularity: "day" | "week"): number {
+  if (granularity === "week") {
+    return Math.max(1, Math.ceil(rangeDays / 7));
+  }
+  return Math.max(1, Math.floor(rangeDays));
+}
+
+function computePromptVolumePeriodChange(
+  rows: CombinedPromptBucket[],
+  rangeDays: number,
+  granularity: "day" | "week",
+  filters: PromptVolumeAiFilterState
+): PromptVolumePeriodChange | null {
+  const n = rows.length;
+  if (n < 2) return null;
+
+  const sumSlice = (slice: CombinedPromptBucket[]) =>
+    slice.reduce((acc, row) => acc + promptVolumeBucketTotal(row, filters), 0);
+
+  const unit = granularity === "week" ? "wk" : "d";
+  let segment = promptVolumeSegmentBuckets(rangeDays, granularity);
+  let currentSlice = rows.slice(-segment);
+  let priorSlice = rows.slice(-segment * 2, -segment);
+  let comparisonLabel = `vs prior ${segment} ${unit}`;
+
+  if (priorSlice.length < 1) {
+    const weekFallback = granularity === "week" ? Math.min(2, Math.max(1, Math.floor(n / 2))) : Math.min(7, Math.max(1, Math.floor(n / 2)));
+    segment = weekFallback;
+    currentSlice = rows.slice(-segment);
+    priorSlice = rows.slice(-segment * 2, -segment);
+    comparisonLabel = granularity === "week" ? `vs prior ${segment} wk` : `vs prior ${segment}d`;
+  }
+
+  if (priorSlice.length < 1) {
+    const half = Math.max(1, Math.floor(n / 2));
+    currentSlice = rows.slice(-half);
+    priorSlice = rows.slice(0, n - half);
+    comparisonLabel = "vs earlier in range";
+  }
+
+  const currentTotal = sumSlice(currentSlice);
+  const priorTotal = sumSlice(priorSlice);
+
+  let percent: number;
+  if (priorTotal > 0) {
+    percent = ((currentTotal - priorTotal) / priorTotal) * 100;
+  } else if (currentTotal > 0) {
+    percent = 100;
+  } else {
+    percent = 0;
+  }
+
+  return {
+    percent: Math.round(percent * 10) / 10,
+    currentTotal,
+    priorTotal,
+    comparisonLabel
+  };
+}
+
+function formatVolumeDeltaPercent(pct: number): string {
+  const rounded = Math.round(pct * 10) / 10;
+  const sign = rounded > 0 ? "+" : "";
+  return `${sign}${rounded}%`;
+}
+
+type EngagementSlice = { name: string; value: number; fill: string };
+
+/** Hide pie % labels on thin slices so the donut stays readable. */
+const ENGAGEMENT_PIE_MIN_LABEL_PERCENT = 10;
+
+function renderEngagementPiePercentLabel({
+  cx = 0,
+  cy = 0,
+  midAngle = 0,
+  innerRadius = 0,
+  outerRadius = 0,
+  percent = 0
+}: {
+  cx?: number;
+  cy?: number;
+  midAngle?: number;
+  innerRadius?: number;
+  outerRadius?: number;
+  percent?: number;
+}) {
+  if (percent < ENGAGEMENT_PIE_MIN_LABEL_PERCENT / 100) {
+    return null;
+  }
+  const RADIAN = Math.PI / 180;
+  const radius = innerRadius + (outerRadius - innerRadius) * 0.52;
+  const x = cx + radius * Math.cos(-midAngle * RADIAN);
+  const y = cy + radius * Math.sin(-midAngle * RADIAN);
+  return (
+    <text
+      x={x}
+      y={y}
+      fill="#FAF8F4"
+      textAnchor="middle"
+      dominantBaseline="central"
+      fontSize={11}
+      fontWeight={600}
+      fontFamily={CHART_FONT_FAMILY}
+      stroke="#1a1a1a"
+      strokeWidth={2}
+      paintOrder="stroke"
+    >
+      {`${Math.round(percent * 100)}%`}
+    </text>
+  );
+}
+
+function ServiceEngagementDonut({
+  label,
+  accentColor,
+  totalMinutes,
+  slices
+}: {
+  label: string;
+  accentColor: string;
+  totalMinutes: number;
+  slices: EngagementSlice[];
+}) {
+  const hasSlices = slices.length > 0;
+  const chartData: EngagementSlice[] = hasSlices
+    ? slices
+    : [{ name: "No activity", value: 1, fill: "#E0DDD6" }];
+
+  return (
+    <div className="flex flex-col items-center">
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wide" style={{ color: accentColor }}>
+        {label}
+      </p>
+      <div className="h-44 w-full max-w-[220px]">
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie
+              data={chartData}
+              dataKey="value"
+              nameKey="name"
+              cx="50%"
+              cy="50%"
+              innerRadius="56%"
+              outerRadius="88%"
+              paddingAngle={hasSlices && slices.length > 1 ? 2 : 0}
+              stroke="#FAF8F4"
+              strokeWidth={2}
+              label={hasSlices ? renderEngagementPiePercentLabel : false}
+              labelLine={false}
+            >
+              {chartData.map((entry, index) => (
+                <Cell key={`${entry.name}-${index}`} fill={entry.fill} fillOpacity={hasSlices ? 0.95 : 0.3} />
+              ))}
+            </Pie>
+            {hasSlices ? (
+              <Tooltip
+                contentStyle={CHART_TOOLTIP_STYLE}
+                formatter={(value: number, name: string) => [`${value} min`, name]}
+              />
+            ) : null}
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+      <p className="mt-2 text-[10px] font-medium uppercase tracking-wide text-faint">Total time</p>
+      <p className="text-xl font-bold tabular-nums leading-none text-ink sm:text-2xl">
+        {totalMinutes > 0 ? Math.round(totalMinutes * 10) / 10 : 0}
+        <span className="ml-1 text-sm font-medium text-muted">min</span>
+      </p>
+    </div>
+  );
+}
+
+function PromptVolumeAiToggleButton({
+  label,
+  color,
+  pressed,
+  disabled,
+  onToggle
+}: {
+  label: string;
+  color: string;
+  pressed: boolean;
+  disabled?: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={pressed}
+      aria-disabled={disabled}
+      disabled={disabled}
+      onClick={onToggle}
+      className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium transition-colors ${
+        pressed ? "bg-ink text-cream" : "border border-line text-faint hover:bg-cream-dark"
+      } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
+    >
+      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: color }} aria-hidden />
+      <span>{label}</span>
+    </button>
+  );
+}
+
 function ModeMiniChart({
   modes
 }: {
@@ -827,6 +1122,10 @@ export function StatisticsClient() {
   const [ideStats, setIdeStats] = useState<IdeStatsPayload | null>(null);
   const [ideStatsLoading, setIdeStatsLoading] = useState(false);
   const [ideStatsError, setIdeStatsError] = useState("");
+  const [promptVolumeAiFilters, setPromptVolumeAiFilters] =
+    useState<PromptVolumeAiFilterState>(DEFAULT_PROMPT_VOLUME_AI_FILTERS);
+  const [reportGenerating, setReportGenerating] = useState(false);
+  const reportRef = useRef<HTMLDivElement>(null);
 
   const placeholderStats = useMemo(
     () => buildPlaceholderExtendedStats(days, granularity),
@@ -934,6 +1233,41 @@ export function StatisticsClient() {
       label: g === "week" ? `wk ${formatShortDay(row.bucket)}` : formatShortDay(row.bucket)
     }));
   }, [displayStats]);
+
+  const promptVolumeChartRows = useMemo(() => {
+    const totals = stackedTimeline.map((row) => promptVolumeBucketTotal(row, promptVolumeAiFilters));
+    const trend = smoothTrendValues(totals);
+    return stackedTimeline.map((row, index) => ({
+      ...row,
+      volume_total: totals[index] ?? 0,
+      volume_trend: trend[index] ?? 0
+    }));
+  }, [stackedTimeline, promptVolumeAiFilters]);
+
+  const promptVolumePeriodChange = useMemo(
+    () =>
+      computePromptVolumePeriodChange(
+        stackedTimeline,
+        days,
+        displayStats?.granularity ?? granularity,
+        promptVolumeAiFilters
+      ),
+    [stackedTimeline, days, displayStats?.granularity, granularity, promptVolumeAiFilters]
+  );
+
+  const promptVolumeAiEnabledCount = useMemo(
+    () => PROMPT_VOLUME_AI_FILTERS.filter((f) => promptVolumeAiFilters[f.key]).length,
+    [promptVolumeAiFilters]
+  );
+
+  const togglePromptVolumeAiFilter = useCallback((key: PromptVolumeAiKey) => {
+    setPromptVolumeAiFilters((prev) => {
+      if (prev[key] && PROMPT_VOLUME_AI_FILTERS.filter((f) => prev[f.key]).length <= 1) {
+        return prev;
+      }
+      return { ...prev, [key]: !prev[key] };
+    });
+  }, []);
 
   const idePromptTimeline = useMemo(() => {
     if (!displayIdeStats?.prompt_timeline) return [];
@@ -1082,6 +1416,7 @@ export function StatisticsClient() {
   const screenTimeByServiceRows = useMemo(() => {
     if (!displayStats?.screen_time_by_service) return [];
     return (["chatgpt", "claude", "gemini"] as const)
+      .filter((serviceKey) => promptVolumeAiFilters[serviceKey])
       .map((serviceKey) => {
         const row = displayStats.screen_time_by_service[serviceKey] ?? EMPTY_SERVICE_SCREEN_TIME;
         return {
@@ -1095,26 +1430,69 @@ export function StatisticsClient() {
                 ? COLOR_CLAUDE
                 : COLOR_GEMINI
         };
-      })
-      .filter((row) => row.minutes > 0);
-  }, [displayStats]);
+      });
+  }, [displayStats, promptVolumeAiFilters]);
 
-  const engagementTimelineRows = useMemo(() => {
-    if (!displayStats?.screen_time_timeline?.length) return [];
-    const g = displayStats.granularity;
-    return displayStats.screen_time_timeline.map((row) => ({
-      ...row,
-      label: g === "week" ? `wk ${formatShortDay(row.bucket)}` : formatShortDay(row.bucket),
-      has_data: row.drafting_minutes > 0 || row.waiting_minutes > 0 || row.reading_idle_minutes > 0
-    }));
-  }, [displayStats]);
+  const screenTimeByServiceChartHasData = useMemo(
+    () => screenTimeByServiceRows.some((row) => row.minutes > 0),
+    [screenTimeByServiceRows]
+  );
+
+  const screenTimeByServiceSectionHeight = Math.max(120, screenTimeByServiceRows.length * 44 + 24);
+
+  const engagementByServicePies = useMemo(() => {
+    if (!displayStats?.screen_time_by_service) return [];
+    const services: Array<{
+      key: "chatgpt" | "claude" | "gemini";
+      filterKey: PromptVolumeAiKey;
+      accent: string;
+    }> = [
+      { key: "chatgpt", filterKey: "chatgpt", accent: COLOR_CHATGPT },
+      { key: "claude", filterKey: "claude", accent: COLOR_CLAUDE },
+      { key: "gemini", filterKey: "gemini", accent: COLOR_GEMINI }
+    ];
+    return services
+      .filter((svc) => promptVolumeAiFilters[svc.filterKey])
+      .map((svc) => {
+        const row = displayStats.screen_time_by_service[svc.key] ?? EMPTY_SERVICE_SCREEN_TIME;
+        const slices: EngagementSlice[] = [
+          { name: "Drafting prompt", value: row.drafting_minutes, fill: COLOR_DRAFTING },
+          { name: "Waiting for AI", value: row.waiting_minutes, fill: COLOR_NATIVE_WEB },
+          { name: "Reading output", value: row.reading_idle_minutes, fill: COLOR_READING_IDLE }
+        ].filter((slice) => slice.value > 0);
+        const totalMinutes =
+          row.total_minutes > 0
+            ? row.total_minutes
+            : slices.reduce((sum, slice) => sum + slice.value, 0);
+        return {
+          key: svc.key,
+          label: svcLabel(svc.key),
+          accent: svc.accent,
+          totalMinutes,
+          slices,
+          hasData: totalMinutes > 0
+        };
+      })
+      .filter((pie) => pie.hasData);
+  }, [displayStats, promptVolumeAiFilters]);
+
+  const engagementByServiceEnabledCount = useMemo(() => {
+    return (["chatgpt", "claude", "gemini"] as const).filter((key) => promptVolumeAiFilters[key]).length;
+  }, [promptVolumeAiFilters]);
+
+  const engagementSpendHasData = useMemo(
+    () =>
+      engagementByServicePies.length > 0 ||
+      (displayStats?.engagement_totals?.segment_count ?? 0) > 0,
+    [engagementByServicePies, displayStats]
+  );
 
   const screenTimeHasData = useMemo(
     () =>
       (displayStats?.engagement_totals?.segment_count ?? 0) > 0 ||
-      screenTimeByServiceRows.length > 0 ||
-      engagementTimelineRows.some((row) => row.has_data),
-    [displayStats, screenTimeByServiceRows, engagementTimelineRows]
+      screenTimeByServiceChartHasData ||
+      engagementSpendHasData,
+    [displayStats, screenTimeByServiceChartHasData, engagementSpendHasData]
   );
 
   const statsInfoNotices = useMemo((): ReactNode[] => {
@@ -1169,48 +1547,6 @@ export function StatisticsClient() {
     return notices;
   }, [displayStats]);
 
-  const pathwayCompareData = useMemo(() => {
-    if (!displayStats) return [];
-    const rows = [
-      {
-        pathway: "With Promptly (Improve / Generate)",
-        ChatGPT: displayStats.latency_comparison_ai.find((x) => x.service_key === "chatgpt")?.prompts_with_promptly ?? 0,
-        Claude: displayStats.latency_comparison_ai.find((x) => x.service_key === "claude")?.prompts_with_promptly ?? 0,
-        Gemini: displayStats.latency_comparison_ai.find((x) => x.service_key === "gemini")?.prompts_with_promptly ?? 0
-      },
-      {
-        pathway: "Native web send only",
-        ChatGPT: displayStats.latency_comparison_ai.find((x) => x.service_key === "chatgpt")?.prompts_native_web ?? 0,
-        Claude: displayStats.latency_comparison_ai.find((x) => x.service_key === "claude")?.prompts_native_web ?? 0,
-        Gemini: displayStats.latency_comparison_ai.find((x) => x.service_key === "gemini")?.prompts_native_web ?? 0
-      }
-    ];
-    const nonZero =
-      rows[0].ChatGPT +
-        rows[0].Claude +
-        rows[0].Gemini +
-        rows[1].ChatGPT +
-        rows[1].Claude +
-        rows[1].Gemini >
-      0;
-    return nonZero ? rows : [];
-  }, [displayStats]);
-
-  const composerCompareData = useMemo(() => {
-    if (!displayStats?.value_insights) return [];
-    const p = displayStats.value_insights.optimize_avg_composer_chars;
-    const n = displayStats.value_insights.native_web_send_avg_composer_chars;
-    if (p === null && n === null) return [];
-    return [
-      {
-        label: "Observed drafts (Improve path)",
-        chars: typeof p === "number" ? p : 0,
-        muted: !(typeof p === "number")
-      },
-      { label: "Observed drafts (native send)", chars: typeof n === "number" ? n : 0, muted: !(typeof n === "number") }
-    ];
-  }, [displayStats]);
-
   const preImproveWordChartRows = useMemo(() => {
     if (!displayStats?.pre_improve_word_timeline?.length) return [];
     const g = displayStats.granularity;
@@ -1243,6 +1579,66 @@ export function StatisticsClient() {
     return `${sign}${rounded}%`;
   }
 
+  const statisticsReportData = useMemo(() => {
+    if (!displayStats) return null;
+    return buildStatisticsReportData({
+      days,
+      granularity: displayStats.granularity ?? granularity,
+      filters: promptVolumeAiFilters,
+      promptVolumeChange: promptVolumePeriodChange,
+      promptEfficiencyPercent: promptDerivedScores?.efficiencyPercent ?? null,
+      promptQualityPercent: promptDerivedScores?.qualityPercent ?? null,
+      preImproveWordChangePercent,
+      combinedTotals: displayStats.combined_totals,
+      timeBalanceTotals: displayStats.time_balance_totals,
+      screenTimeRows: screenTimeByServiceRows.map((row) => ({
+        label: row.service,
+        minutes: row.minutes,
+        color: row.fill
+      })),
+      engagementPies: engagementByServicePies.map((pie) => ({
+        label: pie.label,
+        accent: pie.accent,
+        totalMinutes: pie.totalMinutes,
+        slices: pie.slices
+      })),
+      timelineRows: stackedTimeline.map((row) => ({
+        label: row.label,
+        prompts_chatgpt: row.prompts_chatgpt,
+        prompts_claude: row.prompts_claude,
+        prompts_gemini: row.prompts_gemini,
+        prompts_unknown: row.prompts_unknown
+      }))
+    });
+  }, [
+    displayStats,
+    days,
+    granularity,
+    promptVolumeAiFilters,
+    promptVolumePeriodChange,
+    promptDerivedScores,
+    preImproveWordChangePercent,
+    screenTimeByServiceRows,
+    engagementByServicePies,
+    stackedTimeline
+  ]);
+
+  const handlePrintReport = useCallback(async () => {
+    if (!reportRef.current || !statisticsReportData || reportGenerating) return;
+    setReportGenerating(true);
+    try {
+      const stamp = new Date().toISOString().slice(0, 10);
+      await downloadStatisticsReportPdf(
+        reportRef.current,
+        `promptly-prompt-report-${days}d-${stamp}.pdf`
+      );
+    } catch (e) {
+      console.error("Failed to generate statistics report PDF", e);
+    } finally {
+      setReportGenerating(false);
+    }
+  }, [statisticsReportData, reportGenerating, days]);
+
   return (
     <div className="statistics-charts mx-auto w-full max-w-6xl px-4 py-6 pb-16">
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1256,10 +1652,11 @@ export function StatisticsClient() {
           </Link>
           <button
             type="button"
-            onClick={() => signOut(getFirebaseAuth()).catch(() => {})}
-            className="rounded-lg border border-line px-3 py-1.5 text-xs text-faint hover:bg-cream-dark sm:text-sm"
+            disabled={!user || !statisticsReportData || statsLoading || reportGenerating}
+            onClick={() => void handlePrintReport()}
+            className="rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-ink hover:bg-cream-dark disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm"
           >
-            Sign out
+            {reportGenerating ? "Preparing report…" : "Print Report"}
           </button>
         </div>
       </div>
@@ -1279,20 +1676,41 @@ export function StatisticsClient() {
       {user && displayStats ? (
         <>
           <div className="mb-4 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-xl border border-line bg-cream-dark px-3 py-2">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-faint">Range</span>
-              {([7, 14, 30, 90] as const).map((d) => (
-                <button
-                  key={d}
-                  type="button"
-                  onClick={() => setDays(d)}
-                  className={`rounded-md px-2 py-0.5 text-xs font-medium ${
-                    days === d ? "bg-ink text-cream" : "border border-line text-faint hover:bg-cream-dark"
-                  }`}
-                >
-                  {d}d
-                </button>
-              ))}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-faint">Range</span>
+                {([7, 14, 30, 90] as const).map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => setDays(d)}
+                    className={`rounded-md px-2 py-0.5 text-xs font-medium ${
+                      days === d ? "bg-ink text-cream" : "border border-line text-faint hover:bg-cream-dark"
+                    }`}
+                  >
+                    {d}d
+                  </button>
+                ))}
+              </div>
+              <div
+                className="hidden h-5 w-px shrink-0 bg-line sm:block"
+                aria-hidden
+              />
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-faint">Show</span>
+                {PROMPT_VOLUME_AI_FILTERS.map((filter) => (
+                  <PromptVolumeAiToggleButton
+                    key={filter.key}
+                    label={filter.label}
+                    color={filter.color}
+                    pressed={promptVolumeAiFilters[filter.key]}
+                    disabled={
+                      promptVolumeAiFilters[filter.key] && promptVolumeAiEnabledCount <= 1
+                    }
+                    onToggle={() => togglePromptVolumeAiFilter(filter.key)}
+                  />
+                ))}
+              </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <label className="flex items-center gap-1.5 text-xs text-faint">
@@ -1333,10 +1751,28 @@ export function StatisticsClient() {
 
           {/* Prompt volume */}
           <section className="mb-8 rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4">
-            <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.22em] text-faint">Prompt volume</h2>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">Prompt volume</h2>
+              {promptVolumePeriodChange ? (
+                <p
+                  className="text-right text-lg font-semibold tabular-nums leading-none sm:text-xl"
+                  style={{
+                    color:
+                      promptVolumePeriodChange.percent > 0
+                        ? COLOR_SCORE_GREEN
+                        : promptVolumePeriodChange.percent < 0
+                          ? COLOR_VOLUME_DELTA_DOWN
+                          : "#111111"
+                  }}
+                  title={promptVolumePeriodChange.comparisonLabel}
+                >
+                  {formatVolumeDeltaPercent(promptVolumePeriodChange.percent)}
+                </p>
+              ) : null}
+            </div>
             <div className="h-72 w-full sm:h-80">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={stackedTimeline} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                <ComposedChart data={promptVolumeChartRows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
                   <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
                   <YAxis stroke="#8A8A8A" allowDecimals={false} width={32} tick={CHART_Y_TICK} />
@@ -1345,89 +1781,132 @@ export function StatisticsClient() {
                     cursor={{ fill: "rgba(255,255,255,0.04)" }}
                   />
                   <Legend wrapperStyle={CHART_LEGEND_STYLE} />
-                  <Bar dataKey="prompts_gemini" name="Gemini" stackId="stack" fill={COLOR_GEMINI} radius={[2, 2, 0, 0]} />
-                  <Bar dataKey="prompts_claude" name="Claude" stackId="stack" fill={COLOR_CLAUDE} />
-                  <Bar dataKey="prompts_chatgpt" name="ChatGPT" stackId="stack" fill={COLOR_CHATGPT} />
-                  <Bar dataKey="prompts_unknown" name="Other" stackId="stack" fill={COLOR_UNKNOWN} />
-                </BarChart>
+                  {PROMPT_VOLUME_AI_FILTERS.filter((f) => promptVolumeAiFilters[f.key]).map((filter, index, visible) => (
+                    <Bar
+                      key={filter.dataKey}
+                      dataKey={filter.dataKey}
+                      name={filter.legendName}
+                      stackId="stack"
+                      fill={filter.color}
+                      radius={
+                        index === visible.length - 1 ? ([2, 2, 0, 0] as [number, number, number, number]) : undefined
+                      }
+                    />
+                  ))}
+                  {promptVolumeChartRows.length >= 2 ? (
+                    <Line
+                      type="natural"
+                      dataKey="volume_trend"
+                      name="Trend"
+                      legendType="none"
+                      stroke={COLOR_VOLUME_TREND}
+                      strokeWidth={2}
+                      strokeDasharray="6 4"
+                      dot={false}
+                      isAnimationActive={false}
+                    />
+                  ) : null}
+                </ComposedChart>
               </ResponsiveContainer>
             </div>
           </section>
 
           {screenTimeHasData ? (
-            <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-stretch">
-              <section className="w-full rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4 lg:w-1/2">
-                <h2 className="mb-1 text-sm font-semibold uppercase tracking-[0.22em] text-faint">Screen time by service</h2>
-                <p className="mb-3 text-[11px] text-faint">Foreground minutes on each AI chat while this tab was visible.</p>
+            <>
+              <section className="mb-8 w-full rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4">
+                <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+                  <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">Screen time by service</h2>
+                  <p className="text-xs font-medium tabular-nums text-muted">Last {days} days</p>
+                </div>
+                <p className="mb-3 text-[11px] text-faint">
+                  Total foreground minutes in the selected range — filtered by Show above.
+                </p>
                 {screenTimeByServiceRows.length ? (
-                  <div className="h-56 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart
-                        data={screenTimeByServiceRows}
-                        layout="vertical"
-                        margin={{ top: 4, right: 12, bottom: 4, left: 4 }}
-                        barCategoryGap="28%"
-                      >
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" horizontal={false} />
-                        <XAxis type="number" stroke="#8A8A8A" tick={CHART_Y_TICK} unit=" min" />
-                        <YAxis
-                          type="category"
-                          dataKey="service"
-                          stroke="#8A8A8A"
-                          tick={CHART_Y_TICK_11}
-                          width={72}
-                        />
-                        <Tooltip
-                          contentStyle={CHART_TOOLTIP_STYLE}
-                          formatter={(value: number) => [`${value} min`, "Screen time"]}
-                        />
-                        <Bar dataKey="minutes" name="Screen time" radius={[0, 4, 4, 0]} barSize={16}>
-                          {screenTimeByServiceRows.map((entry) => (
-                            <Cell key={entry.key} fill={entry.fill} fillOpacity={0.95} />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
+                  screenTimeByServiceChartHasData ? (
+                    <div className="w-full" style={{ height: screenTimeByServiceSectionHeight }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          data={screenTimeByServiceRows}
+                          layout="vertical"
+                          margin={{ top: 4, right: 12, bottom: 4, left: 4 }}
+                          barCategoryGap="12%"
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" horizontal={false} />
+                          <XAxis type="number" stroke="#8A8A8A" tick={CHART_Y_TICK} unit=" min" />
+                          <YAxis
+                            type="category"
+                            dataKey="service"
+                            stroke="#8A8A8A"
+                            tick={CHART_Y_TICK_11}
+                            width={72}
+                          />
+                          <Tooltip
+                            contentStyle={CHART_TOOLTIP_STYLE}
+                            formatter={(value: number) => [`${value} min`, "Screen time"]}
+                          />
+                          <Bar dataKey="minutes" name="Screen time" radius={[0, 4, 4, 0]} barSize={18}>
+                            {screenTimeByServiceRows.map((entry) => (
+                              <Cell key={entry.key} fill={entry.fill} fillOpacity={0.95} />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted">No screen time for the selected services in this range yet.</p>
+                  )
                 ) : (
-                  <p className="text-sm text-muted">No service screen time recorded in this range yet.</p>
+                  <p className="text-sm text-muted">Turn on ChatGPT, Claude, or Gemini under Show to view screen time.</p>
                 )}
               </section>
 
-              <section className="w-full rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4 lg:w-1/2">
-                <h2 className="mb-1 text-sm font-semibold uppercase tracking-[0.22em] text-faint">How you spend your time</h2>
-                <p className="mb-3 text-[11px] text-faint">Drafting, waiting for AI, and reading or idle — visible tab time only.</p>
-                {engagementTimelineRows.some((row) => row.has_data) ? (
-                  <div className="h-56 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={engagementTimelineRows.filter((row) => row.has_data)} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
-                        <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
-                        <YAxis stroke="#8A8A8A" allowDecimals tick={CHART_Y_TICK} unit=" min" width={36} />
-                        <Tooltip
-                          contentStyle={CHART_TOOLTIP_STYLE}
-                          formatter={(value: number, name: string) => [`${value} min`, name]}
+              <section className="mb-8 w-full rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4">
+                <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.22em] text-faint">How you spend your time</h2>
+                {engagementByServicePies.length > 0 ? (
+                  <>
+                    <div className="mb-5 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-muted">
+                      <span className="inline-flex items-center gap-2">
+                        <span className="h-3 w-3 rounded-full" style={{ backgroundColor: COLOR_DRAFTING }} />
+                        Drafting prompt
+                      </span>
+                      <span className="inline-flex items-center gap-2">
+                        <span className="h-3 w-3 rounded-full" style={{ backgroundColor: COLOR_NATIVE_WEB }} />
+                        Waiting for AI
+                      </span>
+                      <span className="inline-flex items-center gap-2">
+                        <span className="h-3 w-3 rounded-full" style={{ backgroundColor: COLOR_READING_IDLE }} />
+                        Reading output
+                      </span>
+                    </div>
+                    <div
+                      className={`grid gap-8 ${
+                        engagementByServicePies.length === 1
+                          ? "grid-cols-1 max-w-xs mx-auto"
+                          : engagementByServicePies.length === 2
+                            ? "grid-cols-1 sm:grid-cols-2 max-w-2xl mx-auto"
+                            : "grid-cols-1 sm:grid-cols-3"
+                      }`}
+                    >
+                      {engagementByServicePies.map((pie) => (
+                        <ServiceEngagementDonut
+                          key={pie.key}
+                          label={pie.label}
+                          accentColor={pie.accent}
+                          totalMinutes={pie.totalMinutes}
+                          slices={pie.slices}
                         />
-                        <Legend wrapperStyle={CHART_LEGEND_STYLE} />
-                        <Bar dataKey="drafting_minutes" name="Drafting prompt" stackId="time" fill={COLOR_DRAFTING} />
-                        <Bar dataKey="waiting_minutes" name="Waiting for AI" stackId="time" fill={COLOR_NATIVE_WEB} />
-                        <Bar
-                          dataKey="reading_idle_minutes"
-                          name="Reading answer / idle"
-                          stackId="time"
-                          fill={COLOR_READING_IDLE}
-                          radius={[2, 2, 0, 0]}
-                        />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
+                      ))}
+                    </div>
+                  </>
+                ) : engagementByServiceEnabledCount > 0 ? (
+                  <p className="text-sm text-muted">No engagement breakdown for the selected services in this range yet.</p>
                 ) : (
-                  <p className="text-sm text-muted">No engagement breakdown recorded in this range yet.</p>
+                  <p className="text-sm text-muted">Turn on at least one service under Show to view how you spend time.</p>
                 )}
               </section>
-            </div>
+            </>
           ) : (
-            <section className="mb-8 rounded-2xl border border-line bg-cream p-4 shadow-card sm:p-5">
+            <section className="mb-8 w-full rounded-2xl border border-line bg-cream p-4 shadow-card sm:p-5">
               <h2 className="mb-1 text-sm font-semibold uppercase tracking-[0.22em] text-faint">Screen time</h2>
               <p className="text-sm text-muted">
                 Screen time tracking starts with the latest extension. Use ChatGPT, Claude, or Gemini while signed in to
@@ -1436,109 +1915,24 @@ export function StatisticsClient() {
             </section>
           )}
 
-          {/* Promptly impact scores (left) + average draft chart (right) */}
-          {modelTimeChartRows.length ||
-          promptDerivedScores?.efficiencyPercent != null ||
-          promptDerivedScores?.qualityPercent != null ? (
-            <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-stretch">
-              {promptDerivedScores?.efficiencyPercent != null ||
-              promptDerivedScores?.qualityPercent != null ? (
-                <section
-                  className="flex w-full flex-col rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4 lg:w-1/2"
-                  style={{ minHeight: modelTimeChartRows.length ? modelTimeSectionHeight : undefined }}
-                >
-                  <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.22em] text-faint">Promptly impact</h2>
-                  <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 sm:gap-4">
-                    <div>
-                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Prompt efficiency</p>
-                      {promptDerivedScores.efficiencyPercent != null ? (
-                        <FadeInUpliftPercent
-                          key={`eff-${promptDerivedScores.efficiencyPercent}-${days}-${granularity}`}
-                          value={promptDerivedScores.efficiencyPercent}
-                          className="mt-1 block text-3xl font-bold tabular-nums leading-none sm:text-4xl"
-                          color={COLOR_SCORE_GREEN}
-                        />
-                      ) : (
-                        <p className="mt-1 text-3xl font-bold leading-none text-ink sm:text-4xl">—</p>
-                      )}
-                      <p className="mt-2 text-[10px] leading-snug text-faint">{promptDerivedScores.efficiencyHint}</p>
-                    </div>
-                    <div>
-                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Prompt quality</p>
-                      {promptDerivedScores.qualityPercent != null ? (
-                        <FadeInUpliftPercent
-                          key={`qual-${promptDerivedScores.qualityPercent}-${days}-${granularity}`}
-                          value={promptDerivedScores.qualityPercent}
-                          className="mt-1 block text-3xl font-bold tabular-nums leading-none sm:text-4xl"
-                          color={COLOR_SCORE_GREEN}
-                        />
-                      ) : (
-                        <p className="mt-1 text-3xl font-bold leading-none text-ink sm:text-4xl">—</p>
-                      )}
-                      <p className="mt-2 text-[10px] leading-snug text-faint">{promptDerivedScores.qualityHint}</p>
-                    </div>
-                  </div>
-                </section>
-              ) : null}
-              {modelTimeChartRows.length ? (
-                <section className="w-full rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4 lg:w-1/2">
-                  <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.22em] text-faint">
-                    Average draft &amp; response time
-                  </h2>
-                  <div style={{ height: modelTimeSectionHeight }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart
-                        data={modelTimeChartRows}
-                        layout="vertical"
-                        margin={{ top: 4, right: 12, bottom: 4, left: 4 }}
-                        barCategoryGap="28%"
-                        barGap={4}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" horizontal={false} />
-                        <XAxis type="number" stroke="#8A8A8A" tick={CHART_Y_TICK} unit="s" />
-                        <YAxis
-                          type="category"
-                          dataKey="model"
-                          stroke="#8A8A8A"
-                          tick={CHART_Y_TICK_11}
-                          width={72}
-                        />
-                        <Tooltip
-                          contentStyle={CHART_TOOLTIP_STYLE}
-                          formatter={(value: number, name: string) => {
-                            if (typeof value !== "number" || value <= 0) return ["—", name];
-                            return [`${value}s`, name];
-                          }}
-                        />
-                        <Legend wrapperStyle={CHART_LEGEND_STYLE_COMPACT} />
-                        <Bar dataKey="avg_drafting_s" name="Avg drafting (s)" fill="#c084fc" radius={[0, 4, 4, 0]} barSize={12}>
-                          {modelTimeChartRows.map((entry, idx) => (
-                            <Cell key={`draft-${idx}`} fillOpacity={entry.drafting_missing ? 0.2 : 0.95} />
-                          ))}
-                        </Bar>
-                        <Bar
-                          dataKey="avg_response_s"
-                          name="Avg AI response (s)"
-                          fill={COLOR_NATIVE_WEB}
-                          radius={[0, 4, 4, 0]}
-                          barSize={12}
-                        >
-                          {modelTimeChartRows.map((entry, idx) => (
-                            <Cell key={`resp-${idx}`} fillOpacity={entry.response_missing ? 0.2 : 0.95} />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </section>
-              ) : null}
-            </div>
-          ) : null}
-
           {timeBalanceHasData ? (
-            <section className="mb-12 rounded-2xl border border-line bg-cream p-6 backdrop-blur-md">
-              <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">Writing vs waiting for AI</h2>
-              <div className="mt-4 h-96 w-full">
+            <section className="mb-8 w-full rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4">
+              <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+                <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">Writing vs waiting for AI</h2>
+                {displayStats.time_balance_totals ? (
+                  <p className="text-right text-xs font-medium tabular-nums text-muted">
+                    Avg/send:{" "}
+                    {displayStats.time_balance_totals.draft_active_minutes != null
+                      ? `${displayStats.time_balance_totals.draft_active_minutes} min draft`
+                      : "— draft"}
+                    {" · "}
+                    {displayStats.time_balance_totals.waiting_for_ai_minutes != null
+                      ? `${displayStats.time_balance_totals.waiting_for_ai_minutes} min wait`
+                      : "— wait"}
+                  </p>
+                ) : null}
+              </div>
+              <div className="h-72 w-full sm:h-80">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={timeBalanceChartRows.filter((r) => r.has_data)} margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
@@ -1562,218 +1956,10 @@ export function StatisticsClient() {
                   </BarChart>
                 </ResponsiveContainer>
               </div>
-              {displayStats.time_balance_totals ? (
-                <p className="mt-4 text-[11px] text-faint">
-                  Range average per send:{" "}
-                  {displayStats.time_balance_totals.draft_active_minutes != null
-                    ? `${displayStats.time_balance_totals.draft_active_minutes.toLocaleString()} min drafting`
-                    : "— drafting"}{" "}
-                  ·{" "}
-                  {displayStats.time_balance_totals.waiting_for_ai_minutes != null
-                    ? `${displayStats.time_balance_totals.waiting_for_ai_minutes.toLocaleString()} min waiting`
-                    : "— waiting"}
-                </p>
-              ) : null}
             </section>
           ) : null}
 
-          {/*Latency */}
-          <section className="mb-12 rounded-2xl border border-line bg-cream p-6 backdrop-blur-md">
-            <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">Rewrite vs native turnaround time</h2>
-            <div className="mt-4 h-96 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={latencyChartRows} margin={{ top: 8, right: 12, bottom: 56, left: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
-                  <XAxis dataKey="ai" stroke="#8A8A8A" tick={CHART_Y_TICK_11} />
-                  <YAxis stroke="#8A8A8A" tick={CHART_Y_TICK_11} label={CHART_AXIS_LABEL("Seconds (avg)")} />
-                  <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
-                  <Legend wrapperStyle={CHART_LEGEND_STYLE} />
-                  <Bar dataKey="promptly_rewrite_s" name="Promptly rewrite (avg s)" radius={[8, 8, 0, 0]} fill={COLOR_PROMPTLY}>
-                    {latencyChartRows.map((entry, idx) => (
-                      <Cell key={`p-${idx}`} fillOpacity={entry.promptly_missing ? 0.2 : 0.95} />
-                    ))}
-                  </Bar>
-                  <Bar dataKey="native_roundtrip_s" name="Native host UI (avg s)" radius={[8, 8, 0, 0]} fill={COLOR_NATIVE_WEB}>
-                    {latencyChartRows.map((entry, idx) => (
-                      <Cell key={`n-${idx}`} fillOpacity={entry.native_missing ? 0.2 : 0.95} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </section>
-
-          {/* Pre-improve word count */}
-          {preImproveWordHasData ? (
-            <section className="mb-12 rounded-2xl border border-line bg-cream p-6 backdrop-blur-md">
-              <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.22em] text-faint">Words before Promptly</h2>
-              {preImproveWordChangePercent !== null ? (
-                <p
-                  className="mb-4 text-lg font-semibold tabular-nums leading-none sm:text-xl"
-                  style={{
-                    color:
-                      preImproveWordChangePercent > 0
-                        ? COLOR_SCORE_GREEN
-                        : preImproveWordChangePercent < 0
-                          ? "#b45309"
-                          : "#111111"
-                  }}
-                >
-                  {formatWordChangePercent(preImproveWordChangePercent)}
-                </p>
-              ) : null}
-              {preImproveWordChartRows.length ? (
-                <div className="mt-4 h-72 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={preImproveWordChartRows} margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
-                      <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
-                      <YAxis
-                        stroke="#8A8A8A"
-                        tick={CHART_Y_TICK_11}
-                        allowDecimals
-                        label={CHART_AXIS_LABEL("Avg words")}
-                      />
-                      <Tooltip
-                        contentStyle={CHART_TOOLTIP_STYLE}
-                        formatter={(value: number, name: string, item) => {
-                          const payload = item?.payload as {
-                            samples?: number;
-                            samples_after?: number;
-                          };
-                          const runs =
-                            name === "Before Promptly"
-                              ? (payload?.samples ?? 0)
-                              : (payload?.samples_after ?? 0);
-                          return [`${value} words (${runs.toLocaleString()} runs)`, name];
-                        }}
-                      />
-                      <Legend wrapperStyle={CHART_LEGEND_STYLE} />
-                      <Bar
-                        dataKey="avg_words_before_display"
-                        name="Before Promptly"
-                        fill={COLOR_PROMPTLY}
-                        radius={[4, 4, 0, 0]}
-                        maxBarSize={34}
-                      />
-                      <Bar
-                        dataKey="avg_words_after_display"
-                        name="After Promptly"
-                        fill={COLOR_NATIVE_WEB}
-                        radius={[4, 4, 0, 0]}
-                        maxBarSize={34}
-                      />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              ) : null}
-            </section>
-          ) : null}
-
-          {/* Composer length */}
-          {composerCompareData.length ? (
-            <section className="mb-12 rounded-2xl border border-line bg-cream p-6 backdrop-blur-md">
-              <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">Draft verbosity</h2>
-              <div className="mt-4 h-64 w-full max-w-xl">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={composerCompareData} layout="vertical" margin={{ left: 32, top: 8 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                    <XAxis type="number" stroke="#8A8A8A" tick={CHART_Y_TICK} />
-                    <YAxis dataKey="label" type="category" width={148} stroke="#8A8A8A" tick={CHART_Y_TICK} />
-                    <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
-                    <Bar dataKey="chars" radius={[0, 6, 6, 0]} fill="#c084fc">
-                      {composerCompareData.map((c, idx) => (
-                        <Cell key={idx} fillOpacity={c.muted ? 0.35 : 0.95} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </section>
-          ) : null}
-
-          {/* Promptly pathway compare */}
-          {pathwayCompareData.length ? (
-            <section className="mb-12 rounded-2xl border border-line bg-cream p-6 backdrop-blur-md">
-              <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">Pathway breakdown</h2>
-              <div className="mt-4 h-80 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={pathwayCompareData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
-                    <XAxis dataKey="pathway" stroke="#bfb7ff" tick={CHART_AXIS_TICK_LIGHT} />
-                    <YAxis stroke="#bfb7ff" allowDecimals={false} tick={CHART_AXIS_TICK_LIGHT_PLAIN} />
-                    <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
-                    <Legend wrapperStyle={CHART_LEGEND_STYLE} />
-                    <Bar dataKey="Gemini" name="Gemini" stackId="a" fill={COLOR_GEMINI} />
-                    <Bar dataKey="Claude" name="Claude" stackId="a" fill={COLOR_CLAUDE} />
-                    <Bar dataKey="ChatGPT" name="ChatGPT" stackId="a" fill={COLOR_CHATGPT} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </section>
-          ) : null}
-
-          {/* Supporting technical */}
-          <section className="mb-12 grid gap-10 lg:grid-cols-2">
-            <div className="rounded-2xl border border-line bg-cream-dark p-6">
-              <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-faint">Improve mode mixes</h3>
-              <ModeMiniChart modes={displayStats.breakdowns_from_events.mode} />
-            </div>
-            <div className="rounded-2xl border border-line bg-cream-dark p-6">
-              <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-faint">Billed Promptly tokens</h3>
-              <div className="mt-4 h-64 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                    data={displayStats.timeline.map((row) => ({
-                      ...row,
-                      label: displayStats.granularity === "week" ? `wk ${formatShortDay(row.bucket)}` : formatShortDay(row.bucket)
-                    }))}
-                    margin={{ bottom: 8 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
-                    <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
-                    <YAxis stroke="#8A8A8A" tick={CHART_Y_TICK} />
-                    <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
-                    <Bar dataKey="billed_promptly_tokens" fill="#9333ea" name="Promptly billed tokens / bucket" radius={[4, 4, 0, 0]} maxBarSize={32} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          </section>
-
-          <section className="mb-12 rounded-2xl border border-line bg-cream-dark p-6">
-            <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-faint">Scraped model buckets (Improve path)</h3>
-            <div className="mt-4 overflow-x-auto rounded-xl border border-line">
-              <table className="min-w-[520px] w-full border-collapse text-left text-sm">
-                <thead className="border-b border-line text-[10px] uppercase tracking-wide text-muted">
-                  <tr>
-                    <th className="px-4 py-2 font-semibold">Bucket</th>
-                    <th className="px-4 py-2 font-semibold">Example label</th>
-                    <th className="px-4 py-2 font-semibold">Events</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {displayStats.breakdowns_from_events.model_buckets.length ? (
-                    displayStats.breakdowns_from_events.model_buckets.map((row) => (
-                      <tr key={row.bucket} className="border-b border-line text-ink">
-                        <td className="px-4 py-2 font-mono text-xs text-faint">{row.bucket}</td>
-                        <td className="px-4 py-2 text-xs">{row.exemplar_label || "—"}</td>
-                        <td className="px-4 py-2 tabular-nums">{row.prompts.toLocaleString()}</td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr className="text-ink">
-                      <td colSpan={3} className="px-4 py-3 text-xs italic">
-                        After you Optimize with Promptly attached, detected host labels accumulate here whenever the picker exposes readable text.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <section className="mb-8 rounded-2xl border border-violet-200/80 bg-cream p-4 shadow-card sm:p-5">
+          <section className="mb-8 w-full rounded-2xl border border-violet-200/80 bg-cream p-4 shadow-card sm:p-5">
             <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
               <div>
                 <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">Coding agents</h2>
@@ -1941,7 +2127,7 @@ export function StatisticsClient() {
                 {idePromptTimeline.length ? (
                   <div>
                     <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">Prompts over time</h3>
-                    <div className="h-56 w-full statistics-charts">
+                    <div className="h-56 w-full statistics-charts sm:h-64">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={idePromptTimeline} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#E0DDD6" />
@@ -1963,7 +2149,7 @@ export function StatisticsClient() {
                 ) ? (
                   <div>
                     <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">Screen time (minutes)</h3>
-                    <div className="h-56 w-full statistics-charts">
+                    <div className="h-56 w-full statistics-charts sm:h-64">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={ideScreenTimeline} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#E0DDD6" />
@@ -1994,34 +2180,236 @@ export function StatisticsClient() {
             )}
           </section>
 
-          <footer className="rounded-2xl border border-line bg-cream-dark p-5 text-[11px] leading-relaxed text-faint">
-            <div className="grid gap-2 sm:grid-cols-2">
-              <p>
-                <span className="font-semibold text-ink/90">Native sends:</span>{" "}
-                {displayStats.value_insights.native_web_sends.toLocaleString()}
-              </p>
-              <p>
-                <span className="font-semibold text-ink/90">Optimize events queried:</span>{" "}
-                {displayStats.value_insights.optimize_events_queried.toLocaleString()}
-              </p>
-              <p>
-                <span className="font-semibold text-ink/90">Mirror rows synced:</span>{" "}
-                {displayStats.combined_totals.mirror_rows_synced_to_host_telemetry.toLocaleString()}
-              </p>
-              <p>
-                <span className="font-semibold text-ink/90">Authoritative rollup tokens:</span>{" "}
-                {displayStats.rollup_daily.totals.tokens.toLocaleString()}
-              </p>
+          <div className="my-10 border-t border-line" role="separator" />
+
+          <h2 className="mb-6 text-sm font-semibold uppercase tracking-[0.22em] text-faint">Promptly Labs Diagnostics</h2>
+
+          {/* Promptly impact scores (left) + average draft chart (right) */}
+          {modelTimeChartRows.length ||
+          promptDerivedScores?.efficiencyPercent != null ||
+          promptDerivedScores?.qualityPercent != null ? (
+            <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-stretch">
+              {promptDerivedScores?.efficiencyPercent != null ||
+              promptDerivedScores?.qualityPercent != null ? (
+                <section
+                  className="flex w-full flex-col rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4 lg:w-1/2"
+                  style={{ minHeight: modelTimeChartRows.length ? modelTimeSectionHeight : undefined }}
+                >
+                  <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.22em] text-faint">Promptly impact</h2>
+                  <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 sm:gap-4">
+                    <div>
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Prompt efficiency</p>
+                      {promptDerivedScores.efficiencyPercent != null ? (
+                        <FadeInUpliftPercent
+                          key={`eff-${promptDerivedScores.efficiencyPercent}-${days}-${granularity}`}
+                          value={promptDerivedScores.efficiencyPercent}
+                          className="mt-1 block text-3xl font-bold tabular-nums leading-none sm:text-4xl"
+                          color={COLOR_SCORE_GREEN}
+                        />
+                      ) : (
+                        <p className="mt-1 text-3xl font-bold leading-none text-ink sm:text-4xl">—</p>
+                      )}
+                      <p className="mt-2 text-[10px] leading-snug text-faint">{promptDerivedScores.efficiencyHint}</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Prompt quality</p>
+                      {promptDerivedScores.qualityPercent != null ? (
+                        <FadeInUpliftPercent
+                          key={`qual-${promptDerivedScores.qualityPercent}-${days}-${granularity}`}
+                          value={promptDerivedScores.qualityPercent}
+                          className="mt-1 block text-3xl font-bold tabular-nums leading-none sm:text-4xl"
+                          color={COLOR_SCORE_GREEN}
+                        />
+                      ) : (
+                        <p className="mt-1 text-3xl font-bold leading-none text-ink sm:text-4xl">—</p>
+                      )}
+                      <p className="mt-2 text-[10px] leading-snug text-faint">{promptDerivedScores.qualityHint}</p>
+                    </div>
+                  </div>
+                </section>
+              ) : null}
+              {modelTimeChartRows.length ? (
+                <section className="w-full rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4 lg:w-1/2">
+                  <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.22em] text-faint">
+                    Average draft &amp; response time
+                  </h2>
+                  <div style={{ height: modelTimeSectionHeight }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        data={modelTimeChartRows}
+                        layout="vertical"
+                        margin={{ top: 4, right: 12, bottom: 4, left: 4 }}
+                        barCategoryGap="28%"
+                        barGap={4}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" horizontal={false} />
+                        <XAxis type="number" stroke="#8A8A8A" tick={CHART_Y_TICK} unit="s" />
+                        <YAxis
+                          type="category"
+                          dataKey="model"
+                          stroke="#8A8A8A"
+                          tick={CHART_Y_TICK_11}
+                          width={72}
+                        />
+                        <Tooltip
+                          contentStyle={CHART_TOOLTIP_STYLE}
+                          formatter={(value: number, name: string) => {
+                            if (typeof value !== "number" || value <= 0) return ["—", name];
+                            return [`${value}s`, name];
+                          }}
+                        />
+                        <Legend wrapperStyle={CHART_LEGEND_STYLE_COMPACT} />
+                        <Bar dataKey="avg_drafting_s" name="Avg drafting (s)" fill="#c084fc" radius={[0, 4, 4, 0]} barSize={12}>
+                          {modelTimeChartRows.map((entry, idx) => (
+                            <Cell key={`draft-${idx}`} fillOpacity={entry.drafting_missing ? 0.2 : 0.95} />
+                          ))}
+                        </Bar>
+                        <Bar
+                          dataKey="avg_response_s"
+                          name="Avg AI response (s)"
+                          fill={COLOR_NATIVE_WEB}
+                          radius={[0, 4, 4, 0]}
+                          barSize={12}
+                        >
+                          {modelTimeChartRows.map((entry, idx) => (
+                            <Cell key={`resp-${idx}`} fillOpacity={entry.response_missing ? 0.2 : 0.95} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </section>
+              ) : null}
             </div>
-            {displayStats.footnotes.length ? (
-              <ul className="mt-4 list-disc space-y-2 pl-5">
-                {displayStats.footnotes.map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-            ) : null}
-          </footer>
+          ) : null}
+
+          {/*Latency */}
+          <section className="mb-12 rounded-2xl border border-line bg-cream p-6 backdrop-blur-md">
+            <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">Rewrite vs native turnaround time</h2>
+            <div className="mt-4 h-96 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={latencyChartRows} margin={{ top: 8, right: 12, bottom: 56, left: 8 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                  <XAxis dataKey="ai" stroke="#8A8A8A" tick={CHART_Y_TICK_11} />
+                  <YAxis stroke="#8A8A8A" tick={CHART_Y_TICK_11} label={CHART_AXIS_LABEL("Seconds (avg)")} />
+                  <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
+                  <Legend wrapperStyle={CHART_LEGEND_STYLE} />
+                  <Bar dataKey="promptly_rewrite_s" name="Promptly rewrite (avg s)" radius={[8, 8, 0, 0]} fill={COLOR_PROMPTLY}>
+                    {latencyChartRows.map((entry, idx) => (
+                      <Cell key={`p-${idx}`} fillOpacity={entry.promptly_missing ? 0.2 : 0.95} />
+                    ))}
+                  </Bar>
+                  <Bar dataKey="native_roundtrip_s" name="Native host UI (avg s)" radius={[8, 8, 0, 0]} fill={COLOR_NATIVE_WEB}>
+                    {latencyChartRows.map((entry, idx) => (
+                      <Cell key={`n-${idx}`} fillOpacity={entry.native_missing ? 0.2 : 0.95} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </section>
+
+          {/* Pre-improve word count */}
+          {preImproveWordHasData ? (
+            <section className="mb-12 rounded-2xl border border-line bg-cream p-6 backdrop-blur-md">
+              <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.22em] text-faint">Words before Promptly</h2>
+              {preImproveWordChangePercent !== null ? (
+                <p
+                  className="mb-4 text-lg font-semibold tabular-nums leading-none sm:text-xl"
+                  style={{
+                    color:
+                      preImproveWordChangePercent > 0
+                        ? COLOR_SCORE_GREEN
+                        : preImproveWordChangePercent < 0
+                          ? "#b45309"
+                          : "#111111"
+                  }}
+                >
+                  {formatWordChangePercent(preImproveWordChangePercent)}
+                </p>
+              ) : null}
+              {preImproveWordChartRows.length ? (
+                <div className="mt-4 h-72 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={preImproveWordChartRows} margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                      <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
+                      <YAxis
+                        stroke="#8A8A8A"
+                        tick={CHART_Y_TICK_11}
+                        allowDecimals
+                        label={CHART_AXIS_LABEL("Avg words")}
+                      />
+                      <Tooltip
+                        contentStyle={CHART_TOOLTIP_STYLE}
+                        formatter={(value: number, name: string, item) => {
+                          const payload = item?.payload as {
+                            samples?: number;
+                            samples_after?: number;
+                          };
+                          const runs =
+                            name === "Before Promptly"
+                              ? (payload?.samples ?? 0)
+                              : (payload?.samples_after ?? 0);
+                          return [`${value} words (${runs.toLocaleString()} runs)`, name];
+                        }}
+                      />
+                      <Legend wrapperStyle={CHART_LEGEND_STYLE} />
+                      <Bar
+                        dataKey="avg_words_before_display"
+                        name="Before Promptly"
+                        fill={COLOR_PROMPTLY}
+                        radius={[4, 4, 0, 0]}
+                        maxBarSize={34}
+                      />
+                      <Bar
+                        dataKey="avg_words_after_display"
+                        name="After Promptly"
+                        fill={COLOR_NATIVE_WEB}
+                        radius={[4, 4, 0, 0]}
+                        maxBarSize={34}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : null}
+            </section>
+          ) : null}
+
+          {/* Supporting technical */}
+          <section className="mb-12 grid gap-10 lg:grid-cols-2">
+            <div className="rounded-2xl border border-line bg-cream-dark p-6">
+              <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-faint">Improve mode mixes</h3>
+              <ModeMiniChart modes={displayStats.breakdowns_from_events.mode} />
+            </div>
+            <div className="rounded-2xl border border-line bg-cream-dark p-6">
+              <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-faint">Billed Promptly tokens</h3>
+              <div className="mt-4 h-64 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={displayStats.timeline.map((row) => ({
+                      ...row,
+                      label: displayStats.granularity === "week" ? `wk ${formatShortDay(row.bucket)}` : formatShortDay(row.bucket)
+                    }))}
+                    margin={{ bottom: 8 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                    <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
+                    <YAxis stroke="#8A8A8A" tick={CHART_Y_TICK} />
+                    <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
+                    <Bar dataKey="billed_promptly_tokens" fill="#9333ea" name="Promptly billed tokens / bucket" radius={[4, 4, 0, 0]} maxBarSize={32} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </section>
         </>
+      ) : null}
+
+      {statisticsReportData ? (
+        <div className="pointer-events-none fixed left-[-10000px] top-0 z-[-1] opacity-0" aria-hidden>
+          <StatisticsPrintReport ref={reportRef} data={statisticsReportData} />
+        </div>
       ) : null}
     </div>
   );

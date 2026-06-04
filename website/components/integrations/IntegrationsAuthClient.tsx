@@ -1,8 +1,9 @@
 "use client";
 
+import { resolveGoogleSignInError } from "@/lib/firebaseAuthAccountHints";
+import { listenForGoogleSignInReturn, signInWithGoogleInteractive } from "@/lib/firebaseGoogleAuth";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
-import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider } from "firebase/auth";
-import type { User } from "firebase/auth";
+import { onAuthStateChanged, type User } from "firebase/auth";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -46,6 +47,19 @@ export function IntegrationsAuthClient({ initialTool }: { initialTool?: string |
     return onAuthStateChanged(auth, (next) => {
       setUser(next);
       setLoading(false);
+      if (next) {
+        setBusy(false);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    return listenForGoogleSignInReturn({
+      onError: (message) => {
+        setError(resolveGoogleSignInError(new Error(message)).message);
+        setBusy(false);
+      },
+      onSettled: () => setBusy(false)
     });
   }, []);
 
@@ -84,11 +98,10 @@ export function IntegrationsAuthClient({ initialTool }: { initialTool?: string |
     setError("");
     setBusy(true);
     try {
-      const auth = getFirebaseAuth();
-      await signInWithPopup(auth, new GoogleAuthProvider());
+      const returnTo = `${window.location.pathname}${window.location.search}`;
+      await signInWithGoogleInteractive(returnTo);
     } catch (e) {
-      setError(String(e instanceof Error ? e.message : e));
-    } finally {
+      setError(resolveGoogleSignInError(e).message);
       setBusy(false);
     }
   }

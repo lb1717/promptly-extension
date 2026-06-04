@@ -1,7 +1,8 @@
 "use client";
 
+import { openGoogleSignInInNewTab, waitForAuthenticatedUser } from "@/lib/firebaseGoogleAuth";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
-import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup, type User } from "firebase/auth";
+import { onAuthStateChanged, type User } from "firebase/auth";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { CopyBlock } from "./integrationCopyBlock";
@@ -69,11 +70,15 @@ export function useIntegrationPairing(tool: IdeToolId) {
       const auth = getFirebaseAuth();
       let current = auth.currentUser;
       if (!current) {
-        await signInWithPopup(auth, new GoogleAuthProvider());
-        current = auth.currentUser;
+        const returnTo =
+          typeof window !== "undefined"
+            ? `${window.location.pathname}${window.location.search}`
+            : "/integrations";
+        openGoogleSignInInNewTab(returnTo);
+        current = await waitForAuthenticatedUser(120_000);
       }
       if (!current) {
-        throw new Error("Sign-in did not complete");
+        throw new Error("Sign-in did not complete. Finish Google sign-in in the other tab, then try again.");
       }
       await createPairCode(current);
     } catch (e) {

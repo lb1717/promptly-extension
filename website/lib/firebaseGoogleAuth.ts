@@ -1,12 +1,10 @@
 import {
   getRedirectResult,
   onAuthStateChanged,
-  signInWithPopup,
   signInWithRedirect,
   type User,
   type UserCredential
 } from "firebase/auth";
-import { getFirebaseErrorCode } from "@/lib/firebaseAuthAccountHints";
 import { getFirebaseAuth, getGoogleProvider } from "@/lib/firebaseClient";
 
 export const PROMPTLY_GOOGLE_SIGN_IN_DONE = "PROMPTLY_GOOGLE_SIGN_IN_DONE";
@@ -17,6 +15,26 @@ const REDIRECT_PENDING_KEY = "promptly_google_redirect_pending";
 let redirectResultPromise: Promise<UserCredential | null> | null = null;
 let redirectFlowStarted = false;
 
+export function resetGoogleRedirectAuthState(): void {
+  redirectResultPromise = null;
+  redirectFlowStarted = false;
+}
+
+/** True when this page load is likely the return hop from Google OAuth. */
+export function isReturningFromGoogleRedirect(): boolean {
+  if (typeof window === "undefined") return false;
+  if (wasGoogleRedirectPending()) return true;
+  const search = new URLSearchParams(window.location.search);
+  const hash = window.location.hash || "";
+  return (
+    search.has("code") ||
+    search.has("state") ||
+    hash.includes("access_token=") ||
+    hash.includes("id_token=") ||
+    hash.includes("apiKey=")
+  );
+}
+
 export function googleAuthCallbackPath(returnTo?: string): string {
   const path =
     returnTo ||
@@ -24,15 +42,20 @@ export function googleAuthCallbackPath(returnTo?: string): string {
   return `/auth/google?returnTo=${encodeURIComponent(path)}`;
 }
 
-/** Open Google sign-in in a new tab (falls back to same-tab navigation if blocked). */
+/** Open Google sign-in in a new browser tab (not a popup window). */
 export function openGoogleSignInInNewTab(returnTo?: string): void {
   if (typeof window === "undefined") return;
-  const url = googleAuthCallbackPath(returnTo);
-  // Do not pass noopener — the callback tab notifies window.opener when sign-in completes.
-  const opened = window.open(url, "_blank");
-  if (!opened) {
-    window.location.assign(url);
-  }
+  const url = new URL(googleAuthCallbackPath(returnTo), window.location.origin).href;
+
+  const link = document.createElement("a");
+  link.href = url;
+  link.target = "_blank";
+  // Keep opener so /auth/google can postMessage back to this page when sign-in finishes.
+  link.rel = "opener";
+  link.style.display = "none";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
 }
 
 export type GoogleSignInFlowResult =
@@ -40,29 +63,10 @@ export type GoogleSignInFlowResult =
   | { status: "opened-tab" }
   | { status: "cancelled" };
 
-/** Prefer an in-page Google popup (reliable on user click); fall back to the auth tab flow. */
+/** Opens Google sign-in in a new tab; the original page listens for completion via postMessage. */
 export async function signInWithGoogleInteractive(returnTo?: string): Promise<GoogleSignInFlowResult> {
-  const auth = getFirebaseAuth();
-  const provider = getGoogleProvider();
-
-  try {
-    const cred = await signInWithPopup(auth, provider);
-    return { status: "success", user: cred.user };
-  } catch (error) {
-    const code = getFirebaseErrorCode(error);
-    if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") {
-      return { status: "cancelled" };
-    }
-    if (
-      code === "auth/popup-blocked" ||
-      code === "auth/operation-not-supported-in-this-environment" ||
-      code === "auth/web-storage-unsupported"
-    ) {
-      openGoogleSignInInNewTab(returnTo);
-      return { status: "opened-tab" };
-    }
-    throw error;
-  }
+  openGoogleSignInInNewTab(returnTo);
+  return { status: "opened-tab" };
 }
 
 export function markGoogleRedirectPending(): void {
@@ -81,14 +85,10 @@ export function wasGoogleRedirectPending(): boolean {
 }
 
 export async function startGoogleSignInRedirect(): Promise<void> {
-  if (redirectFlowStarted) return;
+  resetGoogleRedirectAuthState();
   redirectFlowStarted = true;
   markGoogleRedirectPending();
   await signInWithRedirect(getFirebaseAuth(), getGoogleProvider());
-}
-
-export async function signInWithGooglePopupInTab(): Promise<UserCredential> {
-  return signInWithPopup(getFirebaseAuth(), getGoogleProvider());
 }
 
 export async function consumeGoogleSignInRedirectResult(): Promise<UserCredential | null> {

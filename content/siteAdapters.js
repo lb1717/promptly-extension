@@ -479,7 +479,7 @@
   }
 
   function getClaudeAttachmentStripElement(input) {
-    const scope = input?.closest("form");
+    const scope = getClaudeComposerScope(input);
     if (!scope || !input) {
       return null;
     }
@@ -617,46 +617,167 @@
     return claudeComposerIsStackedAboveInput(target, anchor, anchorRect, surfaceRect);
   }
 
-  /** Simple attachment check for a manual vertical nudge (filename testids, Remove buttons, thumbnails). */
-  function claudeHasUploadedAttachment(target) {
-    const input = getClaudeChatInput(target);
-    const scope = input?.closest("form");
-    if (!scope) {
+  function getClaudeComposerScope(input) {
+    if (!isElement(input)) {
+      return null;
+    }
+    const form = input.closest("form");
+    if (form) {
+      return form;
+    }
+    const fieldset = input.closest("fieldset");
+    if (fieldset) {
+      return fieldset;
+    }
+    let node = input.parentElement;
+    for (let depth = 0; node && depth < 18 && node !== document.body; node = node.parentElement, depth += 1) {
+      if (typeof node.getBoundingClientRect !== "function") {
+        continue;
+      }
+      const rect = node.getBoundingClientRect();
+      if (rect.width >= 260 && rect.height >= 40) {
+        return node;
+      }
+    }
+    return input.parentElement;
+  }
+
+  function isNearClaudeComposer(el, input) {
+    if (!isElement(el) || !isElement(input)) {
       return false;
     }
+    const inputRect = input.getBoundingClientRect();
+    const rect = el.getBoundingClientRect();
+    if (inputRect.width < 80 || rect.width < 8 || rect.height < 8) {
+      return false;
+    }
+    const horizontalOverlap = rect.right >= inputRect.left - 48 && rect.left <= inputRect.right + 48;
+    const aboveInput = rect.bottom <= inputRect.top + 24;
+    const notTooFarAbove = rect.top >= inputRect.top - 220;
+    return horizontalOverlap && aboveInput && notTooFarAbove;
+  }
 
-    for (const btn of scope.querySelectorAll('button[aria-label^="Remove "]')) {
-      if (isClaudeElementVisible(btn)) {
+  function collectComposerSearchRoots(input, includeDocumentFallback) {
+    const roots = [];
+    const seen = new Set();
+    const add = (root) => {
+      if (!root || seen.has(root)) {
+        return;
+      }
+      seen.add(root);
+      roots.push(root);
+      let nodes = [];
+      try {
+        nodes = root.querySelectorAll ? root.querySelectorAll("*") : [];
+      } catch (_e) {
+        return;
+      }
+      for (const node of nodes) {
+        if (node.shadowRoot) {
+          add(node.shadowRoot);
+        }
+      }
+    };
+    add(getClaudeComposerScope(input));
+    if (includeDocumentFallback) {
+      add(document);
+    }
+    return roots;
+  }
+
+  function claudeRootHasAttachmentSignals(root, input, requireProximity) {
+    let removeBtns = [];
+    let testIdNodes = [];
+    let thumbs = [];
+    let fileImgs = [];
+    try {
+      removeBtns = root.querySelectorAll('button[aria-label^="Remove "]');
+      testIdNodes = root.querySelectorAll("[data-testid]");
+      thumbs = root.querySelectorAll('[class*="group/thumbnail"]');
+      fileImgs = root.querySelectorAll('img[src*="/files/"], img[src*="/api/"]');
+    } catch (_e) {
+      return false;
+    }
+    const near = (el) => !requireProximity || isNearClaudeComposer(el, input);
+
+    for (const btn of removeBtns) {
+      if (isClaudeElementVisible(btn) && near(btn)) {
         return true;
       }
     }
-
-    for (const node of scope.querySelectorAll("[data-testid]")) {
+    for (const node of testIdNodes) {
       if (!claudeDataTestIdLooksLikeAttachment(node.getAttribute("data-testid"))) {
         continue;
       }
-      if (isClaudeElementVisible(node)) {
+      if (isClaudeElementVisible(node) && near(node)) {
         return true;
       }
     }
-
-    for (const thumb of scope.querySelectorAll('[class*="group/thumbnail"]')) {
-      if (isClaudeElementVisible(thumb)) {
+    for (const thumb of thumbs) {
+      if (isClaudeElementVisible(thumb) && near(thumb)) {
         return true;
       }
     }
-
-    for (const img of scope.querySelectorAll('img[src*="/files/"]')) {
-      if (!isClaudeElementVisible(img)) {
+    for (const img of fileImgs) {
+      if (!isClaudeElementVisible(img) || !near(img)) {
         continue;
       }
       const src = String(img.getAttribute("src") || "");
-      if (src.includes("thumbnail") || src.includes("/files/")) {
+      if (src.includes("thumbnail") || src.includes("/files/") || src.includes("/api/")) {
         return true;
       }
     }
-
     return false;
+  }
+
+  /** Simple attachment check for a manual vertical nudge (filename testids, Remove buttons, thumbnails). */
+  function claudeHasUploadedAttachment(target) {
+    const input = getClaudeChatInput(target);
+    if (!input) {
+      return false;
+    }
+
+    for (const root of collectComposerSearchRoots(input, false)) {
+      if (claudeRootHasAttachmentSignals(root, input, false)) {
+        return true;
+      }
+    }
+    for (const root of collectComposerSearchRoots(input, true)) {
+      if (claudeRootHasAttachmentSignals(root, input, true)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function claudeAttachmentDiagnostics(target) {
+    const input = getClaudeChatInput(target);
+    const scope = getClaudeComposerScope(input);
+    return {
+      hasInput: !!input,
+      hasForm: !!input?.closest("form"),
+      scopeTag: scope?.tagName || null,
+      detected: claudeHasUploadedAttachment(target),
+      removeButtons: collectComposerSearchRoots(input, true).reduce((n, root) => {
+        try {
+          return n + root.querySelectorAll('button[aria-label^="Remove "]').length;
+        } catch (_e) {
+          return n;
+        }
+      }, 0),
+      filenameTestIds: collectComposerSearchRoots(input, true).reduce((n, root) => {
+        try {
+          for (const node of root.querySelectorAll("[data-testid]")) {
+            if (claudeDataTestIdLooksLikeAttachment(node.getAttribute("data-testid"))) {
+              n += 1;
+            }
+          }
+        } catch (_e) {
+          /* ignore */
+        }
+        return n;
+      }, 0)
+    };
   }
 
   function getClaudeComposerChromeTop(input, fallbackTop) {
@@ -920,6 +1041,7 @@
     getClaudeAnchorPlacementRect,
     claudeShowsHomeGreeting,
     claudeHasUploadedAttachment,
+    claudeAttachmentDiagnostics,
     getSessionVerificationHints
   };
 })();
