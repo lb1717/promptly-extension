@@ -22,15 +22,18 @@ import type { User } from "firebase/auth";
 
 type Status = "loading" | "ready" | "working" | "done" | "cancelled" | "error";
 
-const REDIRECT_WAIT_MS = 12_000;
+const REDIRECT_WAIT_MS = 20_000;
+const AUTH_DOMAIN = process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "";
 
 export function GoogleSignInCallbackClient() {
   const searchParams = useSearchParams();
   const returnTo = searchParams.get("returnTo")?.trim() || "/account";
+  const openedFromAccount = searchParams.get("from") === "account";
   const [status, setStatus] = useState<Status>("loading");
   const [errorMessage, setErrorMessage] = useState("");
+  const [errorCode, setErrorCode] = useState("");
   const finishedRef = useRef(false);
-  const autoStartedRef = useRef(false);
+  const redirectStartedRef = useRef(false);
 
   const finishSuccess = useCallback(async (user: User) => {
     if (finishedRef.current) return;
@@ -42,19 +45,37 @@ export function GoogleSignInCallbackClient() {
     tryCloseGoogleSignInTab();
   }, []);
 
-  const finishError = useCallback((message: string) => {
+  const finishError = useCallback((message: string, code = "") => {
     if (finishedRef.current) return;
     finishedRef.current = true;
     clearGoogleRedirectPending();
     setErrorMessage(message);
+    setErrorCode(code);
     setStatus("error");
     notifyGoogleSignInOpenerError(message);
   }, []);
+
+  const startRedirectSignIn = useCallback(async () => {
+    if (finishedRef.current || redirectStartedRef.current) return;
+    redirectStartedRef.current = true;
+    setStatus("working");
+    setErrorMessage("");
+    setErrorCode("");
+
+    try {
+      await startGoogleSignInRedirect();
+    } catch (redirectError) {
+      redirectStartedRef.current = false;
+      const resolved = resolveGoogleSignInError(redirectError);
+      finishError(resolved.message, getFirebaseErrorCode(redirectError));
+    }
+  }, [finishError]);
 
   const handleContinueWithGoogle = useCallback(async () => {
     if (finishedRef.current) return;
     setStatus("working");
     setErrorMessage("");
+    setErrorCode("");
 
     try {
       const cred = await signInWithGooglePopupInTab();
@@ -69,14 +90,9 @@ export function GoogleSignInCallbackClient() {
         return;
       }
 
-      try {
-        await startGoogleSignInRedirect();
-      } catch (redirectError) {
-        const resolved = resolveGoogleSignInError(redirectError);
-        finishError(resolved.message);
-      }
+      await startRedirectSignIn();
     }
-  }, [finishError, finishSuccess]);
+  }, [finishSuccess, startRedirectSignIn]);
 
   useEffect(() => {
     let cancelled = false;
@@ -110,8 +126,14 @@ export function GoogleSignInCallbackClient() {
           finishedRef.current = true;
           setStatus("cancelled");
           notifyGoogleSignInOpenerError(
-            "Google sign-in did not complete. Close this tab, return to Promptly, and try Sign in with Google again."
+            "Google sign-in did not finish. Close this tab, go back to Promptly, and try again."
           );
+          return;
+        }
+
+        const hasOpener = Boolean(window.opener && !window.opener.closed);
+        if (openedFromAccount && hasOpener) {
+          await startRedirectSignIn();
           return;
         }
 
@@ -121,22 +143,14 @@ export function GoogleSignInCallbackClient() {
       } catch (e) {
         if (cancelled || finishedRef.current) return;
         const resolved = resolveGoogleSignInError(e);
-        finishError(resolved.message);
+        finishError(resolved.message, getFirebaseErrorCode(e));
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [finishError, finishSuccess]);
-
-  useEffect(() => {
-    if (status !== "ready") return;
-    if (!window.opener || window.opener.closed) return;
-    if (autoStartedRef.current) return;
-    autoStartedRef.current = true;
-    void handleContinueWithGoogle();
-  }, [status, handleContinueWithGoogle]);
+  }, [finishError, finishSuccess, openedFromAccount, startRedirectSignIn]);
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-page px-6 py-16 text-ink">
@@ -145,7 +159,7 @@ export function GoogleSignInCallbackClient() {
 
       {status === "loading" || status === "working" ? (
         <p className="mt-3 text-sm text-muted">
-          {status === "working" ? "Opening Google…" : "Completing sign-in…"}
+          {status === "working" ? "Redirecting to Google…" : "Completing sign-in…"}
         </p>
       ) : null}
 
@@ -156,6 +170,7 @@ export function GoogleSignInCallbackClient() {
             type="button"
             onClick={() => {
               finishedRef.current = false;
+              redirectStartedRef.current = false;
               resetGoogleRedirectAuthState();
               void handleContinueWithGoogle();
             }}
@@ -188,8 +203,9 @@ export function GoogleSignInCallbackClient() {
             type="button"
             onClick={() => {
               finishedRef.current = false;
+              redirectStartedRef.current = false;
               resetGoogleRedirectAuthState();
-              void handleContinueWithGoogle();
+              void startRedirectSignIn();
             }}
             className="mt-4 inline-flex items-center justify-center rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800"
           >
@@ -204,12 +220,14 @@ export function GoogleSignInCallbackClient() {
       {status === "error" ? (
         <div className="mt-4 max-w-sm text-center">
           <p className="text-sm text-red-700">{errorMessage || "Google sign-in failed."}</p>
+          {errorCode ? <p className="mt-2 font-mono text-xs text-muted">Error code: {errorCode}</p> : null}
           <button
             type="button"
             onClick={() => {
               finishedRef.current = false;
+              redirectStartedRef.current = false;
               resetGoogleRedirectAuthState();
-              setStatus("ready");
+              void startRedirectSignIn();
             }}
             className="mt-4 inline-flex items-center justify-center rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800"
           >
@@ -219,6 +237,12 @@ export function GoogleSignInCallbackClient() {
             Back to Promptly
           </Link>
         </div>
+      ) : null}
+
+      {(status === "error" || status === "cancelled") && AUTH_DOMAIN ? (
+        <p className="mt-6 max-w-md text-center text-xs text-muted">
+          Auth domain for this build: <span className="font-mono">{AUTH_DOMAIN}</span>
+        </p>
       ) : null}
     </main>
   );
