@@ -1,5 +1,7 @@
 export {
   countSalesTeamLinks,
+  isSalesTeamJoinLink,
+  SALES_TEAM_JOIN_OFFER_TITLE,
   SALES_TEAM_LINK_COUNT,
   SALES_TEAM_OFFER_SPECS,
   SALES_TEAM_TIERS,

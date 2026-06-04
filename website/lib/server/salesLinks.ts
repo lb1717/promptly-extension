@@ -1,6 +1,7 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { randomBytes } from "crypto";
 import { getFirebaseAdminDb } from "@/lib/server/firebaseAdmin";
+import { isSalesTeamJoinLink, SALES_TEAM_JOIN_OFFER_TITLE } from "@/lib/salesTeamOffers";
 import { normalizePaidTier, type PaidTier } from "@/lib/server/stripe";
 
 const COLLECTION = "promptly_sales_links";
@@ -35,6 +36,7 @@ export type PublicSalesLink = {
   tier: SalesLinkTier;
   offerTitle: string;
   offerDescription: string;
+  salesTeamLink: boolean;
 };
 
 function slugifyBase(value: string): string {
@@ -113,12 +115,18 @@ function docToRecord(id: string, data: FirebaseFirestore.DocumentData | undefine
 }
 
 function toPublicRecord(record: SalesLinkRecord): PublicSalesLink {
+  const salesTeamLink = isSalesTeamJoinLink({
+    salesTeamId: record.salesTeamId,
+    offerKey: record.offerKey,
+    offerTitle: record.offerTitle
+  });
   return {
     slug: record.slug,
-    recipientName: record.recipientName,
+    recipientName: salesTeamLink ? "" : record.recipientName,
     tier: record.tier,
     offerTitle: record.offerTitle,
-    offerDescription: record.offerDescription
+    offerDescription: record.offerDescription,
+    salesTeamLink
   };
 }
 
@@ -152,7 +160,6 @@ export async function adminListSalesLinksForTeam(
   const links = snap.docs
     .map((doc) => docToRecord(doc.id, doc.data()))
     .filter((item): item is SalesLinkRecord => Boolean(item))
-    .sort((a, b) => (a.offerLabel || "").localeCompare(b.offerLabel || ""));
   return { ok: true, links };
 }
 

@@ -28,6 +28,7 @@ import { useEmailVerificationStatus } from "@/lib/useEmailVerificationStatus";
 import { AI_TRY_TARGETS } from "@/components/onboarding/AiServiceLogos";
 import { syncWebsiteSessionToExtension } from "@/lib/extensionBridge";
 import { planDetailsForTier } from "@/lib/plans";
+import { isSalesTeamJoinLink } from "@/lib/salesTeamOffers";
 import {
   detectAuthTransition,
   markAuthHydrated,
@@ -45,8 +46,9 @@ function advanceAfterAccountAuth(goToStep: (next: number) => void) {
   goToStep(PLAN_STEP);
 }
 
-function salesWelcomeTitle(recipientName: string): string {
-  const name = recipientName.trim();
+function salesWelcomeTitle(link: PublicSalesLink): string {
+  if (isSalesTeamJoinLink(link)) return "Welcome";
+  const name = link.recipientName.trim();
   return name ? `Welcome, ${name}` : "Welcome!";
 }
 
@@ -56,6 +58,7 @@ type PublicSalesLink = {
   tier: "pro" | "student" | "enterprise";
   offerTitle: string;
   offerDescription: string;
+  salesTeamLink?: boolean;
 };
 
 type BillingPayload = {
@@ -456,7 +459,7 @@ export function SalesJoinClient({ slug }: { slug: string }) {
 
   const stepTitle = useMemo(() => {
     if (!link) return "";
-    if (step === 1) return salesWelcomeTitle(link.recipientName);
+    if (step === 1) return salesWelcomeTitle(link);
     if (step === 2) return "Create your account";
     if (step === 3) return "Your plan";
     if (step === 4) return "Install Promptly";
@@ -524,8 +527,9 @@ export function SalesJoinClient({ slug }: { slug: string }) {
         {step === 1 ? (
           <div className="mt-6 space-y-4">
             <p className="text-sm leading-relaxed text-muted">
-              Thanks for using Promptly{link.recipientName.trim() ? `, ${link.recipientName.trim()}` : ""}. We&apos;ve
-              prepared a personalized setup just for you — account, plan, and browser extension in a few quick steps.
+              {isSalesTeamJoinLink(link)
+                ? "Get started with Promptly — create your account, choose your plan, and install the browser extension in a few quick steps."
+                : `Thanks for using Promptly${link.recipientName.trim() ? `, ${link.recipientName.trim()}` : ""}. We&apos;ve prepared a personalized setup just for you — account, plan, and browser extension in a few quick steps.`}
             </p>
             <button
               type="button"
@@ -776,8 +780,11 @@ export function SalesJoinClient({ slug }: { slug: string }) {
             <div className="rounded-xl border border-emerald-200 bg-emerald-50/80 px-4 py-3 text-center">
               <p className="text-lg font-semibold text-emerald-900">Setup complete</p>
               <p className="mt-1 text-sm text-emerald-800">
-                You&apos;re all set{link.recipientName.trim() ? `, ${link.recipientName.trim()}` : ""}. Try Promptly on
-                your favourite AI chat.
+                You&apos;re all set
+                {isSalesTeamJoinLink(link) || !link.recipientName.trim()
+                  ? "."
+                  : `, ${link.recipientName.trim()}.`}{" "}
+                Try Promptly on your favourite AI chat.
               </p>
             </div>
 

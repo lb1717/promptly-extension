@@ -1,7 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { SALES_TEAM_LINK_COUNT } from "@/lib/salesTeamOffers";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  organizeSalesTeamLinks,
+  salesTeamOfferDisplayLabel,
+  SALES_TEAM_LINK_COUNT,
+  type SalesTeamLinkRow
+} from "@/lib/salesTeamOffers";
 
 type SalesTeam = {
   id: string;
@@ -14,14 +19,7 @@ type SalesTeam = {
   createdAt: string | null;
 };
 
-type TeamLink = {
-  id: string;
-  slug: string;
-  offerLabel: string | null;
-  tier: string;
-  signupCount: number;
-  active: boolean;
-};
+type TeamLink = SalesTeamLinkRow;
 
 function formatDate(value: string | null) {
   if (!value) return "—";
@@ -218,14 +216,55 @@ export function AdminSalesTeamClient() {
     }
   }
 
+  const groupedLinks = useMemo(() => organizeSalesTeamLinks(detailLinks), [detailLinks]);
+
+  function renderLinkRow(link: TeamLink) {
+    const label = salesTeamOfferDisplayLabel(link.offerLabel) || link.slug;
+    const url = `${origin}/join/${link.slug}`;
+    const copyId = link.id;
+    return (
+      <tr key={link.id} className="border-b border-violet-500/10 text-violet-100/90">
+        <td className="py-2.5 pr-4 pl-4 font-medium text-white">{label}</td>
+        <td className="py-2.5 pr-4">{link.signupCount}</td>
+        <td className="py-2.5 pr-0">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
+            <span className="max-w-[280px] truncate font-mono text-xs text-violet-300/80">{url}</span>
+            <button
+              type="button"
+              onClick={() => copyText(copyId, url)}
+              disabled={!detailTeam?.active || !link.active}
+              className="shrink-0 rounded-lg border border-violet-500/30 px-2.5 py-1 text-xs font-semibold text-violet-100 hover:bg-violet-500/15 disabled:opacity-50"
+            >
+              {copiedKey === copyId ? "Copied" : "Copy"}
+            </button>
+          </div>
+        </td>
+      </tr>
+    );
+  }
+
   async function copyAllLinks() {
     if (!detailLinks.length) return;
-    const rows = detailLinks.map((link) => {
-      const label = link.offerLabel || link.slug;
-      const url = `${origin}/join/${link.slug}`;
-      return `${label}\t${url}`;
-    });
-    await copyText("all", rows.join("\n"));
+    const lines: string[] = [];
+    for (const group of groupedLinks) {
+      lines.push(group.planLabel);
+      if (group.discounts.length) {
+        lines.push("Discounts");
+        for (const link of group.discounts) {
+          const label = salesTeamOfferDisplayLabel(link.offerLabel) || link.slug;
+          lines.push(`${label}\t${origin}/join/${link.slug}`);
+        }
+      }
+      if (group.trials.length) {
+        lines.push("Free trials");
+        for (const link of group.trials) {
+          const label = salesTeamOfferDisplayLabel(link.offerLabel) || link.slug;
+          lines.push(`${label}\t${origin}/join/${link.slug}`);
+        }
+      }
+      lines.push("");
+    }
+    await copyText("all", lines.join("\n").trim());
   }
 
   return (
@@ -416,30 +455,44 @@ export function AdminSalesTeamClient() {
                     </tr>
                   </thead>
                   <tbody>
-                    {detailLinks.map((link) => {
-                      const label = link.offerLabel || link.slug;
-                      const url = `${origin}/join/${link.slug}`;
-                      const copyId = link.id;
-                      return (
-                        <tr key={link.id} className="border-b border-violet-500/10 text-violet-100/90">
-                          <td className="max-w-[240px] py-2.5 pr-4 font-medium text-white">{label}</td>
-                          <td className="py-2.5 pr-4">{link.signupCount}</td>
-                          <td className="py-2.5 pr-0">
-                            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
-                              <span className="max-w-[280px] truncate font-mono text-xs text-violet-300/80">{url}</span>
-                              <button
-                                type="button"
-                                onClick={() => copyText(copyId, url)}
-                                disabled={!detailTeam.active || !link.active}
-                                className="shrink-0 rounded-lg border border-violet-500/30 px-2.5 py-1 text-xs font-semibold text-violet-100 hover:bg-violet-500/15 disabled:opacity-50"
-                              >
-                                {copiedKey === copyId ? "Copied" : "Copy"}
-                              </button>
-                            </div>
+                    {groupedLinks.map((group) => (
+                      <Fragment key={group.tier}>
+                        <tr className="bg-violet-500/10">
+                          <td
+                            colSpan={3}
+                            className="py-2.5 pr-4 text-xs font-bold uppercase tracking-wider text-violet-100"
+                          >
+                            {group.planLabel}
                           </td>
                         </tr>
-                      );
-                    })}
+                        {group.discounts.length ? (
+                          <>
+                            <tr className="bg-[#1a1228]/60">
+                              <td
+                                colSpan={3}
+                                className="py-1.5 pl-3 pr-4 text-[11px] font-semibold uppercase tracking-wide text-violet-300/70"
+                              >
+                                Discounts
+                              </td>
+                            </tr>
+                            {group.discounts.map((link) => renderLinkRow(link))}
+                          </>
+                        ) : null}
+                        {group.trials.length ? (
+                          <>
+                            <tr className="bg-[#1a1228]/60">
+                              <td
+                                colSpan={3}
+                                className="py-1.5 pl-3 pr-4 text-[11px] font-semibold uppercase tracking-wide text-violet-300/70"
+                              >
+                                Free trials
+                              </td>
+                            </tr>
+                            {group.trials.map((link) => renderLinkRow(link))}
+                          </>
+                        ) : null}
+                      </Fragment>
+                    ))}
                   </tbody>
                 </table>
               </div>

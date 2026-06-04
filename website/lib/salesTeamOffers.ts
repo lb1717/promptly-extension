@@ -70,6 +70,80 @@ export function salesTeamLinkSlug(teamSlug: string, tier: SalesTeamTier, offerKe
 export const SALES_TEAM_LINK_COUNT =
   SALES_TEAM_TIERS.length * SALES_TEAM_OFFER_SPECS.length;
 
+/** Stored on bulk-created join links — used to detect generic (non-personalized) welcome. */
+export const SALES_TEAM_JOIN_OFFER_TITLE = "Your Promptly plan";
+
+export function isSalesTeamJoinLink(link: {
+  salesTeamLink?: boolean;
+  salesTeamId?: string | null;
+  offerKey?: string | null;
+  offerTitle?: string;
+}): boolean {
+  if (link.salesTeamLink) return true;
+  if (link.salesTeamId) return true;
+  if (link.offerKey) return true;
+  return String(link.offerTitle || "").trim() === SALES_TEAM_JOIN_OFFER_TITLE;
+}
+
 export function countSalesTeamLinks(): number {
   return SALES_TEAM_LINK_COUNT;
+}
+
+export function salesTeamTierLabel(tier: SalesTeamTier): string {
+  return TIER_LABEL[tier];
+}
+
+export function salesTeamOfferDisplayLabel(offerLabel: string | null | undefined): string {
+  const label = String(offerLabel || "").trim();
+  if (!label) return "";
+  const sep = " — ";
+  const idx = label.indexOf(sep);
+  return idx >= 0 ? label.slice(idx + sep.length).trim() : label;
+}
+
+export function isSalesTeamTrialOfferKey(offerKey: string | null | undefined): boolean {
+  return String(offerKey || "").startsWith("trial-");
+}
+
+export type SalesTeamLinkRow = {
+  id: string;
+  slug: string;
+  tier: SalesTeamTier;
+  offerKey: string | null;
+  offerLabel: string | null;
+  signupCount: number;
+  active: boolean;
+};
+
+export type SalesTeamPlanLinkGroup = {
+  tier: SalesTeamTier;
+  planLabel: string;
+  discounts: SalesTeamLinkRow[];
+  trials: SalesTeamLinkRow[];
+};
+
+function offerKeySortIndex(offerKey: string | null | undefined): number {
+  const key = String(offerKey || "");
+  const idx = SALES_TEAM_OFFER_SPECS.findIndex((spec) => spec.offerKey === key);
+  return idx >= 0 ? idx : 999;
+}
+
+function sortByOfferSpecOrder(rows: SalesTeamLinkRow[]): SalesTeamLinkRow[] {
+  return [...rows].sort((a, b) => offerKeySortIndex(a.offerKey) - offerKeySortIndex(b.offerKey));
+}
+
+export function organizeSalesTeamLinks(links: SalesTeamLinkRow[]): SalesTeamPlanLinkGroup[] {
+  return SALES_TEAM_TIERS.map((tier) => {
+    const forTier = links.filter((link) => link.tier === tier);
+    const discounts = sortByOfferSpecOrder(
+      forTier.filter((link) => !isSalesTeamTrialOfferKey(link.offerKey))
+    );
+    const trials = sortByOfferSpecOrder(forTier.filter((link) => isSalesTeamTrialOfferKey(link.offerKey)));
+    return {
+      tier,
+      planLabel: TIER_LABEL[tier],
+      discounts,
+      trials
+    };
+  });
 }

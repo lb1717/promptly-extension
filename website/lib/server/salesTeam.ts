@@ -5,6 +5,7 @@ import { adminCreateSalesLink, adminListSalesLinksForTeam, type SalesLinkRecord 
 import { ensureSalesTeamStripeCoupons, getSalesTeamCouponId } from "@/lib/server/stripeDiscountCatalog";
 import {
   countSalesTeamLinks,
+  SALES_TEAM_JOIN_OFFER_TITLE,
   SALES_TEAM_OFFER_SPECS,
   SALES_TEAM_TIERS,
   salesTeamLinkSlug,
@@ -126,7 +127,7 @@ export async function adminCreateSalesTeam(
   });
 
   const links: SalesLinkRecord[] = [];
-  const genericTitle = "Your Promptly plan";
+  const genericTitle = SALES_TEAM_JOIN_OFFER_TITLE;
   const genericDescription = "Subscribe to Promptly with the offer from your sales link.";
 
   for (const tier of SALES_TEAM_TIERS) {
@@ -155,7 +156,7 @@ export async function adminCreateSalesTeam(
       }
 
       const { link } = await adminCreateSalesLink({
-        recipientName: name,
+        recipientName: "",
         tier,
         offerTitle: genericTitle,
         offerDescription: genericDescription,
