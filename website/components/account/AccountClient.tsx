@@ -1153,7 +1153,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                         </button>
                       ) : (
                         <Link
-                          href="/product#pricing"
+                          href="/#pricing"
                           className="inline-flex w-full items-center justify-center rounded-lg border border-line px-3 py-2 text-xs font-semibold text-muted hover:bg-cream-dark"
                         >
                           View plan details

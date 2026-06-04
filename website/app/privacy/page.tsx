@@ -26,7 +26,7 @@ export default function PrivacyPage() {
         <Navbar />
         <article className="mx-auto w-full max-w-3xl px-4 pb-20 pt-10 sm:pt-14">
           <p className="text-sm font-medium text-faint">
-            <Link href="/product" className="text-muted hover:text-ink">
+            <Link href="/" className="text-muted hover:text-ink">
               Product
             </Link>
             <span className="mx-2 opacity-60">/</span>

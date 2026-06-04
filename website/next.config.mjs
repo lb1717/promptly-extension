@@ -5,6 +5,15 @@ const nextConfig = {
   distDir:
     process.env.NEXT_DIST_DIR ||
     (process.env.NODE_ENV === "production" ? ".next-build" : ".next"),
+  async redirects() {
+    return [
+      {
+        source: "/product",
+        destination: "/",
+        permanent: true
+      }
+    ];
+  },
   async headers() {
     return [
       {

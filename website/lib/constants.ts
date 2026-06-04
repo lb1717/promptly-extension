@@ -53,7 +53,7 @@ export const SITE = {
 };
 
 export const NAV_LINKS = [
-  { label: "Product", href: "/product" },
+  { label: "Product", href: "/" },
   { label: "Labs", href: "/labs" }
 ];
 

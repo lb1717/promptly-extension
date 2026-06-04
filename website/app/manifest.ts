@@ -6,7 +6,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "Promptly Labs",
     short_name: "Promptly",
     description: DEFAULT_DESCRIPTION,
-    start_url: "/product",
+    start_url: "/",
     display: "standalone",
     background_color: "#fdfdfc",
     theme_color: "#fdfdfc",

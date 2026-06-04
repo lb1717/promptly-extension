@@ -3,7 +3,10 @@ import type { Metadata } from "next";
 export const DEFAULT_DESCRIPTION =
   "Promptly is a browser extension that improves your AI prompts in one click inside ChatGPT, Claude, and Gemini. Get clearer intent, structured outputs, and less trial-and-error.";
 
-export const DEFAULT_KEYWORDS = [
+/** Keywords for the product homepage — avoid the bare brand phrase that competes with /labs. */
+export const PRODUCT_KEYWORDS = [
+  "Promptly",
+  "Promptly browser extension",
   "prompt optimization",
   "prompt improvement",
   "prompt engineering",
@@ -12,23 +15,24 @@ export const DEFAULT_KEYWORDS = [
   "Gemini prompt tool",
   "AI prompt extension",
   "browser extension for AI",
-  "structured AI outputs",
-  "Promptly Labs"
+  "structured AI outputs"
 ];
+
+export const DEFAULT_KEYWORDS = PRODUCT_KEYWORDS;
 
 type SitemapChangeFrequency = "always" | "hourly" | "daily" | "weekly" | "monthly" | "yearly" | "never";
 
 /** Public marketing pages included in the sitemap. */
 export const PUBLIC_SITEMAP_ROUTES: Array<{ path: string; changeFrequency: SitemapChangeFrequency; priority: number }> =
   [
-  { path: "/product", changeFrequency: "weekly", priority: 1 },
-  { path: "/get-started", changeFrequency: "weekly", priority: 0.9 },
-  { path: "/labs", changeFrequency: "monthly", priority: 0.8 },
-  { path: "/research", changeFrequency: "monthly", priority: 0.75 },
-  { path: "/papers", changeFrequency: "monthly", priority: 0.6 },
-  { path: "/privacy", changeFrequency: "yearly", priority: 0.3 },
-  { path: "/help", changeFrequency: "monthly", priority: 0.35 }
-];
+    { path: "/", changeFrequency: "weekly", priority: 1 },
+    { path: "/get-started", changeFrequency: "weekly", priority: 0.9 },
+    { path: "/labs", changeFrequency: "monthly", priority: 0.45 },
+    { path: "/research", changeFrequency: "monthly", priority: 0.4 },
+    { path: "/papers", changeFrequency: "monthly", priority: 0.35 },
+    { path: "/privacy", changeFrequency: "yearly", priority: 0.3 },
+    { path: "/help", changeFrequency: "monthly", priority: 0.35 }
+  ];
 
 export function getSiteUrl(): string {
   return String(process.env.NEXT_PUBLIC_APP_URL || process.env.APP_BASE_URL || "https://promptly-labs.com").replace(
@@ -59,7 +63,7 @@ export function buildPageMetadata({
   const ogImage = absoluteUrl("/icon-512.png");
 
   return {
-    title: "Promptly Labs",
+    title: { absolute: title },
     description,
     keywords: keywords ?? DEFAULT_KEYWORDS,
     alternates: {
@@ -76,7 +80,7 @@ export function buildPageMetadata({
       type: "website",
       locale: "en_US",
       url,
-      siteName: "Promptly Labs",
+      siteName: "Promptly",
       title,
       description,
       images: [{ url: ogImage, width: 512, height: 512, alt: "Promptly — AI prompt improvement extension" }]
@@ -95,9 +99,13 @@ export function rootMetadata(): Metadata {
 
   return {
     metadataBase: new URL(getSiteUrl()),
-    title: "Promptly Labs",
+    title: {
+      default:
+        "Promptly — One-Click AI Prompt Improvement for ChatGPT, Claude & Gemini",
+      template: "%s"
+    },
     description: DEFAULT_DESCRIPTION,
-    keywords: DEFAULT_KEYWORDS,
+    keywords: PRODUCT_KEYWORDS,
     applicationName: "Promptly",
     authors: [{ name: "Promptly Labs", url: getSiteUrl() }],
     creator: "Promptly Labs",

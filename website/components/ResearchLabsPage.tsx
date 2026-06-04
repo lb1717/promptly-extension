@@ -1,4 +1,5 @@
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { AmbientBackground } from "@/components/AmbientBackground";
 import { Footer } from "@/components/Footer";
 import { Navbar } from "@/components/Navbar";
@@ -157,6 +158,7 @@ type Props = {
 
 export function ResearchLabsPage({ variant = "research" }: Props) {
   const showDemo = variant === "research";
+  const isLabsSection = variant === "labs";
 
   return (
     <main className="relative min-h-screen bg-page text-ink">
@@ -164,11 +166,23 @@ export function ResearchLabsPage({ variant = "research" }: Props) {
       <div className="relative z-10">
         <Navbar />
 
+        {isLabsSection ? (
+          <div className="border-b border-line bg-cream-dark px-4 py-3 text-center text-sm text-muted">
+            Looking for the{" "}
+            <Link href="/" className="font-semibold text-ink underline-offset-2 hover:underline">
+              Promptly browser extension
+            </Link>
+            ? That&apos;s on our product page, not this research section.
+          </div>
+        ) : null}
+
         <section className="px-4 pb-16 pt-10 sm:pb-20 sm:pt-14">
           <div className="mx-auto max-w-6xl">
             <div className="mx-auto max-w-4xl text-center">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-faint">Research</p>
-              <h1 className="mt-4 text-4xl font-semibold leading-tight text-ink sm:text-6xl">Promptly Research Labs</h1>
+              <h1 className="mt-4 text-4xl font-semibold leading-tight text-ink sm:text-6xl">
+                {isLabsSection ? "Prompt engineering research" : "Promptly Research Labs"}
+              </h1>
               <p className="mx-auto mt-6 max-w-3xl text-lg leading-relaxed text-muted sm:text-xl">
                 Promptly turns a raw prompt into a parameterised instruction specification, then reconstructs an
                 optimised prompt using retrieved prompt patterns and search-based prompt optimisation.

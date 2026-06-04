@@ -2,16 +2,16 @@ import { ResearchLabsPage } from "@/components/ResearchLabsPage";
 import { buildPageMetadata } from "@/lib/seo";
 
 export const metadata = buildPageMetadata({
-  title: "Prompt Engineering Research & Architecture",
+  title: "Prompt Engineering Research & Architecture — Promptly Labs",
   description:
-    "Conceptual architecture and prompt optimisation research grounded in MIT and arXiv sources — how Promptly turns a raw prompt into a clearer instruction contract.",
+    "Research and conceptual architecture for prompt optimisation — not the Promptly browser extension. MIT and arXiv sources on instruction contracts and automatic prompt optimization.",
   path: "/labs",
   keywords: [
     "prompt engineering research",
-    "prompt optimisation",
+    "prompt optimisation architecture",
     "instruction drift",
     "automatic prompt optimization",
-    "Promptly Labs"
+    "MIT prompt engineering"
   ]
 });
 

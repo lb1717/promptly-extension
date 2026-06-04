@@ -11,14 +11,15 @@ export function Navbar() {
     <header className="sticky top-0 z-50 border-b border-line bg-page/90 backdrop-blur-xl">
       <div className="mx-auto grid w-full max-w-6xl grid-cols-[auto_1fr_auto] items-center gap-2 px-3 py-3 sm:grid-cols-[1fr_auto_1fr] sm:px-4">
         <Link
-          href="/product"
+          href="/"
           className="hidden min-w-0 justify-self-start text-sm font-semibold text-ink hover:text-muted sm:block"
         >
           {SITE.navBrand}
         </Link>
         <nav className="flex items-center justify-start gap-4 sm:justify-center sm:gap-10">
           {NAV_LINKS.map((item) => {
-            const active = pathname === item.href;
+            const active =
+              item.href === "/" ? pathname === "/" : pathname === item.href || pathname.startsWith(`${item.href}/`);
             return (
               <Link
                 key={item.label}
