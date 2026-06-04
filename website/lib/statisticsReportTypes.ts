@@ -39,9 +39,6 @@ export type StatisticsReportData = {
   periodDetail: string;
   comparisonLabel: string;
   promptVolumeChange: PromptVolumePeriodChange | null;
-  preImproveWordChangePercent: number | null;
-  promptEfficiencyPercent: number | null;
-  promptQualityPercent: number | null;
   promptVolumeTotal: number;
   promptsByService: {
     chatgpt: number;
@@ -63,9 +60,6 @@ type BuildReportParams = {
   granularity: "day" | "week";
   filters: PromptVolumeAiFilterState;
   promptVolumeChange: PromptVolumePeriodChange | null;
-  promptEfficiencyPercent: number | null;
-  promptQualityPercent: number | null;
-  preImproveWordChangePercent: number | null;
   combinedTotals: {
     prompts_chatgpt_surface: number;
     prompts_claude_surface: number;
@@ -78,10 +72,6 @@ type BuildReportParams = {
     reading_idle_minutes: number;
   };
   totalScreenTimeMinutes: number;
-  timeBalanceTotals: {
-    draft_active_minutes: number | null;
-    waiting_for_ai_minutes: number | null;
-  } | null;
   screenTimeRows: Array<{ label: string; minutes: number; color: string }>;
   timelineRows: Array<{
     label: string;
@@ -167,9 +157,6 @@ export function buildStatisticsReportData(params: BuildReportParams): Statistics
     periodDetail: `${granularityLabel} aggregation · ${params.promptVolumeChange?.comparisonLabel ?? "prior period comparison"}`,
     comparisonLabel: params.promptVolumeChange?.comparisonLabel ?? "vs prior period in range",
     promptVolumeChange: params.promptVolumeChange,
-    preImproveWordChangePercent: params.preImproveWordChangePercent,
-    promptEfficiencyPercent: params.promptEfficiencyPercent,
-    promptQualityPercent: params.promptQualityPercent,
     promptVolumeTotal,
     promptsByService,
     totalScreenTimeMinutes: params.totalScreenTimeMinutes,

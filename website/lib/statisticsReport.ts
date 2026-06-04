@@ -23,7 +23,14 @@ export async function downloadStatisticsReportPdf(element: HTMLElement, filename
     useCORS: true,
     logging: false,
     windowWidth: element.scrollWidth,
-    windowHeight: element.scrollHeight
+    windowHeight: element.scrollHeight,
+    onclone: (_doc, cloned) => {
+      if (!(cloned instanceof HTMLElement)) return;
+      cloned.style.background = "#ffffff";
+      cloned.querySelectorAll("svg").forEach((svg) => {
+        svg.style.background = "#ffffff";
+      });
+    }
   });
 
   const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "letter" });

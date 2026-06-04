@@ -12,6 +12,7 @@ import { formatSignedPercent } from "@/lib/statisticsReportTypes";
 
 const REPORT_WIDTH_PX = 816;
 const CHART_WIDTH = 736;
+const NO_DATA = "-";
 
 const cellPad = "5px 6px";
 const indentPad = "5px 6px 5px 22px";
@@ -77,9 +78,20 @@ export const StatisticsPrintReport = forwardRef<HTMLDivElement, { data: Statisti
           fontSize: 11,
           lineHeight: 1.35,
           padding: "36px 40px 32px",
-          boxSizing: "border-box"
+          boxSizing: "border-box",
+          isolation: "isolate",
+          position: "relative"
         }}
       >
+        <div
+          aria-hidden
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: "#ffffff",
+            zIndex: -1
+          }}
+        />
         <div style={{ borderTop: "2px solid #111", borderBottom: "1px solid #111", padding: "10px 0", marginBottom: 14 }}>
           <div style={{ fontSize: 10, letterSpacing: "0.2em", textTransform: "uppercase" }}>Promptly Labs</div>
           <div style={{ fontSize: 20, fontWeight: 600, marginTop: 4 }}>Prompt Usage &amp; Performance Report</div>
@@ -100,7 +112,7 @@ export const StatisticsPrintReport = forwardRef<HTMLDivElement, { data: Statisti
             <div>
               <strong>Prepared:</strong> {data.generatedAtLabel}
             </div>
-            <div style={{ color: "#444", marginTop: 2 }}>Confidential — personal analytics summary</div>
+            <div style={{ color: "#444", marginTop: 2 }}>Confidential - personal analytics summary</div>
           </div>
         </div>
 
@@ -129,74 +141,55 @@ export const StatisticsPrintReport = forwardRef<HTMLDivElement, { data: Statisti
                 bold
                 label="Prompt volume"
                 value={data.promptVolumeTotal.toLocaleString()}
-                change={volChange ? formatSignedPercent(volChange.percent) : "—"}
+                change={volChange ? formatSignedPercent(volChange.percent) : NO_DATA}
               />
               <SummaryRow
                 indent
                 label="ChatGPT"
                 value={data.promptsByService.chatgpt.toLocaleString()}
-                change="—"
+                change={NO_DATA}
               />
               <SummaryRow
                 indent
                 label="Claude"
                 value={data.promptsByService.claude.toLocaleString()}
-                change="—"
+                change={NO_DATA}
               />
               <SummaryRow
                 indent
                 label="Gemini"
                 value={data.promptsByService.gemini.toLocaleString()}
-                change="—"
+                change={NO_DATA}
               />
               <SummaryRow
                 indent
                 label="Other"
                 value={data.promptsByService.other.toLocaleString()}
-                change="—"
+                change={NO_DATA}
               />
               <SummaryRow
                 bold
                 label="Total AI screen time"
                 value={`${data.totalScreenTimeMinutes.toLocaleString()} min`}
-                change="—"
+                change={NO_DATA}
               />
               <SummaryRow
                 indent
                 label="Drafting prompt"
                 value={`${data.engagementBreakdown.draftingMinutes.toLocaleString()} min`}
-                change="—"
+                change={NO_DATA}
               />
               <SummaryRow
                 indent
                 label="Waiting for AI"
                 value={`${data.engagementBreakdown.waitingMinutes.toLocaleString()} min`}
-                change="—"
+                change={NO_DATA}
               />
               <SummaryRow
                 indent
                 label="Reading output"
                 value={`${data.engagementBreakdown.readingMinutes.toLocaleString()} min`}
-                change="—"
-              />
-              <SummaryRow
-                label="Prompt efficiency index"
-                value={data.promptEfficiencyPercent != null ? formatSignedPercent(data.promptEfficiencyPercent) : "—"}
-                change="—"
-              />
-              <SummaryRow
-                label="Prompt quality index"
-                value={data.promptQualityPercent != null ? formatSignedPercent(data.promptQualityPercent) : "—"}
-                change="—"
-              />
-              <SummaryRow
-                label="Pre-improve word count (avg)"
-                value="—"
-                change={
-                  data.preImproveWordChangePercent != null
-                    ? formatSignedPercent(data.preImproveWordChangePercent)
-                    : "—"
-                }
+                change={NO_DATA}
               />
             </tbody>
           </table>

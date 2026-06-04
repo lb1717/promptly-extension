@@ -51,6 +51,7 @@ export function ReportStackedPromptVolumeChart({
   if (!rows.length || !series.length) {
     return (
       <svg width={width} height={height} role="img" aria-label="Prompt volume chart empty">
+        <rect width={width} height={height} fill="#ffffff" />
         <text x={width / 2} y={height / 2} textAnchor="middle" fontSize={10} fill="#666">
           No prompt volume in this period
         </text>
@@ -66,11 +67,12 @@ export function ReportStackedPromptVolumeChart({
 
   return (
     <svg width={width} height={height} role="img" aria-label="Prompt volume stacked bar chart">
+      <rect width={width} height={height} fill="#ffffff" />
       {yTicks.map((tick) => {
         const y = margin.top + plotH - (tick / maxTotal) * plotH;
         return (
           <g key={tick}>
-            <line x1={margin.left} x2={margin.left + plotW} y1={y} y2={y} stroke="#e5e5e5" strokeWidth={1} />
+            <line x1={margin.left} x2={margin.left + plotW} y1={y} y2={y} stroke="#eeeeee" strokeWidth={1} />
             <text x={margin.left - 6} y={y + 3} textAnchor="end" fontSize={8} fill="#444">
               {tick}
             </text>
@@ -146,6 +148,7 @@ export function ReportHorizontalBarChart({
   if (!rows.length) {
     return (
       <svg width={width} height={computedHeight} role="img" aria-label="Screen time chart empty">
+        <rect width={width} height={computedHeight} fill="#ffffff" />
         <text x={width / 2} y={computedHeight / 2} textAnchor="middle" fontSize={10} fill="#666">
           No screen time recorded
         </text>
@@ -155,6 +158,7 @@ export function ReportHorizontalBarChart({
 
   return (
     <svg width={width} height={computedHeight} role="img" aria-label="Screen time by service">
+      <rect width={width} height={computedHeight} fill="#ffffff" />
       {rows.map((row, index) => {
         const y = margin.top + index * rowHeight;
         const barW = (row.minutes / max) * plotW;
@@ -168,9 +172,9 @@ export function ReportHorizontalBarChart({
               y={y + 2}
               width={plotW}
               height={12}
-              fill="#f2f2f2"
-              stroke="#ccc"
-              strokeWidth={0.5}
+              fill="#ffffff"
+              stroke="#dddddd"
+              strokeWidth={1}
             />
             <rect
               x={margin.left}
@@ -205,6 +209,7 @@ export function ReportEngagementBreakdownChart({
   if (total <= 0) {
     return (
       <svg width={width} height={height} role="img" aria-label="Engagement breakdown empty">
+        <rect width={width} height={height} fill="#ffffff" />
         <text x={width / 2} y={height / 2} textAnchor="middle" fontSize={9} fill="#666">
           No engagement time recorded
         </text>
@@ -215,6 +220,7 @@ export function ReportEngagementBreakdownChart({
   let x = margin.left;
   return (
     <svg width={width} height={height} role="img" aria-label="Engagement time breakdown">
+      <rect width={width} height={height} fill="#ffffff" />
       {slices.map((slice) => {
         const w = (slice.minutes / total) * plotW;
         const rect = (

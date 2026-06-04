@@ -1608,9 +1608,6 @@ export function StatisticsClient() {
       granularity: displayStats.granularity ?? granularity,
       filters: promptVolumeAiFilters,
       promptVolumeChange: promptVolumePeriodChange,
-      promptEfficiencyPercent: promptDerivedScores?.efficiencyPercent ?? null,
-      promptQualityPercent: promptDerivedScores?.qualityPercent ?? null,
-      preImproveWordChangePercent,
       combinedTotals: displayStats.combined_totals,
       engagementTotals: {
         drafting_minutes: engagement.drafting_minutes,
@@ -1618,7 +1615,6 @@ export function StatisticsClient() {
         reading_idle_minutes: engagement.reading_idle_minutes
       },
       totalScreenTimeMinutes: reportTotalScreenTimeMinutes,
-      timeBalanceTotals: displayStats.time_balance_totals,
       screenTimeRows: screenTimeByServiceRows.map((row) => ({
         label: row.service,
         minutes: row.minutes,
@@ -1639,8 +1635,6 @@ export function StatisticsClient() {
     granularity,
     promptVolumeAiFilters,
     promptVolumePeriodChange,
-    promptDerivedScores,
-    preImproveWordChangePercent,
     reportTotalScreenTimeMinutes,
     screenTimeByServiceRows,
     stackedTimeline
@@ -2430,7 +2424,11 @@ export function StatisticsClient() {
       ) : null}
 
       {statisticsReportData ? (
-        <div className="pointer-events-none fixed left-[-10000px] top-0 z-[-1] opacity-0" aria-hidden>
+        <div
+          className="pointer-events-none fixed left-[-10000px] top-0 z-[-1] bg-white"
+          style={{ background: "#ffffff" }}
+          aria-hidden
+        >
           <StatisticsPrintReport ref={reportRef} data={statisticsReportData} />
         </div>
       ) : null}
