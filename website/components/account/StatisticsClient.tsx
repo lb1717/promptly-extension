@@ -1579,9 +1579,31 @@ export function StatisticsClient() {
     return `${sign}${rounded}%`;
   }
 
+  const reportTotalScreenTimeMinutes = useMemo(() => {
+    if (!displayStats?.screen_time_by_service) return 0;
+    const services: Array<{ key: PromptlySvc; on: boolean }> = [
+      { key: "chatgpt", on: promptVolumeAiFilters.chatgpt },
+      { key: "claude", on: promptVolumeAiFilters.claude },
+      { key: "gemini", on: promptVolumeAiFilters.gemini },
+      { key: "unknown", on: promptVolumeAiFilters.other }
+    ];
+    return services.reduce((sum, svc) => {
+      if (!svc.on) return sum;
+      return sum + (displayStats.screen_time_by_service[svc.key]?.total_minutes ?? 0);
+    }, 0);
+  }, [displayStats, promptVolumeAiFilters]);
+
   const statisticsReportData = useMemo(() => {
-    if (!displayStats) return null;
+    if (!displayStats || !user) return null;
+    const engagement = displayStats.engagement_totals ?? {
+      drafting_minutes: 0,
+      waiting_minutes: 0,
+      reading_idle_minutes: 0,
+      segment_count: 0
+    };
     return buildStatisticsReportData({
+      userName: user.displayName?.trim() || user.email || "Promptly user",
+      userEmail: user.email || "—",
       days,
       granularity: displayStats.granularity ?? granularity,
       filters: promptVolumeAiFilters,
@@ -1590,17 +1612,17 @@ export function StatisticsClient() {
       promptQualityPercent: promptDerivedScores?.qualityPercent ?? null,
       preImproveWordChangePercent,
       combinedTotals: displayStats.combined_totals,
+      engagementTotals: {
+        drafting_minutes: engagement.drafting_minutes,
+        waiting_minutes: engagement.waiting_minutes,
+        reading_idle_minutes: engagement.reading_idle_minutes
+      },
+      totalScreenTimeMinutes: reportTotalScreenTimeMinutes,
       timeBalanceTotals: displayStats.time_balance_totals,
       screenTimeRows: screenTimeByServiceRows.map((row) => ({
         label: row.service,
         minutes: row.minutes,
         color: row.fill
-      })),
-      engagementPies: engagementByServicePies.map((pie) => ({
-        label: pie.label,
-        accent: pie.accent,
-        totalMinutes: pie.totalMinutes,
-        slices: pie.slices
       })),
       timelineRows: stackedTimeline.map((row) => ({
         label: row.label,
@@ -1612,14 +1634,15 @@ export function StatisticsClient() {
     });
   }, [
     displayStats,
+    user,
     days,
     granularity,
     promptVolumeAiFilters,
     promptVolumePeriodChange,
     promptDerivedScores,
     preImproveWordChangePercent,
+    reportTotalScreenTimeMinutes,
     screenTimeByServiceRows,
-    engagementByServicePies,
     stackedTimeline
   ]);
 

@@ -1,6 +1,7 @@
 export type {
   StatisticsReportData,
   PromptVolumePeriodChange,
+  StatisticsReportEngagementBreakdown,
   StatisticsReportSlice,
   StatisticsReportTimelineRow
 } from "@/lib/statisticsReportTypes";
@@ -17,10 +18,12 @@ export async function downloadStatisticsReportPdf(element: HTMLElement, filename
   ]);
 
   const canvas = await html2canvas(element, {
-    scale: 2,
+    scale: 3,
     backgroundColor: "#ffffff",
     useCORS: true,
-    logging: false
+    logging: false,
+    windowWidth: element.scrollWidth,
+    windowHeight: element.scrollHeight
   });
 
   const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "letter" });

@@ -24,7 +24,16 @@ export type StatisticsReportTimelineRow = {
   total: number;
 };
 
+export type StatisticsReportEngagementBreakdown = {
+  draftingMinutes: number;
+  waitingMinutes: number;
+  readingMinutes: number;
+  totalMinutes: number;
+};
+
 export type StatisticsReportData = {
+  userName: string;
+  userEmail: string;
   generatedAtLabel: string;
   periodTitle: string;
   periodDetail: string;
@@ -33,30 +42,23 @@ export type StatisticsReportData = {
   preImproveWordChangePercent: number | null;
   promptEfficiencyPercent: number | null;
   promptQualityPercent: number | null;
-  totals: {
-    promptsEstimate: number;
+  promptVolumeTotal: number;
+  promptsByService: {
     chatgpt: number;
     claude: number;
     gemini: number;
     other: number;
-    promptlySharePercent: number | null;
   };
-  timeBalance: {
-    draftMinutes: number | null;
-    waitMinutes: number | null;
-  };
+  totalScreenTimeMinutes: number;
+  engagementBreakdown: StatisticsReportEngagementBreakdown;
   screenTimeByService: Array<{ label: string; minutes: number; color: string }>;
-  engagementByService: Array<{
-    label: string;
-    accent: string;
-    totalMinutes: number;
-    slices: StatisticsReportSlice[];
-  }>;
   promptTimeline: StatisticsReportTimelineRow[];
   filters: PromptVolumeAiFilterState;
 };
 
 type BuildReportParams = {
+  userName: string;
+  userEmail: string;
   days: number;
   granularity: "day" | "week";
   filters: PromptVolumeAiFilterState;
@@ -65,24 +67,22 @@ type BuildReportParams = {
   promptQualityPercent: number | null;
   preImproveWordChangePercent: number | null;
   combinedTotals: {
-    prompts_estimate: number;
     prompts_chatgpt_surface: number;
     prompts_claude_surface: number;
     prompts_gemini_surface: number;
     prompts_unknown_surface: number;
-    promptly_share_of_estimated_prompts_percent: number | null;
   };
+  engagementTotals: {
+    drafting_minutes: number;
+    waiting_minutes: number;
+    reading_idle_minutes: number;
+  };
+  totalScreenTimeMinutes: number;
   timeBalanceTotals: {
     draft_active_minutes: number | null;
     waiting_for_ai_minutes: number | null;
   } | null;
   screenTimeRows: Array<{ label: string; minutes: number; color: string }>;
-  engagementPies: Array<{
-    label: string;
-    accent: string;
-    totalMinutes: number;
-    slices: Array<{ name: string; value: number; fill: string }>;
-  }>;
   timelineRows: Array<{
     label: string;
     prompts_chatgpt: number;
@@ -128,6 +128,15 @@ function subsampleTimelineRows<T>(rows: T[], maxPoints = 18): T[] {
 
 export function buildStatisticsReportData(params: BuildReportParams): StatisticsReportData {
   const granularityLabel = params.granularity === "week" ? "weekly (UTC)" : "daily";
+  const promptsByService = {
+    chatgpt: params.filters.chatgpt ? params.combinedTotals.prompts_chatgpt_surface : 0,
+    claude: params.filters.claude ? params.combinedTotals.prompts_claude_surface : 0,
+    gemini: params.filters.gemini ? params.combinedTotals.prompts_gemini_surface : 0,
+    other: params.filters.other ? params.combinedTotals.prompts_unknown_surface : 0
+  };
+  const promptVolumeTotal =
+    promptsByService.chatgpt + promptsByService.claude + promptsByService.gemini + promptsByService.other;
+
   const promptTimeline: StatisticsReportTimelineRow[] = subsampleTimelineRows(params.timelineRows).map((row) => ({
     label: row.label,
     chatgpt: params.filters.chatgpt ? row.prompts_chatgpt : 0,
@@ -137,22 +146,19 @@ export function buildStatisticsReportData(params: BuildReportParams): Statistics
     total: bucketTotalForFilters(row, params.filters)
   }));
 
-  const engagementByService = params.engagementPies.map((pie) => {
-    const sliceTotal = pie.slices.reduce((sum, s) => sum + s.value, 0);
-    return {
-      label: pie.label,
-      accent: pie.accent,
-      totalMinutes: pie.totalMinutes,
-      slices: pie.slices.map((slice) => ({
-        name: slice.name,
-        value: slice.value,
-        color: slice.fill,
-        percent: sliceTotal > 0 ? Math.round((slice.value / sliceTotal) * 1000) / 10 : 0
-      }))
-    };
-  });
+  const engagementBreakdown: StatisticsReportEngagementBreakdown = {
+    draftingMinutes: params.engagementTotals.drafting_minutes,
+    waitingMinutes: params.engagementTotals.waiting_minutes,
+    readingMinutes: params.engagementTotals.reading_idle_minutes,
+    totalMinutes:
+      params.engagementTotals.drafting_minutes +
+      params.engagementTotals.waiting_minutes +
+      params.engagementTotals.reading_idle_minutes
+  };
 
   return {
+    userName: params.userName,
+    userEmail: params.userEmail,
     generatedAtLabel: new Date().toLocaleString(undefined, {
       dateStyle: "long",
       timeStyle: "short"
@@ -164,20 +170,11 @@ export function buildStatisticsReportData(params: BuildReportParams): Statistics
     preImproveWordChangePercent: params.preImproveWordChangePercent,
     promptEfficiencyPercent: params.promptEfficiencyPercent,
     promptQualityPercent: params.promptQualityPercent,
-    totals: {
-      promptsEstimate: params.combinedTotals.prompts_estimate,
-      chatgpt: params.filters.chatgpt ? params.combinedTotals.prompts_chatgpt_surface : 0,
-      claude: params.filters.claude ? params.combinedTotals.prompts_claude_surface : 0,
-      gemini: params.filters.gemini ? params.combinedTotals.prompts_gemini_surface : 0,
-      other: params.filters.other ? params.combinedTotals.prompts_unknown_surface : 0,
-      promptlySharePercent: params.combinedTotals.promptly_share_of_estimated_prompts_percent
-    },
-    timeBalance: {
-      draftMinutes: params.timeBalanceTotals?.draft_active_minutes ?? null,
-      waitMinutes: params.timeBalanceTotals?.waiting_for_ai_minutes ?? null
-    },
+    promptVolumeTotal,
+    promptsByService,
+    totalScreenTimeMinutes: params.totalScreenTimeMinutes,
+    engagementBreakdown,
     screenTimeByService: params.screenTimeRows,
-    engagementByService,
     promptTimeline,
     filters: params.filters
   };
