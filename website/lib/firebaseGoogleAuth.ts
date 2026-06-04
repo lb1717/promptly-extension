@@ -6,7 +6,6 @@ import {
   type User,
   type UserCredential
 } from "firebase/auth";
-import { getFirebaseErrorCode } from "@/lib/firebaseAuthAccountHints";
 import { getFirebaseAuth, getGoogleProvider } from "@/lib/firebaseClient";
 
 export const PROMPTLY_GOOGLE_SIGN_IN_DONE = "PROMPTLY_GOOGLE_SIGN_IN_DONE";
@@ -50,32 +49,10 @@ export type GoogleSignInFlowResult =
   | { status: "opened-tab" }
   | { status: "cancelled" };
 
-/**
- * Sign in on the page where the user clicked (popup). If the browser blocks the popup,
- * open /auth/google in a new tab and run redirect sign-in there (no second popup).
- */
+/** Open /auth/google in a new tab; that page redirects to Google (not a popup window). */
 export async function signInWithGoogleInteractive(returnTo?: string): Promise<GoogleSignInFlowResult> {
-  const auth = getFirebaseAuth();
-  const provider = getGoogleProvider();
-
-  try {
-    const cred = await signInWithPopup(auth, provider);
-    return { status: "success", user: cred.user };
-  } catch (error) {
-    const code = getFirebaseErrorCode(error);
-    if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") {
-      return { status: "cancelled" };
-    }
-    if (
-      code === "auth/popup-blocked" ||
-      code === "auth/operation-not-supported-in-this-environment" ||
-      code === "auth/web-storage-unsupported"
-    ) {
-      openGoogleSignInInNewTab(returnTo, true);
-      return { status: "opened-tab" };
-    }
-    throw error;
-  }
+  openGoogleSignInInNewTab(returnTo, true);
+  return { status: "opened-tab" };
 }
 
 export function markGoogleRedirectPending(): void {
