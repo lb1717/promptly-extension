@@ -94,7 +94,7 @@ export const StatisticsPrintReport = forwardRef<HTMLDivElement, { data: Statisti
         />
         <div style={{ borderTop: "2px solid #111", borderBottom: "1px solid #111", padding: "10px 0", marginBottom: 14 }}>
           <div style={{ fontSize: 10, letterSpacing: "0.2em", textTransform: "uppercase" }}>Promptly Labs</div>
-          <div style={{ fontSize: 20, fontWeight: 600, marginTop: 4 }}>Prompt Usage &amp; Performance Report</div>
+          <div style={{ fontSize: 20, fontWeight: 600, marginTop: 4 }}>AI Usage and Performance Report</div>
         </div>
 
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 14, fontSize: 10 }}>
