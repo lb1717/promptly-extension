@@ -959,7 +959,6 @@ function renderEngagementPiePercentLabel({
   cx = 0,
   cy = 0,
   midAngle = 0,
-  innerRadius = 0,
   outerRadius = 0,
   percent = 0
 }: {
@@ -974,22 +973,26 @@ function renderEngagementPiePercentLabel({
     return null;
   }
   const RADIAN = Math.PI / 180;
-  const radius = innerRadius + (outerRadius - innerRadius) * 0.52;
-  const x = cx + radius * Math.cos(-midAngle * RADIAN);
-  const y = cy + radius * Math.sin(-midAngle * RADIAN);
+  const angle = -midAngle * RADIAN;
+  const outer = Number(outerRadius) || 0;
+  const labelRadius = outer + 12;
+  const x = cx + labelRadius * Math.cos(angle);
+  const y = cy + labelRadius * Math.sin(angle);
+  const cos = Math.cos(angle);
+  let textAnchor: "start" | "middle" | "end" = "middle";
+  if (cos > 0.2) textAnchor = "start";
+  else if (cos < -0.2) textAnchor = "end";
+
   return (
     <text
       x={x}
       y={y}
-      fill="#FAF8F4"
-      textAnchor="middle"
+      fill="#1F1B16"
+      textAnchor={textAnchor}
       dominantBaseline="central"
       fontSize={11}
       fontWeight={600}
       fontFamily={CHART_FONT_FAMILY}
-      stroke="#1a1a1a"
-      strokeWidth={2}
-      paintOrder="stroke"
     >
       {`${Math.round(percent * 100)}%`}
     </text>
@@ -1017,22 +1020,26 @@ function ServiceEngagementDonut({
       <p className="mb-2 text-xs font-semibold uppercase tracking-wide" style={{ color: accentColor }}>
         {label}
       </p>
-      <div className="h-44 w-full max-w-[220px]">
+      <div className="h-52 w-full max-w-[240px]">
         <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
+          <PieChart margin={{ top: 12, right: 28, bottom: 12, left: 28 }}>
             <Pie
               data={chartData}
               dataKey="value"
               nameKey="name"
               cx="50%"
               cy="50%"
-              innerRadius="56%"
-              outerRadius="88%"
+              innerRadius="52%"
+              outerRadius="72%"
               paddingAngle={hasSlices && slices.length > 1 ? 2 : 0}
               stroke="#FAF8F4"
               strokeWidth={2}
               label={hasSlices ? renderEngagementPiePercentLabel : false}
-              labelLine={false}
+              labelLine={
+                hasSlices
+                  ? { stroke: "#8A837A", strokeWidth: 1 }
+                  : false
+              }
             >
               {chartData.map((entry, index) => (
                 <Cell key={`${entry.name}-${index}`} fill={entry.fill} fillOpacity={hasSlices ? 0.95 : 0.3} />

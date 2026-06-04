@@ -1,5 +1,5 @@
 import { AmbientBackground } from "@/components/AmbientBackground";
-import { Benefits } from "@/components/Benefits";
+import { HomeAnalyticsSection } from "@/components/HomeAnalyticsSection";
 import { DemoSection } from "@/components/DemoSection";
 import { FinalCTA } from "@/components/FinalCTA";
 import { Footer } from "@/components/Footer";
@@ -11,9 +11,9 @@ import { ProductPageJsonLd } from "@/components/JsonLd";
 import { buildPageMetadata, PRODUCT_KEYWORDS } from "@/lib/seo";
 
 export const metadata = buildPageMetadata({
-  title: "Promptly — One-Click AI Prompt Improvement for ChatGPT, Claude & Gemini",
+  title: "Promptly | Improve and Track AI Use for ChatGPT, Claude & Gemini",
   description:
-    "Improve AI prompts in one click inside ChatGPT, Claude, and Gemini. Promptly rewrites for clearer intent, structured outputs, and less wasted effort — from Promptly Labs.",
+    "Improve AI prompts in one click inside ChatGPT, Claude, and Gemini. Promptly rewrites for clearer intent, structured outputs, and less wasted effort from Promptly Labs.",
   path: "/",
   keywords: PRODUCT_KEYWORDS
 });
@@ -28,7 +28,7 @@ export default function HomePage() {
         <Hero />
         <DemoSection />
         <IntegratedWith />
-        <Benefits />
+        <HomeAnalyticsSection />
         <PricingSection />
         <FinalCTA />
         <Footer />

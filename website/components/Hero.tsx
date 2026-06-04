@@ -46,13 +46,13 @@ export function Hero() {
               />
             </div>
           </div>
-          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-faint">Promptly by Promptly Labs</p>
-          <h1 className="mb-4 text-4xl font-semibold leading-tight text-ink sm:text-6xl">
-            Improve your AI prompts in one click
+          <h1 className="mb-4 mt-1 flex w-full justify-center font-semibold leading-tight text-ink">
+            <span className="text-center text-[clamp(1.75rem,5vw,3.75rem)] sm:whitespace-nowrap">
+              Improve and Track AI Use
+            </span>
           </h1>
           <p className="mx-auto mb-5 max-w-2xl text-muted sm:mb-6">
-            Promptly is a browser extension that rewrites your prompt inside ChatGPT, Claude, and Gemini—clearer
-            structure, tighter outputs, less wasted effort.
+            Promptly Labs is an extension that optimizes prompts and measures how efficiently you are using AI.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3">
             <Button
