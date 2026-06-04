@@ -1,5 +1,5 @@
 import { AdminInlineGateForm } from "@/components/admin/AdminInlineGateForm";
-import { AdminSalesClient } from "@/components/admin/AdminSalesClient";
+import { AdminSalesTabs } from "@/components/admin/AdminSalesTabs";
 import { ADMIN_COOKIE_NAME } from "@/lib/adminSession";
 import { cookies } from "next/headers";
 
@@ -9,5 +9,5 @@ export default function AdminSalesPage() {
     return <AdminInlineGateForm />;
   }
 
-  return <AdminSalesClient />;
+  return <AdminSalesTabs />;
 }

@@ -20,6 +20,9 @@ export type SalesLinkRecord = {
   trialDays: number | null;
   skipPaymentMethod: boolean;
   internalNote: string | null;
+  salesTeamId: string | null;
+  offerKey: string | null;
+  offerLabel: string | null;
   active: boolean;
   signupCount: number;
   createdAt: string | null;
@@ -97,6 +100,11 @@ function docToRecord(id: string, data: FirebaseFirestore.DocumentData | undefine
     skipPaymentMethod: data.skipPaymentMethod === true,
     internalNote:
       typeof data.internalNote === "string" && data.internalNote.trim() ? data.internalNote.trim() : null,
+    salesTeamId:
+      typeof data.salesTeamId === "string" && data.salesTeamId.trim() ? data.salesTeamId.trim() : null,
+    offerKey: typeof data.offerKey === "string" && data.offerKey.trim() ? data.offerKey.trim() : null,
+    offerLabel:
+      typeof data.offerLabel === "string" && data.offerLabel.trim() ? data.offerLabel.trim() : null,
     active: data.active !== false,
     signupCount: Math.max(0, Number(data.signupCount || 0)),
     createdAt: data.createdAt?.toDate?.()?.toISOString?.() ?? null,
@@ -120,13 +128,39 @@ async function slugExists(slug: string, excludeId?: string): Promise<boolean> {
   return snap.docs.some((doc) => doc.id !== excludeId);
 }
 
-export async function adminListSalesLinks(): Promise<{ ok: true; links: SalesLinkRecord[] }> {
+export async function adminListSalesLinks(options?: {
+  excludeSalesTeam?: boolean;
+}): Promise<{ ok: true; links: SalesLinkRecord[] }> {
   const db = getFirebaseAdminDb();
   const snap = await db.collection(COLLECTION).orderBy("createdAt", "desc").get();
   const links = snap.docs
     .map((doc) => docToRecord(doc.id, doc.data()))
-    .filter((item): item is SalesLinkRecord => Boolean(item));
+    .filter((item): item is SalesLinkRecord => Boolean(item))
+    .filter((item) => (options?.excludeSalesTeam ? !item.salesTeamId : true));
   return { ok: true, links };
+}
+
+export async function adminListSalesLinksForTeam(
+  salesTeamId: string
+): Promise<{ ok: true; links: SalesLinkRecord[] }> {
+  const cleanId = String(salesTeamId || "").trim();
+  if (!cleanId) {
+    return { ok: true, links: [] };
+  }
+  const db = getFirebaseAdminDb();
+  const snap = await db.collection(COLLECTION).where("salesTeamId", "==", cleanId).get();
+  const links = snap.docs
+    .map((doc) => docToRecord(doc.id, doc.data()))
+    .filter((item): item is SalesLinkRecord => Boolean(item))
+    .sort((a, b) => (a.offerLabel || "").localeCompare(b.offerLabel || ""));
+  return { ok: true, links };
+}
+
+async function isSalesTeamActive(salesTeamId: string): Promise<boolean> {
+  const db = getFirebaseAdminDb();
+  const snap = await db.collection("promptly_sales_team").doc(salesTeamId).get();
+  if (!snap.exists) return false;
+  return snap.data()?.active !== false;
 }
 
 export async function getActiveSalesLinkBySlug(slug: string): Promise<SalesLinkRecord | null> {
@@ -138,6 +172,10 @@ export async function getActiveSalesLinkBySlug(slug: string): Promise<SalesLinkR
   if (!doc) return null;
   const record = docToRecord(doc.id, doc.data());
   if (!record || !record.active) return null;
+  if (record.salesTeamId) {
+    const teamOk = await isSalesTeamActive(record.salesTeamId);
+    if (!teamOk) return null;
+  }
   return record;
 }
 
@@ -159,6 +197,9 @@ export type CreateSalesLinkInput = {
   internalNote?: string | null;
   slug?: string | null;
   active?: boolean;
+  salesTeamId?: string | null;
+  offerKey?: string | null;
+  offerLabel?: string | null;
 };
 
 export async function adminCreateSalesLink(input: CreateSalesLinkInput): Promise<{ ok: true; link: SalesLinkRecord }> {
@@ -200,6 +241,12 @@ export async function adminCreateSalesLink(input: CreateSalesLinkInput): Promise
 
   const db = getFirebaseAdminDb();
   const ref = db.collection(COLLECTION).doc();
+  const salesTeamId =
+    typeof input.salesTeamId === "string" && input.salesTeamId.trim() ? input.salesTeamId.trim() : null;
+  const offerKey = typeof input.offerKey === "string" && input.offerKey.trim() ? input.offerKey.trim() : null;
+  const offerLabel =
+    typeof input.offerLabel === "string" && input.offerLabel.trim() ? input.offerLabel.trim() : null;
+
   const payload = {
     slug,
     recipientName,
@@ -212,6 +259,9 @@ export async function adminCreateSalesLink(input: CreateSalesLinkInput): Promise
     trialDays,
     skipPaymentMethod,
     internalNote,
+    salesTeamId,
+    offerKey,
+    offerLabel,
     active: input.active !== false,
     signupCount: 0,
     createdAt: FieldValue.serverTimestamp(),
@@ -335,17 +385,27 @@ export async function adminDeleteSalesLink(id: string): Promise<{ ok: true }> {
 }
 
 export async function incrementSalesLinkSignupCount(slug: string): Promise<void> {
-  const record = await getActiveSalesLinkBySlug(slug);
-  if (!record) return;
+  const clean = String(slug || "").trim().toLowerCase();
+  if (!clean) return;
   const db = getFirebaseAdminDb();
-  await db
-    .collection(COLLECTION)
-    .doc(record.id)
-    .set(
-      {
-        signupCount: FieldValue.increment(1),
-        updatedAt: FieldValue.serverTimestamp()
-      },
-      { merge: true }
-    );
+  const snap = await db.collection(COLLECTION).where("slug", "==", clean).limit(1).get();
+  const doc = snap.docs[0];
+  if (!doc) return;
+  const record = docToRecord(doc.id, doc.data());
+  if (!record) return;
+
+  await doc.ref.set(
+    {
+      signupCount: FieldValue.increment(1),
+      updatedAt: FieldValue.serverTimestamp()
+    },
+    { merge: true }
+  );
+
+  if (record.salesTeamId) {
+    const { incrementSalesTeamSignupCount } = await import("@/lib/server/salesTeam");
+    await incrementSalesTeamSignupCount(record.salesTeamId).catch((err) => {
+      console.error("sales team signup count increment failed", err);
+    });
+  }
 }

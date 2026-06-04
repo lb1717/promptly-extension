@@ -8,7 +8,7 @@ export async function GET() {
   if (!requireAdminSession()) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const data = await adminListSalesLinks();
+  const data = await adminListSalesLinks({ excludeSalesTeam: true });
   return NextResponse.json(data, { status: 200 });
 }
 
