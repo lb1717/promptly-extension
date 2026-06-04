@@ -3,16 +3,16 @@
 import {
   clearGoogleRedirectPending,
   consumeGoogleSignInRedirectResult,
-  isReturningFromGoogleRedirect,
   notifyGoogleSignInOpenerError,
   notifyGoogleSignInOpenerSuccess,
   resetGoogleRedirectAuthState,
+  signInWithGooglePopupInTab,
   startGoogleSignInRedirect,
   tryCloseGoogleSignInTab,
   waitForAuthenticatedUser,
   wasGoogleRedirectPending
 } from "@/lib/firebaseGoogleAuth";
-import { resolveGoogleSignInError } from "@/lib/firebaseAuthAccountHints";
+import { getFirebaseErrorCode, resolveGoogleSignInError } from "@/lib/firebaseAuthAccountHints";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
 import { syncPromptlyUserDoc } from "@/lib/promptlyUserSync";
 import Link from "next/link";
@@ -30,6 +30,7 @@ export function GoogleSignInCallbackClient() {
   const [status, setStatus] = useState<Status>("loading");
   const [errorMessage, setErrorMessage] = useState("");
   const finishedRef = useRef(false);
+  const autoStartedRef = useRef(false);
 
   const finishSuccess = useCallback(async (user: User) => {
     if (finishedRef.current) return;
@@ -50,59 +51,38 @@ export function GoogleSignInCallbackClient() {
     notifyGoogleSignInOpenerError(message);
   }, []);
 
-  const finishCancelled = useCallback((message?: string) => {
-    if (finishedRef.current) return;
-    finishedRef.current = true;
-    clearGoogleRedirectPending();
-    const text = message || "Google sign-in was cancelled.";
-    setErrorMessage(text);
-    setStatus("cancelled");
-    notifyGoogleSignInOpenerError(text);
-  }, []);
-
   const handleContinueWithGoogle = useCallback(async () => {
     if (finishedRef.current) return;
     setStatus("working");
     setErrorMessage("");
 
     try {
-      await startGoogleSignInRedirect();
-    } catch (redirectError) {
-      const resolved = resolveGoogleSignInError(redirectError);
-      finishError(resolved.message);
+      const cred = await signInWithGooglePopupInTab();
+      await finishSuccess(cred.user);
+    } catch (e) {
+      const code = getFirebaseErrorCode(e);
+      if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") {
+        finishedRef.current = true;
+        clearGoogleRedirectPending();
+        setStatus("cancelled");
+        notifyGoogleSignInOpenerError("Google sign-in was cancelled.");
+        return;
+      }
+
+      try {
+        await startGoogleSignInRedirect();
+      } catch (redirectError) {
+        const resolved = resolveGoogleSignInError(redirectError);
+        finishError(resolved.message);
+      }
     }
-  }, [finishError]);
+  }, [finishError, finishSuccess]);
 
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
       try {
-        const auth = getFirebaseAuth();
-        if (auth.currentUser) {
-          await finishSuccess(auth.currentUser);
-          return;
-        }
-
-        const returning = isReturningFromGoogleRedirect();
-
-        if (!returning) {
-          const openedFromSite = Boolean(window.opener && !window.opener.closed);
-          if (openedFromSite) {
-            if (!cancelled) {
-              setStatus("working");
-            }
-            await handleContinueWithGoogle();
-          } else if (!cancelled) {
-            setStatus("ready");
-          }
-          return;
-        }
-
-        if (!cancelled) {
-          setStatus("loading");
-        }
-
         const result = await consumeGoogleSignInRedirectResult();
         if (cancelled || finishedRef.current) return;
 
@@ -111,19 +91,25 @@ export function GoogleSignInCallbackClient() {
           return;
         }
 
+        const auth = getFirebaseAuth();
         if (auth.currentUser) {
           await finishSuccess(auth.currentUser);
           return;
         }
 
-        if (wasGoogleRedirectPending()) {
+        const hadPendingRedirect = wasGoogleRedirectPending();
+        clearGoogleRedirectPending();
+
+        if (hadPendingRedirect) {
           const user = await waitForAuthenticatedUser(REDIRECT_WAIT_MS);
           if (cancelled || finishedRef.current) return;
           if (user) {
             await finishSuccess(user);
             return;
           }
-          finishCancelled(
+          finishedRef.current = true;
+          setStatus("cancelled");
+          notifyGoogleSignInOpenerError(
             "Google sign-in did not complete. Close this tab, return to Promptly, and try Sign in with Google again."
           );
           return;
@@ -142,7 +128,15 @@ export function GoogleSignInCallbackClient() {
     return () => {
       cancelled = true;
     };
-  }, [finishCancelled, finishError, finishSuccess, handleContinueWithGoogle]);
+  }, [finishError, finishSuccess]);
+
+  useEffect(() => {
+    if (status !== "ready") return;
+    if (!window.opener || window.opener.closed) return;
+    if (autoStartedRef.current) return;
+    autoStartedRef.current = true;
+    void handleContinueWithGoogle();
+  }, [status, handleContinueWithGoogle]);
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-page px-6 py-16 text-ink">
@@ -151,7 +145,7 @@ export function GoogleSignInCallbackClient() {
 
       {status === "loading" || status === "working" ? (
         <p className="mt-3 text-sm text-muted">
-          {status === "working" ? "Redirecting to Google…" : "Completing sign-in…"}
+          {status === "working" ? "Opening Google…" : "Completing sign-in…"}
         </p>
       ) : null}
 

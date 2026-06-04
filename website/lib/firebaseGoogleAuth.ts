@@ -14,27 +14,13 @@ export const PROMPTLY_GOOGLE_SIGN_IN_ERROR = "PROMPTLY_GOOGLE_SIGN_IN_ERROR";
 
 const REDIRECT_PENDING_KEY = "promptly_google_redirect_pending";
 const REDIRECT_PENDING_MAX_AGE_MS = 15 * 60 * 1000;
-const REDIRECT_RESULT_TIMEOUT_MS = 15_000;
 
+let redirectResultPromise: Promise<UserCredential | null> | null = null;
 let redirectFlowStarted = false;
 
 export function resetGoogleRedirectAuthState(): void {
+  redirectResultPromise = null;
   redirectFlowStarted = false;
-}
-
-/** True when this page load is likely the return hop from Google OAuth. */
-export function isReturningFromGoogleRedirect(): boolean {
-  if (typeof window === "undefined") return false;
-  if (wasGoogleRedirectPending()) return true;
-  const search = new URLSearchParams(window.location.search);
-  const hash = window.location.hash || "";
-  return (
-    search.has("code") ||
-    search.has("state") ||
-    hash.includes("access_token=") ||
-    hash.includes("id_token=") ||
-    hash.includes("apiKey=")
-  );
 }
 
 export function googleAuthCallbackPath(returnTo?: string): string {
@@ -44,20 +30,15 @@ export function googleAuthCallbackPath(returnTo?: string): string {
   return `/auth/google?returnTo=${encodeURIComponent(path)}`;
 }
 
-/** Open Google sign-in in a new browser tab (not a popup window). */
+/** Open Google sign-in in a new tab (falls back to same-tab navigation if blocked). */
 export function openGoogleSignInInNewTab(returnTo?: string): void {
   if (typeof window === "undefined") return;
-  const url = new URL(googleAuthCallbackPath(returnTo), window.location.origin).href;
-
-  const link = document.createElement("a");
-  link.href = url;
-  link.target = "_blank";
-  // Keep opener so /auth/google can postMessage back to this page when sign-in finishes.
-  link.rel = "opener";
-  link.style.display = "none";
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
+  const url = googleAuthCallbackPath(returnTo);
+  // Do not pass noopener — the callback tab notifies window.opener when sign-in completes.
+  const opened = window.open(url, "_blank");
+  if (!opened) {
+    window.location.assign(url);
+  }
 }
 
 export type GoogleSignInFlowResult =
@@ -65,24 +46,10 @@ export type GoogleSignInFlowResult =
   | { status: "opened-tab" }
   | { status: "cancelled" };
 
-/**
- * Prefer an in-page popup (fast, works on the account page). If blocked, open /auth/google in a new tab.
- */
+/** Opens /auth/google in a new tab; the account page listens for completion via postMessage. */
 export async function signInWithGoogleInteractive(returnTo?: string): Promise<GoogleSignInFlowResult> {
-  const auth = getFirebaseAuth();
-  const provider = getGoogleProvider();
-
-  try {
-    const cred = await signInWithPopup(auth, provider);
-    return { status: "success", user: cred.user };
-  } catch (error) {
-    const code = getFirebaseErrorCode(error);
-    if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") {
-      return { status: "cancelled" };
-    }
-    openGoogleSignInInNewTab(returnTo);
-    return { status: "opened-tab" };
-  }
+  openGoogleSignInInNewTab(returnTo);
+  return { status: "opened-tab" };
 }
 
 export function markGoogleRedirectPending(): void {
@@ -108,30 +75,21 @@ export function wasGoogleRedirectPending(): boolean {
 }
 
 export async function startGoogleSignInRedirect(): Promise<void> {
-  resetGoogleRedirectAuthState();
+  if (redirectFlowStarted) return;
   redirectFlowStarted = true;
   markGoogleRedirectPending();
   await signInWithRedirect(getFirebaseAuth(), getGoogleProvider());
 }
 
-export async function consumeGoogleSignInRedirectResult(
-  timeoutMs = REDIRECT_RESULT_TIMEOUT_MS
-): Promise<UserCredential | null> {
-  const auth = getFirebaseAuth();
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+export async function signInWithGooglePopupInTab(): Promise<UserCredential> {
+  return signInWithPopup(getFirebaseAuth(), getGoogleProvider());
+}
 
-  try {
-    return await Promise.race([
-      getRedirectResult(auth),
-      new Promise<null>((resolve) => {
-        timeoutId = setTimeout(() => resolve(null), timeoutMs);
-      })
-    ]);
-  } finally {
-    if (timeoutId !== undefined) {
-      clearTimeout(timeoutId);
-    }
+export async function consumeGoogleSignInRedirectResult(): Promise<UserCredential | null> {
+  if (!redirectResultPromise) {
+    redirectResultPromise = getRedirectResult(getFirebaseAuth());
   }
+  return redirectResultPromise;
 }
 
 export function waitForAuthenticatedUser(timeoutMs: number): Promise<User | null> {
