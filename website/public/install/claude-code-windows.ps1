@@ -35,5 +35,5 @@ Write-Host "Plugin pack OK"
 
 Write-Host ""
 Write-Host "Promptly plugin pack ready for Claude Code"
-Write-Host "  Next on the website: step 2 - paste the plugin commands into Claude Code."
-Write-Host "  Marketplace path: $Integrations"
+Write-Host "  Next: in Claude Code run /plugin marketplace add and select this folder:"
+Write-Host "  $Integrations"

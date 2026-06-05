@@ -39,7 +39,7 @@ export function IntegrationsHubClient() {
           Connect Claude Code, Cursor &amp; Codex
         </h1>
         <p className="mx-auto mt-3 max-w-lg text-sm leading-relaxed text-muted">
-          Copy, paste, done. Three steps for Cursor and Codex — four for Claude Code.
+          Copy, paste, done. Three steps for every agent.
         </p>
       </div>
 

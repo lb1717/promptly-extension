@@ -67,8 +67,14 @@ export function connectCommandsPowerShell(tool: string, code: string): string[] 
   return [`${login}; if ($LASTEXITCODE -eq 0) { ${status} }`];
 }
 
-export function claudeMarketplaceCommand(os: OsId): string {
-  return os === "mac"
-    ? "/plugin marketplace add $HOME/integrations"
-    : "/plugin marketplace add %USERPROFILE%/integrations";
+export function claudePluginCommands(): string[] {
+  return [
+    "/plugin marketplace add",
+    "/plugin install promptly-claude-code@promptly-labs",
+    "/reload-plugins"
+  ];
+}
+
+export function claudeIntegrationsFolder(os: OsId): string {
+  return os === "mac" ? "~/integrations" : "%USERPROFILE%\\integrations";
 }

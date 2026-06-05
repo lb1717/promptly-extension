@@ -35,5 +35,5 @@ echo "✓ Plugin pack OK"
 
 echo ""
 echo "✓ Promptly plugin pack ready for Claude Code"
-echo "  Next on the website: step 2 — paste the plugin commands into Claude Code."
-echo "  Marketplace path: ${INTEGRATIONS}"
+echo "  Next: in Claude Code run /plugin marketplace add and select this folder:"
+echo "  ${INTEGRATIONS}"
