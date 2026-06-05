@@ -137,9 +137,7 @@ export function IntegrationsAuthClient({ initialTool }: { initialTool?: string |
     <div className="mx-auto w-full max-w-lg rounded-2xl border border-line bg-cream p-6 shadow-card sm:p-8">
       <img src="/images/promptly-logo.png" alt="Promptly" className="mx-auto h-10 w-auto object-contain" />
       <h1 className="mt-6 text-center text-xl font-semibold text-ink">Connect {toolLabel}</h1>
-      <p className="mt-2 text-center text-sm text-muted">
-        Sign in, copy your code, then run the login command in Terminal.
-      </p>
+      <p className="mt-2 text-center text-sm text-muted">Copy and paste into Terminal.</p>
 
       {loading ? (
         <p className="mt-8 text-center text-sm text-muted">Loading…</p>

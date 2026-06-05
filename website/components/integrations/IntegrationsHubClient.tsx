@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { ClaudeCodeSetup, CodexSetup, CursorSetup, PLUGIN_PACK_URL, type IdeToolId } from "./integrationSteps";
+import { ClaudeCodeSetup, CodexSetup, CursorSetup, type IdeToolId } from "./integrationSteps";
 import type { OsId } from "./integrationOs";
 
 const TOOL_TABS: { id: IdeToolId; label: string; accent: string }[] = [
@@ -39,14 +39,7 @@ export function IntegrationsHubClient() {
           Connect Claude Code, Cursor &amp; Codex
         </h1>
         <p className="mx-auto mt-3 max-w-lg text-sm leading-relaxed text-muted">
-          Three steps for Cursor and Codex, four for Claude Code. One terminal command installs everything — then connect
-          your account and enable hooks in your coding app.
-        </p>
-        <p className="mx-auto mt-2 text-xs text-faint">
-          Plugin pack:{" "}
-          <a href={PLUGIN_PACK_URL} className="underline hover:text-ink">
-            promptly-coding-agents.zip
-          </a>
+          Copy, paste, done. Three steps for Cursor and Codex — four for Claude Code.
         </p>
       </div>
 
@@ -115,15 +108,9 @@ export function IntegrationsHubClient() {
         </div>
       </section>
 
-      <section className="mt-8 rounded-2xl border border-line bg-cream-dark p-4 text-sm text-muted">
-        <p>
-          <strong className="text-ink">Desktop app only?</strong> The install script in step 1 handles any one-time CLI
-          setup automatically. Cursor only needs the app plus that single command.
-        </p>
-        <p className="mt-2">
-          <strong className="text-ink">Privacy:</strong> We track prompt counts and time only — never prompt text.
-        </p>
-      </section>
+      <p className="mt-8 text-center text-xs text-faint">
+        Prompt counts and time only — never prompt text.
+      </p>
 
       <p className="mt-8 text-center text-xs text-faint">
         Browser extension for ChatGPT, Claude &amp; Gemini →{" "}
