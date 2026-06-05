@@ -3,7 +3,17 @@
  * Promptly IDE telemetry CLI — self-contained (bundled into each agent plugin).
  * Never uploads raw prompt text; metadata only.
  */
-import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import {
+  closeSync,
+  createReadStream,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  statSync,
+  writeFileSync
+} from "fs";
 import { homedir } from "os";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
@@ -14,7 +24,12 @@ const DEFAULT_API_URL = process.env.PROMPTLY_API_URL || "https://promptly-labs.c
 const CREDENTIALS_PATH =
   process.env.PROMPTLY_CREDENTIALS_PATH || join(homedir(), ".promptly", "credentials.json");
 const QUEUE_PATH = process.env.PROMPTLY_QUEUE_PATH || join(homedir(), ".promptly", "event-queue.json");
+const SESSION_MODEL_PATH =
+  process.env.PROMPTLY_SESSION_MODEL_PATH || join(homedir(), ".promptly", "claude-session-models.json");
 const MAX_BATCH = 25;
+const MAX_SESSION_MODELS = 200;
+const SESSION_MODEL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const TRANSCRIPT_TAIL_BYTES = 128 * 1024;
 
 const TOOL_CLIENT = {
   claude_code: "promptly-claude-code",
@@ -80,6 +95,105 @@ function extractModelMeta(input) {
     return { model_label: null, model_bucket: "unknown" };
   }
   return { model_label: label, model_bucket: slugToModelBucket(label) };
+}
+
+function expandHomePath(path) {
+  const p = String(path || "").trim();
+  if (!p) return "";
+  return p.startsWith("~/") ? join(homedir(), p.slice(2)) : p;
+}
+
+function humanizeClaudeModelId(id) {
+  const slug = String(id || "").trim();
+  if (!slug) return null;
+  const versioned = slug.match(/^claude-([a-z]+)-(\d+)-(\d+)$/i);
+  if (versioned) {
+    const family = versioned[1].charAt(0).toUpperCase() + versioned[1].slice(1);
+    return `Claude ${family} ${versioned[2]}.${versioned[3]}`;
+  }
+  return slug;
+}
+
+function modelMetaFromId(id) {
+  const raw = String(id || "").trim();
+  if (!raw) return { model_label: null, model_bucket: "unknown" };
+  const label = humanizeClaudeModelId(raw) || raw;
+  return { model_label: label.slice(0, 120), model_bucket: slugToModelBucket(label) };
+}
+
+function loadSessionModels() {
+  const data = readJson(SESSION_MODEL_PATH, { sessions: {} });
+  return data && typeof data.sessions === "object" ? data.sessions : {};
+}
+
+function cacheClaudeSessionModel(sessionId, modelId) {
+  const sid = String(sessionId || "").trim();
+  const mid = String(modelId || "").trim();
+  if (!sid || !mid) return;
+  const sessions = loadSessionModels();
+  sessions[sid] = { model: mid, updated_at: Date.now() };
+  const pruned = Object.fromEntries(
+    Object.entries(sessions)
+      .sort((a, b) => (b[1]?.updated_at || 0) - (a[1]?.updated_at || 0))
+      .slice(0, MAX_SESSION_MODELS)
+  );
+  writeJson(SESSION_MODEL_PATH, { sessions: pruned });
+}
+
+function modelFromSessionCache(sessionId) {
+  const sid = String(sessionId || "").trim();
+  if (!sid) return null;
+  const entry = loadSessionModels()[sid];
+  if (!entry?.model) return null;
+  if (Date.now() - (entry.updated_at || 0) > SESSION_MODEL_TTL_MS) return null;
+  return modelMetaFromId(entry.model);
+}
+
+function readTranscriptTailModelId(transcriptPath) {
+  try {
+    const path = expandHomePath(transcriptPath);
+    if (!path || !existsSync(path)) return null;
+    const size = statSync(path).size;
+    if (!size) return null;
+    const readSize = Math.min(size, TRANSCRIPT_TAIL_BYTES);
+    const fd = openSync(path, "r");
+    const buf = Buffer.alloc(readSize);
+    readSync(fd, buf, 0, readSize, size - readSize);
+    closeSync(fd);
+    const lines = buf.toString("utf8").split("\n").filter(Boolean);
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const row = JSON.parse(lines[i]);
+        if (row?.type === "assistant") {
+          const model = row?.message?.model;
+          if (typeof model === "string" && model.trim()) return model.trim();
+        }
+        if (typeof row?.model === "string" && row.model.trim()) return row.model.trim();
+      } catch {
+        /* skip malformed tail line */
+      }
+    }
+  } catch {
+    /* ignore transcript read errors */
+  }
+  return null;
+}
+
+/** Claude Code only sends `model` on SessionStart — resolve from cache or transcript for prompt events. */
+function resolveModelMeta(input, tool) {
+  const direct = extractModelMeta(input);
+  if (direct.model_bucket !== "unknown" || tool !== "claude_code") return direct;
+
+  const cached = modelFromSessionCache(input.session_id);
+  if (cached) return cached;
+
+  const modelId = readTranscriptTailModelId(input.transcript_path);
+  if (modelId) {
+    if (input.session_id) cacheClaudeSessionModel(input.session_id, modelId);
+    return modelMetaFromId(modelId);
+  }
+
+  return direct;
 }
 
 function normalizeTool(raw) {
@@ -212,7 +326,7 @@ function hookEventToTelemetry(input, tool) {
       composer_word_estimate: words || 1,
       composer_char_estimate: chars || 1,
       client_occurred_ms: now,
-      ...extractModelMeta(input)
+      ...resolveModelMeta(input, tool)
     };
   }
 
@@ -245,6 +359,9 @@ function hookEventToTelemetry(input, tool) {
   }
 
   if (eventName.includes("sessionstart")) {
+    if (tool === "claude_code" && typeof input.model === "string" && input.model.trim()) {
+      cacheClaudeSessionModel(input.session_id, input.model);
+    }
     return {
       tool,
       interaction_kind: "engagement_segment",
