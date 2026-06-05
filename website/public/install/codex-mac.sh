@@ -45,4 +45,5 @@ fi
 
 echo ""
 echo "✓ Promptly installed for Codex"
-echo "  Next: connect your account on promptly-labs.com/integrations (step 2)."
+echo "  If you used the one-command setup, account connect runs next automatically."
+echo "  Otherwise finish step 1 on promptly-labs.com/integrations, then trust hooks (step 2)."

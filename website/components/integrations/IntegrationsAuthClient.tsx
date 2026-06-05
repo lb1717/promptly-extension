@@ -7,9 +7,9 @@ import { onAuthStateChanged, type User } from "firebase/auth";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { loginCommand, loginCommandPowerShell, type OsId } from "./integrationOs";
+import { fullSetupCommands, type IdeToolId, type OsId } from "./integrationOs";
 
-type IdeTool = "claude_code" | "cursor" | "codex";
+type IdeTool = IdeToolId;
 
 const TOOL_LABELS: Record<IdeTool, string> = {
   claude_code: "Claude Code",
@@ -38,8 +38,7 @@ export function IntegrationsAuthClient({ initialTool }: { initialTool?: string |
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [copiedCode, setCopiedCode] = useState(false);
-  const [copiedLogin, setCopiedLogin] = useState(false);
+  const [copiedSetup, setCopiedSetup] = useState(false);
   const [activeOs, setActiveOs] = useState<OsId>("mac");
 
   useEffect(() => {
@@ -106,38 +105,28 @@ export function IntegrationsAuthClient({ initialTool }: { initialTool?: string |
     }
   }
 
-  async function copyCode() {
+  async function copySetup() {
     if (!pairCode) return;
     try {
-      await navigator.clipboard.writeText(pairCode);
-      setCopiedCode(true);
-      window.setTimeout(() => setCopiedCode(false), 2000);
+      await navigator.clipboard.writeText(fullSetupCommands(activeOs, tool, pairCode)[0]);
+      setCopiedSetup(true);
+      window.setTimeout(() => setCopiedSetup(false), 2000);
     } catch {
-      setCopiedCode(false);
-    }
-  }
-
-  async function copyLogin() {
-    if (!pairCode) return;
-    try {
-      await navigator.clipboard.writeText(loginCommand(activeOs, tool, pairCode));
-      setCopiedLogin(true);
-      window.setTimeout(() => setCopiedLogin(false), 2000);
-    } catch {
-      setCopiedLogin(false);
+      setCopiedSetup(false);
     }
   }
 
   const toolLabel = TOOL_LABELS[tool];
-  const loginCmd = pairCode ? loginCommand(activeOs, tool, pairCode) : null;
-  const loginCmdPs =
-    pairCode && activeOs === "windows" ? loginCommandPowerShell(tool, pairCode) : null;
+  const setupCmd = pairCode ? fullSetupCommands(activeOs, tool, pairCode)[0] : null;
+  const terminalLabel = activeOs === "mac" ? "Terminal" : "PowerShell";
 
   return (
     <div className="mx-auto w-full max-w-lg rounded-2xl border border-line bg-cream p-6 shadow-card sm:p-8">
       <img src="/images/promptly-logo.png" alt="Promptly" className="mx-auto h-10 w-auto object-contain" />
       <h1 className="mt-6 text-center text-xl font-semibold text-ink">Connect {toolLabel}</h1>
-      <p className="mt-2 text-center text-sm text-muted">Copy and paste into Terminal.</p>
+      <p className="mt-2 text-center text-sm text-muted">
+        One command installs Promptly and links your account.
+      </p>
 
       {loading ? (
         <p className="mt-8 text-center text-sm text-muted">Loading…</p>
@@ -166,26 +155,14 @@ export function IntegrationsAuthClient({ initialTool }: { initialTool?: string |
           </p>
           {pairCode ? (
             <>
-              <div className="rounded-xl border border-line bg-cream-dark p-4 text-center">
-                <p className="text-xs font-medium uppercase tracking-wide text-faint">Pairing code</p>
-                <p className="mt-2 font-mono text-3xl font-bold tracking-[0.35em] text-ink">{pairCode}</p>
-                {expiresAt ? (
-                  <p className="mt-2 text-xs text-faint">Expires {new Date(expiresAt).toLocaleTimeString()}</p>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => void copyCode()}
-                  className="mt-4 rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-ink hover:bg-cream"
-                >
-                  {copiedCode ? "Copied" : "Copy code"}
-                </button>
-              </div>
-
+              {expiresAt ? (
+                <p className="text-center text-xs text-faint">
+                  Code expires {new Date(expiresAt).toLocaleTimeString()} — copy and run soon.
+                </p>
+              ) : null}
               <div className="rounded-xl border border-line bg-white/60 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-medium text-ink">
-                    Run in {activeOs === "mac" ? "Terminal" : "Terminal / PowerShell"}
-                  </p>
+                  <p className="text-sm font-medium text-ink">Run in {terminalLabel}</p>
                   <div className="flex gap-1">
                     {(["mac", "windows"] as const).map((os) => (
                       <button
@@ -203,31 +180,16 @@ export function IntegrationsAuthClient({ initialTool }: { initialTool?: string |
                     ))}
                     <button
                       type="button"
-                      onClick={() => void copyLogin()}
+                      onClick={() => void copySetup()}
                       className="ml-1 shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-ink hover:bg-cream"
                     >
-                      {copiedLogin ? "Copied" : "Copy"}
+                      {copiedSetup ? "Copied" : "Copy"}
                     </button>
                   </div>
                 </div>
                 <pre className="mt-3 overflow-x-auto whitespace-pre-wrap rounded-lg bg-ink p-3 font-mono text-xs leading-relaxed text-cream">
-                  {loginCmd}
+                  {setupCmd}
                 </pre>
-                {loginCmdPs ? (
-                  <>
-                    <p className="mt-3 text-xs font-medium text-muted">PowerShell</p>
-                    <pre className="mt-1 overflow-x-auto whitespace-pre-wrap rounded-lg bg-ink p-3 font-mono text-xs leading-relaxed text-cream">
-                      {loginCmdPs}
-                    </pre>
-                  </>
-                ) : null}
-                <p className="mt-3 text-xs text-faint">
-                  Install the plugin first if you haven&apos;t — see the{" "}
-                  <Link href="/integrations" className="underline hover:text-ink">
-                    setup guide
-                  </Link>
-                  . Then paste this and press Enter.
-                </p>
               </div>
             </>
           ) : (
