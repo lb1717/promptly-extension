@@ -33,7 +33,16 @@ if [[ ! -f "${INTEGRATIONS}/.claude-plugin/marketplace.json" ]]; then
 fi
 echo "✓ Plugin pack OK"
 
+echo "→ Installing Promptly in Claude Code…"
+export PATH="$(npm prefix -g)/bin:${PATH}"
+claude plugin marketplace add "${INTEGRATIONS}"
+claude plugin install promptly-claude-code@promptly-labs
+
+if ! claude plugin list 2>/dev/null | grep -q promptly-claude-code; then
+  echo "✗ Promptly plugin not found in claude plugin list — retry this step"
+  exit 1
+fi
+
 echo ""
-echo "✓ Promptly plugin pack ready for Claude Code"
-echo "  Next: in Claude Code run /plugin marketplace add and select this folder:"
-echo "  ${INTEGRATIONS}"
+echo "✓ Promptly installed for Claude Code"
+echo "  Next: connect your account on promptly-labs.com/integrations (step 2)."

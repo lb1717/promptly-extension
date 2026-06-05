@@ -33,7 +33,17 @@ if (-not (Test-Path (Join-Path $Integrations ".claude-plugin\marketplace.json"))
 }
 Write-Host "Plugin pack OK"
 
+Write-Host "-> Installing Promptly in Claude Code..."
+$env:Path = "$(npm prefix -g)\bin;" + $env:Path
+claude plugin marketplace add $Integrations
+claude plugin install promptly-claude-code@promptly-labs
+claude plugin list
+
+if (-not ((claude plugin list) -match "promptly-claude-code")) {
+  Write-Host "Promptly plugin not found - retry this step"
+  exit 1
+}
+
 Write-Host ""
-Write-Host "Promptly plugin pack ready for Claude Code"
-Write-Host "  Next: in Claude Code run /plugin marketplace add and select this folder:"
-Write-Host "  $Integrations"
+Write-Host "Promptly installed for Claude Code"
+Write-Host "  Next: connect your account on promptly-labs.com/integrations (step 2)."
