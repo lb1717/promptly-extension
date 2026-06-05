@@ -20,7 +20,10 @@ const RAW_BROWSER_EXTENSION_TARGETS: BrowserExtensionTarget[] = [
     key: "edge",
     name: "Microsoft Edge",
     extensionId: String(process.env.NEXT_PUBLIC_EDGE_EXTENSION_ID || "").trim(),
-    installUrl: String(process.env.NEXT_PUBLIC_EDGE_ADDONS_URL || "").trim()
+    installUrl: String(
+      process.env.NEXT_PUBLIC_EDGE_ADDONS_URL ||
+        "https://microsoftedge.microsoft.com/addons/detail/promptly/kjmhecmpdjbcdpnifekoabjhchlphiof"
+    ).trim()
   },
   {
     key: "firefox",
@@ -46,7 +49,10 @@ export const SITE = {
   /** Public general onboarding funnel (not sales invite links). */
   getStartedPath: "/get-started",
   chromeStoreUrl: `https://chromewebstore.google.com/detail/promptly/${CHROME_EXTENSION_ID}`,
-  edgeAddonsUrl: String(process.env.NEXT_PUBLIC_EDGE_ADDONS_URL || "").trim(),
+  edgeAddonsUrl: String(
+    process.env.NEXT_PUBLIC_EDGE_ADDONS_URL ||
+      "https://microsoftedge.microsoft.com/addons/detail/promptly/kjmhecmpdjbcdpnifekoabjhchlphiof"
+  ).trim(),
   /** Production Chrome extension ID — used to sync Firebase session from /account to the extension. */
   chromeExtensionId: CHROME_EXTENSION_ID,
   browserExtensionTargets: BROWSER_EXTENSION_TARGETS
