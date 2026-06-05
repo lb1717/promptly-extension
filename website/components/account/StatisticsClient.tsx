@@ -2061,11 +2061,11 @@ export function StatisticsClient() {
               <p className="text-sm text-muted">
                 {ideAnyConnected ? (
                   <>
-                    Your agent is connected but no prompts are recorded in this range yet. Finish step 6 on{" "}
+                    Your agent is connected but no prompts are recorded in this range yet. Finish the last step on{" "}
                     <Link href="/integrations" className="underline hover:text-ink">
                       integrations
                     </Link>{" "}
-                    (trust hooks / reload the app), run the step 5 test if needed, then send a prompt and refresh.
+                    (trust hooks / reload the app), then send a prompt and refresh.
                   </>
                 ) : (
                   <>
@@ -2073,7 +2073,7 @@ export function StatisticsClient() {
                     <Link href="/integrations" className="underline hover:text-ink">
                       integrations
                     </Link>
-                    , connect your account, run the step 5 test, then complete step 6 in your coding app.
+                    , connect your account, then enable hooks in your coding app.
                   </>
                 )}
               </p>
