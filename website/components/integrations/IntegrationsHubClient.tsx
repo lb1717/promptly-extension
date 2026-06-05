@@ -39,7 +39,8 @@ export function IntegrationsHubClient() {
           Connect Claude Code, Cursor &amp; Codex
         </h1>
         <p className="mx-auto mt-3 max-w-lg text-sm leading-relaxed text-muted">
-          Press connect, paste one command, allow hooks. Two steps.
+          Press connect, paste one command, allow hooks. Two steps per agent. You can connect all three on the same
+          computer — each gets its own pairing code and tracks separately.
         </p>
       </div>
 

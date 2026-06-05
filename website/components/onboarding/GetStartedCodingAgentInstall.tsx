@@ -121,7 +121,10 @@ export function GetStartedCodingAgentInstall({
           ))}
         </div>
       </div>
-      <p className="mt-1 text-xs text-muted">Track prompts in Claude Code, Codex, or Cursor — skip if you only use the browser.</p>
+      <p className="mt-1 text-xs text-muted">
+        Set up one or all three — each agent needs its own pairing code. Prompt and screen-time stats stay separate per
+        agent.
+      </p>
 
       <div className="mt-3 grid grid-cols-3 gap-2">
         {TOOLS.map((tool) => {

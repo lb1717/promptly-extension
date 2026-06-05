@@ -69,7 +69,7 @@ export function OnboardingDoneStep({
             Run the install command in your terminal, then send a prompt in {agentList} to start tracking.
           </p>
           <p className="mt-3 text-xs text-faint">
-            You can always install Promptly on Chrome, Edge, or your other coding apps later from{" "}
+            You can pair Claude Code, Cursor, and Codex on the same computer, or add Chrome/Edge later from{" "}
             <Link href="/integrations" className="font-medium text-ink underline-offset-2 hover:underline">
               Integrations
             </Link>{" "}

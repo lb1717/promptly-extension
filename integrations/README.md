@@ -52,13 +52,16 @@ node "$HOME/integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs" logi
 
 Or use the Promptly MCP tool `promptly_login` after enabling the plugin MCP server.
 
-Credentials are stored per tool in `~/.promptly/credentials-<tool>.json` (e.g. `credentials-claude_code.json`). Each coding agent needs its own pairing code.
+Credentials are stored per tool in `~/.promptly/credentials-<tool>.json`. You can pair **Claude Code, Cursor, and Codex on the same computer** — run `login --tool …` once per agent (three separate pairing codes). Tracking stays separate per tool.
 
 ## Local development
 
 ```bash
 export PROMPTLY_API_URL=http://localhost:3000
 node integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs login CODE --tool claude_code
+node integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs login CODE --tool cursor
+node integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs login CODE --tool codex
+node integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs status
 ```
 
 Deploy Firestore indexes before stats populate:

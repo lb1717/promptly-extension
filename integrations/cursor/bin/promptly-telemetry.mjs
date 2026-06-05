@@ -20,11 +20,23 @@ import { fileURLToPath } from "url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const DEFAULT_API_URL = process.env.PROMPTLY_API_URL || "https://promptly-labs.com";
-const PROMPTLY_DIR = join(homedir(), ".promptly");
-const LEGACY_CREDENTIALS_PATH = join(PROMPTLY_DIR, "credentials.json");
-const LEGACY_QUEUE_PATH = join(PROMPTLY_DIR, "event-queue.json");
-const SESSION_MODEL_PATH =
-  process.env.PROMPTLY_SESSION_MODEL_PATH || join(PROMPTLY_DIR, "claude-session-models.json");
+const DEFAULT_PROMPTLY_DIR = join(homedir(), ".promptly");
+
+function promptlyStorageDir() {
+  return process.env.PROMPTLY_DIR || DEFAULT_PROMPTLY_DIR;
+}
+
+function legacyCredentialsPath() {
+  return join(promptlyStorageDir(), "credentials.json");
+}
+
+function legacyQueuePath() {
+  return join(promptlyStorageDir(), "event-queue.json");
+}
+
+function sessionModelPath() {
+  return process.env.PROMPTLY_SESSION_MODEL_PATH || join(promptlyStorageDir(), "claude-session-models.json");
+}
 const MAX_BATCH = 25;
 const MAX_SESSION_MODELS = 200;
 const SESSION_MODEL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -54,21 +66,19 @@ function writeJson(path, data) {
 }
 
 function credentialsPathForTool(tool) {
-  if (process.env.PROMPTLY_CREDENTIALS_PATH) return process.env.PROMPTLY_CREDENTIALS_PATH;
-  return join(PROMPTLY_DIR, `credentials-${tool}.json`);
+  return join(promptlyStorageDir(), `credentials-${tool}.json`);
 }
 
 function queuePathForTool(tool) {
-  if (process.env.PROMPTLY_QUEUE_PATH) return process.env.PROMPTLY_QUEUE_PATH;
-  return join(PROMPTLY_DIR, `event-queue-${tool}.json`);
+  return join(promptlyStorageDir(), `event-queue-${tool}.json`);
 }
 
 function recentSendsPath(tool) {
-  return join(PROMPTLY_DIR, `recent-sends-${tool}.json`);
+  return join(promptlyStorageDir(), `recent-sends-${tool}.json`);
 }
 
 function migrateLegacyCredentials(tool) {
-  const legacy = readJson(LEGACY_CREDENTIALS_PATH, null);
+  const legacy = readJson(legacyCredentialsPath(), null);
   if (!legacy?.device_token) return null;
   const legacyTool = normalizeTool(legacy.tool);
   if (legacyTool !== tool) return null;
@@ -87,7 +97,7 @@ function saveCredentials(tool, creds) {
 }
 
 function migrateLegacyQueue(tool) {
-  const legacy = readJson(LEGACY_QUEUE_PATH, { events: [] });
+  const legacy = readJson(legacyQueuePath(), { events: [] });
   const events = Array.isArray(legacy.events) ? legacy.events : [];
   if (!events.length) return;
   const matching = events.filter((event) => event?.tool === tool);
@@ -97,7 +107,7 @@ function migrateLegacyQueue(tool) {
     saveQueue(tool, [...current, ...matching]);
   }
   if (remaining.length !== events.length) {
-    writeJson(LEGACY_QUEUE_PATH, { events: remaining });
+    writeJson(legacyQueuePath(), { events: remaining });
   }
 }
 
@@ -193,7 +203,7 @@ function modelMetaFromId(id) {
 }
 
 function loadSessionModels() {
-  const data = readJson(SESSION_MODEL_PATH, { sessions: {} });
+  const data = readJson(sessionModelPath(), { sessions: {} });
   return data && typeof data.sessions === "object" ? data.sessions : {};
 }
 
@@ -208,7 +218,7 @@ function cacheClaudeSessionModel(sessionId, modelId) {
       .sort((a, b) => (b[1]?.updated_at || 0) - (a[1]?.updated_at || 0))
       .slice(0, MAX_SESSION_MODELS)
   );
-  writeJson(SESSION_MODEL_PATH, { sessions: pruned });
+  writeJson(sessionModelPath(), { sessions: pruned });
 }
 
 function modelFromSessionCache(sessionId) {
@@ -494,7 +504,9 @@ async function cmdLogin(flags) {
     connected_at: new Date().toISOString()
   });
   console.log(`Connected to Promptly as ${body.email || body.uid} (${body.tool})`);
-  console.log(`This token is for ${body.tool} only. Pair each other coding agent separately.`);
+  console.log(
+    `Saved pairing for ${body.tool}. You can pair Claude Code, Cursor, and Codex on the same computer — run login once per agent.`
+  );
 }
 
 function cmdStatus(flags) {

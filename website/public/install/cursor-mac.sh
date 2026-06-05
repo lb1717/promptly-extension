@@ -34,7 +34,7 @@ if [[ ! -d "${CURSOR_PLUGIN}/.cursor-plugin" ]]; then
 fi
 
 echo ""
-echo "✓ Promptly installed for Cursor only"
-echo "  Claude Code and Codex need separate install + pairing from promptly-labs.com/integrations."
+echo "✓ Promptly installed for Cursor"
+echo "  You can also install Claude Code and Codex on this Mac — each needs its own install + pairing from promptly-labs.com/integrations."
 echo "  If you used the one-command setup, account connect runs next automatically."
 echo "  Otherwise finish step 1 on promptly-labs.com/integrations, then trust hooks (step 2)."

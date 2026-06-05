@@ -15,11 +15,7 @@
       "version": "1.0.0",
       "author": { "name": "Promptly Labs" },
       "category": "productivity",
-      "tags": ["promptly", "telemetry", "claude-code"],
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
-      }
+      "tags": ["promptly", "telemetry", "claude-code"]
     },
     {
       "name": "promptly-cursor",
@@ -28,11 +24,7 @@
       "version": "1.0.0",
       "author": { "name": "Promptly Labs" },
       "category": "productivity",
-      "tags": ["promptly", "telemetry", "cursor"],
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
-      }
+      "tags": ["promptly", "telemetry", "cursor"]
     },
     {
       "name": "promptly-codex",
@@ -41,11 +33,7 @@
       "version": "1.0.0",
       "author": { "name": "Promptly Labs" },
       "category": "productivity",
-      "tags": ["promptly", "telemetry", "codex"],
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
-      }
+      "tags": ["promptly", "telemetry", "codex"]
     }
   ]
 }

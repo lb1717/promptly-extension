@@ -44,7 +44,7 @@ if ! codex plugin list 2>/dev/null | grep -q promptly-codex; then
 fi
 
 echo ""
-echo "✓ Promptly installed for Codex only"
-echo "  Claude Code and Cursor need separate install + pairing from promptly-labs.com/integrations."
+echo "✓ Promptly installed for Codex"
+echo "  You can also install Claude Code and Cursor on this Mac — each needs its own install + pairing from promptly-labs.com/integrations."
 echo "  If you used the one-command setup, account connect runs next automatically."
 echo "  Otherwise finish step 1 on promptly-labs.com/integrations, then trust hooks (step 2)."
