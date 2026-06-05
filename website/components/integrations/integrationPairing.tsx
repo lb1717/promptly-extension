@@ -5,17 +5,8 @@ import { getFirebaseAuth } from "@/lib/firebaseClient";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { useCallback, useEffect, useState } from "react";
 import { CopyBlock } from "./integrationCopyBlock";
-import {
-  connectCommands,
-  connectCommandsPowerShell,
-  type IdeToolId,
-  type OsId
-} from "./integrationOs";
+import { fullSetupCommands, type IdeToolId, type OsId } from "./integrationOs";
 import { StepValidation } from "./integrationUi";
-
-function windowsShellBlocks(cmd: string[], ps: string[]): (string[])[] {
-  return [cmd, ps];
-}
 
 export function useIntegrationPairing(tool: IdeToolId) {
   const [user, setUser] = useState<User | null>(null);
@@ -104,6 +95,12 @@ export function useIntegrationPairing(tool: IdeToolId) {
   };
 }
 
+function installSuccessHint(tool: IdeToolId): string {
+  if (tool === "claude_code") return "Promptly installed for Claude Code";
+  if (tool === "codex") return "Promptly installed for Codex";
+  return "Promptly installed for Cursor";
+}
+
 export function ConnectAccountStep({
   n,
   os,
@@ -113,14 +110,10 @@ export function ConnectAccountStep({
   os: OsId;
   tool: IdeToolId;
 }) {
-  const isWindows = os === "windows";
-  const { user, loading, pairCode, expiresAt, busy, error, signInAndConnect, refreshCode } =
+  const { loading, pairCode, expiresAt, busy, error, signInAndConnect, refreshCode } =
     useIntegrationPairing(tool);
 
-  const code = pairCode ?? "YOUR_CODE";
-  const terminalCommands = isWindows
-    ? windowsShellBlocks(connectCommands("windows", tool, code), connectCommandsPowerShell(tool, code))
-    : connectCommands("mac", tool, code);
+  const terminalLabel = os === "mac" ? "Terminal" : "PowerShell";
 
   return (
     <li className="flex gap-4 pb-8 last:pb-0">
@@ -129,9 +122,9 @@ export function ConnectAccountStep({
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 className="font-semibold text-ink">Connect account</h3>
+          <h3 className="font-semibold text-ink">Install &amp; connect</h3>
           <span className="rounded-md bg-cream-dark px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-faint">
-            Terminal
+            {terminalLabel}
           </span>
         </div>
 
@@ -148,7 +141,7 @@ export function ConnectAccountStep({
               >
                 {busy ? "Connecting…" : "Press to Connect Account Now"}
               </button>
-              {pairCode && user ? (
+              {pairCode ? (
                 <button
                   type="button"
                   disabled={busy}
@@ -162,45 +155,31 @@ export function ConnectAccountStep({
           )}
         </div>
 
-        {user && pairCode ? (
-          <p className="mt-3 text-sm text-muted">Copy and paste into Terminal.</p>
-        ) : null}
-
-        {pairCode ? (
-          <div className="mt-3 rounded-lg border border-line bg-cream-dark px-3 py-2 text-center">
-            <p className="font-mono text-2xl font-bold tracking-[0.3em] text-ink">{pairCode}</p>
+        {!pairCode ? (
+          <p className="mt-3 text-sm text-muted">
+            Press the button to sign in — then copy the one command below into {terminalLabel}.
+          </p>
+        ) : (
+          <>
+            <p className="mt-3 text-sm text-muted">
+              Copy and paste into {terminalLabel}. Installs Promptly and connects your account in one go.
+            </p>
             {expiresAt ? (
-              <p className="mt-1 text-xs text-faint">Expires {new Date(expiresAt).toLocaleTimeString()}</p>
+              <p className="mt-1 text-xs text-faint">
+                Code expires {new Date(expiresAt).toLocaleTimeString()} — run soon after copying.
+              </p>
             ) : null}
-          </div>
-        ) : null}
+            <CopyBlock lines={fullSetupCommands(os, tool, pairCode)} />
+            <StepValidation
+              items={[
+                `"${installSuccessHint(tool)}" in the output`,
+                '"connected": true at the end'
+              ]}
+            />
+          </>
+        )}
 
         {error ? <p className="mt-2 text-xs text-red-700">{error}</p> : null}
-
-        {pairCode ? (
-          <>
-            {(Array.isArray(terminalCommands[0])
-              ? (terminalCommands as (string[])[])
-              : [terminalCommands as string[]]
-            ).map((lines, i) => (
-              <CopyBlock
-                key={i}
-                lines={lines}
-                label={
-                  (terminalCommands as (string[])[]).length > 1
-                    ? i === 0
-                      ? "Command Prompt"
-                      : "PowerShell"
-                    : undefined
-                }
-              />
-            ))}
-          </>
-        ) : null}
-
-        {pairCode ? (
-          <StepValidation items={['"connected": true in the output']} />
-        ) : null}
       </div>
     </li>
   );

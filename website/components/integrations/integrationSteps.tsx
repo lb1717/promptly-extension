@@ -1,13 +1,6 @@
 import type { ReactNode } from "react";
-import { CopyBlock } from "./integrationCopyBlock";
 import { ConnectAccountStep } from "./integrationPairing";
-import {
-  installCommands,
-  PLUGIN_PACK_URL,
-  type IdeToolId,
-  type OsId
-} from "./integrationOs";
-import { StepValidation } from "./integrationUi";
+import { PLUGIN_PACK_URL, type IdeToolId, type OsId } from "./integrationOs";
 
 export type { IdeToolId, OsId };
 export { PLUGIN_PACK_URL };
@@ -23,14 +16,21 @@ const WHERE_LABEL: Record<Where, string> = {
   browser: "Browser"
 };
 
-function terminalWhereLabel(os: OsId): string {
-  return os === "mac" ? "Terminal" : "PowerShell";
-}
-
-function installSuccessHint(tool: IdeToolId): string {
-  if (tool === "claude_code") return "Promptly installed for Claude Code";
-  if (tool === "codex") return "Promptly installed for Codex";
-  return "Promptly installed for Cursor";
+function ReloadWindowHint({ os }: { os: OsId }) {
+  if (os === "mac") {
+    return (
+      <>
+        <kbd className="rounded border border-line bg-cream-dark px-1.5 py-0.5 font-mono text-xs">Cmd+Shift+P</kbd> →{" "}
+        <strong className="text-ink">Reload Window</strong>
+      </>
+    );
+  }
+  return (
+    <>
+      <kbd className="rounded border border-line bg-cream-dark px-1.5 py-0.5 font-mono text-xs">Ctrl+Shift+P</kbd> →{" "}
+      <strong className="text-ink">Reload Window</strong>
+    </>
+  );
 }
 
 export function Step({
@@ -38,24 +38,14 @@ export function Step({
   title,
   where,
   whereLabel,
-  children,
-  commands,
-  validation
+  children
 }: {
   n: number;
   title: string;
   where?: Where;
   whereLabel?: string;
   children?: ReactNode;
-  commands?: StepCommands;
-  validation?: string[];
 }) {
-  const commandGroups: (string[])[] = !commands
-    ? []
-    : Array.isArray(commands[0])
-      ? (commands as (string[])[])
-      : [commands as string[]];
-
   return (
     <li className="flex gap-4 pb-8 last:pb-0">
       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-ink text-xs font-bold text-cream">
@@ -71,29 +61,8 @@ export function Step({
           ) : null}
         </div>
         {children ? <div className="mt-1 text-sm leading-relaxed text-muted">{children}</div> : null}
-        {commandGroups.map((lines, i) => (
-          <CopyBlock key={i} lines={lines} />
-        ))}
-        {validation?.length ? <StepValidation items={validation} /> : null}
       </div>
     </li>
-  );
-}
-
-function ReloadWindowHint({ os }: { os: OsId }) {
-  if (os === "mac") {
-    return (
-      <>
-        <kbd className="rounded border border-line bg-cream-dark px-1.5 py-0.5 font-mono text-xs">Cmd+Shift+P</kbd> →{" "}
-        <strong className="text-ink">Reload Window</strong>
-      </>
-    );
-  }
-  return (
-    <>
-      <kbd className="rounded border border-line bg-cream-dark px-1.5 py-0.5 font-mono text-xs">Ctrl+Shift+P</kbd> →{" "}
-      <strong className="text-ink">Reload Window</strong>
-    </>
   );
 }
 
@@ -134,49 +103,25 @@ function LiveTrackingStep({ n, tool, os }: { n: number; tool: IdeToolId; os: OsI
   );
 }
 
-function InstallStep({ n, os, tool }: { n: number; os: OsId; tool: IdeToolId }) {
-  return (
-    <Step
-      n={n}
-      title="Install"
-      where="terminal"
-      whereLabel={terminalWhereLabel(os)}
-      commands={installCommands(os, tool)}
-      validation={[`Ends with "${installSuccessHint(tool)}"`]}
-    >
-      Copy and paste into Terminal, then press Enter. Everything installs automatically — no folder picking.
-    </Step>
-  );
-}
-
 type SetupProps = { os: OsId; tool: IdeToolId };
 
-export function CodexSetup({ os, tool }: SetupProps) {
+function AgentSetup({ os, tool }: SetupProps) {
   return (
     <ol className="mt-6 list-none space-y-0">
-      <InstallStep n={1} os={os} tool={tool} />
-      <ConnectAccountStep n={2} os={os} tool={tool} />
-      <LiveTrackingStep n={3} tool={tool} os={os} />
+      <ConnectAccountStep n={1} os={os} tool={tool} />
+      <LiveTrackingStep n={2} tool={tool} os={os} />
     </ol>
   );
 }
 
-export function ClaudeCodeSetup({ os, tool }: SetupProps) {
-  return (
-    <ol className="mt-6 list-none space-y-0">
-      <InstallStep n={1} os={os} tool={tool} />
-      <ConnectAccountStep n={2} os={os} tool={tool} />
-      <LiveTrackingStep n={3} tool={tool} os={os} />
-    </ol>
-  );
+export function CodexSetup(props: SetupProps) {
+  return <AgentSetup {...props} />;
 }
 
-export function CursorSetup({ os, tool }: SetupProps) {
-  return (
-    <ol className="mt-6 list-none space-y-0">
-      <InstallStep n={1} os={os} tool={tool} />
-      <ConnectAccountStep n={2} os={os} tool={tool} />
-      <LiveTrackingStep n={3} tool={tool} os={os} />
-    </ol>
-  );
+export function ClaudeCodeSetup(props: SetupProps) {
+  return <AgentSetup {...props} />;
+}
+
+export function CursorSetup(props: SetupProps) {
+  return <AgentSetup {...props} />;
 }

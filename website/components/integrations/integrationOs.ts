@@ -67,3 +67,15 @@ export function connectCommandsPowerShell(tool: string, code: string): string[] 
   return [`${login}; if ($LASTEXITCODE -eq 0) { ${status} }`];
 }
 
+/** Install then connect in one paste — install must run first (creates the login CLI). */
+export function fullSetupCommands(os: OsId, tool: IdeToolId, code: string): string[] {
+  if (os === "mac") {
+    const install = installCommands("mac", tool)[0];
+    const connect = connectCommands("mac", tool, code)[0];
+    return [`${install} && ${connect}`];
+  }
+  const install = installCommands("windows", tool)[0];
+  const connect = connectCommandsPowerShell(tool, code)[0];
+  return [`${install}; if ($LASTEXITCODE -eq 0) { ${connect} }`];
+}
+
