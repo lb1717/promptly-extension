@@ -1,26 +1,12 @@
-import Link from "next/link";
 import type { ReactNode } from "react";
 import { CopyBlock } from "./integrationCopyBlock";
 import { ConnectAccountStep } from "./integrationPairing";
 import {
-  claudeCliSetupCommands,
-  claudeCliSetupPowerShell,
   claudeMarketplaceCommand,
-  codexCliSetupCommands,
-  codexCliSetupPowerShell,
-  codexPluginSetupCommands,
-  codexPluginSetupPowerShell,
-  cursorInstallCommands,
-  cursorInstallCommandsPowerShell,
-  downloadCommands,
-  downloadCommandsPowerShell,
-  integrationsDir,
-  nodeCheckCommands,
-  nodeCheckPowerShell,
+  installCommands,
+  installScriptUrl,
   NODE_INSTALL_URL,
   PLUGIN_PACK_URL,
-  testTrackingCommands,
-  testTrackingPowerShell,
   type IdeToolId,
   type OsId
 } from "./integrationOs";
@@ -41,11 +27,7 @@ const WHERE_LABEL: Record<Where, string> = {
 };
 
 function terminalWhereLabel(os: OsId): string {
-  return os === "mac" ? "Terminal (zsh)" : "Command Prompt / PowerShell";
-}
-
-function windowsShellBlocks(cmd: string[], ps: string[]): StepCommands {
-  return [cmd, ps];
+  return os === "mac" ? "Terminal (zsh)" : "PowerShell";
 }
 
 export function Step({
@@ -87,27 +69,12 @@ export function Step({
         </div>
         {children ? <div className="mt-1 text-sm leading-relaxed text-muted">{children}</div> : null}
         {commandGroups.map((lines, i) => (
-          <CopyBlock
-            key={i}
-            lines={lines}
-            label={
-              commandGroups.length > 1
-                ? i === 0
-                  ? osLabelForBlock(i, commandGroups.length)
-                  : "PowerShell"
-                : undefined
-            }
-          />
+          <CopyBlock key={i} lines={lines} />
         ))}
         {validation?.length ? <StepValidation items={validation} /> : null}
       </div>
     </li>
   );
-}
-
-function osLabelForBlock(index: number, total: number): string | undefined {
-  if (total <= 1) return undefined;
-  return index === 0 ? "Command Prompt" : "PowerShell";
 }
 
 function ReloadWindowHint({ os }: { os: OsId }) {
@@ -134,7 +101,7 @@ function LiveTrackingStep({ n, tool, os }: { n: number; tool: IdeToolId; os: OsI
     return (
       <Step n={n} title="Trust hooks and restart Codex" where="cursor_app" whereLabel="Codex">
         <p>
-          Step 5 confirms your account is linked. <strong className="text-ink">Real Codex prompts only count after this:</strong>
+          After your account shows connected, <strong className="text-ink">real Codex prompts only count after this:</strong>
         </p>
         <ol className="mt-2 list-decimal space-y-2 pl-5">
           <li>
@@ -155,7 +122,7 @@ function LiveTrackingStep({ n, tool, os }: { n: number; tool: IdeToolId; os: OsI
     return (
       <Step n={n} title="Allow hooks and restart Claude Code" where="claude_code">
         <p>
-          Step 5 confirms your account is linked. <strong className="text-ink">Live tracking needs hook permission:</strong>
+          After your account shows connected, <strong className="text-ink">live tracking needs hook permission:</strong>
         </p>
         <ol className="mt-2 list-decimal space-y-2 pl-5">
           <li>
@@ -177,7 +144,7 @@ function LiveTrackingStep({ n, tool, os }: { n: number; tool: IdeToolId; os: OsI
   return (
     <Step n={n} title="Reload Cursor and send a prompt" where="cursor_app" whereLabel="Cursor">
       <p>
-        Step 5 confirms your account is linked. <strong className="text-ink">Cursor needs a reload to pick up hooks:</strong>
+        After your account shows connected, <strong className="text-ink">Cursor needs a reload to pick up hooks:</strong>
       </p>
       <ol className="mt-2 list-decimal space-y-2 pl-5">
         <li>
@@ -195,161 +162,86 @@ function LiveTrackingStep({ n, tool, os }: { n: number; tool: IdeToolId; os: OsI
   );
 }
 
+function InstallStep({ n, os, tool }: { n: number; os: OsId; tool: IdeToolId }) {
+  const toolLabel =
+    tool === "codex" ? "Codex" : tool === "cursor" ? "Cursor" : "Claude Code";
+
+  return (
+    <Step
+      n={n}
+      title={`Install Promptly for ${toolLabel}`}
+      where="terminal"
+      whereLabel={terminalWhereLabel(os)}
+      commands={installCommands(os, tool)}
+      validation={[
+        `Ends with "Promptly installed for ${toolLabel}" or "plugin pack ready"`,
+        tool === "claude_code"
+          ? "Claude Code CLI ready (if you didn't have it already)"
+          : tool === "codex"
+            ? "Codex CLI ready and promptly-codex in plugin list"
+            : "Cursor plugin OK"
+      ]}
+    >
+      <p>
+        One command downloads the plugin pack, checks prerequisites, and installs everything for {toolLabel}. Requires
+        Node.js — install from{" "}
+        <a href={NODE_INSTALL_URL} className="font-medium text-ink underline hover:no-underline">
+          nodejs.org
+        </a>{" "}
+        if the script stops early.
+      </p>
+      <p className="mt-2 text-xs text-faint">
+        Script:{" "}
+        <a href={installScriptUrl(os, tool)} className="underline hover:text-ink">
+          {installScriptUrl(os, tool)}
+        </a>
+        {" · "}
+        <a href={PLUGIN_PACK_URL} className="underline hover:text-ink">
+          zip only
+        </a>
+      </p>
+      {tool === "codex" ? (
+        <StepNote>
+          <strong className="text-ink">Using the Codex desktop app?</strong> You still need the CLI once — this script
+          installs it if missing. After setup, keep using the app as usual.
+        </StepNote>
+      ) : null}
+      {tool === "claude_code" ? (
+        <StepNote>
+          <strong className="text-ink">Claude desktop app ≠ Claude Code.</strong> This installs the{" "}
+          <code className="text-ink">claude</code> terminal agent and downloads the plugin pack. Step 2 registers the
+          plugin inside Claude Code.
+        </StepNote>
+      ) : null}
+      {tool === "cursor" ? (
+        <StepNote>
+          <strong className="text-ink">Need the Cursor app installed.</strong> This step only copies the plugin files —
+          open Cursor separately if you haven&apos;t already.
+        </StepNote>
+      ) : null}
+    </Step>
+  );
+}
+
 type SetupProps = { os: OsId; tool: IdeToolId };
 
 export function CodexSetup({ os, tool }: SetupProps) {
-  const isWindows = os === "windows";
-  const dir = integrationsDir(os);
-
   return (
     <ol className="mt-6 list-none space-y-0">
-      <Step
-        n={1}
-        title="Install the Codex CLI"
-        where="terminal"
-        whereLabel={terminalWhereLabel(os)}
-        commands={
-          isWindows
-            ? windowsShellBlocks(codexCliSetupCommands("windows"), codexCliSetupPowerShell())
-            : codexCliSetupCommands("mac")
-        }
-        validation={[
-          "A version number from codex --version",
-          'Final line: "Codex CLI ready" (or ✓ on Mac)'
-        ]}
-      >
-        <StepNote>
-          <strong className="text-ink">Using the Codex desktop app?</strong> That&apos;s fine — you still need the small
-          CLI once to register the Promptly plugin. After setup, keep using the app as usual.
-        </StepNote>
-        <p className="mt-2">
-          Requires Node.js. If the script stops, install from{" "}
-          <a href={NODE_INSTALL_URL} className="font-medium text-ink underline hover:no-underline">
-            nodejs.org
-          </a>{" "}
-          and rerun this step.
-        </p>
-      </Step>
-
-      <Step
-        n={2}
-        title="Download the Promptly plugin pack"
-        where="terminal"
-        whereLabel={terminalWhereLabel(os)}
-        commands={
-          isWindows
-            ? windowsShellBlocks(downloadCommands("windows"), downloadCommandsPowerShell())
-            : downloadCommands("mac")
-        }
-        validation={['"Plugin pack OK" at the end (not "Failed")', `Folder exists at ${dir}`]}
-      >
-        <p>
-          Or{" "}
-          <a href={PLUGIN_PACK_URL} className="font-medium text-ink underline hover:no-underline">
-            download the zip in your browser
-          </a>{" "}
-          and unzip into your user folder so you have <code className="text-ink">{dir}</code>.
-        </p>
-      </Step>
-
-      <Step
-        n={3}
-        title="Install Promptly in Codex"
-        where="terminal"
-        whereLabel={terminalWhereLabel(os)}
-        commands={
-          isWindows
-            ? windowsShellBlocks(codexPluginSetupCommands("windows"), codexPluginSetupPowerShell())
-            : codexPluginSetupCommands("mac")
-        }
-        validation={[
-          "promptly-labs appears when listing marketplaces",
-          "promptly-codex appears in codex plugin list",
-          '"Promptly plugin installed" at the end'
-        ]}
-      >
-        Run in {terminalWhereLabel(os)}, not inside the Codex chat.
-      </Step>
-
-      <ConnectAccountStep n={4} os={os} tool={tool} />
-
-      <Step
-        n={5}
-        title="Verify your account link"
-        where="terminal"
-        whereLabel={terminalWhereLabel(os)}
-        commands={
-          isWindows
-            ? windowsShellBlocks(testTrackingCommands("windows", tool), testTrackingPowerShell(tool))
-            : testTrackingCommands("mac", tool)
-        }
-        validation={[
-          '"Test prompt uploaded" in Terminal',
-          'Status still shows "connected": true',
-          "Codex shows Connected on Statistics → Coding agents"
-        ]}
-      >
-        <p>
-          This uploads one test prompt to confirm Promptly sees your account. It does{" "}
-          <strong className="text-ink">not</strong> replace step 6 — real Codex prompts still need trusted hooks.
-        </p>
-      </Step>
-
-      <LiveTrackingStep n={6} tool={tool} os={os} />
+      <InstallStep n={1} os={os} tool={tool} />
+      <ConnectAccountStep n={2} os={os} tool={tool} />
+      <LiveTrackingStep n={3} tool={tool} os={os} />
     </ol>
   );
 }
 
 export function ClaudeCodeSetup({ os, tool }: SetupProps) {
-  const isWindows = os === "windows";
-  const dir = integrationsDir(os);
-
   return (
     <ol className="mt-6 list-none space-y-0">
-      <Step
-        n={1}
-        title="Install the Claude Code CLI"
-        where="terminal"
-        whereLabel={terminalWhereLabel(os)}
-        commands={
-          isWindows
-            ? windowsShellBlocks(claudeCliSetupCommands("windows"), claudeCliSetupPowerShell())
-            : claudeCliSetupCommands("mac")
-        }
-        validation={[
-          "A version number from claude --version",
-          'Final line: "Claude Code CLI ready"'
-        ]}
-      >
-        <StepNote>
-          <strong className="text-ink">Claude desktop app ≠ Claude Code.</strong> Promptly hooks into Claude Code — the
-          terminal agent you start with the <code className="text-ink">claude</code> command.
-        </StepNote>
-      </Step>
+      <InstallStep n={1} os={os} tool={tool} />
 
       <Step
         n={2}
-        title="Download the Promptly plugin pack"
-        where="terminal"
-        whereLabel={terminalWhereLabel(os)}
-        commands={
-          isWindows
-            ? windowsShellBlocks(downloadCommands("windows"), downloadCommandsPowerShell())
-            : downloadCommands("mac")
-        }
-        validation={['"Plugin pack OK" at the end', `Folder exists at ${dir}`]}
-      >
-        <p>
-          Or{" "}
-          <a href={PLUGIN_PACK_URL} className="font-medium text-ink underline hover:no-underline">
-            download the zip in your browser
-          </a>{" "}
-          and unzip into your user folder.
-        </p>
-      </Step>
-
-      <Step
-        n={3}
         title="Install Promptly in Claude Code"
         where="claude_code"
         commands={[
@@ -368,114 +260,18 @@ export function ClaudeCodeSetup({ os, tool }: SetupProps) {
         a time.
       </Step>
 
-      <ConnectAccountStep n={4} os={os} tool={tool} />
-
-      <Step
-        n={5}
-        title="Verify your account link"
-        where="terminal"
-        whereLabel={terminalWhereLabel(os)}
-        commands={
-          isWindows
-            ? windowsShellBlocks(testTrackingCommands("windows", tool), testTrackingPowerShell(tool))
-            : testTrackingCommands("mac", tool)
-        }
-        validation={[
-          '"Test prompt uploaded" in Terminal',
-          "Claude Code shows Connected on Statistics → Coding agents"
-        ]}
-      >
-        <p>
-          Confirms Promptly sees your account. Complete step 6 so live Claude Code prompts are tracked automatically.
-        </p>
-      </Step>
-
-      <LiveTrackingStep n={6} tool={tool} os={os} />
+      <ConnectAccountStep n={3} os={os} tool={tool} />
+      <LiveTrackingStep n={4} tool={tool} os={os} />
     </ol>
   );
 }
 
 export function CursorSetup({ os, tool }: SetupProps) {
-  const isWindows = os === "windows";
-  const dir = integrationsDir(os);
-
   return (
     <ol className="mt-6 list-none space-y-0">
-      <Step
-        n={1}
-        title="Check Node.js"
-        where="terminal"
-        whereLabel={terminalWhereLabel(os)}
-        commands={
-          isWindows
-            ? windowsShellBlocks(nodeCheckCommands("windows"), nodeCheckPowerShell())
-            : nodeCheckCommands("mac")
-        }
-        validation={['"Node.js OK" and a version number']}
-      >
-        <StepNote>
-          <strong className="text-ink">Need the Cursor app installed.</strong> This step only checks Node.js for the
-          copy script. Open Cursor separately if you haven&apos;t already.
-        </StepNote>
-      </Step>
-
-      <Step
-        n={2}
-        title="Download the Promptly plugin pack"
-        where="terminal"
-        whereLabel={terminalWhereLabel(os)}
-        commands={
-          isWindows
-            ? windowsShellBlocks(downloadCommands("windows"), downloadCommandsPowerShell())
-            : downloadCommands("mac")
-        }
-        validation={['"Plugin pack OK" at the end', `Folder exists at ${dir}`]}
-      >
-        <p>
-          Or{" "}
-          <a href={PLUGIN_PACK_URL} className="font-medium text-ink underline hover:no-underline">
-            download the zip in your browser
-          </a>
-          .
-        </p>
-      </Step>
-
-      <Step
-        n={3}
-        title="Install the Cursor plugin"
-        where="terminal"
-        whereLabel={terminalWhereLabel(os)}
-        commands={
-          isWindows
-            ? windowsShellBlocks(cursorInstallCommands("windows"), cursorInstallCommandsPowerShell())
-            : cursorInstallCommands("mac")
-        }
-        validation={['"Cursor plugin OK" at the end']}
-      >
-        <p className="mt-2">You will reload Cursor again in step 6 after connecting your account.</p>
-      </Step>
-
-      <ConnectAccountStep n={4} os={os} tool={tool} />
-
-      <Step
-        n={5}
-        title="Verify your account link"
-        where="terminal"
-        whereLabel={terminalWhereLabel(os)}
-        commands={
-          isWindows
-            ? windowsShellBlocks(testTrackingCommands("windows", tool), testTrackingPowerShell(tool))
-            : testTrackingCommands("mac", tool)
-        }
-        validation={[
-          '"Test prompt uploaded" in Terminal',
-          "Cursor shows Connected on Statistics → Coding agents"
-        ]}
-      >
-        <p>Confirms Promptly sees your account. Complete step 6 so Agent/Composer prompts are tracked.</p>
-      </Step>
-
-      <LiveTrackingStep n={6} tool={tool} os={os} />
+      <InstallStep n={1} os={os} tool={tool} />
+      <ConnectAccountStep n={2} os={os} tool={tool} />
+      <LiveTrackingStep n={3} tool={tool} os={os} />
     </ol>
   );
 }

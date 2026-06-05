@@ -39,7 +39,8 @@ export function IntegrationsHubClient() {
           Connect Claude Code, Cursor &amp; Codex
         </h1>
         <p className="mx-auto mt-3 max-w-lg text-sm leading-relaxed text-muted">
-          Six steps per agent — the last one is in your coding app (trust hooks / reload). Each step tells you what success looks like before you move on.
+          Three steps for Cursor and Codex, four for Claude Code. One terminal command installs everything — then connect
+          your account and enable hooks in your coding app.
         </p>
         <p className="mx-auto mt-2 text-xs text-faint">
           Plugin pack:{" "}
@@ -116,8 +117,8 @@ export function IntegrationsHubClient() {
 
       <section className="mt-8 rounded-2xl border border-line bg-cream-dark p-4 text-sm text-muted">
         <p>
-          <strong className="text-ink">Desktop app only?</strong> Codex and Claude Code still need a one-time CLI install
-          for plugin setup — step 1 handles that. Cursor only needs the app plus the file copy in step 3.
+          <strong className="text-ink">Desktop app only?</strong> The install script in step 1 handles any one-time CLI
+          setup automatically. Cursor only needs the app plus that single command.
         </p>
         <p className="mt-2">
           <strong className="text-ink">Privacy:</strong> We track prompt counts and time only — never prompt text.

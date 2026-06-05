@@ -226,7 +226,7 @@ export function ConnectAccountStep({
           items={[
             'Shows Connected to Promptly as your@email.com',
             'Status output includes "connected": true',
-            'If you see "Usage: login", re-run step 2 to get the latest plugin pack, then try again'
+            'If you see "Usage: login", re-run step 1 (install script) then try again'
           ]}
         />
 
