@@ -2,7 +2,15 @@
 
 import { useCallback, useState } from "react";
 
-export function CopyBlock({ lines, label }: { lines: string[]; label?: string }) {
+export function CopyBlock({
+  lines,
+  label,
+  onCopy
+}: {
+  lines: string[];
+  label?: string;
+  onCopy?: () => void;
+}) {
   const text = lines.join("\n");
   const [copied, setCopied] = useState(false);
 
@@ -10,11 +18,12 @@ export function CopyBlock({ lines, label }: { lines: string[]; label?: string })
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
+      onCopy?.();
       window.setTimeout(() => setCopied(false), 2000);
     } catch {
       setCopied(false);
     }
-  }, [text]);
+  }, [text, onCopy]);
 
   return (
     <div className="relative mt-2 overflow-hidden rounded-xl border border-line bg-ink">

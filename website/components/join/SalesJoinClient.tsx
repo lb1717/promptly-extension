@@ -25,9 +25,11 @@ import { EmailVerificationNotice } from "@/components/auth/EmailVerificationNoti
 import { listenForGoogleSignInReturn, signInWithGoogleInteractive } from "@/lib/firebaseGoogleAuth";
 import { canProceedWithEmailAccount } from "@/lib/emailVerification";
 import { useEmailVerificationStatus } from "@/lib/useEmailVerificationStatus";
-import { AI_TRY_TARGETS } from "@/components/onboarding/AiServiceLogos";
+import type { IdeToolId } from "@/components/integrations/integrationOs";
 import { GetStartedCodingAgentInstall } from "@/components/onboarding/GetStartedCodingAgentInstall";
 import { OnboardingBrowserExtensionInstall } from "@/components/onboarding/OnboardingBrowserExtensionInstall";
+import { OnboardingDoneStep } from "@/components/onboarding/OnboardingDoneStep";
+import { canFinishOnboardingInstall } from "@/lib/onboardingInstallProgress";
 import { syncWebsiteSessionToExtension } from "@/lib/extensionBridge";
 import { planDetailsForTier } from "@/lib/plans";
 import { isSalesTeamJoinLink } from "@/lib/salesTeamOffers";
@@ -109,6 +111,8 @@ export function SalesJoinClient({ slug }: { slug: string }) {
   });
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [extensionDetected, setExtensionDetected] = useState(false);
+  const [browserStoreClicked, setBrowserStoreClicked] = useState(false);
+  const [setupAgents, setSetupAgents] = useState<IdeToolId[]>([]);
   const [openingAi, setOpeningAi] = useState<string | null>(null);
 
   const [emailAuthMode, setEmailAuthMode] = useState<"signin" | "register">("register");
@@ -444,6 +448,19 @@ export function SalesJoinClient({ slug }: { slug: string }) {
     user && !checkoutStatus.loading && checkoutStatus.stripeConfigured && checkoutStatus.tierAvailable
   );
 
+  const canFinishInstall = useMemo(
+    () =>
+      canFinishOnboardingInstall({
+        browserStoreClicked,
+        setupAgents
+      }),
+    [browserStoreClicked, setupAgents]
+  );
+
+  const noteAgentCommandCopy = useCallback((tool: IdeToolId) => {
+    setSetupAgents((prev) => (prev.includes(tool) ? prev : [...prev, tool]));
+  }, []);
+
   const checkoutBlockedMessage = useMemo(() => {
     if (checkoutStatus.loading || !user) return "";
     if (!checkoutStatus.stripeConfigured) {
@@ -690,7 +707,7 @@ export function SalesJoinClient({ slug }: { slug: string }) {
           <div className="mt-6 space-y-4">
             {checkoutResult === "success" ? (
               <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-                Payment successful — install what you need below, or skip and finish when ready.
+                Payment successful — pick one option below to get started.
               </p>
             ) : null}
             <p className="text-sm text-muted">
@@ -698,14 +715,23 @@ export function SalesJoinClient({ slug }: { slug: string }) {
               other options in the future so feel free to only begin with one.
             </p>
 
-            <OnboardingBrowserExtensionInstall extensionDetected={extensionDetected} />
+            <OnboardingBrowserExtensionInstall
+              extensionDetected={extensionDetected}
+              onStoreClick={() => setBrowserStoreClicked(true)}
+            />
 
-            <GetStartedCodingAgentInstall />
+            <GetStartedCodingAgentInstall onAgentCommandCopy={noteAgentCommandCopy} />
 
+            {!canFinishInstall ? (
+              <p className="text-center text-xs text-faint">
+                Add to Chrome or Edge, or copy an install command above, to continue.
+              </p>
+            ) : null}
             <button
               type="button"
               onClick={() => goToStep(DONE_STEP)}
-              className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-cream hover:bg-neutral-800"
+              disabled={!canFinishInstall}
+              className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
             >
               Finish setup
             </button>
@@ -715,54 +741,23 @@ export function SalesJoinClient({ slug }: { slug: string }) {
           </div>
         ) : null}
 
-        {step === 5 ? (
-          <div className="mt-6 space-y-5">
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50/80 px-4 py-3 text-center">
-              <p className="text-lg font-semibold text-emerald-900">Setup complete</p>
-              <p className="mt-1 text-sm text-emerald-800">
-                You&apos;re all set
-                {isSalesTeamJoinLink(link) || !link.recipientName.trim()
-                  ? "."
-                  : `, ${link.recipientName.trim()}.`}{" "}
-                Try Promptly on your favourite AI chat.
-              </p>
-            </div>
-
-            <p className="text-center text-sm font-semibold text-ink">Try it out now</p>
-            <p className="text-center text-xs text-faint">
-              Use Chrome or Edge on a computer — these links open AI chat in your desktop browser where Promptly is
-              installed.
-            </p>
-
-            <div className="grid gap-3">
-              {AI_TRY_TARGETS.map(({ key, name, url, Logo }) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => openAiTarget(key, url)}
-                  disabled={!user || openingAi !== null}
-                  className="flex flex-col items-center rounded-xl border border-line bg-cream-dark p-4 transition-colors hover:border-ink/20 hover:bg-cream disabled:opacity-60"
-                >
-                  <Logo className="h-10 w-10" />
-                  <span className="mt-2 text-sm font-semibold text-ink">{name}</span>
-                  <span className="mt-1 text-xs text-faint">
-                    {openingAi === key ? "Signing in to extension…" : "Open & start prompting"}
-                  </span>
-                </button>
-              ))}
-            </div>
-
-            <p className="text-center text-xs text-faint">
-              We sync your Promptly sign-in to the extension when you open a chat (if installed).
-            </p>
-
-            <Link
-              href="/account"
-              className="inline-flex w-full items-center justify-center rounded-xl border border-line px-4 py-2.5 text-sm font-semibold text-ink hover:bg-cream-dark"
-            >
-              Go to your account
-            </Link>
-          </div>
+        {step === 5 && link ? (
+          <OnboardingDoneStep
+            browserStoreClicked={browserStoreClicked}
+            setupAgents={setupAgents}
+            openingAi={openingAi}
+            onOpenAi={openAiTarget}
+            completionDetail={
+              browserStoreClicked
+                ? `You're all set${
+                    isSalesTeamJoinLink(link) || !link.recipientName.trim() ? "." : `, ${link.recipientName.trim()}.`
+                  } Try Promptly on your favourite AI chat.`
+                : `You're all set${
+                    isSalesTeamJoinLink(link) || !link.recipientName.trim() ? "." : `, ${link.recipientName.trim()}.`
+                  }`
+            }
+            disabled={!user}
+          />
         ) : null}
       </div>
     </div>

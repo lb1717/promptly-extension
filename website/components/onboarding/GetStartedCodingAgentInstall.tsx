@@ -32,7 +32,15 @@ function installSuccessHint(tool: IdeToolId): string {
   return "Promptly installed for Cursor";
 }
 
-function CodingAgentPanel({ tool, os }: { tool: IdeToolId; os: OsId }) {
+function CodingAgentPanel({
+  tool,
+  os,
+  onCommandCopy
+}: {
+  tool: IdeToolId;
+  os: OsId;
+  onCommandCopy?: (tool: IdeToolId) => void;
+}) {
   const meta = TOOLS.find((t) => t.id === tool)!;
   const { pairCode, expiresAt, busy, error, signInAndConnect, refreshCode } = useIntegrationPairing(tool);
   const terminalLabel = os === "mac" ? "Terminal" : "PowerShell";
@@ -63,7 +71,7 @@ function CodingAgentPanel({ tool, os }: { tool: IdeToolId; os: OsId }) {
           <p className="text-xs text-muted">
             Paste into {terminalLabel}. Run within 10 minutes of generating the code.
           </p>
-          <CopyBlock lines={fullSetupCommands(os, tool, pairCode)} />
+          <CopyBlock lines={fullSetupCommands(os, tool, pairCode)} onCopy={() => onCommandCopy?.(tool)} />
           <p className="text-[11px] text-faint">
             Success: &quot;{installSuccessHint(tool)}&quot; and &quot;connected&quot;: true
           </p>
@@ -84,7 +92,11 @@ function CodingAgentPanel({ tool, os }: { tool: IdeToolId; os: OsId }) {
   );
 }
 
-export function GetStartedCodingAgentInstall() {
+export function GetStartedCodingAgentInstall({
+  onAgentCommandCopy
+}: {
+  onAgentCommandCopy?: (tool: IdeToolId) => void;
+}) {
   const [os, setOs] = useState<OsId>("mac");
   const [openTool, setOpenTool] = useState<IdeToolId | null>(null);
 
@@ -130,7 +142,9 @@ export function GetStartedCodingAgentInstall() {
         })}
       </div>
 
-      {openTool ? <CodingAgentPanel tool={openTool} os={os} /> : null}
+      {openTool ? (
+        <CodingAgentPanel tool={openTool} os={os} onCommandCopy={onAgentCommandCopy} />
+      ) : null}
     </div>
   );
 }

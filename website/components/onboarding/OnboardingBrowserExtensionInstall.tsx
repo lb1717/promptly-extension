@@ -6,9 +6,11 @@ const EDGE_URL =
   "https://microsoftedge.microsoft.com/addons/detail/promptly/kjmhecmpdjbcdpnifekoabjhchlphiof";
 
 export function OnboardingBrowserExtensionInstall({
-  extensionDetected
+  extensionDetected,
+  onStoreClick
 }: {
   extensionDetected?: boolean;
+  onStoreClick?: () => void;
 }) {
   return (
     <div className="rounded-xl border border-line bg-cream-dark p-4">
@@ -23,7 +25,8 @@ export function OnboardingBrowserExtensionInstall({
           href={SITE.chromeStoreUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex w-full items-center justify-between gap-3 rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream transition-colors hover:bg-neutral-800"
+          onClick={() => onStoreClick?.()}
+          className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream transition-colors hover:bg-neutral-800"
         >
           <span>Add to Chrome</span>
           <img src="/images/browser-chrome.png" alt="" aria-hidden className="h-5 w-5 shrink-0 object-contain" />
@@ -32,7 +35,8 @@ export function OnboardingBrowserExtensionInstall({
           href={EDGE_URL}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex w-full items-center justify-between gap-3 rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream transition-colors hover:bg-neutral-800"
+          onClick={() => onStoreClick?.()}
+          className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream transition-colors hover:bg-neutral-800"
         >
           <span>Add to Edge</span>
           <img src="/images/browser-edge.png" alt="" aria-hidden className="h-5 w-5 shrink-0 object-contain" />
