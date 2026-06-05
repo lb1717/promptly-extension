@@ -26,6 +26,7 @@ import { listenForGoogleSignInReturn, signInWithGoogleInteractive } from "@/lib/
 import { EmailVerificationNotice } from "@/components/auth/EmailVerificationNotice";
 import { AI_TRY_TARGETS } from "@/components/onboarding/AiServiceLogos";
 import { GetStartedCodingAgentInstall } from "@/components/onboarding/GetStartedCodingAgentInstall";
+import { OnboardingBrowserExtensionInstall } from "@/components/onboarding/OnboardingBrowserExtensionInstall";
 import { canProceedWithEmailAccount } from "@/lib/emailVerification";
 import { useEmailVerificationStatus } from "@/lib/useEmailVerificationStatus";
 import { GET_STARTED_PLANS, type PaidPlanKey, type PlanKey } from "@/lib/plans";
@@ -94,8 +95,6 @@ export function GeneralOnboardingClient() {
 
   const authHydratedRef = useRef(false);
   const prevUserRef = useRef<User | null>(null);
-
-  const edgeUrl = SITE.edgeAddonsUrl || SITE.browserExtensionTargets.find((t) => t.key === "edge")?.installUrl;
 
   const {
     uiStatus: verificationUiStatus,
@@ -613,38 +612,11 @@ export function GeneralOnboardingClient() {
         {step === 4 ? (
           <div className="mt-6 space-y-4">
             <p className="text-sm text-muted">
-              Install what you need — both steps are optional. Skip anything you won&apos;t use and finish when ready.
+              Install Promptly for your browser and/or for desktop apps and coding apps. You can always install
+              other options in the future so feel free to only begin with one.
             </p>
 
-            <div className="rounded-xl border border-line bg-cream-dark p-4">
-              <p className="text-xs font-semibold uppercase tracking-wider text-faint">
-                1. Browser extension <span className="font-normal normal-case text-faint">(optional)</span>
-              </p>
-              <p className="mt-1 text-xs text-muted">
-                For ChatGPT, Claude, and Gemini in Chrome or Edge. Skip if you only use coding agents.
-              </p>
-              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                <a
-                  href={SITE.chromeStoreUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex flex-1 items-center justify-center rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800"
-                >
-                  Add to Chrome
-                </a>
-                <a
-                  href={edgeUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex flex-1 items-center justify-center rounded-xl border border-line bg-cream px-4 py-2.5 text-sm font-semibold text-ink hover:bg-cream-dark"
-                >
-                  Add to Edge
-                </a>
-              </div>
-              {extensionDetected ? (
-                <p className="mt-2 text-xs text-emerald-700">Extension detected — you&apos;re connected.</p>
-              ) : null}
-            </div>
+            <OnboardingBrowserExtensionInstall extensionDetected={extensionDetected} />
 
             <GetStartedCodingAgentInstall />
 

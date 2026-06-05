@@ -26,6 +26,8 @@ import { listenForGoogleSignInReturn, signInWithGoogleInteractive } from "@/lib/
 import { canProceedWithEmailAccount } from "@/lib/emailVerification";
 import { useEmailVerificationStatus } from "@/lib/useEmailVerificationStatus";
 import { AI_TRY_TARGETS } from "@/components/onboarding/AiServiceLogos";
+import { GetStartedCodingAgentInstall } from "@/components/onboarding/GetStartedCodingAgentInstall";
+import { OnboardingBrowserExtensionInstall } from "@/components/onboarding/OnboardingBrowserExtensionInstall";
 import { syncWebsiteSessionToExtension } from "@/lib/extensionBridge";
 import { planDetailsForTier } from "@/lib/plans";
 import { isSalesTeamJoinLink } from "@/lib/salesTeamOffers";
@@ -107,7 +109,6 @@ export function SalesJoinClient({ slug }: { slug: string }) {
   });
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [extensionDetected, setExtensionDetected] = useState(false);
-  const [storeLinkClicked, setStoreLinkClicked] = useState(false);
   const [openingAi, setOpeningAi] = useState<string | null>(null);
 
   const [emailAuthMode, setEmailAuthMode] = useState<"signin" | "register">("register");
@@ -439,8 +440,6 @@ export function SalesJoinClient({ slug }: { slug: string }) {
     }
   }
 
-  const edgeUrl = SITE.edgeAddonsUrl || SITE.browserExtensionTargets.find((t) => t.key === "edge")?.installUrl;
-
   const canActivatePlan = Boolean(
     user && !checkoutStatus.loading && checkoutStatus.stripeConfigured && checkoutStatus.tierAvailable
   );
@@ -688,86 +687,27 @@ export function SalesJoinClient({ slug }: { slug: string }) {
         ) : null}
 
         {step === 4 ? (
-          <div className="mt-6 space-y-5">
+          <div className="mt-6 space-y-4">
             {checkoutResult === "success" ? (
               <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-                Payment successful — one more step to start using Promptly.
+                Payment successful — install what you need below, or skip and finish when ready.
               </p>
             ) : null}
             <p className="text-sm text-muted">
-              The browser store opens in a new tab. When you&apos;re done installing, return here — we&apos;ll detect
-              the extension automatically when possible.
+              Install Promptly for your browser and/or for desktop apps and coding apps. You can always install
+              other options in the future so feel free to only begin with one.
             </p>
 
-            <div className="rounded-xl border border-line bg-cream-dark p-4">
-              <p className="text-xs font-semibold uppercase tracking-wider text-faint">1. Download Promptly</p>
-              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                <a
-                  href={SITE.chromeStoreUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={() => setStoreLinkClicked(true)}
-                  className="inline-flex flex-1 items-center justify-center rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800"
-                >
-                  Add to Chrome
-                </a>
-                {edgeUrl ? (
-                  <a
-                    href={edgeUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={() => setStoreLinkClicked(true)}
-                    className="inline-flex flex-1 items-center justify-center rounded-xl border border-line bg-cream px-4 py-2.5 text-sm font-semibold text-ink hover:bg-cream-dark"
-                  >
-                    Add to Edge
-                  </a>
-                ) : null}
-              </div>
-            </div>
+            <OnboardingBrowserExtensionInstall extensionDetected={extensionDetected} />
 
-            <div className="rounded-xl border border-line bg-cream-dark p-4">
-              <p className="text-xs font-semibold uppercase tracking-wider text-faint">
-                2. Open ChatGPT, Claude, or Gemini
-              </p>
-              <p className="mt-2 text-sm text-muted">
-                On a laptop or desktop, open one of these in Chrome or Edge — Promptly appears inside the chat box.
-                It&apos;s a browser extension for your computer, not a mobile app.
-              </p>
-              <div className="mt-3 grid gap-2">
-                {AI_TRY_TARGETS.map(({ key, name, url, Logo }) => (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => openAiTarget(key, url)}
-                    disabled={!user || openingAi !== null}
-                    className="inline-flex items-center gap-3 rounded-lg border border-line bg-cream px-3 py-2.5 text-left text-sm font-medium text-ink hover:bg-cream-dark disabled:opacity-60"
-                  >
-                    <Logo className="h-6 w-6 shrink-0" />
-                    <span>Open {name}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
+            <GetStartedCodingAgentInstall />
 
-            {extensionDetected ? (
-              <p className="text-sm text-emerald-700">Extension detected — you&apos;re connected.</p>
-            ) : null}
-
-            {!storeLinkClicked && !extensionDetected ? (
-              <p className="text-center text-xs text-faint">Add Promptly to Chrome or Edge above to continue.</p>
-            ) : null}
-            {extensionDetected && !storeLinkClicked ? (
-              <p className="text-center text-xs text-faint">
-                Already installed — you can finish setup without opening the store again.
-              </p>
-            ) : null}
             <button
               type="button"
               onClick={() => goToStep(DONE_STEP)}
-              disabled={!storeLinkClicked && !extensionDetected}
-              className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-cream hover:bg-neutral-800"
             >
-              {extensionDetected ? "Finish setup" : "I've installed — finish setup"}
+              Finish setup
             </button>
             <button type="button" onClick={() => goToStep(PLAN_STEP)} className="text-xs text-faint hover:text-ink">
               ← Back

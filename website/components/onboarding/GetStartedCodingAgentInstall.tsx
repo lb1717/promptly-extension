@@ -5,24 +5,24 @@ import { fullSetupCommands, type IdeToolId, type OsId } from "@/components/integ
 import { useIntegrationPairing } from "@/components/integrations/integrationPairing";
 import { useState } from "react";
 
-const TOOLS: { id: IdeToolId; label: string; accent: string; hooks: string }[] = [
+const TOOLS: { id: IdeToolId; label: string; bg: string; hooks: string }[] = [
   {
     id: "claude_code",
     label: "Claude Code",
-    accent: "#D97757",
+    bg: "#D97757",
     hooks: "Send a prompt in Claude Code — allow Promptly hooks if asked."
-  },
-  {
-    id: "cursor",
-    label: "Cursor",
-    accent: "#00D8FF",
-    hooks: "Reload Cursor (Cmd/Ctrl+Shift+P → Reload Window), allow hooks, send a prompt in Agent."
   },
   {
     id: "codex",
     label: "Codex",
-    accent: "#10A37F",
+    bg: "#10A37F",
     hooks: "Quit & reopen Codex, run /hooks and trust Promptly, then send a prompt."
+  },
+  {
+    id: "cursor",
+    label: "Cursor",
+    bg: "#0097B2",
+    hooks: "Reload Cursor (Cmd/Ctrl+Shift+P → Reload Window), allow hooks, send a prompt in Agent."
   }
 ];
 
@@ -91,8 +91,8 @@ export function GetStartedCodingAgentInstall() {
   return (
     <div className="rounded-xl border border-line bg-cream-dark p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs font-semibold uppercase tracking-wider text-faint">
-          2. Coding agents <span className="font-normal normal-case text-faint">(optional)</span>
+        <p className="text-base font-semibold text-ink">
+          2. Coding agents <span className="text-sm font-normal text-muted">(optional)</span>
         </p>
         <div className="flex gap-1">
           {(["mac", "windows"] as const).map((id) => (
@@ -109,9 +109,9 @@ export function GetStartedCodingAgentInstall() {
           ))}
         </div>
       </div>
-      <p className="mt-1 text-xs text-muted">Track prompts in Claude Code, Cursor, or Codex — skip if you only use the browser.</p>
+      <p className="mt-1 text-xs text-muted">Track prompts in Claude Code, Codex, or Cursor — skip if you only use the browser.</p>
 
-      <div className="mt-3 flex flex-wrap gap-2">
+      <div className="mt-3 grid grid-cols-3 gap-2">
         {TOOLS.map((tool) => {
           const open = openTool === tool.id;
           return (
@@ -119,10 +119,10 @@ export function GetStartedCodingAgentInstall() {
               key={tool.id}
               type="button"
               onClick={() => setOpenTool(open ? null : tool.id)}
-              className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
-                open ? "border-ink text-ink" : "border-line text-muted hover:border-ink/30 hover:text-ink"
+              className={`w-full rounded-lg px-2 py-2 text-xs font-semibold text-white transition-opacity ${
+                open ? "ring-2 ring-ink ring-offset-2 ring-offset-cream-dark" : "hover:opacity-90"
               }`}
-              style={open ? { borderColor: tool.accent, color: tool.accent } : undefined}
+              style={{ backgroundColor: tool.bg }}
             >
               {tool.label}
             </button>
