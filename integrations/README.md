@@ -52,7 +52,7 @@ node "$HOME/integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs" logi
 
 Or use the Promptly MCP tool `promptly_login` after enabling the plugin MCP server.
 
-Credentials are stored in `~/.promptly/credentials.json`.
+Credentials are stored per tool in `~/.promptly/credentials-<tool>.json` (e.g. `credentials-claude_code.json`). Each coding agent needs its own pairing code.
 
 ## Local development
 

@@ -65,6 +65,11 @@ const INTEGRATION_PAIR_CODES_COLLECTION = "promptly_integration_pair_codes";
 const INTEGRATION_DEVICES_COLLECTION = "promptly_integration_devices";
 const INTEGRATION_PAIR_TTL_MS = 10 * 60 * 1000;
 const IDE_CLIENT_HEADERS = new Set(["promptly-claude-code", "promptly-cursor", "promptly-codex"]);
+const IDE_TOOL_TO_CLIENT: Record<PromptlyIdeTool, string> = {
+  claude_code: "promptly-claude-code",
+  cursor: "promptly-cursor",
+  codex: "promptly-codex"
+};
 /** Max telemetry text length from browser (host model picker label scrape). */
 const TELEMETRY_HOST_MODEL_MAX_CHARS = 120;
 const GOOGLE_ACCESS_TOKEN_CACHE_TTL_MS = 45 * 60 * 1000;
@@ -985,7 +990,9 @@ export async function exchangeIntegrationPairCode(params: {
   };
 }
 
-async function resolveUserFromIntegrationDeviceToken(token: string): Promise<PromptlyUser | null> {
+async function resolveUserFromIntegrationDeviceToken(
+  token: string
+): Promise<{ user: PromptlyUser; deviceTool: PromptlyIdeTool } | null> {
   const raw = String(token || "").trim();
   if (!raw.startsWith("pt_") || raw.length < 16) {
     return null;
@@ -1003,6 +1010,10 @@ async function resolveUserFromIntegrationDeviceToken(token: string): Promise<Pro
   }
   const doc = snap.docs[0]!;
   const data = doc.data() as Record<string, unknown>;
+  const deviceTool = normalizePromptlyIdeTool(data.tool);
+  if (!deviceTool) {
+    return null;
+  }
   const storedUid = String(data.uid || "").trim();
   if (!storedUid) {
     return null;
@@ -1010,7 +1021,8 @@ async function resolveUserFromIntegrationDeviceToken(token: string): Promise<Pro
   const email = normalizeUserEmail(data.email);
   const canonicalUid = email ? await resolveCanonicalUidForEmail(email, storedUid) : storedUid;
   await doc.ref.set({ lastSeenAt: FieldValue.serverTimestamp(), uid: canonicalUid, email }, { merge: true });
-  return upsertPromptlyUser(canonicalUid, email, { provider: "ide-integration" });
+  const user = await upsertPromptlyUser(canonicalUid, email, { provider: "ide-integration" });
+  return { user, deviceTool };
 }
 
 export async function listIntegrationDevices(user: PromptlyUser) {
@@ -1076,7 +1088,12 @@ export async function revokeIntegrationDevice(user: PromptlyUser, deviceId: stri
   return true;
 }
 
-export async function requireIdeTelemetryUser(request: Request): Promise<{ ok: true; user: PromptlyUser }> {
+export async function requireIdeTelemetryUser(request: Request): Promise<{
+  ok: true;
+  user: PromptlyUser;
+  deviceTool: PromptlyIdeTool | null;
+  clientHeader: string;
+}> {
   const clientHeader = String(request.headers.get("x-promptly-client") || "")
     .trim()
     .toLowerCase();
@@ -1087,9 +1104,9 @@ export async function requireIdeTelemetryUser(request: Request): Promise<{ ok: t
   const rawToken = readFirebaseToken(request);
   if (rawToken) {
     if (rawToken.startsWith("pt_")) {
-      const user = await resolveUserFromIntegrationDeviceToken(rawToken);
-      if (user) {
-        return { ok: true, user };
+      const resolved = await resolveUserFromIntegrationDeviceToken(rawToken);
+      if (resolved) {
+        return { ok: true, user: resolved.user, deviceTool: resolved.deviceTool, clientHeader };
       }
       throw new Error("Invalid device token");
     }
@@ -1097,10 +1114,31 @@ export async function requireIdeTelemetryUser(request: Request): Promise<{ ok: t
     const email = normalizeUserEmail(decoded.email);
     const canonicalUid = email ? await resolveCanonicalUidForEmail(email, decoded.uid) : decoded.uid;
     const user = await upsertPromptlyUser(canonicalUid, email, { provider: "firebase" });
-    return { ok: true, user };
+    return { ok: true, user, deviceTool: null, clientHeader };
   }
 
   throw new Error("Missing authorization token");
+}
+
+export function filterIdeActivityEventsForDevice(
+  rows: IdeActivityEventInput[],
+  deviceTool: PromptlyIdeTool,
+  clientHeader: string
+): { accepted: IdeActivityEventInput[]; rejected: number } {
+  const expectedClient = IDE_TOOL_TO_CLIENT[deviceTool];
+  if (clientHeader !== expectedClient) {
+    throw new Error(`Client header must be ${expectedClient} for ${deviceTool} device tokens`);
+  }
+  const accepted: IdeActivityEventInput[] = [];
+  let rejected = 0;
+  for (const row of rows) {
+    if (row.tool === deviceTool) {
+      accepted.push(row);
+    } else {
+      rejected += 1;
+    }
+  }
+  return { accepted, rejected };
 }
 
 /**

@@ -34,6 +34,7 @@ if (-not (Test-Path (Join-Path $CursorPlugin ".cursor-plugin"))) {
 }
 
 Write-Host ""
-Write-Host "Promptly installed for Cursor"
+Write-Host "Promptly installed for Cursor only"
+Write-Host "  Claude Code and Codex need separate install + pairing from promptly-labs.com/integrations."
 Write-Host "  If you used the one-command setup, account connect runs next automatically."
 Write-Host "  Otherwise finish step 1 on promptly-labs.com/integrations, then trust hooks (step 2)."

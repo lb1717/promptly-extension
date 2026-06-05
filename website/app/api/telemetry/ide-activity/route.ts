@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   buildPromptlyCorsHeaders,
+  filterIdeActivityEventsForDevice,
   handlePromptlyPreflight,
   normalizeIdeActivityEventInput,
   persistIdeActivityEvents,
@@ -16,7 +17,7 @@ export async function OPTIONS(request: Request) {
 export async function POST(request: Request) {
   const origin = request.headers.get("Origin");
   try {
-    const { user } = await requireIdeTelemetryUser(request);
+    const { user, deviceTool, clientHeader } = await requireIdeTelemetryUser(request);
     const payload = await request.json().catch(() => null);
     if (!payload || typeof payload !== "object") {
       return NextResponse.json(
@@ -50,9 +51,23 @@ export async function POST(request: Request) {
       }
     }
 
-    const written = await persistIdeActivityEvents(user, rows);
+    let accepted = rows;
+    let toolRejected = 0;
+    if (deviceTool) {
+      const filtered = filterIdeActivityEventsForDevice(rows, deviceTool, clientHeader);
+      accepted = filtered.accepted;
+      toolRejected = filtered.rejected;
+    }
+
+    const written = await persistIdeActivityEvents(user, accepted);
     return NextResponse.json(
-      { ok: true, written, received: rawEvents.length, invalid_skipped: invalid },
+      {
+        ok: true,
+        written,
+        received: rawEvents.length,
+        invalid_skipped: invalid,
+        tool_mismatch_skipped: toolRejected
+      },
       { status: 200, headers: buildPromptlyCorsHeaders(origin) }
     );
   } catch (error) {

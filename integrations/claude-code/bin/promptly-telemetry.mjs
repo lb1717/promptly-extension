@@ -5,7 +5,6 @@
  */
 import {
   closeSync,
-  createReadStream,
   existsSync,
   mkdirSync,
   openSync,
@@ -21,15 +20,18 @@ import { fileURLToPath } from "url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const DEFAULT_API_URL = process.env.PROMPTLY_API_URL || "https://promptly-labs.com";
-const CREDENTIALS_PATH =
-  process.env.PROMPTLY_CREDENTIALS_PATH || join(homedir(), ".promptly", "credentials.json");
-const QUEUE_PATH = process.env.PROMPTLY_QUEUE_PATH || join(homedir(), ".promptly", "event-queue.json");
+const PROMPTLY_DIR = join(homedir(), ".promptly");
+const LEGACY_CREDENTIALS_PATH = join(PROMPTLY_DIR, "credentials.json");
+const LEGACY_QUEUE_PATH = join(PROMPTLY_DIR, "event-queue.json");
 const SESSION_MODEL_PATH =
-  process.env.PROMPTLY_SESSION_MODEL_PATH || join(homedir(), ".promptly", "claude-session-models.json");
+  process.env.PROMPTLY_SESSION_MODEL_PATH || join(PROMPTLY_DIR, "claude-session-models.json");
 const MAX_BATCH = 25;
 const MAX_SESSION_MODELS = 200;
 const SESSION_MODEL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const TRANSCRIPT_TAIL_BYTES = 128 * 1024;
+const SEND_DEDUPE_MS = 4000;
+const RECENT_SENDS_MAX = 50;
+const ALL_TOOLS = ["claude_code", "cursor", "codex"];
 
 const TOOL_CLIENT = {
   claude_code: "promptly-claude-code",
@@ -51,12 +53,81 @@ function writeJson(path, data) {
   writeFileSync(path, JSON.stringify(data, null, 2), "utf8");
 }
 
-function getCredentials() {
-  return readJson(CREDENTIALS_PATH, null);
+function credentialsPathForTool(tool) {
+  if (process.env.PROMPTLY_CREDENTIALS_PATH) return process.env.PROMPTLY_CREDENTIALS_PATH;
+  return join(PROMPTLY_DIR, `credentials-${tool}.json`);
 }
 
-function saveCredentials(creds) {
-  writeJson(CREDENTIALS_PATH, creds);
+function queuePathForTool(tool) {
+  if (process.env.PROMPTLY_QUEUE_PATH) return process.env.PROMPTLY_QUEUE_PATH;
+  return join(PROMPTLY_DIR, `event-queue-${tool}.json`);
+}
+
+function recentSendsPath(tool) {
+  return join(PROMPTLY_DIR, `recent-sends-${tool}.json`);
+}
+
+function migrateLegacyCredentials(tool) {
+  const legacy = readJson(LEGACY_CREDENTIALS_PATH, null);
+  if (!legacy?.device_token) return null;
+  const legacyTool = normalizeTool(legacy.tool);
+  if (legacyTool !== tool) return null;
+  writeJson(credentialsPathForTool(tool), legacy);
+  return legacy;
+}
+
+function getCredentials(tool) {
+  const creds = readJson(credentialsPathForTool(tool), null);
+  if (creds?.device_token) return creds;
+  return migrateLegacyCredentials(tool);
+}
+
+function saveCredentials(tool, creds) {
+  writeJson(credentialsPathForTool(tool), creds);
+}
+
+function migrateLegacyQueue(tool) {
+  const legacy = readJson(LEGACY_QUEUE_PATH, { events: [] });
+  const events = Array.isArray(legacy.events) ? legacy.events : [];
+  if (!events.length) return;
+  const matching = events.filter((event) => event?.tool === tool);
+  const remaining = events.filter((event) => event?.tool !== tool);
+  if (matching.length) {
+    const current = loadQueue(tool);
+    saveQueue(tool, [...current, ...matching]);
+  }
+  if (remaining.length !== events.length) {
+    writeJson(LEGACY_QUEUE_PATH, { events: remaining });
+  }
+}
+
+function loadQueue(tool) {
+  migrateLegacyQueue(tool);
+  const q = readJson(queuePathForTool(tool), { events: [] });
+  return Array.isArray(q.events) ? q.events : [];
+}
+
+function saveQueue(tool, events) {
+  writeJson(queuePathForTool(tool), { events: events.slice(-500) });
+}
+
+function enqueueEvent(tool, event) {
+  const events = loadQueue(tool);
+  events.push(event);
+  saveQueue(tool, events);
+  return events.length;
+}
+
+function isDuplicateSend(tool, input, event) {
+  const sid = String(input?.session_id || input?.conversation_id || input?.sessionId || "").trim() || "_";
+  const key = `${sid}:${event.composer_word_estimate}:${event.composer_char_estimate}`;
+  const now = Date.now();
+  const data = readJson(recentSendsPath(tool), { entries: [] });
+  const entries = (Array.isArray(data.entries) ? data.entries : []).filter((entry) => now - entry.at < SEND_DEDUPE_MS);
+  if (entries.some((entry) => entry.key === key)) return true;
+  entries.push({ key, at: now });
+  writeJson(recentSendsPath(tool), { entries: entries.slice(-RECENT_SENDS_MAX) });
+  return false;
 }
 
 function countWords(text) {
@@ -251,28 +322,18 @@ async function readStdinJson() {
   });
 }
 
-function loadQueue() {
-  const q = readJson(QUEUE_PATH, { events: [] });
-  return Array.isArray(q.events) ? q.events : [];
-}
-
-function saveQueue(events) {
-  writeJson(QUEUE_PATH, { events: events.slice(-500) });
-}
-
-function enqueueEvent(event) {
-  const events = loadQueue();
-  events.push(event);
-  saveQueue(events);
-  return events.length;
-}
-
 async function flushQueue(tool, clientHeader) {
-  const creds = getCredentials();
+  const creds = getCredentials(tool);
   if (!creds?.device_token) {
     return { ok: false, error: "not_connected" };
   }
-  const events = loadQueue();
+  if (normalizeTool(creds.tool) && normalizeTool(creds.tool) !== tool) {
+    return { ok: false, error: `credentials_mismatch:${creds.tool}` };
+  }
+  const events = loadQueue(tool).filter((event) => event?.tool === tool);
+  if (events.length !== loadQueue(tool).length) {
+    saveQueue(tool, events);
+  }
   if (!events.length) {
     return { ok: true, written: 0 };
   }
@@ -291,8 +352,9 @@ async function flushQueue(tool, clientHeader) {
   if (!res.ok) {
     return { ok: false, error: body.error || `HTTP ${res.status}` };
   }
-  saveQueue(events.slice(batch.length));
-  if (events.length > batch.length) {
+  const remaining = events.slice(batch.length);
+  saveQueue(tool, remaining);
+  if (remaining.length) {
     await flushQueue(tool, clientHeader);
   }
   return { ok: true, written: body.written ?? batch.length };
@@ -312,11 +374,10 @@ function hookEventToTelemetry(input, tool) {
     (typeof input.reason === "string" && typeof input.session_id === "string");
   const hasStopStatus = typeof input.status === "string" && typeof input.loop_count === "number";
 
-  if (
-    eventName.includes("userpromptsubmit") ||
-    eventName.includes("beforesubmitprompt") ||
-    (hasPrompt && !hasSessionEnd && !hasStopStatus)
-  ) {
+  const isExplicitPromptEvent =
+    eventName.includes("userpromptsubmit") || eventName.includes("beforesubmitprompt");
+
+  if (isExplicitPromptEvent || (hasPrompt && !hasSessionEnd && !hasStopStatus && !eventName)) {
     const prompt = String(input.prompt || input.user_prompt || "");
     const words = countWords(prompt);
     const chars = Math.min(12000, prompt.length);
@@ -381,9 +442,12 @@ async function cmdHook(flags) {
     process.exit(1);
   }
   const input = await readStdinJson();
-  const event = hookEventToTelemetry(input, tool);
+  let event = hookEventToTelemetry(input, tool);
+  if (event?.interaction_kind === "send" && isDuplicateSend(tool, input, event)) {
+    event = null;
+  }
   if (event) {
-    enqueueEvent(event);
+    enqueueEvent(tool, event);
   }
   const clientHeader = flags.client || TOOL_CLIENT[tool];
   try {
@@ -421,7 +485,7 @@ async function cmdLogin(flags) {
     console.error(body.error || `Exchange failed (${res.status})`);
     process.exit(1);
   }
-  saveCredentials({
+  saveCredentials(tool, {
     device_token: body.device_token,
     uid: body.uid,
     email: body.email,
@@ -430,15 +494,34 @@ async function cmdLogin(flags) {
     connected_at: new Date().toISOString()
   });
   console.log(`Connected to Promptly as ${body.email || body.uid} (${body.tool})`);
+  console.log(`This token is for ${body.tool} only. Pair each other coding agent separately.`);
 }
 
-function cmdStatus() {
-  const creds = getCredentials();
-  if (!creds?.device_token) {
-    console.log("Not connected. Open https://promptly-labs.com/auth/integrations to get a pairing code.");
+function cmdStatus(flags) {
+  const tool = normalizeTool(flags.tool);
+  if (tool) {
+    const creds = getCredentials(tool);
+    if (!creds?.device_token) {
+      console.log(JSON.stringify({ connected: false, tool }, null, 2));
+      process.exit(1);
+    }
+    console.log(JSON.stringify({ connected: true, email: creds.email, tool: creds.tool, uid: creds.uid }, null, 2));
+    return;
+  }
+
+  const summary = ALL_TOOLS.map((id) => {
+    const creds = getCredentials(id);
+    return {
+      tool: id,
+      connected: Boolean(creds?.device_token),
+      email: creds?.email || null
+    };
+  });
+  if (!summary.some((row) => row.connected)) {
+    console.log("Not connected. Open https://promptly-labs.com/integrations to get pairing codes.");
     process.exit(1);
   }
-  console.log(JSON.stringify({ connected: true, email: creds.email, tool: creds.tool, uid: creds.uid }, null, 2));
+  console.log(JSON.stringify({ tools: summary }, null, 2));
 }
 
 function cmdOpenLogin(flags) {
@@ -453,12 +536,12 @@ async function cmdTestSend(flags) {
     console.error("Usage: promptly-telemetry test-send --tool claude_code|cursor|codex");
     process.exit(1);
   }
-  const creds = getCredentials();
+  const creds = getCredentials(tool);
   if (!creds?.device_token) {
-    console.error("Not connected. Run login first.");
+    console.error(`Not connected for ${tool}. Run login --tool ${tool} first.`);
     process.exit(1);
   }
-  enqueueEvent({
+  enqueueEvent(tool, {
     tool,
     interaction_kind: "send",
     composer_word_estimate: 1,
@@ -486,7 +569,7 @@ async function main() {
       await cmdLogin(flags);
       break;
     case "status":
-      cmdStatus();
+      cmdStatus(flags);
       break;
     case "test-send":
       await cmdTestSend(flags);
@@ -494,9 +577,20 @@ async function main() {
     case "open-login":
       cmdOpenLogin(flags);
       break;
-    case "flush":
-      await flushQueue(normalizeTool(flags.tool) || "claude_code", flags.client);
+    case "flush": {
+      const tool = normalizeTool(flags.tool);
+      if (!tool) {
+        console.error("Usage: promptly-telemetry flush --tool claude_code|cursor|codex");
+        process.exit(1);
+      }
+      const result = await flushQueue(tool, flags.client || TOOL_CLIENT[tool]);
+      if (!result.ok) {
+        console.error(result.error || "Flush failed");
+        process.exit(1);
+      }
+      console.log(JSON.stringify(result, null, 2));
       break;
+    }
     default:
       console.log(`Promptly telemetry CLI
 
@@ -504,9 +598,9 @@ Commands:
   hook --tool <tool>          Process hook stdin and upload events
   login --tool <tool> <CODE>  Exchange pairing code for device token
   test-send --tool <tool>     Upload one test prompt (verify stats pipeline)
-  status                      Show connection status
+  status [--tool <tool>]      Show connection status for one or all tools
   open-login --tool <tool>    Print sign-in URL
-  flush --tool <tool>         Flush queued events`);
+  flush --tool <tool>         Flush queued events for one tool`);
   }
 }
 

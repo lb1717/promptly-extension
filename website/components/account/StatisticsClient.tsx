@@ -2009,20 +2009,21 @@ export function StatisticsClient() {
             <div className="mb-5 grid gap-3 sm:grid-cols-3">
               {IDE_AGENT_CARDS.map((agent) => {
                 const conn = ideConnectionByTool.get(agent.key);
-                const connected = (conn?.device_count ?? 0) > 0;
+                const paired = (conn?.device_count ?? 0) > 0;
                 const prompts = displayIdeStats?.totals.prompts[agent.key] ?? 0;
+                const active = paired || prompts > 0;
                 return (
                   <div
                     key={agent.key}
                     className={`rounded-xl border p-3 ${
-                      connected ? "border-emerald-300/80 bg-emerald-50/60" : "border-line bg-white/70"
+                      active ? "border-emerald-300/80 bg-emerald-50/60" : "border-line bg-white/70"
                     }`}
                   >
                     <p className="text-[11px] font-medium uppercase text-faint">{agent.label}</p>
-                    <p className={`mt-1 text-sm font-semibold ${connected ? "text-emerald-900" : "text-muted"}`}>
-                      {connected ? "Connected" : "Not connected"}
+                    <p className={`mt-1 text-sm font-semibold ${active ? "text-emerald-900" : "text-muted"}`}>
+                      {paired ? "Paired" : prompts > 0 ? "Receiving prompts" : "Not paired"}
                     </p>
-                    {connected ? (
+                    {paired ? (
                       <p className="mt-1 text-[10px] text-muted">
                         Last sync {formatIdeLastSeen(conn?.last_seen_at_ms)}
                         {conn && conn.device_count > 1 ? ` · ${conn.device_count} devices` : null}

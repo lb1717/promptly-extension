@@ -9,13 +9,15 @@ import { readFileSync, existsSync } from "fs";
 
 const DEFAULT_API = process.env.PROMPTLY_API_URL || "https://promptly-labs.com";
 
-function credsPath() {
-  return join(homedir(), ".promptly", "credentials.json");
+const DEFAULT_TOOL = process.env.PROMPTLY_TOOL || "claude_code";
+
+function credsPath(tool = DEFAULT_TOOL) {
+  return join(homedir(), ".promptly", `credentials-${tool}.json`);
 }
 
-function readCreds() {
+function readCreds(tool = DEFAULT_TOOL) {
   try {
-    return JSON.parse(readFileSync(credsPath(), "utf8"));
+    return JSON.parse(readFileSync(credsPath(tool), "utf8"));
   } catch {
     return null;
   }

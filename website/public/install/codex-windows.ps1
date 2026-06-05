@@ -46,6 +46,7 @@ if (-not ((codex plugin list) -match "promptly-codex")) {
 }
 
 Write-Host ""
-Write-Host "Promptly installed for Codex"
+Write-Host "Promptly installed for Codex only"
+Write-Host "  Claude Code and Cursor need separate install + pairing from promptly-labs.com/integrations."
 Write-Host "  If you used the one-command setup, account connect runs next automatically."
 Write-Host "  Otherwise finish step 1 on promptly-labs.com/integrations, then trust hooks (step 2)."
