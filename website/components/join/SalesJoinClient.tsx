@@ -544,8 +544,8 @@ export function SalesJoinClient({ slug }: { slug: string }) {
           <div className="mt-6 space-y-4">
             <p className="text-sm leading-relaxed text-muted">
               {isSalesTeamJoinLink(link)
-                ? "Get started with Promptly — create your account, choose your plan, and install the browser extension in a few quick steps."
-                : `Thanks for using Promptly${link.recipientName.trim() ? `, ${link.recipientName.trim()}` : ""}. We&apos;ve prepared a personalized setup just for you — account, plan, and browser extension in a few quick steps.`}
+                ? "Get started with Promptly — create your account, choose your plan, and install what you need in a few quick steps."
+                : `Thanks for using Promptly${link.recipientName.trim() ? `, ${link.recipientName.trim()}` : ""}. We've set up a quick onboarding flow for you: account, plan, and optional installs for your browser or coding apps.`}
             </p>
             <button
               type="button"
