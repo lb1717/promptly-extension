@@ -3,22 +3,22 @@
   "hooks": {
     "beforeSubmitPrompt": [
       {
-        "command": "node ./bin/promptly-telemetry.mjs hook --tool cursor"
+        "command": "node ./bin/promptly-telemetry.mjs hook --tool codex"
       }
     ],
     "stop": [
       {
-        "command": "node ./bin/promptly-telemetry.mjs hook --tool cursor"
+        "command": "node ./bin/promptly-telemetry.mjs hook --tool codex"
       }
     ],
     "sessionStart": [
       {
-        "command": "node ./bin/promptly-telemetry.mjs hook --tool cursor"
+        "command": "node ./bin/promptly-telemetry.mjs hook --tool codex"
       }
     ],
     "sessionEnd": [
       {
-        "command": "node ./bin/promptly-telemetry.mjs hook --tool cursor"
+        "command": "node ./bin/promptly-telemetry.mjs hook --tool codex"
       }
     ]
   }

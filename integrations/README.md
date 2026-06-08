@@ -1,125 +1,54 @@
 # Promptly IDE agent integrations
 
-Connect **Claude Code**, **Cursor**, and **Codex** to your Promptly account. Track prompt counts and screen time (metadata only — no prompt bodies). Use **`/promptly`** in the agent chat to rewrite a draft prompt (improve mode) before you send it.
+Connect **Claude Code**, **Cursor**, and **Codex** to your Promptly account. Track prompt counts and screen time (metadata only — no prompt bodies). Use **`/promptly`** in each agent to rewrite a draft prompt (improve mode).
 
 ## Architecture
 
 - **Plugins** install hooks that call `promptly-telemetry.mjs` (bundled in each plugin `bin/`).
 - **CLI** batches events to `POST /api/telemetry/ide-activity` with a device token.
 - **Website** pairing at `/auth/integrations` issues 8-character codes.
-- **Statistics** appear in the **Coding agents** section at the bottom of [/account/statistics](https://promptly-labs.com/account/statistics).
+- **Statistics** appear in the **Coding agents** section at [/account/statistics](https://promptly-labs.com/account/statistics).
 
-## Quick install
-
-Install scripts at [promptly-labs.com/install](https://promptly-labs.com/install) check for **Node.js 18+** first and try to install it automatically (Homebrew or official binary on Mac; winget/Chocolatey on Windows) before installing Promptly.
-
-1. Download [promptly-coding-agents.zip](https://promptly-labs.com/downloads/promptly-coding-agents.zip)
-2. Unzip to your user folder (creates `~/integrations` on Mac or `%USERPROFILE%\integrations` on Windows)
-3. Follow [promptly-labs.com/integrations](https://promptly-labs.com/integrations) — pick **Mac** or **Windows** and your coding agent
-
-### Claude Code
+Sync shared files from `packages/` before building the zip:
 
 ```bash
-# After unzip to $HOME/integrations:
-/plugin marketplace add $HOME/integrations
-/plugin install promptly-claude-code@promptly-labs
-/reload-plugins
+node integrations/scripts/sync-plugin-pack.mjs
+cd website && npm run prebuild
 ```
 
-### Codex
+## Install (recommended)
 
-```bash
-codex plugin marketplace add "$HOME/integrations"
-codex plugin add promptly-codex@promptly-labs
-# or: codex plugin install promptly-codex@promptly-labs
-```
+Use the one-command setup at [promptly-labs.com/integrations](https://promptly-labs.com/integrations). Scripts **remove the old plugin**, download a fresh pack, reinstall, and register **`/promptly`**:
 
-### Cursor
+| Agent | `/promptly` installed to |
+| --- | --- |
+| **Claude Code** | `~/.claude/commands/promptly.md` |
+| **Cursor** | `~/.cursor/commands/promptly.md` |
+| **Codex** | `~/.codex/skills/promptly/SKILL.md` (Codex skill — bare `/promptly`) |
 
-```bash
-mkdir -p ~/.cursor/plugins/local
-cp -R "$HOME/integrations/cursor" ~/.cursor/plugins/local/promptly-cursor
-# Restart Cursor (Developer: Reload Window)
-```
-
-## Connect your account
-
-1. Open [promptly-labs.com/auth/integrations](https://promptly-labs.com/auth/integrations) (use `?tool=cursor` or `?tool=codex` as needed).
-2. Sign in and copy the **8-character pairing code**.
-3. Run:
-
-```bash
-node "$HOME/integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs" login ABCD1234 --tool claude_code
-```
-
-Or use the Promptly MCP tool `promptly_login` after enabling the plugin MCP server.
-
-Credentials are stored per tool in `~/.promptly/credentials-<tool>.json`. You can pair **Claude Code, Cursor, and Codex on the same computer** — run `login --tool …` once per agent (three separate pairing codes). Tracking stays separate per tool.
+Re-run install anytime to refresh hooks, MCP, and slash commands without re-pairing.
 
 ## Improve a prompt (`/promptly`)
 
-MCP prompts alone do **not** register as `/promptly` in Claude Code. The install scripts add a real slash command:
-
-| Agent | How to improve a draft |
+| Agent | Usage |
 | --- | --- |
-| **Claude Code** | `/promptly your draft here` (also `/promptly-claude-code:promptly …`) |
+| **Claude Code** | `/promptly your draft here` — runs improve via bash |
 | **Cursor** | `/promptly your draft here` in chat |
-| **Codex** | `/promptly-codex:promptly your draft here` |
+| **Codex** | `/promptly your draft here` (skill; quit/reopen Codex after install) |
 
-Claude Code runs Promptly directly via bash and replaces your message with the improved text. Cursor runs a small script via the agent. Codex uses the namespaced plugin command.
-
-After install, run **`/reload-plugins`** (Claude Code) or **Reload Window** (Cursor) if `/promptly` does not autocomplete.
-
-## Local development
-
-```bash
-export PROMPTLY_API_URL=http://localhost:3000
-node integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs login CODE --tool claude_code
-node integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs login CODE --tool cursor
-node integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs login CODE --tool codex
-node integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs status
-```
-
-Deploy Firestore indexes before stats populate:
-
-```bash
-firebase deploy --only firestore:indexes
-```
-
-## E2E checklist
-
-- [ ] Sign in at `/auth/integrations?tool=claude_code` and receive a pairing code
-- [ ] `promptly-telemetry login <code> --tool claude_code` returns connected
-- [ ] `promptly-telemetry status` shows email and tool
-- [ ] Submit a prompt in Claude Code; hook runs without blocking the agent
-- [ ] Firestore `promptly_ide_events` receives rows for your uid
-- [ ] `/account/statistics` **Coding agents** section shows prompt counts
-- [ ] Revoke device at `/api/integrations/devices` (DELETE) → telemetry returns 401
-- [ ] Repeat for Cursor and Codex with `--tool cursor` / `--tool codex`
-
-## Test telemetry manually
-
-```bash
-export PROMPTLY_API_URL=http://localhost:3000
-echo '{"hook_event_name":"UserPromptSubmit","prompt":"hello world test"}' | \
-  node integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs hook --tool claude_code
-```
+Pair each agent separately (`login --tool claude_code|cursor|codex`).
 
 ## Repository layout
 
 ```
 integrations/
 ├── packages/telemetry-cli/   # Shared CLI (source of truth)
-├── packages/mcp-server/      # MCP connect/login/status
-├── claude-code/              # Claude Code plugin bundle
-├── cursor/                   # Cursor plugin bundle
-├── codex/                    # Codex plugin bundle
-├── .claude-plugin/           # Marketplace manifest (Claude Code + Codex legacy)
-└── .agents/plugins/          # Marketplace manifest (Codex native path)
-```
-
-When updating the CLI, copy `packages/telemetry-cli/bin/promptly-telemetry.mjs` into each plugin `bin/` directory, then rebuild the zip:
-
-```bash
-cd website && npm run prebuild
+├── packages/mcp-server/      # MCP connect/login/status/improve
+├── packages/promptly-improve/
+├── scripts/sync-plugin-pack.mjs
+├── claude-code/
+├── cursor/
+├── codex/
+│   └── skill/SKILL.md        # Codex /promptly skill
+└── .claude-plugin/           # Marketplace manifest
 ```

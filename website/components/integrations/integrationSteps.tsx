@@ -67,24 +67,18 @@ export function Step({
 }
 
 function LiveTrackingStep({ n, tool, os }: { n: number; tool: IdeToolId; os: OsId }) {
-  const improveHint =
-    tool === "claude_code" ? (
-      <p className="mt-2">
-        Improve a draft: type <code className="text-ink">/promptly</code> then your draft (or{" "}
-        <code className="text-ink">/promptly-claude-code:promptly</code>). Run{" "}
-        <code className="text-ink">/reload-plugins</code> once if it does not appear.
-      </p>
-    ) : tool === "codex" ? (
-      <p className="mt-2">
-        Improve a draft: type <code className="text-ink">/promptly-codex:promptly</code> then your
-        draft.
-      </p>
-    ) : (
-      <p className="mt-2">
-        Improve a draft: type <code className="text-ink">/promptly</code> in chat, then your draft.
-        Reload Cursor if it does not appear.
-      </p>
-    );
+  const improveHint = (
+    <p className="mt-2">
+      Improve a draft: type <code className="text-ink">/promptly</code> then your draft.{" "}
+      {tool === "claude_code" ? (
+        <>Run <code className="text-ink">/reload-plugins</code> once if it does not appear.</>
+      ) : tool === "codex" ? (
+        <>Quit and reopen Codex if it does not appear.</>
+      ) : (
+        <>Reload Cursor if it does not appear.</>
+      )}
+    </p>
+  );
 
   if (tool === "codex") {
     return (

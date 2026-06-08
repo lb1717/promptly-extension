@@ -12,6 +12,10 @@ if ! command -v curl >/dev/null 2>&1; then
 fi
 eval "$(curl -fsSL "${PROMPTLY_INSTALL_BASE}/_ensure-node-mac.sh")"
 eval "$(curl -fsSL "${PROMPTLY_INSTALL_BASE}/_install-common-mac.sh")"
+if ! declare -f promptly_unzip_plugin_pack >/dev/null 2>&1; then
+  echo "✗ Failed to load install helpers from ${PROMPTLY_INSTALL_BASE}/_install-common-mac.sh"
+  exit 1
+fi
 ensure_unzip_mac
 ensure_node_mac
 
@@ -25,15 +29,13 @@ if [[ ! -f "${INTEGRATIONS}/.claude-plugin/marketplace.json" ]]; then
 fi
 echo "✓ Plugin pack OK"
 
-echo "→ Installing Cursor plugin…"
-mkdir -p "${HOME}/.cursor/plugins/local"
-rm -rf "${CURSOR_PLUGIN}"
-cp -R "${INTEGRATIONS}/cursor" "${CURSOR_PLUGIN}"
-
-if [[ ! -d "${CURSOR_PLUGIN}/.cursor-plugin" ]]; then
-  echo "✗ Cursor plugin copy failed"
-  exit 1
-fi
+SOURCE_CURSOR="${INTEGRATIONS}/cursor"
+promptly_sync_telemetry_cli "${SOURCE_CURSOR}"
+set +e
+promptly_sync_improve_cli "${SOURCE_CURSOR}"
+set -e
+promptly_cursor_plugin_reinstall "${INTEGRATIONS}"
+promptly_sync_cursor_command_files "${SOURCE_CURSOR}"
 
 echo "→ Verifying Cursor plugin configuration…"
 if ! grep -q 'hook --tool cursor' "${CURSOR_PLUGIN}/hooks/hooks.json" 2>/dev/null; then
@@ -44,19 +46,12 @@ if ! grep -q '"PROMPTLY_TOOL": "cursor"' "${CURSOR_PLUGIN}/mcp.json" 2>/dev/null
   echo "✗ MCP server is not configured for Cursor"
   exit 1
 fi
-if [[ ! -f "${CURSOR_PLUGIN}/commands/promptly.md" ]]; then
-  echo "✗ Missing /promptly slash command file"
+if [[ ! -f "${HOME}/.cursor/commands/promptly.md" ]]; then
+  echo "✗ Missing /promptly command (~/.cursor/commands/promptly.md)"
   exit 1
 fi
-echo "✓ Hooks and MCP verified for Cursor"
-
-echo "→ Installing /promptly slash command…"
-mkdir -p "${HOME}/.cursor/commands"
-cp "${CURSOR_PLUGIN}/user-commands/promptly.md" "${HOME}/.cursor/commands/promptly.md"
-echo "✓ Type /promptly in Cursor chat (reload window if it does not appear)"
+echo "✓ Hooks, MCP, and /promptly verified for Cursor"
 
 echo ""
 echo "✓ Promptly installed for Cursor"
-echo "  You can also install Claude Code and Codex on this Mac — each needs its own install + pairing from promptly-labs.com/integrations."
-echo "  If you used the one-command setup, account connect runs next automatically."
-echo "  Otherwise finish step 1 on promptly-labs.com/integrations, then trust hooks (step 2)."
+echo "  Reload Cursor window, allow hooks if asked, then type: /promptly your draft here"

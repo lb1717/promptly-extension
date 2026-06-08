@@ -2,9 +2,11 @@
   "mcpServers": {
     "promptly": {
       "command": "node",
-      "args": ["./mcp/server.mjs"],
+      "args": [
+        "${PLUGIN_ROOT}/mcp/server.mjs"
+      ],
       "env": {
-        "PROMPTLY_TOOL": "cursor"
+        "PROMPTLY_TOOL": "codex"
       }
     }
   }

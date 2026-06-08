@@ -11,6 +11,10 @@ if ! command -v curl >/dev/null 2>&1; then
 fi
 eval "$(curl -fsSL "${PROMPTLY_INSTALL_BASE}/_ensure-node-mac.sh")"
 eval "$(curl -fsSL "${PROMPTLY_INSTALL_BASE}/_install-common-mac.sh")"
+if ! declare -f promptly_unzip_plugin_pack >/dev/null 2>&1; then
+  echo "✗ Failed to load install helpers from ${PROMPTLY_INSTALL_BASE}/_install-common-mac.sh"
+  exit 1
+fi
 ensure_unzip_mac
 ensure_node_mac
 
@@ -35,8 +39,14 @@ if [[ ! -f "${INTEGRATIONS}/.claude-plugin/marketplace.json" ]]; then
 fi
 echo "✓ Plugin pack OK"
 
+CLAUDE_PLUGIN="${INTEGRATIONS}/claude-code"
+promptly_sync_telemetry_cli "${CLAUDE_PLUGIN}"
+set +e
+promptly_sync_improve_cli "${CLAUDE_PLUGIN}"
+set -e
+promptly_sync_claude_code_command_files "${CLAUDE_PLUGIN}"
+
 echo "→ Installing Promptly in Claude Code…"
-export PATH="$(npm prefix -g)/bin:${PATH}"
 promptly_claude_marketplace_refresh "${INTEGRATIONS}"
 promptly_claude_plugin_reinstall
 
@@ -45,9 +55,6 @@ if ! claude plugin list 2>/dev/null | grep -q promptly-claude-code; then
   exit 1
 fi
 
-CLAUDE_PLUGIN="${INTEGRATIONS}/claude-code"
-promptly_sync_improve_cli "${CLAUDE_PLUGIN}"
-promptly_sync_claude_code_command_files "${CLAUDE_PLUGIN}"
 echo "→ Verifying Claude Code plugin configuration…"
 if ! grep -q 'hook --tool claude_code' "${CLAUDE_PLUGIN}/hooks/hooks.json" 2>/dev/null; then
   echo "✗ Hooks are not configured for Claude Code (expected --tool claude_code)"
@@ -57,20 +64,13 @@ if ! grep -q '"PROMPTLY_TOOL": "claude_code"' "${CLAUDE_PLUGIN}/.mcp.json" 2>/de
   echo "✗ MCP server is not configured for Claude Code"
   exit 1
 fi
-if [[ ! -f "${CLAUDE_PLUGIN}/commands/promptly.md" ]]; then
-  echo "✗ Missing /promptly slash command file"
+if [[ ! -f "${HOME}/.claude/commands/promptly.md" ]]; then
+  echo "✗ Missing /promptly command (~/.claude/commands/promptly.md)"
   exit 1
 fi
-echo "✓ Hooks and MCP verified for Claude Code"
-
-echo "→ Installing /promptly slash command…"
-mkdir -p "${HOME}/.claude/commands"
-cp "${CLAUDE_PLUGIN}/user-commands/promptly.md" "${HOME}/.claude/commands/promptly.md"
-echo "✓ Type /promptly in Claude Code (then /reload-plugins if it does not appear)"
+echo "✓ Hooks, MCP, and /promptly verified for Claude Code"
 
 echo ""
 echo "✓ Promptly installed for Claude Code"
-echo "  Run /reload-plugins in Claude Code, then type /promptly your draft"
-echo "  You can also install Cursor and Codex on this Mac — each needs its own install + pairing from promptly-labs.com/integrations."
-echo "  If you used the one-command setup, account connect runs next automatically."
-echo "  Otherwise finish step 1 on promptly-labs.com/integrations, then trust hooks (step 2)."
+echo "  Run /reload-plugins once, then type: /promptly your draft here"
+echo "  Re-pair only if you have not connected this agent yet (integrations page)."

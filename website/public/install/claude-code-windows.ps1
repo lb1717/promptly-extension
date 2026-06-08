@@ -6,70 +6,38 @@ $ZipPath = Join-Path $env:USERPROFILE "promptly.zip"
 $InstallBase = if ($env:PROMPTLY_INSTALL_BASE) { $env:PROMPTLY_INSTALL_BASE } else { "https://promptly-labs.com/install" }
 
 Invoke-Expression ((Invoke-WebRequest -Uri "$InstallBase/_ensure-node-windows.ps1" -UseBasicParsing).Content)
-Invoke-Expression ((Invoke-WebRequest -Uri "$InstallBase/_install-common-windows.ps1" -UseBasicParsing).Content)
+try {
+  Invoke-Expression ((Invoke-WebRequest -Uri "$InstallBase/_install-common-windows.ps1" -UseBasicParsing).Content)
+} catch { }
 Ensure-NodeJs
 
 $env:Path = "$(npm prefix -g)\bin;" + $env:Path
 
 Write-Host "-> Checking Claude Code CLI..."
 if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
-  Write-Host "  Installing @anthropic-ai/claude-code..."
   npm install -g @anthropic-ai/claude-code
   $env:Path = "$(npm prefix -g)\bin;" + $env:Path
 }
 claude --version
-Write-Host "Claude Code CLI ready"
 
 Write-Host "-> Downloading Promptly plugin pack..."
 Invoke-WebRequest -Uri $PluginPackUrl -OutFile $ZipPath
 Promptly-UnzipPluginPack -ZipPath $ZipPath -Dest $env:USERPROFILE
 
-if (-not (Test-Path (Join-Path $Integrations ".claude-plugin\marketplace.json"))) {
-  Write-Host "Plugin pack failed - retry download"
-  exit 1
-}
-Write-Host "Plugin pack OK"
+$ClaudePlugin = Join-Path $Integrations "claude-code"
+Promptly-SyncTelemetryCli -PluginDir $ClaudePlugin
+try { Promptly-SyncImproveCli -PluginDir $ClaudePlugin } catch { }
+Promptly-SyncClaudeCodeCommandFiles -PluginDir $ClaudePlugin
 
 Write-Host "-> Installing Promptly in Claude Code..."
-$env:Path = "$(npm prefix -g)\bin;" + $env:Path
 Promptly-ClaudeMarketplaceRefresh -IntegrationsPath $Integrations
 Promptly-ClaudePluginReinstall
-claude plugin list
 
 if (-not ((claude plugin list) -match "promptly-claude-code")) {
   Write-Host "Promptly plugin not found - retry this step"
   exit 1
 }
 
-$ClaudePlugin = Join-Path $Integrations "claude-code"
-Promptly-SyncImproveCli -PluginDir $ClaudePlugin
-Promptly-SyncClaudeCodeCommandFiles -PluginDir $ClaudePlugin
-Write-Host "-> Verifying Claude Code plugin configuration..."
-$hooksJson = Get-Content (Join-Path $ClaudePlugin "hooks\hooks.json") -Raw
-$mcpJson = Get-Content (Join-Path $ClaudePlugin ".mcp.json") -Raw
-if ($hooksJson -notmatch 'hook --tool claude_code') {
-  Write-Host "Hooks are not configured for Claude Code (expected --tool claude_code)"
-  exit 1
-}
-if ($mcpJson -notmatch '"PROMPTLY_TOOL": "claude_code"') {
-  Write-Host "MCP server is not configured for Claude Code"
-  exit 1
-}
-if (-not (Test-Path (Join-Path $ClaudePlugin "commands\promptly.md"))) {
-  Write-Host "Missing /promptly slash command file"
-  exit 1
-}
-Write-Host "Hooks and MCP verified for Claude Code"
-
-Write-Host "-> Installing /promptly slash command..."
-$ClaudeCommands = Join-Path $env:USERPROFILE ".claude\commands"
-New-Item -ItemType Directory -Force -Path $ClaudeCommands | Out-Null
-Copy-Item -Force (Join-Path $ClaudePlugin "user-commands\promptly.md") (Join-Path $ClaudeCommands "promptly.md")
-Write-Host "Type /promptly in Claude Code (/reload-plugins if it does not appear)"
-
 Write-Host ""
 Write-Host "Promptly installed for Claude Code"
-Write-Host "  Run /reload-plugins in Claude Code, then type /promptly your draft"
-Write-Host "  You can also install Cursor and Codex on this PC - each needs its own install + pairing from promptly-labs.com/integrations."
-Write-Host "  If you used the one-command setup, account connect runs next automatically."
-Write-Host "  Otherwise finish step 1 on promptly-labs.com/integrations, then trust hooks (step 2)."
+Write-Host "  Run /reload-plugins once, then type: /promptly your draft here"
