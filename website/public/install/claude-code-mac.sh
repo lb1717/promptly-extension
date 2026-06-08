@@ -54,7 +54,16 @@ if ! grep -q '"PROMPTLY_TOOL": "claude_code"' "${CLAUDE_PLUGIN}/.mcp.json" 2>/de
   echo "✗ MCP server is not configured for Claude Code"
   exit 1
 fi
+if [[ ! -f "${CLAUDE_PLUGIN}/commands/promptly.md" ]]; then
+  echo "✗ Missing /promptly slash command file"
+  exit 1
+fi
 echo "✓ Hooks and MCP verified for Claude Code"
+
+echo "→ Installing /promptly slash command…"
+mkdir -p "${HOME}/.claude/commands"
+cp "${CLAUDE_PLUGIN}/user-commands/promptly.md" "${HOME}/.claude/commands/promptly.md"
+echo "✓ Type /promptly in Claude Code (then /reload-plugins if it does not appear)"
 
 echo ""
 echo "✓ Promptly installed for Claude Code"

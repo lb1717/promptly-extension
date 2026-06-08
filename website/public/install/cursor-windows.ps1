@@ -40,7 +40,17 @@ if ($mcpJson -notmatch '"PROMPTLY_TOOL": "cursor"') {
   Write-Host "MCP server is not configured for Cursor"
   exit 1
 }
+if (-not (Test-Path (Join-Path $CursorPlugin "commands\promptly.md"))) {
+  Write-Host "Missing /promptly slash command file"
+  exit 1
+}
 Write-Host "Hooks and MCP verified for Cursor"
+
+Write-Host "-> Installing /promptly slash command..."
+$CursorCommands = Join-Path $env:USERPROFILE ".cursor\commands"
+New-Item -ItemType Directory -Force -Path $CursorCommands | Out-Null
+Copy-Item -Force (Join-Path $CursorPlugin "user-commands\promptly.md") (Join-Path $CursorCommands "promptly.md")
+Write-Host "Type /promptly in Cursor chat (reload window if it does not appear)"
 
 Write-Host ""
 Write-Host "Promptly installed for Cursor"

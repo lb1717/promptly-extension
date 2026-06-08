@@ -143,6 +143,17 @@ const tools = [
         tool: { type: "string", enum: ["claude_code", "cursor", "codex"] }
       }
     }
+  },
+  {
+    name: "promptly_improve",
+    description: "Rewrite a draft prompt using Promptly improve mode. Returns the improved text only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        prompt: { type: "string", description: "Draft prompt to improve" }
+      },
+      required: ["prompt"]
+    }
   }
 ];
 
@@ -270,6 +281,19 @@ async function handleToolCall(name, args) {
       return toolResult(`Not connected for ${tool}. Use promptly_connect first.`);
     }
     return toolResult(`Connected as ${c.email || c.uid} (${c.tool || tool})`);
+  }
+  if (name === "promptly_improve") {
+    const draft = String(args?.prompt || "").trim();
+    if (!draft) {
+      return toolResult("prompt is required", true);
+    }
+    try {
+      const tool = resolveTool();
+      const improved = await optimizePromptViaApi(draft, tool);
+      return toolResult(improved);
+    } catch (error) {
+      return toolResult(String(error?.message || error), true);
+    }
   }
   return toolResult(`Unknown tool: ${name}`, true);
 }

@@ -87,6 +87,14 @@ function CodingAgentPanel({
       <p className="text-xs text-muted">
         <span className="font-medium text-ink">Hooks:</span> {meta.hooks}
       </p>
+      <p className="text-xs text-muted">
+        <span className="font-medium text-ink">Improve:</span>{" "}
+        {tool === "claude_code"
+          ? "/promptly your draft (or /promptly-claude-code:promptly)"
+          : tool === "codex"
+            ? "/promptly-codex:promptly your draft"
+            : "/promptly your draft in chat"}
+      </p>
 
       {error ? <p className="text-xs text-red-700">{error}</p> : null}
       {expiresAt && pairCode ? (

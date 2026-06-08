@@ -67,12 +67,24 @@ export function Step({
 }
 
 function LiveTrackingStep({ n, tool, os }: { n: number; tool: IdeToolId; os: OsId }) {
-  const improveHint = (
-    <p className="mt-2">
-      To improve a draft before sending, type <code className="text-ink">/promptly</code> in chat and enter your draft
-      when prompted.
-    </p>
-  );
+  const improveHint =
+    tool === "claude_code" ? (
+      <p className="mt-2">
+        Improve a draft: type <code className="text-ink">/promptly</code> then your draft (or{" "}
+        <code className="text-ink">/promptly-claude-code:promptly</code>). Run{" "}
+        <code className="text-ink">/reload-plugins</code> once if it does not appear.
+      </p>
+    ) : tool === "codex" ? (
+      <p className="mt-2">
+        Improve a draft: type <code className="text-ink">/promptly-codex:promptly</code> then your
+        draft.
+      </p>
+    ) : (
+      <p className="mt-2">
+        Improve a draft: type <code className="text-ink">/promptly</code> in chat, then your draft.
+        Reload Cursor if it does not appear.
+      </p>
+    );
 
   if (tool === "codex") {
     return (

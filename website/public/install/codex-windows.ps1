@@ -53,10 +53,15 @@ if ($mcpJson -notmatch '"PROMPTLY_TOOL": "codex"') {
   Write-Host "MCP server is not configured for Codex"
   exit 1
 }
+if (-not (Test-Path (Join-Path $CodexPlugin "commands\promptly.md"))) {
+  Write-Host "Missing /promptly slash command file"
+  exit 1
+}
 Write-Host "Hooks and MCP verified for Codex"
 
 Write-Host ""
 Write-Host "Promptly installed for Codex"
+Write-Host "  Improve prompts with: /promptly-codex:promptly your draft here"
 Write-Host "  You can also install Claude Code and Cursor on this PC - each needs its own install + pairing from promptly-labs.com/integrations."
 Write-Host "  If you used the one-command setup, account connect runs next automatically."
 Write-Host "  Otherwise finish step 1 on promptly-labs.com/integrations, then trust hooks (step 2)."

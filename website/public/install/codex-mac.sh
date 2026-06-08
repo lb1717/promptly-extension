@@ -54,10 +54,15 @@ if ! grep -q '"PROMPTLY_TOOL": "codex"' "${CODEX_PLUGIN}/.mcp.json" 2>/dev/null;
   echo "✗ MCP server is not configured for Codex"
   exit 1
 fi
+if [[ ! -f "${CODEX_PLUGIN}/commands/promptly.md" ]]; then
+  echo "✗ Missing /promptly slash command file"
+  exit 1
+fi
 echo "✓ Hooks and MCP verified for Codex"
 
 echo ""
 echo "✓ Promptly installed for Codex"
+echo "  Improve prompts with: /promptly-codex:promptly your draft here"
 echo "  You can also install Claude Code and Cursor on this Mac — each needs its own install + pairing from promptly-labs.com/integrations."
 echo "  If you used the one-command setup, account connect runs next automatically."
 echo "  Otherwise finish step 1 on promptly-labs.com/integrations, then trust hooks (step 2)."

@@ -52,7 +52,17 @@ if ($mcpJson -notmatch '"PROMPTLY_TOOL": "claude_code"') {
   Write-Host "MCP server is not configured for Claude Code"
   exit 1
 }
+if (-not (Test-Path (Join-Path $ClaudePlugin "commands\promptly.md"))) {
+  Write-Host "Missing /promptly slash command file"
+  exit 1
+}
 Write-Host "Hooks and MCP verified for Claude Code"
+
+Write-Host "-> Installing /promptly slash command..."
+$ClaudeCommands = Join-Path $env:USERPROFILE ".claude\commands"
+New-Item -ItemType Directory -Force -Path $ClaudeCommands | Out-Null
+Copy-Item -Force (Join-Path $ClaudePlugin "user-commands\promptly.md") (Join-Path $ClaudeCommands "promptly.md")
+Write-Host "Type /promptly in Claude Code (/reload-plugins if it does not appear)"
 
 Write-Host ""
 Write-Host "Promptly installed for Claude Code"

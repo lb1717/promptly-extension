@@ -58,11 +58,17 @@ Credentials are stored per tool in `~/.promptly/credentials-<tool>.json`. You ca
 
 ## Improve a prompt (`/promptly`)
 
-After pairing, type **`/promptly`** in Cursor, Codex, or Claude Code (MCP prompts). Enter your draft when prompted — Promptly rewrites it in **improve** mode and inserts the improved text as your message. Review it, then send.
+MCP prompts alone do **not** register as `/promptly` in Claude Code. The install scripts add a real slash command:
 
-**Important:** generate a pairing code for the same agent you use (Cursor, Codex, or Claude Code). The get-started command runs `status --tool <agent>` so you can confirm `"tool": "cursor"` (or codex / claude_code) before trusting statistics.
+| Agent | How to improve a draft |
+| --- | --- |
+| **Claude Code** | `/promptly your draft here` (also `/promptly-claude-code:promptly …`) |
+| **Cursor** | `/promptly your draft here` in chat |
+| **Codex** | `/promptly-codex:promptly your draft here` |
 
-Requires the Promptly MCP server from the plugin bundle (installed with the coding-agent zip). Uses the same account credits as the browser extension.
+Claude Code runs Promptly directly via bash and replaces your message with the improved text. Cursor runs a small script via the agent. Codex uses the namespaced plugin command.
+
+After install, run **`/reload-plugins`** (Claude Code) or **Reload Window** (Cursor) if `/promptly` does not autocomplete.
 
 ## Local development
 

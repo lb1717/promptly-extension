@@ -2,9 +2,9 @@
   "mcpServers": {
     "promptly": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/server.mjs"],
+      "args": ["./mcp/server.mjs"],
       "env": {
-        "PROMPTLY_TOOL": "claude_code"
+        "PROMPTLY_TOOL": "cursor"
       }
     }
   }

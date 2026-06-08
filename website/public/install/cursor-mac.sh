@@ -43,7 +43,16 @@ if ! grep -q '"PROMPTLY_TOOL": "cursor"' "${CURSOR_PLUGIN}/mcp.json" 2>/dev/null
   echo "✗ MCP server is not configured for Cursor"
   exit 1
 fi
+if [[ ! -f "${CURSOR_PLUGIN}/commands/promptly.md" ]]; then
+  echo "✗ Missing /promptly slash command file"
+  exit 1
+fi
 echo "✓ Hooks and MCP verified for Cursor"
+
+echo "→ Installing /promptly slash command…"
+mkdir -p "${HOME}/.cursor/commands"
+cp "${CURSOR_PLUGIN}/user-commands/promptly.md" "${HOME}/.cursor/commands/promptly.md"
+echo "✓ Type /promptly in Cursor chat (reload window if it does not appear)"
 
 echo ""
 echo "✓ Promptly installed for Cursor"
