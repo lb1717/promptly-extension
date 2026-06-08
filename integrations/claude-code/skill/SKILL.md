@@ -1,5 +1,6 @@
 ---
-description: Improve a draft with Promptly and run it immediately
+name: promptly
+description: Improve a draft with Promptly and execute it immediately
 argument-hint: [your draft prompt]
 allowed-tools: Read, Bash(node:*)
 ---

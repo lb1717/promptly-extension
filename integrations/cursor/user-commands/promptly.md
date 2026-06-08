@@ -1,9 +1,9 @@
 ---
-description: Improve a draft prompt with Promptly (rewrite mode only)
+description: Improve a draft with Promptly and run it immediately
 argument-hint: [your draft prompt]
 ---
 
-Run Promptly improve and reply with **only** the improved prompt (no preamble):
+Improve the draft below with Promptly, then **execute the improved version as my task** (do not only echo it back):
 
 ```bash
 node "$HOME/integrations/cursor/bin/promptly-improve.mjs" --tool cursor "$ARGUMENTS"

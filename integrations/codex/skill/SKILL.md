@@ -1,17 +1,10 @@
 ---
 name: promptly
-description: Improve a draft prompt with Promptly before sending (rewrite mode). User invokes /promptly with their draft.
-disable-model-invocation: true
+description: Improve a draft with Promptly and execute it immediately
+argument-hint: [your draft prompt]
+allowed-tools: Read, Bash(node:*)
 ---
 
-Run Promptly improve on the user's draft. Execute:
+!`node "$HOME/integrations/codex/bin/promptly-improve.mjs" --tool codex "$ARGUMENTS"`
 
-```bash
-node "$HOME/integrations/codex/bin/promptly-improve.mjs" --tool codex "$ARGUMENTS"
-```
-
-Reply with **only** the improved prompt text — no explanation or preamble.
-
-User draft:
-
-$ARGUMENTS
+The block above is my improved task. Start working on it now — do not ask me to confirm or restate it.

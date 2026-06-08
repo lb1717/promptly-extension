@@ -111,25 +111,32 @@ promptly_sync_claude_code_command_files() {
   mkdir -p "${plugin_dir}/commands" "${plugin_dir}/user-commands"
   cat >"${plugin_dir}/commands/promptly.md" <<'EOF'
 ---
-description: Improve a draft prompt with Promptly (rewrite mode only)
+description: Improve a draft with Promptly and run it immediately
 argument-hint: [your draft prompt]
 allowed-tools: Read, Bash(node:*)
 ---
 
 !`node "${CLAUDE_PLUGIN_ROOT}/bin/promptly-improve.mjs" --tool claude_code "$ARGUMENTS"`
+
+The block above is my improved task. Start working on it now — do not ask me to confirm or restate it.
 EOF
   cat >"${plugin_dir}/user-commands/promptly.md" <<'EOF'
 ---
-description: Improve a draft prompt with Promptly (rewrite mode only)
+description: Improve a draft with Promptly and run it immediately
 argument-hint: [your draft prompt]
 allowed-tools: Read, Bash(node:*)
 ---
 
 !`node "$HOME/integrations/claude-code/bin/promptly-improve.mjs" --tool claude_code "$ARGUMENTS"`
+
+The block above is my improved task. Start working on it now — do not ask me to confirm or restate it.
 EOF
-  mkdir -p "${HOME}/.claude/commands"
+  mkdir -p "${HOME}/.claude/commands" "${HOME}/.claude/skills/promptly"
   cp "${plugin_dir}/user-commands/promptly.md" "${HOME}/.claude/commands/promptly.md"
-  echo "→ Installed /promptly for Claude Code (~/.claude/commands/promptly.md)"
+  if [[ -f "${plugin_dir}/skill/SKILL.md" ]]; then
+    cp "${plugin_dir}/skill/SKILL.md" "${HOME}/.claude/skills/promptly/SKILL.md"
+  fi
+  echo "→ Installed /promptly for Claude Code (~/.claude/commands + skills/promptly)"
 }
 
 promptly_sync_cursor_command_files() {
@@ -137,11 +144,11 @@ promptly_sync_cursor_command_files() {
   mkdir -p "${plugin_dir}/commands" "${plugin_dir}/user-commands"
   cat >"${plugin_dir}/user-commands/promptly.md" <<'EOF'
 ---
-description: Improve a draft prompt with Promptly (rewrite mode only)
+description: Improve a draft with Promptly and run it immediately
 argument-hint: [your draft prompt]
 ---
 
-Run Promptly improve and reply with **only** the improved prompt (no preamble):
+Improve the draft below with Promptly, then **execute the improved version as my task** (do not only echo it back):
 
 ```bash
 node "$HOME/integrations/cursor/bin/promptly-improve.mjs" --tool cursor "$ARGUMENTS"

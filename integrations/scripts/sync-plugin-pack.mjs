@@ -146,12 +146,14 @@ writeFileSync(
   join(root, "claude-code/commands/promptly.md"),
   [
     "---",
-    "description: Improve a draft prompt with Promptly (rewrite mode only)",
+    "description: Improve a draft with Promptly and run it immediately",
     "argument-hint: [your draft prompt]",
     "allowed-tools: Read, Bash(node:*)",
     "---",
     "",
     '!`node "${CLAUDE_PLUGIN_ROOT}/bin/promptly-improve.mjs" --tool claude_code "$ARGUMENTS"`',
+    "",
+    "The block above is my improved task. Start working on it now — do not ask me to confirm or restate it.",
     ""
   ].join("\n")
 );
@@ -160,22 +162,42 @@ writeFileSync(
   join(root, "claude-code/user-commands/promptly.md"),
   [
     "---",
-    "description: Improve a draft prompt with Promptly (rewrite mode only)",
+    "description: Improve a draft with Promptly and run it immediately",
     "argument-hint: [your draft prompt]",
     "allowed-tools: Read, Bash(node:*)",
     "---",
     "",
     '!`node "$HOME/integrations/claude-code/bin/promptly-improve.mjs" --tool claude_code "$ARGUMENTS"`',
+    "",
+    "The block above is my improved task. Start working on it now — do not ask me to confirm or restate it.",
+    ""
+  ].join("\n")
+);
+
+mkdirSync(join(root, "claude-code/skill"), { recursive: true });
+writeFileSync(
+  join(root, "claude-code/skill/SKILL.md"),
+  [
+    "---",
+    "name: promptly",
+    "description: Improve a draft with Promptly and execute it immediately",
+    "argument-hint: [your draft prompt]",
+    "allowed-tools: Read, Bash(node:*)",
+    "---",
+    "",
+    '!`node "$HOME/integrations/claude-code/bin/promptly-improve.mjs" --tool claude_code "$ARGUMENTS"`',
+    "",
+    "The block above is my improved task. Start working on it now — do not ask me to confirm or restate it.",
     ""
   ].join("\n")
 );
 
 const cursorSlash = `---
-description: Improve a draft prompt with Promptly (rewrite mode only)
+description: Improve a draft with Promptly and run it immediately
 argument-hint: [your draft prompt]
 ---
 
-Run Promptly improve and reply with **only** the improved prompt (no preamble):
+Improve the draft below with Promptly, then **execute the improved version as my task** (do not only echo it back):
 
 \`\`\`bash
 node "$HOME/integrations/cursor/bin/promptly-improve.mjs" --tool cursor "$ARGUMENTS"
@@ -192,24 +214,19 @@ writeFileSync(join(root, "cursor/user-commands/promptly.md"), cursorSlash);
 mkdirSync(join(root, "codex/skill"), { recursive: true });
 writeFileSync(
   join(root, "codex/skill/SKILL.md"),
-  `---
-name: promptly
-description: Improve a draft prompt with Promptly before sending (rewrite mode). User invokes /promptly with their draft.
-disable-model-invocation: true
----
-
-Run Promptly improve on the user's draft. Execute:
-
-\`\`\`bash
-node "$HOME/integrations/codex/bin/promptly-improve.mjs" --tool codex "$ARGUMENTS"
-\`\`\`
-
-Reply with **only** the improved prompt text — no explanation or preamble.
-
-User draft:
-
-$ARGUMENTS
-`
+  [
+    "---",
+    "name: promptly",
+    "description: Improve a draft with Promptly and execute it immediately",
+    "argument-hint: [your draft prompt]",
+    "allowed-tools: Read, Bash(node:*)",
+    "---",
+    "",
+    '!`node "$HOME/integrations/codex/bin/promptly-improve.mjs" --tool codex "$ARGUMENTS"`',
+    "",
+    "The block above is my improved task. Start working on it now — do not ask me to confirm or restate it.",
+    ""
+  ].join("\n")
 );
 
 console.log("[promptly] synced plugin pack from packages/");
