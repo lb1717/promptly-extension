@@ -880,12 +880,19 @@ function isCursorHostPayload(input) {
 
 function isClaudeCodeHostPayload(input) {
   const event = hookEventName(input);
-  if (event.includes("userpromptsubmit")) return true;
+  if (event.includes("userpromptsubmit")) {
+    const model = hookModelToken(input);
+    if (/^(gpt-|o[0-9]|codex)/.test(model)) return false;
+    if (input?.turn_id && !input?.transcript_path) return false;
+    return true;
+  }
   if (input?.transcript_path) return true;
   if (event.includes("sessionstart") || event.includes("sessionend")) {
     if (input?.session_id) return true;
   }
   if ((event === "stop" || event.endsWith(".stop")) && input?.session_id) {
+    const model = hookModelToken(input);
+    if (/^(gpt-|o[0-9]|codex)/.test(model)) return false;
     if (typeof input?.loop_count !== "number") return true;
   }
   if (input?.session_id && !input?.conversation_id) {
@@ -897,7 +904,10 @@ function isClaudeCodeHostPayload(input) {
 
 function isCodexHostPayload(input) {
   const event = hookEventName(input);
-  if (event.includes("beforesubmitprompt")) return true;
+  if (event.includes("userpromptsubmit") || event.includes("beforesubmitprompt")) return true;
+  if ((event === "stop" || event.endsWith(".stop")) && input?.session_id) {
+    if (typeof input?.loop_count !== "number") return true;
+  }
   const model = hookModelToken(input);
   if (/^(gpt-|o[0-9]|codex)/.test(model)) return true;
   if (typeof input?.model_reasoning_effort === "string") return true;
@@ -947,39 +957,30 @@ function stopStatusAccepted(status) {
 
 function buildStopTelemetryEvent(tool, sessionId, agentAccountEmail, modelMeta, now = Date.now()) {
   const pending = consumePendingSubmit(tool, sessionId);
-  const latencyMs = pending?.at
-    ? Math.min(1_800_000, Math.max(500, now - pending.at))
-    : null;
-  if (latencyMs) {
-    return {
-      tool,
-      interaction_kind: "response_latency",
-      host_response_latency_ms: latencyMs,
-      client_occurred_ms: now,
-      agent_account_email: agentAccountEmail || pending?.agent_account_email || null,
-      model_label: modelMeta.model_label || pending?.model_label || null,
-      model_bucket: modelMeta.model_bucket || pending?.model_bucket || "unknown"
-    };
-  }
+  if (!pending?.at) return null;
+  const latencyMs = Math.min(1_800_000, Math.max(500, now - pending.at));
   return {
     tool,
-    interaction_kind: "engagement_segment",
-    engagement_category: "waiting",
-    duration_ms: 5000,
+    interaction_kind: "response_latency",
+    host_response_latency_ms: latencyMs,
     client_occurred_ms: now,
-    agent_account_email: agentAccountEmail
+    agent_account_email: agentAccountEmail || pending?.agent_account_email || null,
+    model_label: modelMeta.model_label || pending?.model_label || null,
+    model_bucket: modelMeta.model_bucket || pending?.model_bucket || "unknown"
   };
 }
 
 function hookPayloadMatchesTool(input, tool) {
   if (!input || typeof input !== "object") return false;
   if (!isPromptSubmitPayload(input)) return true;
+  if (tool === "codex" && isCodexHostPayload(input)) return true;
   if (tool === "claude_code") {
     if (isCursorHostPayload(input)) return false;
     if (isCodexHostPayload(input) && !isClaudeCodeHostPayload(input)) return false;
     return true;
   }
   if (tool === "cursor") {
+    if (isCodexHostPayload(input)) return false;
     if (isClaudeCodeHostPayload(input) && !isCursorHostPayload(input)) return false;
     return true;
   }
@@ -1046,6 +1047,10 @@ function hookEventToTelemetry(input, tool) {
     return null;
   }
 
+  if (eventName.includes("afteragentresponse")) {
+    return buildStopTelemetryEvent(tool, sessionId, agentAccountEmail, modelMeta, now);
+  }
+
   if ((eventName.includes("stop") && !eventName.includes("subagent")) || hasStopStatus) {
     if (stopStatusAccepted(input.status)) {
       return buildStopTelemetryEvent(tool, sessionId, agentAccountEmail, modelMeta, now);
@@ -1095,7 +1100,9 @@ async function cmdHook(flags) {
   if (hookName.includes("sessionstart") && sessionId) {
     markSessionStarted(tool, sessionId);
   }
-  if (isStopHookName(hookName) && sessionId) {
+  const isResponseEndHook =
+    isStopHookName(hookName) || hookName.includes("afteragentresponse");
+  if (isResponseEndHook && sessionId) {
     markDraftWindowStart(tool, sessionId);
     if (!event || event.interaction_kind === "send") {
       const agentAccountEmail = resolveAgentAccountEmail(input, tool);
@@ -1235,10 +1242,28 @@ function cmdDiagnostics(flags) {
       input: { hook_event_name: "beforeSubmitPrompt", session_id: sessionId, prompt: "diagnostics hello" }
     },
     {
+      label: "UserPromptSubmit (codex)",
+      input: {
+        hook_event_name: "UserPromptSubmit",
+        session_id: sessionId,
+        turn_id: "turn-1",
+        prompt: "diagnostics hello",
+        model: "gpt-5.4"
+      }
+    },
+    {
+      label: "afterAgentResponse (cursor)",
+      input: {
+        hook_event_name: "afterAgentResponse",
+        conversation_id: sessionId,
+        text: "done"
+      }
+    },
+    {
       label: "stop (cursor success)",
       input: { hook_event_name: "stop", session_id: sessionId, status: "success", loop_count: 1 }
     },
-    { label: "Stop (claude)", input: { hook_event_name: "Stop", session_id: sessionId } }
+    { label: "Stop (codex/claude)", input: { hook_event_name: "Stop", session_id: sessionId } }
   ];
   console.log(
     JSON.stringify(

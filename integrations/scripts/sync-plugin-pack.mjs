@@ -71,20 +71,35 @@ const codexMcp = {
 writeFileSync(join(root, "codex/.mcp.json"), `${JSON.stringify(codexMcp, null, 2)}\n`);
 writeFileSync(join(root, "codex/mcp.json"), `${JSON.stringify(codexMcp, null, 2)}\n`);
 
-function hookJson(tool) {
+function cursorHookJson(tool) {
+  const cmd = `node ./bin/promptly-telemetry.mjs hook --tool ${tool}`;
   return {
     version: 1,
     hooks: {
-      beforeSubmitPrompt: [{ command: `node ./bin/promptly-telemetry.mjs hook --tool ${tool}` }],
-      stop: [{ command: `node ./bin/promptly-telemetry.mjs hook --tool ${tool}` }],
-      sessionStart: [{ command: `node ./bin/promptly-telemetry.mjs hook --tool ${tool}` }],
-      sessionEnd: [{ command: `node ./bin/promptly-telemetry.mjs hook --tool ${tool}` }]
+      beforeSubmitPrompt: [{ command: cmd }],
+      afterAgentResponse: [{ command: cmd }],
+      stop: [{ command: cmd }],
+      sessionStart: [{ command: cmd }],
+      sessionEnd: [{ command: cmd }]
     }
   };
 }
 
-writeFileSync(join(root, "cursor/hooks/hooks.json"), `${JSON.stringify(hookJson("cursor"), null, 2)}\n`);
-writeFileSync(join(root, "codex/hooks/hooks.json"), `${JSON.stringify(hookJson("codex"), null, 2)}\n`);
+function codexHookJson(tool) {
+  const cmd = `node ./bin/promptly-telemetry.mjs hook --tool ${tool}`;
+  const hookEntry = () => [{ hooks: [{ type: "command", command: cmd, timeout: 15 }] }];
+  return {
+    hooks: {
+      UserPromptSubmit: hookEntry(),
+      Stop: hookEntry(),
+      SessionStart: hookEntry(),
+      SessionEnd: hookEntry()
+    }
+  };
+}
+
+writeFileSync(join(root, "cursor/hooks/hooks.json"), `${JSON.stringify(cursorHookJson("cursor"), null, 2)}\n`);
+writeFileSync(join(root, "codex/hooks/hooks.json"), `${JSON.stringify(codexHookJson("codex"), null, 2)}\n`);
 
 writeFileSync(
   join(root, "claude-code/hooks/hooks.json"),

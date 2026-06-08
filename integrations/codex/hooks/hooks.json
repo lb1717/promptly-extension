@@ -1,24 +1,47 @@
 {
-  "version": 1,
   "hooks": {
-    "beforeSubmitPrompt": [
+    "UserPromptSubmit": [
       {
-        "command": "node ./bin/promptly-telemetry.mjs hook --tool codex"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./bin/promptly-telemetry.mjs hook --tool codex",
+            "timeout": 15
+          }
+        ]
       }
     ],
-    "stop": [
+    "Stop": [
       {
-        "command": "node ./bin/promptly-telemetry.mjs hook --tool codex"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./bin/promptly-telemetry.mjs hook --tool codex",
+            "timeout": 15
+          }
+        ]
       }
     ],
-    "sessionStart": [
+    "SessionStart": [
       {
-        "command": "node ./bin/promptly-telemetry.mjs hook --tool codex"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./bin/promptly-telemetry.mjs hook --tool codex",
+            "timeout": 15
+          }
+        ]
       }
     ],
-    "sessionEnd": [
+    "SessionEnd": [
       {
-        "command": "node ./bin/promptly-telemetry.mjs hook --tool codex"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./bin/promptly-telemetry.mjs hook --tool codex",
+            "timeout": 15
+          }
+        ]
       }
     ]
   }

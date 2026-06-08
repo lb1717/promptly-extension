@@ -6,6 +6,11 @@
         "command": "node ./bin/promptly-telemetry.mjs hook --tool cursor"
       }
     ],
+    "afterAgentResponse": [
+      {
+        "command": "node ./bin/promptly-telemetry.mjs hook --tool cursor"
+      }
+    ],
     "stop": [
       {
         "command": "node ./bin/promptly-telemetry.mjs hook --tool cursor"
