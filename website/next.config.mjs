@@ -1,6 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Vercel project Output Directory is `.next-build`; local dev uses `.next`.
+  distDir: process.env.VERCEL ? ".next-build" : ".next",
   async redirects() {
     return [
       {
