@@ -76,4 +76,7 @@ echo "✓ Hooks, MCP, and /promptly verified for Codex"
 
 echo ""
 echo "✓ Promptly installed for Codex"
-echo "  Quit and reopen Codex, trust this project folder, enable Promptly hooks (/hooks), then send a prompt"
+echo "  Quit and reopen Codex (desktop app or terminal)."
+echo "  Hooks are trusted in Terminal Codex with: codex   then type /hooks"
+echo "  (The Codex desktop app has no /hooks slash command — use Terminal for hook review.)"
+echo "  Open a trusted project folder, then send a prompt to test telemetry."
