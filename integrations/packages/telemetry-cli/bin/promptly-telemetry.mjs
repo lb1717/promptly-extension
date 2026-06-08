@@ -1030,14 +1030,7 @@ function hookEventToTelemetry(input, tool) {
     if (tool === "claude_code" && typeof input.model === "string" && input.model.trim()) {
       cacheClaudeSessionModel(input.session_id, input.model);
     }
-    return {
-      tool,
-      interaction_kind: "engagement_segment",
-      engagement_category: "reading_idle",
-      duration_ms: 2000,
-      client_occurred_ms: now,
-      agent_account_email: agentAccountEmail
-    };
+    return null;
   }
 
   return null;

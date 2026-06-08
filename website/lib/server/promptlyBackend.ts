@@ -7,6 +7,7 @@ import {
   type QueryDocumentSnapshot
 } from "firebase-admin/firestore";
 import { getFirebaseAdminAuth, getFirebaseAdminDb } from "@/lib/server/firebaseAdmin";
+import { withStatsQueryCache } from "@/lib/server/statsQueryCache";
 import { PROMPTLY_USER_CONTENT_TOKEN } from "./promptEngineeringConstants";
 import {
   extractFrameworkInstructionsFromTemplate,
@@ -61,6 +62,19 @@ export const HOST_LLM_EVENTS_QUERY_LIMIT = 5000;
 /** IDE / CLI agent telemetry (Claude Code, Cursor, Codex) — separate from web extension stats. */
 const IDE_EVENTS_COLLECTION = "promptly_ide_events";
 export const IDE_EVENTS_QUERY_LIMIT = 5000;
+
+function isFirestoreQuotaError(err: unknown): boolean {
+  const message = String(err instanceof Error ? err.message : err);
+  const code = (err as { code?: number | string })?.code;
+  if (code === 8 || code === "8" || code === "RESOURCE_EXHAUSTED") return true;
+  return /RESOURCE_EXHAUSTED|Quota exceeded|resource[\s-]*exhausted|exceeded.*quota|\bcode:\s*8\b/i.test(
+    message
+  );
+}
+
+export function isPromptlyFirestoreQuotaError(err: unknown): boolean {
+  return isFirestoreQuotaError(err);
+}
 const INTEGRATION_PAIR_CODES_COLLECTION = "promptly_integration_pair_codes";
 const INTEGRATION_DEVICES_COLLECTION = "promptly_integration_devices";
 const INTEGRATION_PAIR_TTL_MS = 10 * 60 * 1000;
@@ -1074,6 +1088,18 @@ export async function listIntegrationDevices(user: PromptlyUser) {
   return Array.from(seen.values());
 }
 
+async function listIntegrationDevicesSafe(user: PromptlyUser) {
+  try {
+    return await listIntegrationDevices(user);
+  } catch (err) {
+    if (isFirestoreQuotaError(err)) {
+      console.warn("[stats] listIntegrationDevices quota exhausted");
+      return [];
+    }
+    throw err;
+  }
+}
+
 export async function revokeIntegrationDevice(user: PromptlyUser, deviceId: string): Promise<boolean> {
   const db = getFirebaseAdminDb();
   const ref = db.collection(INTEGRATION_DEVICES_COLLECTION).doc(String(deviceId || "").trim());
@@ -1534,6 +1560,7 @@ export type AccountIdeStatsPayload = {
   events_docs_in_query: number;
   index_missing: boolean;
   likely_truncated: boolean;
+  quota_exceeded: boolean;
   footnotes: string[];
 };
 
@@ -1541,7 +1568,8 @@ export async function getAccountIdeUsageStats(
   user: PromptlyUser,
   days: number,
   granularity: AccountStatsExtendedGranularity = "day",
-  emailFilters?: Partial<Record<PromptlyIdeTool, Set<string>>>
+  emailFilters?: Partial<Record<PromptlyIdeTool, Set<string>>>,
+  opts?: { bypassCache?: boolean }
 ): Promise<AccountIdeStatsPayload> {
   const rangeDays = Math.max(1, Math.min(90, Math.floor(days || 14)));
   const recentDays = getRecentDays(rangeDays);
@@ -1553,6 +1581,7 @@ export async function getAccountIdeUsageStats(
     docs: QueryDocumentSnapshot<DocumentData>[];
     indexMissing: boolean;
     usedDesc: boolean;
+    quotaExceeded: boolean;
   }> => {
     const runDesc = () =>
       db
@@ -1575,17 +1604,25 @@ export async function getAccountIdeUsageStats(
         .get();
     try {
       const snap = await runDesc();
-      return { docs: snap.docs, indexMissing: false, usedDesc: true };
+      return { docs: snap.docs, indexMissing: false, usedDesc: true, quotaExceeded: false };
     } catch (err) {
+      if (isFirestoreQuotaError(err)) {
+        console.warn("[getAccountIdeUsageStats] promptly_ide_events quota exhausted");
+        return { docs: [], indexMissing: false, usedDesc: false, quotaExceeded: true };
+      }
       const message = String(err instanceof Error ? err.message : err);
       if (/FAILED_PRECONDITION|requires an index|9 FAILED_PRECONDITION/i.test(message)) {
         try {
           const snap = await runAsc();
-          return { docs: snap.docs, indexMissing: false, usedDesc: false };
+          return { docs: snap.docs, indexMissing: false, usedDesc: false, quotaExceeded: false };
         } catch (err2) {
+          if (isFirestoreQuotaError(err2)) {
+            console.warn("[getAccountIdeUsageStats] promptly_ide_events quota exhausted (asc fallback)");
+            return { docs: [], indexMissing: false, usedDesc: false, quotaExceeded: true };
+          }
           const m2 = String(err2 instanceof Error ? err2.message : err2);
           if (/FAILED_PRECONDITION|requires an index|9 FAILED_PRECONDITION/i.test(m2)) {
-            return { docs: [], indexMissing: true, usedDesc: false };
+            return { docs: [], indexMissing: true, usedDesc: false, quotaExceeded: false };
           }
           throw err2;
         }
@@ -1594,7 +1631,14 @@ export async function getAccountIdeUsageStats(
     }
   };
 
-  const [eventsResult, devices] = await Promise.all([queryIdeEvents(), listIntegrationDevices(user)]);
+  const [eventsResult, devices] = await Promise.all([
+    withStatsQueryCache(
+      `ide-events:${user.uid}:${startDay}:${endDay}`,
+      queryIdeEvents,
+      { bypass: opts?.bypassCache }
+    ),
+    listIntegrationDevicesSafe(user)
+  ]);
 
   type DayScratch = {
     bucket_day: string;
@@ -1884,6 +1928,11 @@ export async function getAccountIdeUsageStats(
   }
 
   const footnotes: string[] = [];
+  if (eventsResult.quotaExceeded) {
+    footnotes.unshift(
+      "Firestore read quota was exceeded. Try a shorter date range, wait for the daily quota to reset, or refresh later."
+    );
+  }
   if (eventsResult.indexMissing) {
     footnotes.push(
       "Deploy promptly_ide_events Firestore indexes (uid + utcDay) before coding-agent charts populate."
@@ -2012,6 +2061,7 @@ export async function getAccountIdeUsageStats(
     events_docs_in_query: eventsResult.docs.length,
     index_missing: eventsResult.indexMissing,
     likely_truncated: eventsResult.docs.length >= IDE_EVENTS_QUERY_LIMIT,
+    quota_exceeded: eventsResult.quotaExceeded,
     footnotes
   };
 }
@@ -2122,7 +2172,8 @@ type HostPassiveBucketAgg = {
 export async function getAccountUsageStatsExtended(
   user: PromptlyUser,
   days: number,
-  granularity: AccountStatsExtendedGranularity = "day"
+  granularity: AccountStatsExtendedGranularity = "day",
+  opts?: { bypassCache?: boolean }
 ) {
   const rangeDays = Math.max(1, Math.min(90, Math.floor(days || 14)));
   const recentDays = getRecentDays(rangeDays);
@@ -2134,7 +2185,7 @@ export async function getAccountUsageStatsExtended(
   const queryEventsIndexed = async (
     collectionPath: string,
     limit: number
-  ): Promise<{ docs: QueryDocumentSnapshot<DocumentData>[]; indexMissing: boolean }> => {
+  ): Promise<{ docs: QueryDocumentSnapshot<DocumentData>[]; indexMissing: boolean; quotaExceeded: boolean }> => {
     try {
       const snap = await db
         .collection(collectionPath)
@@ -2144,12 +2195,16 @@ export async function getAccountUsageStatsExtended(
         .orderBy("utcDay", "asc")
         .limit(limit)
         .get();
-      return { docs: snap.docs, indexMissing: false };
+      return { docs: snap.docs, indexMissing: false, quotaExceeded: false };
     } catch (err) {
+      if (isFirestoreQuotaError(err)) {
+        console.warn(`[getAccountUsageStatsExtended] ${collectionPath} quota exhausted`);
+        return { docs: [], indexMissing: false, quotaExceeded: true };
+      }
       const message = String(err instanceof Error ? err.message : err);
       if (/FAILED_PRECONDITION|requires an index|9 FAILED_PRECONDITION/i.test(message)) {
         console.warn(`[getAccountUsageStatsExtended] ${collectionPath} query skipped:`, message.slice(0, 220));
-        return { docs: [], indexMissing: true };
+        return { docs: [], indexMissing: true, quotaExceeded: false };
       }
       throw err;
     }
@@ -2163,6 +2218,7 @@ export async function getAccountUsageStatsExtended(
     docs: QueryDocumentSnapshot<DocumentData>[];
     indexMissing: boolean;
     used_desc_index: boolean;
+    quotaExceeded: boolean;
   }> => {
     const runDesc = () =>
       db
@@ -2187,8 +2243,12 @@ export async function getAccountUsageStatsExtended(
 
     try {
       const snap = await runDesc();
-      return { docs: snap.docs, indexMissing: false, used_desc_index: true };
+      return { docs: snap.docs, indexMissing: false, used_desc_index: true, quotaExceeded: false };
     } catch (err) {
+      if (isFirestoreQuotaError(err)) {
+        console.warn(`[getAccountUsageStatsExtended] ${HOST_LLM_EVENTS_COLLECTION} quota exhausted`);
+        return { docs: [], indexMissing: false, used_desc_index: false, quotaExceeded: true };
+      }
       const message = String(err instanceof Error ? err.message : err);
       if (/FAILED_PRECONDITION|requires an index|9 FAILED_PRECONDITION/i.test(message)) {
         console.warn(
@@ -2197,12 +2257,16 @@ export async function getAccountUsageStatsExtended(
         );
         try {
           const snap = await runAsc();
-          return { docs: snap.docs, indexMissing: false, used_desc_index: false };
+          return { docs: snap.docs, indexMissing: false, used_desc_index: false, quotaExceeded: false };
         } catch (err2) {
+          if (isFirestoreQuotaError(err2)) {
+            console.warn(`[getAccountUsageStatsExtended] ${HOST_LLM_EVENTS_COLLECTION} quota exhausted (asc fallback)`);
+            return { docs: [], indexMissing: false, used_desc_index: false, quotaExceeded: true };
+          }
           const m2 = String(err2 instanceof Error ? err2.message : err2);
           if (/FAILED_PRECONDITION|requires an index|9 FAILED_PRECONDITION/i.test(m2)) {
             console.warn(`[getAccountUsageStatsExtended] ${HOST_LLM_EVENTS_COLLECTION} asc query skipped:`, m2.slice(0, 220));
-            return { docs: [], indexMissing: true, used_desc_index: false };
+            return { docs: [], indexMissing: true, used_desc_index: false, quotaExceeded: false };
           }
           throw err2;
         }
@@ -2211,12 +2275,21 @@ export async function getAccountUsageStatsExtended(
     }
   };
 
-  /** Parallel rollup + optimize events + passive host listener events */
-  const [rollupBaseline, eventsResult, hostPassiveResult] = await Promise.all([
-    getAccountUsageStats(user, rangeDays),
-    queryEventsIndexed(OPTIMIZE_EVENTS_COLLECTION, OPTIMIZE_EVENTS_QUERY_LIMIT),
-    queryHostPassiveEventsIndexed()
+  /** Optimize + host queries in parallel; rollup reuses optimize docs (avoids a duplicate 5k read). */
+  const queryCacheKey = `${user.uid}:${startDay}:${endDay}`;
+  const [eventsResult, hostPassiveResult] = await Promise.all([
+    withStatsQueryCache(
+      `optimize-events:${queryCacheKey}`,
+      () => queryEventsIndexed(OPTIMIZE_EVENTS_COLLECTION, OPTIMIZE_EVENTS_QUERY_LIMIT),
+      { bypass: opts?.bypassCache }
+    ),
+    withStatsQueryCache(`host-events:${queryCacheKey}`, queryHostPassiveEventsIndexed, {
+      bypass: opts?.bypassCache
+    })
   ]);
+  const rollupBaseline = await getAccountUsageStats(user, rangeDays, {
+    prefetchedOptimizeDocs: eventsResult.docs
+  });
 
   type DayScratch = TimelineBucketAgg;
   const byDayScratch = new Map<string, DayScratch>();
@@ -2931,6 +3004,11 @@ export async function getAccountUsageStatsExtended(
       "Promptly optimize charts may be empty until the Firestore composite index on promptly_optimize_events (uid + utcDay + __name__) exists — firebase deploy --only firestore:indexes."
     );
   }
+  if (eventsResult.quotaExceeded || hostPassiveResult.quotaExceeded) {
+    footnotes.unshift(
+      "Firestore read quota was exceeded. Try a shorter date range, wait for the daily quota to reset, or refresh later."
+    );
+  }
   if (hostPassiveResult.indexMissing) {
     footnotes.unshift(
       "Passive AI-site charts may be empty until Firestore composites on promptly_host_llm_events are enabled — deploy firestore.indexes.json (firebase deploy --only firestore:indexes); at minimum uid ASC, utcDay ASC, __name__ ASC."
@@ -2950,6 +3028,7 @@ export async function getAccountUsageStatsExtended(
     events_index_missing: eventsResult.indexMissing,
     /** True when prompt count from daily rollup exceeds what event query could return */
     likely_truncated: events_truncated,
+    quota_exceeded: eventsResult.quotaExceeded || hostPassiveResult.quotaExceeded,
     rollup_daily: {
       totals: rollupBaseline.totals,
       service_breakdown: rollupBaseline.service_breakdown,
@@ -3742,6 +3821,38 @@ async function getDailyUsage(uid: string, day: string, limit: number): Promise<D
     responseTimeCount: Math.max(0, Math.floor(Number(raw.responseTimeCount || 0) || 0)),
     limit
   };
+}
+
+function emptyDailyUsage(uid: string, day: string, limit: number): DailyUsage {
+  return {
+    uid,
+    day,
+    email: null,
+    used: 0,
+    promptsImproved: 0,
+    auto: 0,
+    manual: 0,
+    generated: 0,
+    chatgpt: 0,
+    claude: 0,
+    gemini: 0,
+    unknown: 0,
+    responseTimeTotalMs: 0,
+    responseTimeCount: 0,
+    limit
+  };
+}
+
+async function getDailyUsageSafe(uid: string, day: string, limit: number): Promise<DailyUsage> {
+  try {
+    return await getDailyUsage(uid, day, limit);
+  } catch (err) {
+    if (isFirestoreQuotaError(err)) {
+      console.warn("[stats] getDailyUsage quota exhausted:", day);
+      return emptyDailyUsage(uid, day, limit);
+    }
+    throw err;
+  }
 }
 
 /**
@@ -5160,6 +5271,20 @@ export async function getCreditsForUser(user: PromptlyUser, request: Request) {
   };
 }
 
+function dailyOptimizePromptCountsFromDocs(
+  docs: QueryDocumentSnapshot<DocumentData>[],
+  recentDays: string[]
+): Map<string, number> {
+  const counts = new Map<string, number>(recentDays.map((d) => [d, 0]));
+  for (const doc of docs) {
+    const day = readAnalyticsUtcDay(doc.data() as Record<string, unknown>);
+    if (day && counts.has(day)) {
+      counts.set(day, (counts.get(day) || 0) + 1);
+    }
+  }
+  return counts;
+}
+
 async function queryDailyOptimizePromptCountsByDay(
   uid: string,
   recentDays: string[]
@@ -5180,12 +5305,7 @@ async function queryDailyOptimizePromptCountsByDay(
       .orderBy("utcDay")
       .limit(OPTIMIZE_EVENTS_QUERY_LIMIT)
       .get();
-    for (const doc of snap.docs) {
-      const day = readAnalyticsUtcDay(doc.data() as Record<string, unknown>);
-      if (day && counts.has(day)) {
-        counts.set(day, (counts.get(day) || 0) + 1);
-      }
-    }
+    return dailyOptimizePromptCountsFromDocs(snap.docs, recentDays);
   } catch (err) {
     console.warn(
       "[getAccountUsageStats] optimize events query failed:",
@@ -5195,7 +5315,11 @@ async function queryDailyOptimizePromptCountsByDay(
   return counts;
 }
 
-export async function getAccountUsageStats(user: PromptlyUser, days: number) {
+export async function getAccountUsageStats(
+  user: PromptlyUser,
+  days: number,
+  opts?: { prefetchedOptimizeDocs?: QueryDocumentSnapshot<DocumentData>[] }
+) {
   const rangeDays = Math.max(1, Math.min(60, Math.floor(days || 14)));
   const recentDays = getRecentDays(rangeDays);
   const weeklyLimit = weeklyTokenLimitFromDaily(user.dailyTokenLimit);
@@ -5203,10 +5327,12 @@ export async function getAccountUsageStats(user: PromptlyUser, days: number) {
   const uniqueWeekKeys = [...new Set(recentDays.map(weekKeyForDay))];
   const weekUsageByKey = new Map(
     await Promise.all(
-      uniqueWeekKeys.map(async (weekKey) => [weekKey, await getDailyUsage(user.uid, weekKey, weeklyLimit)] as const)
+      uniqueWeekKeys.map(async (weekKey) => [weekKey, await getDailyUsageSafe(user.uid, weekKey, weeklyLimit)] as const)
     )
   );
-  const dailyPromptCounts = await queryDailyOptimizePromptCountsByDay(user.uid, recentDays);
+  const dailyPromptCounts = opts?.prefetchedOptimizeDocs
+    ? dailyOptimizePromptCountsFromDocs(opts.prefetchedOptimizeDocs, recentDays)
+    : await queryDailyOptimizePromptCountsByDay(user.uid, recentDays);
 
   let totalPrompts = 0;
   let totalTokens = 0;

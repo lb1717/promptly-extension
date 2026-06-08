@@ -72,6 +72,22 @@ const IDE_AGENT_CARDS: Array<{ key: "claude_code" | "cursor" | "codex"; label: s
   { key: "codex", label: IDE_AGENT_LABELS.codex }
 ];
 
+function appendIdeEmailFilterParams(
+  params: URLSearchParams,
+  emailSelection: SelectedEmailsByTool,
+  availableByTool?: Record<IdeToolKey, string[]>
+) {
+  for (const agent of IDE_AGENT_CARDS) {
+    const selected = emailSelection[agent.key];
+    const available = availableByTool?.[agent.key] ?? [];
+    const isStrictSubset =
+      selected.size > 0 && available.length > 0 && selected.size < available.length;
+    if (isStrictSubset) {
+      params.set(`${agent.key}_emails`, Array.from(selected).join(","));
+    }
+  }
+}
+
 const CHART_FONT_FAMILY = "var(--font-roboto-chart), Roboto, sans-serif";
 /** All chart axis ticks — dates, counts, units, and category labels on axes. */
 const CHART_Y_TICK = { fill: "#5C5C5C", fontSize: 10, fontFamily: CHART_FONT_FAMILY };
@@ -181,6 +197,7 @@ type IdeStatsPayload = {
   events_docs_in_query: number;
   index_missing: boolean;
   likely_truncated: boolean;
+  quota_exceeded?: boolean;
   footnotes: string[];
 };
 
@@ -423,6 +440,7 @@ type ExtendedStatsPayload = {
     model_buckets: Array<{ bucket: string; exemplar_label: string | null; prompts: number }>;
   };
   host_passive_listener: HostPassiveLite;
+  quota_exceeded?: boolean;
   footnotes: string[];
 };
 
@@ -1195,6 +1213,7 @@ export function StatisticsClient() {
     useState<PromptVolumeAiFilterState>(DEFAULT_PROMPT_VOLUME_AI_FILTERS);
   const [reportGenerating, setReportGenerating] = useState(false);
   const reportRef = useRef<HTMLDivElement>(null);
+  const ideStatsReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const placeholderStats = useMemo(
     () => buildPlaceholderExtendedStats(days, granularity),
@@ -1240,7 +1259,7 @@ export function StatisticsClient() {
     });
   }, []);
 
-  const loadExtended = useCallback(async (current: User | null, d: number, g: "day" | "week") => {
+  const loadExtended = useCallback(async (current: User | null, d: number, g: "day" | "week", refresh = false) => {
     if (!current) {
       setStats(null);
       return;
@@ -1249,7 +1268,12 @@ export function StatisticsClient() {
     setStatsError("");
     try {
       const token = await current.getIdToken(false);
-      const res = await fetch(`/api/account/stats/extended?days=${encodeURIComponent(String(d))}&granularity=${g}`, {
+      const params = new URLSearchParams({
+        days: String(d),
+        granularity: g
+      });
+      if (refresh) params.set("refresh", "1");
+      const res = await fetch(`/api/account/stats/extended?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json().catch(() => ({}));
@@ -1258,7 +1282,12 @@ export function StatisticsClient() {
       }
       setStats(data as ExtendedStatsPayload);
     } catch (e) {
-      setStatsError(String(e instanceof Error ? e.message : e));
+      const raw = String(e instanceof Error ? e.message : e);
+      setStatsError(
+        /RESOURCE_EXHAUSTED|Quota exceeded/i.test(raw)
+          ? "Firestore daily read limit reached. Try a shorter date range or refresh after the quota resets."
+          : raw
+      );
     } finally {
       setStatsLoading(false);
     }
@@ -1269,7 +1298,9 @@ export function StatisticsClient() {
       current: User | null,
       d: number,
       g: "day" | "week",
-      emailSelection: SelectedEmailsByTool
+      emailSelection: SelectedEmailsByTool,
+      availableByTool?: Record<IdeToolKey, string[]>,
+      refresh = false
     ) => {
     if (!current) {
       setIdeStats(null);
@@ -1283,12 +1314,8 @@ export function StatisticsClient() {
         days: String(d),
         granularity: g
       });
-      for (const agent of IDE_AGENT_CARDS) {
-        const emails = emailSelection[agent.key];
-        if (emails.size > 0) {
-          params.set(`${agent.key}_emails`, Array.from(emails).join(","));
-        }
-      }
+      if (refresh) params.set("refresh", "1");
+      appendIdeEmailFilterParams(params, emailSelection, availableByTool);
       const res = await fetch(`/api/account/stats/ide?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -1298,12 +1325,35 @@ export function StatisticsClient() {
       }
       setIdeStats(data as IdeStatsPayload);
     } catch (e) {
-      setIdeStatsError(String(e instanceof Error ? e.message : e));
+      const raw = String(e instanceof Error ? e.message : e);
+      setIdeStatsError(
+        /RESOURCE_EXHAUSTED|Quota exceeded/i.test(raw)
+          ? "Firestore daily read limit reached. Try a shorter date range or refresh after the quota resets."
+          : raw
+      );
     } finally {
       setIdeStatsLoading(false);
     }
   },
     []
+  );
+
+  const scheduleIdeStatsReload = useCallback(
+    (
+      emailSelection: SelectedEmailsByTool,
+      availableByTool?: Record<IdeToolKey, string[]>,
+      refresh = false
+    ) => {
+      if (!user) return;
+      if (ideStatsReloadTimerRef.current) {
+        clearTimeout(ideStatsReloadTimerRef.current);
+      }
+      ideStatsReloadTimerRef.current = setTimeout(() => {
+        ideStatsReloadTimerRef.current = null;
+        void loadIdeStats(user, days, granularity, emailSelection, availableByTool, refresh);
+      }, 300);
+    },
+    [user, days, granularity, loadIdeStats]
   );
 
   const toggleAgentEmail = useCallback((tool: IdeToolKey, email: string) => {
@@ -1314,15 +1364,25 @@ export function StatisticsClient() {
       } else {
         current.add(email);
       }
-      return { ...prev, [tool]: current };
+      const next = { ...prev, [tool]: current };
+      scheduleIdeStatsReload(next, ideStats?.agent_emails_by_tool);
+      return next;
     });
+  }, [scheduleIdeStatsReload, ideStats?.agent_emails_by_tool]);
+
+  useEffect(() => {
+    return () => {
+      if (ideStatsReloadTimerRef.current) {
+        clearTimeout(ideStatsReloadTimerRef.current);
+      }
+    };
   }, []);
 
   const refreshAllStats = useCallback(() => {
     if (!user) return;
-    void loadExtended(user, days, granularity);
-    void loadIdeStats(user, days, granularity, selectedEmailsByTool);
-  }, [user, days, granularity, selectedEmailsByTool, loadExtended, loadIdeStats]);
+    void loadExtended(user, days, granularity, true);
+    void loadIdeStats(user, days, granularity, selectedEmailsByTool, ideStats?.agent_emails_by_tool, true);
+  }, [user, days, granularity, selectedEmailsByTool, ideStats?.agent_emails_by_tool, loadExtended, loadIdeStats]);
 
   useEffect(() => {
     setSelectedEmailsByTool({
@@ -1363,8 +1423,12 @@ export function StatisticsClient() {
   useEffect(() => {
     if (!user || loading) return;
     void loadExtended(user, days, granularity);
-    void loadIdeStats(user, days, granularity, selectedEmailsByTool);
-  }, [user, loading, days, granularity, selectedEmailsByTool, loadExtended, loadIdeStats]);
+    void loadIdeStats(user, days, granularity, {
+      claude_code: new Set(),
+      cursor: new Set(),
+      codex: new Set()
+    });
+  }, [user, loading, days, granularity, loadExtended, loadIdeStats]);
 
   const stackedTimeline = useMemo(() => {
     if (!displayStats?.combined_prompt_timeline) return [];
@@ -1952,6 +2016,12 @@ export function StatisticsClient() {
 
           {statsError ? (
             <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">{statsError}</div>
+          ) : null}
+
+          {displayStats?.quota_exceeded || displayIdeStats?.quota_exceeded ? (
+            <div className="mb-4 rounded-xl border border-amber-300/60 bg-amber-50/90 px-4 py-3 text-sm text-amber-950">
+              Firestore read quota was exceeded. Charts may be incomplete until the daily limit resets — try 7 days instead of 14, or check back tomorrow.
+            </div>
           ) : null}
 
           {statsInfoNotices.length ? (
