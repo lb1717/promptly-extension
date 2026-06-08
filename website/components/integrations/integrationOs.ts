@@ -103,6 +103,39 @@ export function connectCommandsPowerShell(tool: IdeToolId, code: string): string
   return [`${login}; if ($LASTEXITCODE -eq 0) { ${status} }`];
 }
 
+export type AllAgentsPairCodes = Record<IdeToolId, string>;
+
+const ALL_IDE_TOOLS: IdeToolId[] = ["claude_code", "cursor", "codex"];
+
+/** One paste: fresh install all agents, pair all three, verify telemetry CLI. */
+export function allAgentsFullSetupCommands(os: OsId, codes: AllAgentsPairCodes): string[] {
+  const install = allAgentsInstallCommands(os)[0]!;
+  if (os === "mac") {
+    const parts = [
+      install,
+      ...ALL_IDE_TOOLS.map((tool) => loginCommand(os, tool, codes[tool])),
+      ...ALL_IDE_TOOLS.map((tool) => statusCommand(os, tool))
+    ];
+    return [parts.join(" && ")];
+  }
+  let ps = `${install}; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }`;
+  for (const tool of ALL_IDE_TOOLS) {
+    ps += `; ${loginCommandPowerShell(tool, codes[tool])}; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }`;
+  }
+  for (const tool of ALL_IDE_TOOLS) {
+    ps += `; ${statusCommandPowerShell(tool)}`;
+  }
+  return [ps];
+}
+
+export function allAgentsSetupValidationItems(): string[] {
+  return [
+    "Promptly all-agents install summary",
+    '"Promptly installed for Cursor" (or skipped if Cursor files missing)',
+    '"connected": true for claude_code, cursor, and codex in status output'
+  ];
+}
+
 /** Install then connect in one paste — install must run first (creates the login CLI). */
 export function fullSetupCommands(os: OsId, tool: IdeToolId, code: string): string[] {
   if (os === "mac") {

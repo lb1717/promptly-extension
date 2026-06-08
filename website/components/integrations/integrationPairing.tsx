@@ -5,8 +5,17 @@ import { getFirebaseAuth } from "@/lib/firebaseClient";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { useCallback, useEffect, useState } from "react";
 import { CopyBlock } from "./integrationCopyBlock";
-import { fullSetupCommands, type IdeToolId, type OsId } from "./integrationOs";
+import {
+  allAgentsFullSetupCommands,
+  allAgentsSetupValidationItems,
+  fullSetupCommands,
+  type AllAgentsPairCodes,
+  type IdeToolId,
+  type OsId
+} from "./integrationOs";
 import { StepValidation } from "./integrationUi";
+
+const ALL_TOOLS: IdeToolId[] = ["claude_code", "cursor", "codex"];
 
 export function useIntegrationPairing(tool: IdeToolId) {
   const [user, setUser] = useState<User | null>(null);
@@ -103,6 +112,206 @@ function installSuccessHint(tool: IdeToolId): string {
 
 function toolStatusSnippet(tool: IdeToolId): string {
   return `"tool": "${tool}" and "connected": true`;
+}
+
+export function useAllAgentsPairing() {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [pairCodes, setPairCodes] = useState<Partial<AllAgentsPairCodes>>({});
+  const [expiresAt, setExpiresAt] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const auth = getFirebaseAuth();
+    return onAuthStateChanged(auth, (next) => {
+      setUser(next);
+      setLoading(false);
+    });
+  }, []);
+
+  const hasAllCodes = ALL_TOOLS.every((tool) => Boolean(pairCodes[tool]?.trim()));
+
+  const createAllPairCodes = useCallback(async (current: User) => {
+    setBusy(true);
+    setError("");
+    try {
+      const token = await current.getIdToken(true);
+      const results = await Promise.all(
+        ALL_TOOLS.map(async (tool) => {
+          const res = await fetch("/api/integrations/pair", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`
+            },
+            body: JSON.stringify({ tool })
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            throw new Error(data?.error || `Pairing failed for ${tool} (${res.status})`);
+          }
+          return {
+            tool,
+            code: String(data.code || ""),
+            expiresAt: typeof data.expiresAt === "string" ? data.expiresAt : null
+          };
+        })
+      );
+      const nextCodes: Partial<AllAgentsPairCodes> = {};
+      let earliestExpiry: string | null = null;
+      for (const row of results) {
+        nextCodes[row.tool] = row.code;
+        if (row.expiresAt && (!earliestExpiry || row.expiresAt < earliestExpiry)) {
+          earliestExpiry = row.expiresAt;
+        }
+      }
+      setPairCodes(nextCodes);
+      setExpiresAt(earliestExpiry);
+    } catch (e) {
+      setError(String(e instanceof Error ? e.message : e));
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const signInAndConnect = useCallback(async () => {
+    setError("");
+    setBusy(true);
+    try {
+      const auth = getFirebaseAuth();
+      let current = auth.currentUser;
+      if (!current) {
+        const returnTo =
+          typeof window !== "undefined"
+            ? `${window.location.pathname}${window.location.search}`
+            : "/integrations";
+        openGoogleSignInInNewTab(returnTo);
+        current = await waitForAuthenticatedUser(120_000);
+      }
+      if (!current) {
+        throw new Error("Sign-in did not complete. Finish Google sign-in in the other tab, then try again.");
+      }
+      await createAllPairCodes(current);
+    } catch (e) {
+      setError(String(e instanceof Error ? e.message : e));
+    } finally {
+      setBusy(false);
+    }
+  }, [createAllPairCodes]);
+
+  const refreshCodes = useCallback(async () => {
+    if (!user) return;
+    await createAllPairCodes(user);
+  }, [user, createAllPairCodes]);
+
+  return {
+    user,
+    loading,
+    pairCodes,
+    hasAllCodes,
+    expiresAt,
+    busy,
+    error,
+    signInAndConnect,
+    refreshCodes
+  };
+}
+
+export function AllAgentsConnectStep({
+  n = 1,
+  os,
+  buttonLabel = "Press to Connect Account Now",
+  compact = false,
+  errorClassName = "text-red-700"
+}: {
+  n?: number;
+  os: OsId;
+  buttonLabel?: string;
+  compact?: boolean;
+  errorClassName?: string;
+}) {
+  const { loading, hasAllCodes, pairCodes, expiresAt, busy, error, signInAndConnect, refreshCodes } =
+    useAllAgentsPairing();
+  const terminalLabel = os === "mac" ? "Terminal" : "PowerShell";
+  const commandLines =
+    hasAllCodes && ALL_TOOLS.every((tool) => pairCodes[tool])
+      ? allAgentsFullSetupCommands(os, pairCodes as AllAgentsPairCodes)
+      : [];
+
+  const inner = (
+    <>
+      <div className={compact ? "mt-0" : "mt-3"}>
+        {loading ? (
+          <span className="text-xs text-muted">Loading…</span>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void signInAndConnect()}
+              className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:opacity-50"
+            >
+              {busy ? "Generating command…" : buttonLabel}
+            </button>
+            {hasAllCodes ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void refreshCodes()}
+                className="rounded-lg border border-line px-2.5 py-1.5 text-xs font-medium text-ink hover:bg-cream-dark disabled:opacity-50"
+              >
+                New codes
+              </button>
+            ) : null}
+          </div>
+        )}
+      </div>
+
+      {!hasAllCodes ? (
+        <p className="mt-3 text-sm text-muted">
+          Sign in with your Promptly account, then copy one command into {terminalLabel}. It removes old plugins,
+          reinstalls Claude Code, Cursor, and Codex, pairs all three, and runs status checks.
+        </p>
+      ) : (
+        <>
+          <p className="mt-3 text-sm text-muted">
+            Copy this entire command into {terminalLabel} — install, connect, and verify in one paste.
+          </p>
+          {expiresAt ? (
+            <p className="mt-1 text-xs text-faint">
+              Pairing codes expire {new Date(expiresAt).toLocaleTimeString()} — run soon after copying.
+            </p>
+          ) : null}
+          <CopyBlock lines={commandLines} label={terminalLabel} />
+          <StepValidation items={allAgentsSetupValidationItems()} />
+        </>
+      )}
+
+      {error ? <p className={`mt-2 text-xs ${errorClassName}`}>{error}</p> : null}
+    </>
+  );
+
+  if (compact) {
+    return inner;
+  }
+
+  return (
+    <li className="flex gap-4 pb-8 last:pb-0">
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-ink text-xs font-bold text-cream">
+        {n}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="font-semibold text-ink">Install &amp; connect all agents</h3>
+          <span className="rounded-md bg-cream-dark px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-faint">
+            {terminalLabel}
+          </span>
+        </div>
+        {inner}
+      </div>
+    </li>
+  );
 }
 
 export function ConnectAccountStep({

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { AllAgentsConnectStep } from "./integrationPairing";
 import { ClaudeCodeSetup, CodexSetup, CursorSetup, type IdeToolId } from "./integrationSteps";
 import type { OsId } from "./integrationOs";
 
@@ -22,7 +23,7 @@ export function IntegrationsHubClient() {
   const activeMeta = useMemo(() => TOOL_TABS.find((t) => t.id === activeTool)!, [activeTool]);
   const setupProps = { os: activeOs, tool: activeTool };
 
-  const setup =
+  const hooksSetup =
     activeTool === "codex" ? (
       <CodexSetup {...setupProps} />
     ) : activeTool === "claude_code" ? (
@@ -39,8 +40,8 @@ export function IntegrationsHubClient() {
           Connect Claude Code, Cursor &amp; Codex
         </h1>
         <p className="mx-auto mt-3 max-w-lg text-sm leading-relaxed text-muted">
-          Press connect, paste one command, allow hooks. Two steps per agent. The install script checks for Node.js
-          and installs it if missing. You can connect all three on the same computer — each gets its own pairing code.
+          Press connect, copy one command, paste in Terminal. It removes old plugins, reinstalls all three agents,
+          pairs your Promptly account, and verifies everything — then allow hooks per agent below.
         </p>
       </div>
 
@@ -68,44 +69,46 @@ export function IntegrationsHubClient() {
           })}
         </div>
 
-        <p className="mt-6 text-center text-xs font-medium uppercase tracking-wide text-faint">Coding agent</p>
-        <div className="mt-2 flex flex-wrap justify-center gap-2" role="tablist" aria-label="Coding agent">
-          {TOOL_TABS.map((tab) => {
-            const selected = tab.id === activeTool;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                role="tab"
-                aria-selected={selected}
-                onClick={() => setActiveTool(tab.id)}
-                className={`rounded-full border px-4 py-2 text-sm font-medium transition-colors ${
-                  selected
-                    ? "border-ink bg-ink text-cream"
-                    : "border-line bg-cream text-muted hover:border-ink/30 hover:text-ink"
-                }`}
-                style={selected ? { borderColor: tab.accent, backgroundColor: tab.accent } : undefined}
-              >
-                {tab.label}
-              </button>
-            );
-          })}
-        </div>
-
-        <div
-          className="mt-6 rounded-2xl border border-line bg-cream p-6 shadow-card sm:p-8"
-          role="tabpanel"
-          aria-label={`${activeMeta.label} setup on ${activeOs}`}
-        >
+        <div className="mt-6 rounded-2xl border border-line bg-cream p-6 shadow-card sm:p-8">
           <div className="border-b border-line pb-4">
             <h2 className="text-lg font-semibold text-ink">
-              {activeMeta.label} · {activeOs === "mac" ? "Mac" : "Windows"}
+              Install &amp; connect · {activeOs === "mac" ? "Mac" : "Windows"}
             </h2>
-            <p className="mt-1 text-sm text-muted">
-              Do each step in order. Don&apos;t skip ahead until the green checklist matches what you see.
-            </p>
+            <p className="mt-1 text-sm text-muted">One command for Claude Code, Cursor, and Codex.</p>
           </div>
-          {setup}
+          <ol className="mt-6 list-none">
+            <AllAgentsConnectStep n={1} os={activeOs} />
+          </ol>
+
+          <div className="mt-8 border-t border-line pt-6">
+            <p className="text-xs font-medium uppercase tracking-wide text-faint">Step 2 · Enable hooks</p>
+            <p className="mt-2 text-center text-xs font-medium uppercase tracking-wide text-faint">Coding agent</p>
+            <div className="mt-2 flex flex-wrap justify-center gap-2" role="tablist" aria-label="Coding agent">
+              {TOOL_TABS.map((tab) => {
+                const selected = tab.id === activeTool;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={selected}
+                    onClick={() => setActiveTool(tab.id)}
+                    className={`rounded-full border px-4 py-2 text-sm font-medium transition-colors ${
+                      selected
+                        ? "border-ink bg-ink text-cream"
+                        : "border-line bg-cream text-muted hover:border-ink/30 hover:text-ink"
+                    }`}
+                    style={selected ? { borderColor: tab.accent, backgroundColor: tab.accent } : undefined}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="mt-4" role="tabpanel" aria-label={`${activeMeta.label} hooks on ${activeOs}`}>
+              {hooksSetup}
+            </div>
+          </div>
         </div>
       </section>
 

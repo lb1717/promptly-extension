@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
-import { ConnectAccountStep } from "./integrationPairing";
-import { PLUGIN_PACK_URL, type IdeToolId, type OsId } from "./integrationOs";
+import { AllAgentsConnectStep } from "./integrationPairing";
+import type { IdeToolId, OsId } from "./integrationOs";
 
 export type { IdeToolId, OsId };
-export { PLUGIN_PACK_URL };
+export { PLUGIN_PACK_URL } from "./integrationOs";
 
 export type Where = "terminal" | "claude_code" | "cursor_app" | "browser";
 
@@ -121,15 +121,6 @@ function LiveTrackingStep({ n, tool, os }: { n: number; tool: IdeToolId; os: OsI
 
 type SetupProps = { os: OsId; tool: IdeToolId };
 
-function AgentSetup({ os, tool }: SetupProps) {
-  return (
-    <ol className="mt-6 list-none space-y-0">
-      <ConnectAccountStep n={1} os={os} tool={tool} />
-      <LiveTrackingStep n={2} tool={tool} os={os} />
-    </ol>
-  );
-}
-
 export function HooksOnlySetup({ os, tool }: SetupProps) {
   return (
     <ol className="mt-2 list-none space-y-0">
@@ -139,13 +130,13 @@ export function HooksOnlySetup({ os, tool }: SetupProps) {
 }
 
 export function CodexSetup(props: SetupProps) {
-  return <AgentSetup {...props} />;
+  return <HooksOnlySetup {...props} />;
 }
 
 export function ClaudeCodeSetup(props: SetupProps) {
-  return <AgentSetup {...props} />;
+  return <HooksOnlySetup {...props} />;
 }
 
 export function CursorSetup(props: SetupProps) {
-  return <AgentSetup {...props} />;
+  return <HooksOnlySetup {...props} />;
 }
