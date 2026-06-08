@@ -308,8 +308,32 @@ promptly_write_codex_hooks_json() {
 EOF
 }
 
+promptly_telemetry_cli_is_stale() {
+  local path="$1"
+  [[ ! -f "${path}" ]] && return 0
+  grep -q 'hooks_audit' "${path}" 2>/dev/null && return 1
+  return 0
+}
+
+promptly_refresh_telemetry_cli() {
+  local integrations="${1:-${HOME}/integrations}"
+  local dest="${integrations}/packages/telemetry-cli/bin/promptly-telemetry.mjs"
+  local raw_url="https://raw.githubusercontent.com/lb1717/promptly-extension/main/integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs"
+  mkdir -p "$(dirname "${dest}")"
+  if promptly_telemetry_cli_is_stale "${dest}"; then
+    echo "→ Refreshing telemetry CLI from GitHub (plugin pack zip was stale)…"
+    if curl -fsSL "${raw_url}" -o "${dest}.tmp"; then
+      mv "${dest}.tmp" "${dest}"
+    else
+      rm -f "${dest}.tmp"
+      echo "⚠ Could not refresh telemetry CLI — timing stats may be inaccurate until the plugin pack updates"
+    fi
+  fi
+}
+
 promptly_prepare_plugin_pack() {
   local integrations="${1:-${HOME}/integrations}"
+  promptly_refresh_telemetry_cli "${integrations}"
   local sync_script="${integrations}/scripts/sync-plugin-pack.mjs"
   if [[ -f "${sync_script}" ]] && command -v node >/dev/null 2>&1; then
     echo "→ Syncing plugin pack hooks and CLIs…"
