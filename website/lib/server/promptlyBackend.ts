@@ -7,7 +7,7 @@ import {
   type QueryDocumentSnapshot
 } from "firebase-admin/firestore";
 import { getFirebaseAdminAuth, getFirebaseAdminDb } from "@/lib/server/firebaseAdmin";
-import { withStatsQueryCache } from "@/lib/server/statsQueryCache";
+import { STATS_QUERY_CACHE_TTL_MS, withStatsQueryCache } from "@/lib/server/statsQueryCache";
 import { PROMPTLY_USER_CONTENT_TOKEN } from "./promptEngineeringConstants";
 import {
   extractFrameworkInstructionsFromTemplate,
@@ -62,6 +62,8 @@ export const HOST_LLM_EVENTS_QUERY_LIMIT = 5000;
 /** IDE / CLI agent telemetry (Claude Code, Cursor, Codex) — separate from web extension stats. */
 const IDE_EVENTS_COLLECTION = "promptly_ide_events";
 export const IDE_EVENTS_QUERY_LIMIT = 5000;
+/** Widen queries to this window once, then slice in memory when the user changes range. */
+const STATS_SUPERSET_DAYS = 90;
 
 function isFirestoreQuotaError(err: unknown): boolean {
   const message = String(err instanceof Error ? err.message : err);
@@ -1276,7 +1278,7 @@ export function normalizeIdeActivityEventInput(raw: Record<string, unknown>): Id
     const durRaw = raw.duration_ms ?? raw.durationMs ?? raw.engagementDurationMs ?? raw.engagement_duration_ms;
     if (typeof durRaw === "number" && Number.isFinite(durRaw)) {
       const v = Math.max(0, Math.floor(durRaw));
-      if (v >= 2000 && v <= 1_800_000) {
+      if (v >= 1000 && v <= 1_800_000) {
         engagementDurationMs = v;
       }
     }
@@ -1564,31 +1566,40 @@ export type AccountIdeStatsPayload = {
   footnotes: string[];
 };
 
-export async function getAccountIdeUsageStats(
-  user: PromptlyUser,
-  days: number,
-  granularity: AccountStatsExtendedGranularity = "day",
-  emailFilters?: Partial<Record<PromptlyIdeTool, Set<string>>>,
+type IdeEventsQueryResult = {
+  docs: QueryDocumentSnapshot<DocumentData>[];
+  indexMissing: boolean;
+  usedDesc: boolean;
+  quotaExceeded: boolean;
+};
+
+function filterEventDocsByUtcDayRange(
+  docs: QueryDocumentSnapshot<DocumentData>[],
+  startDay: string,
+  endDay: string
+): QueryDocumentSnapshot<DocumentData>[] {
+  return docs.filter((doc) => {
+    const day = readAnalyticsUtcDay(doc.data() as Record<string, unknown>);
+    return Boolean(day && day >= startDay && day <= endDay);
+  });
+}
+
+async function queryIdeEventsSuperset(
+  uid: string,
   opts?: { bypassCache?: boolean }
-): Promise<AccountIdeStatsPayload> {
-  const rangeDays = Math.max(1, Math.min(90, Math.floor(days || 14)));
-  const recentDays = getRecentDays(rangeDays);
-  const startDay = recentDays[0]!;
-  const endDay = recentDays[recentDays.length - 1]!;
+): Promise<IdeEventsQueryResult> {
+  const supersetDays = getRecentDays(STATS_SUPERSET_DAYS);
+  const queryStartDay = supersetDays[0]!;
+  const queryEndDay = supersetDays[supersetDays.length - 1]!;
   const db = getFirebaseAdminDb();
 
-  const queryIdeEvents = async (): Promise<{
-    docs: QueryDocumentSnapshot<DocumentData>[];
-    indexMissing: boolean;
-    usedDesc: boolean;
-    quotaExceeded: boolean;
-  }> => {
+  const runQuery = async (): Promise<IdeEventsQueryResult> => {
     const runDesc = () =>
       db
         .collection(IDE_EVENTS_COLLECTION)
-        .where("uid", "==", user.uid)
-        .where("utcDay", ">=", startDay)
-        .where("utcDay", "<=", endDay)
+        .where("uid", "==", uid)
+        .where("utcDay", ">=", queryStartDay)
+        .where("utcDay", "<=", queryEndDay)
         .orderBy("utcDay", "desc")
         .orderBy(FieldPath.documentId(), "desc")
         .limit(IDE_EVENTS_QUERY_LIMIT)
@@ -1596,9 +1607,9 @@ export async function getAccountIdeUsageStats(
     const runAsc = () =>
       db
         .collection(IDE_EVENTS_COLLECTION)
-        .where("uid", "==", user.uid)
-        .where("utcDay", ">=", startDay)
-        .where("utcDay", "<=", endDay)
+        .where("uid", "==", uid)
+        .where("utcDay", ">=", queryStartDay)
+        .where("utcDay", "<=", queryEndDay)
         .orderBy("utcDay", "asc")
         .limit(IDE_EVENTS_QUERY_LIMIT)
         .get();
@@ -1606,18 +1617,18 @@ export async function getAccountIdeUsageStats(
       const snap = await runDesc();
       return { docs: snap.docs, indexMissing: false, usedDesc: true, quotaExceeded: false };
     } catch (err) {
+      const message = String(err instanceof Error ? err.message : err);
       if (isFirestoreQuotaError(err)) {
-        console.warn("[getAccountIdeUsageStats] promptly_ide_events quota exhausted");
+        console.warn("[queryIdeEventsSuperset] promptly_ide_events quota exhausted:", message.slice(0, 320));
         return { docs: [], indexMissing: false, usedDesc: false, quotaExceeded: true };
       }
-      const message = String(err instanceof Error ? err.message : err);
       if (/FAILED_PRECONDITION|requires an index|9 FAILED_PRECONDITION/i.test(message)) {
         try {
           const snap = await runAsc();
           return { docs: snap.docs, indexMissing: false, usedDesc: false, quotaExceeded: false };
         } catch (err2) {
           if (isFirestoreQuotaError(err2)) {
-            console.warn("[getAccountIdeUsageStats] promptly_ide_events quota exhausted (asc fallback)");
+            console.warn("[queryIdeEventsSuperset] promptly_ide_events quota exhausted (asc fallback)");
             return { docs: [], indexMissing: false, usedDesc: false, quotaExceeded: true };
           }
           const m2 = String(err2 instanceof Error ? err2.message : err2);
@@ -1631,14 +1642,32 @@ export async function getAccountIdeUsageStats(
     }
   };
 
-  const [eventsResult, devices] = await Promise.all([
-    withStatsQueryCache(
-      `ide-events:${user.uid}:${startDay}:${endDay}`,
-      queryIdeEvents,
-      { bypass: opts?.bypassCache }
-    ),
+  return withStatsQueryCache(`ide-events:${uid}:superset${STATS_SUPERSET_DAYS}`, runQuery, {
+    bypass: opts?.bypassCache,
+    ttlMs: STATS_QUERY_CACHE_TTL_MS
+  });
+}
+
+export async function getAccountIdeUsageStats(
+  user: PromptlyUser,
+  days: number,
+  granularity: AccountStatsExtendedGranularity = "day",
+  emailFilters?: Partial<Record<PromptlyIdeTool, Set<string>>>,
+  opts?: { bypassCache?: boolean }
+): Promise<AccountIdeStatsPayload> {
+  const rangeDays = Math.max(1, Math.min(90, Math.floor(days || 14)));
+  const recentDays = getRecentDays(rangeDays);
+  const startDay = recentDays[0]!;
+  const endDay = recentDays[recentDays.length - 1]!;
+
+  const [eventsSuperset, devices] = await Promise.all([
+    queryIdeEventsSuperset(user.uid, { bypassCache: opts?.bypassCache }),
     listIntegrationDevicesSafe(user)
   ]);
+  const eventsResult = {
+    ...eventsSuperset,
+    docs: filterEventDocsByUtcDayRange(eventsSuperset.docs, startDay, endDay)
+  };
 
   type DayScratch = {
     bucket_day: string;
@@ -1792,7 +1821,7 @@ export async function getAccountIdeUsageStats(
       const durRaw = raw.engagementDurationMs ?? raw.engagement_duration_ms ?? raw.duration_ms ?? raw.durationMs;
       const durMs =
         typeof durRaw === "number" && Number.isFinite(durRaw) ? Math.floor(durRaw) : null;
-      if (cat && durMs !== null && durMs >= 2000) {
+      if (cat && durMs !== null && durMs >= 1000) {
         row.engagement_ms[cat][tool] += durMs;
         row.screen_time_ms[tool] += durMs;
         screenTotals[tool] += durMs;
@@ -1930,7 +1959,7 @@ export async function getAccountIdeUsageStats(
   const footnotes: string[] = [];
   if (eventsResult.quotaExceeded) {
     footnotes.unshift(
-      "Firestore read quota was exceeded. Try a shorter date range, wait for the daily quota to reset, or refresh later."
+      "Firestore returned a quota error for coding-agent events. If you upgraded to Blaze, confirm billing is active on project promptly-prod-976ef (the project this site uses), then refresh."
     );
   }
   if (eventsResult.indexMissing) {
@@ -2179,6 +2208,9 @@ export async function getAccountUsageStatsExtended(
   const recentDays = getRecentDays(rangeDays);
   const startDay = recentDays[0];
   const endDay = recentDays[recentDays.length - 1];
+  const supersetDays = getRecentDays(STATS_SUPERSET_DAYS);
+  const queryStartDay = supersetDays[0]!;
+  const queryEndDay = supersetDays[supersetDays.length - 1]!;
 
   const db = getFirebaseAdminDb();
 
@@ -2190,8 +2222,8 @@ export async function getAccountUsageStatsExtended(
       const snap = await db
         .collection(collectionPath)
         .where("uid", "==", user.uid)
-        .where("utcDay", ">=", startDay)
-        .where("utcDay", "<=", endDay)
+        .where("utcDay", ">=", queryStartDay)
+        .where("utcDay", "<=", queryEndDay)
         .orderBy("utcDay", "asc")
         .limit(limit)
         .get();
@@ -2224,8 +2256,8 @@ export async function getAccountUsageStatsExtended(
       db
         .collection(HOST_LLM_EVENTS_COLLECTION)
         .where("uid", "==", user.uid)
-        .where("utcDay", ">=", startDay)
-        .where("utcDay", "<=", endDay)
+        .where("utcDay", ">=", queryStartDay)
+        .where("utcDay", "<=", queryEndDay)
         .orderBy("utcDay", "desc")
         .orderBy(FieldPath.documentId(), "desc")
         .limit(HOST_LLM_EVENTS_QUERY_LIMIT)
@@ -2235,8 +2267,8 @@ export async function getAccountUsageStatsExtended(
       db
         .collection(HOST_LLM_EVENTS_COLLECTION)
         .where("uid", "==", user.uid)
-        .where("utcDay", ">=", startDay)
-        .where("utcDay", "<=", endDay)
+        .where("utcDay", ">=", queryStartDay)
+        .where("utcDay", "<=", queryEndDay)
         .orderBy("utcDay", "asc")
         .limit(HOST_LLM_EVENTS_QUERY_LIMIT)
         .get();
@@ -2276,17 +2308,25 @@ export async function getAccountUsageStatsExtended(
   };
 
   /** Optimize + host queries in parallel; rollup reuses optimize docs (avoids a duplicate 5k read). */
-  const queryCacheKey = `${user.uid}:${startDay}:${endDay}`;
-  const [eventsResult, hostPassiveResult] = await Promise.all([
+  const [eventsSuperset, hostSuperset] = await Promise.all([
     withStatsQueryCache(
-      `optimize-events:${queryCacheKey}`,
+      `optimize-events:${user.uid}:superset${STATS_SUPERSET_DAYS}`,
       () => queryEventsIndexed(OPTIMIZE_EVENTS_COLLECTION, OPTIMIZE_EVENTS_QUERY_LIMIT),
-      { bypass: opts?.bypassCache }
+      { bypass: opts?.bypassCache, ttlMs: STATS_QUERY_CACHE_TTL_MS }
     ),
-    withStatsQueryCache(`host-events:${queryCacheKey}`, queryHostPassiveEventsIndexed, {
-      bypass: opts?.bypassCache
+    withStatsQueryCache(`host-events:${user.uid}:superset${STATS_SUPERSET_DAYS}`, queryHostPassiveEventsIndexed, {
+      bypass: opts?.bypassCache,
+      ttlMs: STATS_QUERY_CACHE_TTL_MS
     })
   ]);
+  const eventsResult = {
+    ...eventsSuperset,
+    docs: filterEventDocsByUtcDayRange(eventsSuperset.docs, startDay!, endDay!)
+  };
+  const hostPassiveResult = {
+    ...hostSuperset,
+    docs: filterEventDocsByUtcDayRange(hostSuperset.docs, startDay!, endDay!)
+  };
   const rollupBaseline = await getAccountUsageStats(user, rangeDays, {
     prefetchedOptimizeDocs: eventsResult.docs
   });
@@ -3006,7 +3046,7 @@ export async function getAccountUsageStatsExtended(
   }
   if (eventsResult.quotaExceeded || hostPassiveResult.quotaExceeded) {
     footnotes.unshift(
-      "Firestore read quota was exceeded. Try a shorter date range, wait for the daily quota to reset, or refresh later."
+      "Firestore returned a quota error loading event history. If you upgraded to Blaze, confirm billing is active on project promptly-prod-976ef, then refresh."
     );
   }
   if (hostPassiveResult.indexMissing) {

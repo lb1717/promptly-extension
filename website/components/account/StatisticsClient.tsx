@@ -2020,7 +2020,11 @@ export function StatisticsClient() {
 
           {displayStats?.quota_exceeded || displayIdeStats?.quota_exceeded ? (
             <div className="mb-4 rounded-xl border border-amber-300/60 bg-amber-50/90 px-4 py-3 text-sm text-amber-950">
-              Firestore read quota was exceeded. Charts may be incomplete until the daily limit resets — try 7 days instead of 14, or check back tomorrow.
+              Firestore returned a quota error, so some charts may be incomplete. On Blaze this is usually a
+              temporary rate limit, billing not active on the production project (
+              <strong>promptly-prod-976ef</strong>
+              ), or the wrong Firebase project was upgraded. Check Firebase Console → Usage and billing for that
+              project, then try Refresh or a shorter date range.
             </div>
           ) : null}
 
@@ -2450,114 +2454,6 @@ export function StatisticsClient() {
                   </div>
                 </div>
 
-                {ideEngagementByToolRows.length ||
-                ideAvgWordsChartRows.length ||
-                ideDraftResponseChartRows.length ? (
-                  <div className="space-y-6 rounded-xl border border-line bg-white/60 p-4">
-                    <div>
-                      <h3 className="text-xs font-semibold uppercase tracking-wide text-faint">
-                        Prompt &amp; time insights
-                      </h3>
-                      <p className="mt-1 text-[11px] text-muted">
-                        Draft time is estimated from when the AI finishes until your next prompt. Prompt length is a
-                        word count at submit (metadata only — never the full text).
-                      </p>
-                    </div>
-
-                    {ideEngagementByToolRows.length ? (
-                      <div>
-                        <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">
-                          Time per agent (minutes)
-                        </h4>
-                        <div className="h-56 w-full statistics-charts sm:h-64">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={ideEngagementByToolRows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-                              <CartesianGrid strokeDasharray="3 3" stroke="#E0DDD6" />
-                              <XAxis dataKey="agent" tick={CHART_Y_TICK} />
-                              <YAxis tick={CHART_Y_TICK} allowDecimals />
-                              <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
-                              <Legend wrapperStyle={CHART_LEGEND_STYLE} />
-                              <Bar dataKey="drafting" name="Drafting" stackId="time" fill={COLOR_DRAFTING} />
-                              <Bar dataKey="waiting" name="Waiting for AI" stackId="time" fill={COLOR_NATIVE_WEB} />
-                              <Bar
-                                dataKey="reading"
-                                name="Reading / idle"
-                                stackId="time"
-                                fill={COLOR_READING_IDLE}
-                                radius={[2, 2, 0, 0]}
-                              />
-                            </BarChart>
-                          </ResponsiveContainer>
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {ideDraftResponseChartRows.length ? (
-                      <div>
-                        <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">
-                          Average draft vs response time (seconds)
-                        </h4>
-                        <div className="h-52 w-full statistics-charts">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <BarChart
-                              data={ideDraftResponseChartRows}
-                              margin={{ top: 8, right: 8, bottom: 0, left: 0 }}
-                            >
-                              <CartesianGrid strokeDasharray="3 3" stroke="#E0DDD6" />
-                              <XAxis dataKey="agent" tick={CHART_Y_TICK} />
-                              <YAxis tick={CHART_Y_TICK} unit="s" />
-                              <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
-                              <Legend wrapperStyle={CHART_LEGEND_STYLE} />
-                              <Bar dataKey="avg_draft_s" name="Avg draft" fill={COLOR_DRAFTING} radius={[4, 4, 0, 0]} />
-                              <Bar
-                                dataKey="avg_response_s"
-                                name="Avg response"
-                                fill={COLOR_NATIVE_WEB}
-                                radius={[4, 4, 0, 0]}
-                              />
-                            </BarChart>
-                          </ResponsiveContainer>
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {ideAvgWordsChartRows.length ? (
-                      <div>
-                        <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">
-                          Average prompt length (words)
-                        </h4>
-                        <div
-                          className="w-full statistics-charts"
-                          style={{ height: Math.max(160, ideAvgWordsChartRows.length * 36 + 48) }}
-                        >
-                          <ResponsiveContainer width="100%" height="100%">
-                            <BarChart
-                              data={ideAvgWordsChartRows}
-                              layout="vertical"
-                              margin={{ top: 4, right: 12, bottom: 4, left: 4 }}
-                              barCategoryGap="20%"
-                            >
-                              <CartesianGrid strokeDasharray="3 3" stroke="#E0DDD6" horizontal={false} />
-                              <XAxis type="number" tick={CHART_Y_TICK} allowDecimals />
-                              <YAxis
-                                type="category"
-                                dataKey="label"
-                                width={120}
-                                tick={{ ...CHART_Y_TICK, fontSize: 9 }}
-                              />
-                              <Tooltip
-                                contentStyle={CHART_TOOLTIP_STYLE}
-                                formatter={(value: number) => [`${value} words`, "Avg length"]}
-                              />
-                              <Bar dataKey="avg_words" name="Avg words" fill="#7c3aed" radius={[0, 4, 4, 0]} barSize={14} />
-                            </BarChart>
-                          </ResponsiveContainer>
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-
                 {IDE_AGENT_CARDS.map((agent) => {
                   const toolRows = ideModelsByTool.get(agent.key) ?? [];
                   const toolTotal = displayIdeStats?.totals.prompts[agent.key] ?? 0;
@@ -2664,6 +2560,114 @@ export function StatisticsClient() {
                         </BarChart>
                       </ResponsiveContainer>
                     </div>
+                  </div>
+                ) : null}
+
+                {ideEngagementByToolRows.length ||
+                ideAvgWordsChartRows.length ||
+                ideDraftResponseChartRows.length ? (
+                  <div className="space-y-6 rounded-xl border border-line bg-white/60 p-4">
+                    <div>
+                      <h3 className="text-xs font-semibold uppercase tracking-wide text-faint">
+                        Prompt &amp; time insights
+                      </h3>
+                      <p className="mt-1 text-[11px] text-muted">
+                        Draft time is estimated from when the AI finishes until your next prompt. Prompt length is a
+                        word count at submit (metadata only — never the full text).
+                      </p>
+                    </div>
+
+                    {ideEngagementByToolRows.length ? (
+                      <div>
+                        <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                          Time per agent (minutes)
+                        </h4>
+                        <div className="h-56 w-full statistics-charts sm:h-64">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={ideEngagementByToolRows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="#E0DDD6" />
+                              <XAxis dataKey="agent" tick={CHART_Y_TICK} />
+                              <YAxis tick={CHART_Y_TICK} allowDecimals />
+                              <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
+                              <Legend wrapperStyle={CHART_LEGEND_STYLE} />
+                              <Bar dataKey="drafting" name="Drafting" stackId="time" fill={COLOR_DRAFTING} />
+                              <Bar dataKey="waiting" name="Waiting for AI" stackId="time" fill={COLOR_NATIVE_WEB} />
+                              <Bar
+                                dataKey="reading"
+                                name="Reading / idle"
+                                stackId="time"
+                                fill={COLOR_READING_IDLE}
+                                radius={[2, 2, 0, 0]}
+                              />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {ideDraftResponseChartRows.length ? (
+                      <div>
+                        <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                          Average draft vs response time (seconds)
+                        </h4>
+                        <div className="h-52 w-full statistics-charts">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <BarChart
+                              data={ideDraftResponseChartRows}
+                              margin={{ top: 8, right: 8, bottom: 0, left: 0 }}
+                            >
+                              <CartesianGrid strokeDasharray="3 3" stroke="#E0DDD6" />
+                              <XAxis dataKey="agent" tick={CHART_Y_TICK} />
+                              <YAxis tick={CHART_Y_TICK} unit="s" />
+                              <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
+                              <Legend wrapperStyle={CHART_LEGEND_STYLE} />
+                              <Bar dataKey="avg_draft_s" name="Avg draft" fill={COLOR_DRAFTING} radius={[4, 4, 0, 0]} />
+                              <Bar
+                                dataKey="avg_response_s"
+                                name="Avg response"
+                                fill={COLOR_NATIVE_WEB}
+                                radius={[4, 4, 0, 0]}
+                              />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {ideAvgWordsChartRows.length ? (
+                      <div>
+                        <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                          Average prompt length (words)
+                        </h4>
+                        <div
+                          className="w-full statistics-charts"
+                          style={{ height: Math.max(160, ideAvgWordsChartRows.length * 36 + 48) }}
+                        >
+                          <ResponsiveContainer width="100%" height="100%">
+                            <BarChart
+                              data={ideAvgWordsChartRows}
+                              layout="vertical"
+                              margin={{ top: 4, right: 12, bottom: 4, left: 4 }}
+                              barCategoryGap="20%"
+                            >
+                              <CartesianGrid strokeDasharray="3 3" stroke="#E0DDD6" horizontal={false} />
+                              <XAxis type="number" tick={CHART_Y_TICK} allowDecimals />
+                              <YAxis
+                                type="category"
+                                dataKey="label"
+                                width={120}
+                                tick={{ ...CHART_Y_TICK, fontSize: 9 }}
+                              />
+                              <Tooltip
+                                contentStyle={CHART_TOOLTIP_STYLE}
+                                formatter={(value: number) => [`${value} words`, "Avg length"]}
+                              />
+                              <Bar dataKey="avg_words" name="Avg words" fill="#7c3aed" radius={[0, 4, 4, 0]} barSize={14} />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
               </div>

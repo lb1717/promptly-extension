@@ -85,7 +85,8 @@ function draftTimingPath(tool) {
   return join(promptlyStorageDir(), `draft-timing-${tool}.json`);
 }
 
-const DRAFT_MIN_MS = 2000;
+const DRAFT_MIN_MS = 1000;
+const ENGAGEMENT_MIN_MS = 1000;
 const DRAFT_MAX_MS = 1_800_000;
 
 function loadDraftTimingSessions(tool) {
@@ -921,6 +922,55 @@ function isPromptSubmitPayload(input) {
  * Reject cross-host *prompt* payloads (e.g. Cursor stdin reaching --tool claude_code).
  * Lifecycle hooks (session start/end, stop) trust the hook command's --tool flag.
  */
+function isStopHookName(hookName) {
+  const name = String(hookName || "").toLowerCase();
+  return name.includes("stop") && !name.includes("subagent");
+}
+
+function stopStatusAccepted(status) {
+  const value = String(status || "")
+    .trim()
+    .toLowerCase();
+  if (!value) return true;
+  return (
+    value === "completed" ||
+    value === "complete" ||
+    value === "success" ||
+    value === "done" ||
+    value === "finished" ||
+    value === "aborted" ||
+    value === "error" ||
+    value === "cancelled" ||
+    value === "canceled"
+  );
+}
+
+function buildStopTelemetryEvent(tool, sessionId, agentAccountEmail, modelMeta, now = Date.now()) {
+  const pending = consumePendingSubmit(tool, sessionId);
+  const latencyMs = pending?.at
+    ? Math.min(1_800_000, Math.max(500, now - pending.at))
+    : null;
+  if (latencyMs) {
+    return {
+      tool,
+      interaction_kind: "response_latency",
+      host_response_latency_ms: latencyMs,
+      client_occurred_ms: now,
+      agent_account_email: agentAccountEmail || pending?.agent_account_email || null,
+      model_label: modelMeta.model_label || pending?.model_label || null,
+      model_bucket: modelMeta.model_bucket || pending?.model_bucket || "unknown"
+    };
+  }
+  return {
+    tool,
+    interaction_kind: "engagement_segment",
+    engagement_category: "waiting",
+    duration_ms: 5000,
+    client_occurred_ms: now,
+    agent_account_email: agentAccountEmail
+  };
+}
+
 function hookPayloadMatchesTool(input, tool) {
   if (!input || typeof input !== "object") return false;
   if (!isPromptSubmitPayload(input)) return true;
@@ -983,7 +1033,7 @@ function hookEventToTelemetry(input, tool) {
 
   if (eventName.includes("sessionend") || (hasSessionEnd && !hasPrompt)) {
     const dur = Number(input.duration_ms ?? input.durationMs ?? 0);
-    if (Number.isFinite(dur) && dur >= 500) {
+    if (Number.isFinite(dur) && dur >= ENGAGEMENT_MIN_MS) {
       return {
         tool,
         interaction_kind: "engagement_segment",
@@ -997,31 +1047,8 @@ function hookEventToTelemetry(input, tool) {
   }
 
   if ((eventName.includes("stop") && !eventName.includes("subagent")) || hasStopStatus) {
-    const status = String(input.status || "").toLowerCase();
-    if (status === "completed" || status === "aborted" || status === "error" || !status) {
-      const pending = consumePendingSubmit(tool, sessionId);
-      const latencyMs = pending?.at
-        ? Math.min(1_800_000, Math.max(500, now - pending.at))
-        : null;
-      if (latencyMs) {
-        return {
-          tool,
-          interaction_kind: "response_latency",
-          host_response_latency_ms: latencyMs,
-          client_occurred_ms: now,
-          agent_account_email: agentAccountEmail || pending?.agent_account_email || null,
-          model_label: modelMeta.model_label || pending?.model_label || null,
-          model_bucket: modelMeta.model_bucket || pending?.model_bucket || "unknown"
-        };
-      }
-      return {
-        tool,
-        interaction_kind: "engagement_segment",
-        engagement_category: "waiting",
-        duration_ms: 5000,
-        client_occurred_ms: now,
-        agent_account_email: agentAccountEmail
-      };
+    if (stopStatusAccepted(input.status)) {
+      return buildStopTelemetryEvent(tool, sessionId, agentAccountEmail, modelMeta, now);
     }
     return null;
   }
@@ -1030,14 +1057,7 @@ function hookEventToTelemetry(input, tool) {
     if (tool === "claude_code" && typeof input.model === "string" && input.model.trim()) {
       cacheClaudeSessionModel(input.session_id, input.model);
     }
-    return {
-      tool,
-      interaction_kind: "engagement_segment",
-      engagement_category: "reading_idle",
-      duration_ms: 2000,
-      client_occurred_ms: now,
-      agent_account_email: agentAccountEmail
-    };
+    return null;
   }
 
   return null;
@@ -1075,6 +1095,14 @@ async function cmdHook(flags) {
   if (hookName.includes("sessionstart") && sessionId) {
     markSessionStarted(tool, sessionId);
   }
+  if (isStopHookName(hookName) && sessionId) {
+    markDraftWindowStart(tool, sessionId);
+    if (!event || event.interaction_kind === "send") {
+      const agentAccountEmail = resolveAgentAccountEmail(input, tool);
+      const modelMeta = buildModelMeta(input, tool);
+      event = buildStopTelemetryEvent(tool, sessionId, agentAccountEmail, modelMeta);
+    }
+  }
   if (event) {
     if (event.interaction_kind === "send" && sessionId) {
       const draftMs = consumeDraftDurationMs(tool, sessionId);
@@ -1107,14 +1135,7 @@ async function cmdHook(flags) {
     ) {
       markDraftWindowStart(tool, sessionId);
     }
-    if (event.interaction_kind === "response_latency" && sessionId) {
-      if (patchQueuedSendLatency(tool, sessionId, event.host_response_latency_ms)) {
-        event = null;
-      }
-    }
-    if (event) {
-      enqueueEvent(tool, event);
-    }
+    enqueueEvent(tool, event);
   }
   const clientHeader = flags.client || TOOL_CLIENT[tool];
   try {
@@ -1204,6 +1225,48 @@ function cmdOpenLogin(flags) {
   console.log(`${base}/auth/integrations?tool=${tool}`);
 }
 
+function cmdDiagnostics(flags) {
+  const tool = normalizeTool(flags.tool) || "cursor";
+  const sessionId = "promptly-diagnostics-session";
+  const samples = [
+    { label: "sessionStart", input: { hook_event_name: "sessionStart", session_id: sessionId } },
+    {
+      label: "beforeSubmitPrompt",
+      input: { hook_event_name: "beforeSubmitPrompt", session_id: sessionId, prompt: "diagnostics hello" }
+    },
+    {
+      label: "stop (cursor success)",
+      input: { hook_event_name: "stop", session_id: sessionId, status: "success", loop_count: 1 }
+    },
+    { label: "Stop (claude)", input: { hook_event_name: "Stop", session_id: sessionId } }
+  ];
+  console.log(
+    JSON.stringify(
+      {
+        tool,
+        hook_samples: samples.map((sample) => ({
+          label: sample.label,
+          event: hookEventToTelemetry(sample.input, tool)
+        }))
+      },
+      null,
+      2
+    )
+  );
+  console.log(
+    "\nLocal state:\n" +
+      JSON.stringify(
+        {
+          pending: readJson(pendingSubmitsPath(tool), { pending: {} }).pending,
+          draft_timing: loadDraftTimingSessions(tool),
+          queue_depth: loadQueue(tool).length
+        },
+        null,
+        2
+      )
+  );
+}
+
 async function cmdTestSend(flags) {
   const tool = normalizeTool(flags.tool);
   if (!tool) {
@@ -1248,6 +1311,9 @@ async function main() {
     case "test-send":
       await cmdTestSend(flags);
       break;
+    case "diagnostics":
+      cmdDiagnostics(flags);
+      break;
     case "open-login":
       cmdOpenLogin(flags);
       break;
@@ -1272,6 +1338,7 @@ Commands:
   hook --tool <tool>          Process hook stdin and upload events
   login --tool <tool> <CODE>  Exchange pairing code for device token
   test-send --tool <tool>     Upload one test prompt (verify stats pipeline)
+  diagnostics [--tool <tool>] Simulate hook payloads and show local timing state
   status [--tool <tool>]      Show connection status for one or all tools
   open-login --tool <tool>    Print sign-in URL
   flush --tool <tool>         Flush queued events for one tool`);
