@@ -52,6 +52,15 @@ function formatIdeModelLabel(row: { bucket: string; label: string | null }): str
   return row.bucket.replace(/-/g, " ");
 }
 
+function formatResponseMs(ms: number | null | undefined): string {
+  if (ms == null || ms <= 0) return "—";
+  if (ms < 1000) return `${ms} ms`;
+  return `${(ms / 1000).toFixed(1)} s`;
+}
+
+type IdeToolKey = "claude_code" | "cursor" | "codex";
+type SelectedEmailsByTool = Record<IdeToolKey, Set<string>>;
+
 function formatIdeLastSeen(ms: number | null | undefined): string {
   if (!ms) return "Not synced yet";
   return new Date(ms).toLocaleString();
@@ -138,7 +147,19 @@ type IdeStatsPayload = {
     reading_idle_minutes: number;
   }>;
   connected_tools: Array<{ tool: string; device_count: number; last_seen_at_ms: number | null }>;
-  model_buckets: Array<{ tool: string; bucket: string; label: string | null; prompts: number }>;
+  model_buckets: Array<{
+    tool: string;
+    bucket: string;
+    label: string | null;
+    prompts: number;
+    avg_response_ms: number | null;
+    response_samples: number;
+  }>;
+  agent_emails_by_tool: { claude_code: string[]; cursor: string[]; codex: string[] };
+  response_latency_by_tool: Record<
+    string,
+    { avg_ms: number | null; samples: number; p50_ms: number | null }
+  >;
   events_docs_in_query: number;
   index_missing: boolean;
   likely_truncated: boolean;
@@ -177,6 +198,12 @@ function emptyIdeStats(days: number, granularity: "day" | "week"): IdeStatsPaylo
     })),
     connected_tools: [],
     model_buckets: [],
+    agent_emails_by_tool: { claude_code: [], cursor: [], codex: [] },
+    response_latency_by_tool: {
+      claude_code: { avg_ms: null, samples: 0, p50_ms: null },
+      cursor: { avg_ms: null, samples: 0, p50_ms: null },
+      codex: { avg_ms: null, samples: 0, p50_ms: null }
+    },
     events_docs_in_query: 0,
     index_missing: false,
     likely_truncated: false,
@@ -1129,6 +1156,11 @@ export function StatisticsClient() {
   const [ideStats, setIdeStats] = useState<IdeStatsPayload | null>(null);
   const [ideStatsLoading, setIdeStatsLoading] = useState(false);
   const [ideStatsError, setIdeStatsError] = useState("");
+  const [selectedEmailsByTool, setSelectedEmailsByTool] = useState<SelectedEmailsByTool>({
+    claude_code: new Set(),
+    cursor: new Set(),
+    codex: new Set()
+  });
   const [promptVolumeAiFilters, setPromptVolumeAiFilters] =
     useState<PromptVolumeAiFilterState>(DEFAULT_PROMPT_VOLUME_AI_FILTERS);
   const [reportGenerating, setReportGenerating] = useState(false);
@@ -1202,7 +1234,13 @@ export function StatisticsClient() {
     }
   }, []);
 
-  const loadIdeStats = useCallback(async (current: User | null, d: number, g: "day" | "week") => {
+  const loadIdeStats = useCallback(
+    async (
+      current: User | null,
+      d: number,
+      g: "day" | "week",
+      emailSelection: SelectedEmailsByTool
+    ) => {
     if (!current) {
       setIdeStats(null);
       return;
@@ -1211,7 +1249,17 @@ export function StatisticsClient() {
     setIdeStatsError("");
     try {
       const token = await current.getIdToken(false);
-      const res = await fetch(`/api/account/stats/ide?days=${encodeURIComponent(String(d))}&granularity=${g}`, {
+      const params = new URLSearchParams({
+        days: String(d),
+        granularity: g
+      });
+      for (const agent of IDE_AGENT_CARDS) {
+        const emails = emailSelection[agent.key];
+        if (emails.size > 0) {
+          params.set(`${agent.key}_emails`, Array.from(emails).join(","));
+        }
+      }
+      const res = await fetch(`/api/account/stats/ide?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json().catch(() => ({}));
@@ -1224,13 +1272,63 @@ export function StatisticsClient() {
     } finally {
       setIdeStatsLoading(false);
     }
+  },
+    []
+  );
+
+  const toggleAgentEmail = useCallback((tool: IdeToolKey, email: string) => {
+    setSelectedEmailsByTool((prev) => {
+      const current = new Set(prev[tool]);
+      if (current.has(email)) {
+        if (current.size <= 1) return prev;
+        current.delete(email);
+      } else {
+        current.add(email);
+      }
+      return { ...prev, [tool]: current };
+    });
   }, []);
+
+  useEffect(() => {
+    setSelectedEmailsByTool({
+      claude_code: new Set(),
+      cursor: new Set(),
+      codex: new Set()
+    });
+  }, [days, granularity]);
+
+  useEffect(() => {
+    if (!ideStats?.agent_emails_by_tool) return;
+    setSelectedEmailsByTool((prev) => {
+      let changed = false;
+      const next: SelectedEmailsByTool = {
+        claude_code: new Set(prev.claude_code),
+        cursor: new Set(prev.cursor),
+        codex: new Set(prev.codex)
+      };
+      for (const agent of IDE_AGENT_CARDS) {
+        const available = ideStats.agent_emails_by_tool[agent.key] ?? [];
+        if (!next[agent.key].size && available.length) {
+          next[agent.key] = new Set(available);
+          changed = true;
+          continue;
+        }
+        for (const email of available) {
+          if (!next[agent.key].has(email)) {
+            next[agent.key].add(email);
+            changed = true;
+          }
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [ideStats?.agent_emails_by_tool]);
 
   useEffect(() => {
     if (!user || loading) return;
     void loadExtended(user, days, granularity);
-    void loadIdeStats(user, days, granularity);
-  }, [user, loading, days, granularity, loadExtended, loadIdeStats]);
+    void loadIdeStats(user, days, granularity, selectedEmailsByTool);
+  }, [user, loading, days, granularity, selectedEmailsByTool, loadExtended, loadIdeStats]);
 
   const stackedTimeline = useMemo(() => {
     if (!displayStats?.combined_prompt_timeline) return [];
@@ -1988,7 +2086,9 @@ export function StatisticsClient() {
               <div>
                 <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">Coding agents</h2>
                 <p className="mt-1 text-xs text-muted">
-                  Claude Code, Cursor, and Codex — separate from web chat statistics above.
+                  Claude Code, Cursor, and Codex — separate from web chat statistics above. Pairing verifies your
+                  Promptly plan; all activity on this computer rolls up here. Use the account chips on each card to
+                  filter by the email logged into that agent.
                 </p>
               </div>
               <Link
@@ -2012,6 +2112,9 @@ export function StatisticsClient() {
                 const paired = (conn?.device_count ?? 0) > 0;
                 const prompts = displayIdeStats?.totals.prompts[agent.key] ?? 0;
                 const active = paired || prompts > 0;
+                const agentEmails = ideStats?.agent_emails_by_tool?.[agent.key] ?? [];
+                const selectedEmails = selectedEmailsByTool[agent.key];
+                const latency = displayIdeStats?.response_latency_by_tool?.[agent.key];
                 return (
                   <div
                     key={agent.key}
@@ -2039,6 +2142,42 @@ export function StatisticsClient() {
                       <span className="font-medium tabular-nums text-ink">{prompts.toLocaleString()}</span> prompts in
                       range
                     </p>
+                    {latency?.samples ? (
+                      <p className="mt-1 text-[10px] text-muted">
+                        Avg response {formatResponseMs(latency.avg_ms)}
+                        {latency.p50_ms ? ` · median ${formatResponseMs(latency.p50_ms)}` : null}
+                      </p>
+                    ) : null}
+                    {agentEmails.length ? (
+                      <div className="mt-3 flex flex-wrap gap-1.5">
+                        {agentEmails.map((email) => {
+                          const selected = selectedEmails.has(email);
+                          const onlyOne = agentEmails.length === 1;
+                          return (
+                            <button
+                              key={`${agent.key}-${email}`}
+                              type="button"
+                              disabled={onlyOne}
+                              onClick={() => toggleAgentEmail(agent.key, email)}
+                              className={`rounded-full border px-2 py-0.5 text-[10px] transition ${
+                                selected
+                                  ? "border-violet-400 bg-violet-100 text-violet-900"
+                                  : "border-line bg-white/80 text-muted line-through opacity-70"
+                              } ${onlyOne ? "cursor-default" : "hover:border-violet-300"}`}
+                              title={
+                                onlyOne
+                                  ? "Only one agent account in range"
+                                  : selected
+                                    ? "Click to exclude this account from charts below"
+                                    : "Click to include this account"
+                              }
+                            >
+                              {email}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
                   </div>
                 );
               })}
@@ -2117,6 +2256,7 @@ export function StatisticsClient() {
                               <th className="px-4 py-2 font-semibold">Model</th>
                               <th className="px-4 py-2 font-semibold">Prompts</th>
                               <th className="px-4 py-2 font-semibold">Share</th>
+                              <th className="px-4 py-2 font-semibold">Avg response</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -2129,6 +2269,9 @@ export function StatisticsClient() {
                                   </td>
                                   <td className="px-4 py-2 tabular-nums text-ink">{row.prompts.toLocaleString()}</td>
                                   <td className="px-4 py-2 tabular-nums text-muted">{share}%</td>
+                                  <td className="px-4 py-2 tabular-nums text-muted">
+                                    {formatResponseMs(row.avg_response_ms)}
+                                  </td>
                                 </tr>
                               );
                             })}

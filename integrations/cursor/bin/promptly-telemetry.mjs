@@ -77,6 +77,227 @@ function recentSendsPath(tool) {
   return join(promptlyStorageDir(), `recent-sends-${tool}.json`);
 }
 
+function pendingSubmitsPath(tool) {
+  return join(promptlyStorageDir(), `pending-submits-${tool}.json`);
+}
+
+function agentSessionMetaPath(tool) {
+  return join(promptlyStorageDir(), `agent-session-meta-${tool}.json`);
+}
+
+let codexConfigCache = null;
+
+function decodeJwtEmail(token) {
+  try {
+    const parts = String(token || "").split(".");
+    if (parts.length < 2) return null;
+    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+    for (const key of ["email", "user_email", "preferred_username"]) {
+      const value = payload?.[key];
+      if (typeof value === "string" && value.includes("@")) {
+        return value.trim().toLowerCase();
+      }
+    }
+  } catch {
+    /* ignore malformed token */
+  }
+  return null;
+}
+
+function normalizeAgentEmail(raw) {
+  const value = String(raw || "").trim().toLowerCase();
+  if (!value || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return null;
+  return value.slice(0, 120);
+}
+
+function normalizeEffortToken(raw) {
+  const value = String(raw || "")
+    .trim()
+    .toLowerCase();
+  if (!value) return null;
+  if (value === "minimal" || value === "none") return "low";
+  if (value === "xhigh") return "max";
+  if (["low", "medium", "high", "max"].includes(value)) return value;
+  return null;
+}
+
+function readCodexConfig() {
+  try {
+    const path = join(homedir(), ".codex", "config.toml");
+    if (!existsSync(path)) return codexConfigCache || {};
+    const stat = statSync(path);
+    if (codexConfigCache && codexConfigCache._mtime === stat.mtimeMs) {
+      return codexConfigCache;
+    }
+    const text = readFileSync(path, "utf8");
+    const readField = (name) => {
+      const match = text.match(new RegExp(`^\\s*${name}\\s*=\\s*["']?([^"'\\n]+)`, "m"));
+      return match ? String(match[1]).trim().replace(/^["']|["']$/g, "") : null;
+    };
+    codexConfigCache = {
+      _mtime: stat.mtimeMs,
+      model: readField("model"),
+      model_reasoning_effort: readField("model_reasoning_effort")
+    };
+    return codexConfigCache;
+  } catch {
+    return codexConfigCache || {};
+  }
+}
+
+function readCodexAgentEmail() {
+  try {
+    const auth = readJson(join(homedir(), ".codex", "auth.json"), null);
+    const tokens = auth?.tokens;
+    if (tokens && typeof tokens === "object") {
+      for (const value of Object.values(tokens)) {
+        if (typeof value === "string" && value.includes(".")) {
+          const email = decodeJwtEmail(value);
+          if (email) return email;
+        }
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+function loadAgentSessionMeta(tool) {
+  const data = readJson(agentSessionMetaPath(tool), { sessions: {} });
+  return data && typeof data.sessions === "object" ? data.sessions : {};
+}
+
+function cacheAgentSessionMeta(tool, sessionId, patch) {
+  const sid = String(sessionId || "").trim();
+  if (!sid) return;
+  const sessions = loadAgentSessionMeta(tool);
+  const prev = sessions[sid] && typeof sessions[sid] === "object" ? sessions[sid] : {};
+  sessions[sid] = { ...prev, ...patch, updated_at: Date.now() };
+  const pruned = Object.fromEntries(
+    Object.entries(sessions)
+      .sort((a, b) => (b[1]?.updated_at || 0) - (a[1]?.updated_at || 0))
+      .slice(0, MAX_SESSION_MODELS)
+  );
+  writeJson(agentSessionMetaPath(tool), { sessions: pruned });
+}
+
+function agentSessionMeta(tool, sessionId) {
+  const sid = String(sessionId || "").trim();
+  if (!sid) return null;
+  const entry = loadAgentSessionMeta(tool)[sid];
+  if (!entry) return null;
+  if (Date.now() - (entry.updated_at || 0) > SESSION_MODEL_TTL_MS) return null;
+  return entry;
+}
+
+function extractAgentAccountEmail(input, tool) {
+  const candidates = [
+    input?.user_email,
+    input?.userEmail,
+    input?.account_email,
+    input?.accountEmail,
+    input?.login_email,
+    input?.loginEmail,
+    input?.anthropic_email,
+    input?.anthropicEmail
+  ];
+  for (const candidate of candidates) {
+    const email = normalizeAgentEmail(candidate);
+    if (email) return email;
+  }
+
+  const sessionId = input?.session_id ?? input?.conversation_id ?? input?.sessionId;
+  const cached = agentSessionMeta(tool, sessionId);
+  if (cached?.agent_account_email) return cached.agent_account_email;
+
+  if (tool === "codex") {
+    return readCodexAgentEmail();
+  }
+  return null;
+}
+
+function resolveAgentAccountEmail(input, tool) {
+  const email = extractAgentAccountEmail(input, tool);
+  const sessionId = input?.session_id ?? input?.conversation_id ?? input?.sessionId;
+  if (email && sessionId) {
+    cacheAgentSessionMeta(tool, sessionId, { agent_account_email: email });
+  }
+  return email;
+}
+
+function resolveModelVariant(input, tool) {
+  if (tool === "codex") {
+    const cfg = readCodexConfig();
+    return (
+      normalizeEffortToken(
+        input?.model_reasoning_effort ??
+          input?.reasoning_effort ??
+          input?.reasoningEffort ??
+          cfg.model_reasoning_effort
+      ) || null
+    );
+  }
+  if (tool === "claude_code") {
+    const fromPayload =
+      input?.effort && typeof input.effort === "object"
+        ? input.effort.level
+        : typeof input?.effort === "string"
+          ? input.effort
+          : null;
+    return (
+      normalizeEffortToken(fromPayload ?? process.env.CLAUDE_EFFORT ?? process.env.CLAUDE_CODE_EFFORT_LEVEL) ||
+      null
+    );
+  }
+  return null;
+}
+
+function appendModelVariant(base, variant) {
+  if (!variant) return base;
+  const label = base.model_label ? `${base.model_label} · ${variant}` : `Unknown · ${variant}`;
+  const bucket = slugToModelBucket(`${base.model_bucket}-${variant}`);
+  return { model_label: label.slice(0, 120), model_bucket: bucket };
+}
+
+function recordPendingSubmit(tool, sessionId, meta) {
+  const sid = String(sessionId || "").trim();
+  if (!sid) return;
+  const data = readJson(pendingSubmitsPath(tool), { pending: {} });
+  const pending = data.pending && typeof data.pending === "object" ? data.pending : {};
+  pending[sid] = { at: Date.now(), ...meta };
+  writeJson(pendingSubmitsPath(tool), { pending });
+}
+
+function consumePendingSubmit(tool, sessionId) {
+  const sid = String(sessionId || "").trim();
+  if (!sid) return null;
+  const data = readJson(pendingSubmitsPath(tool), { pending: {} });
+  const pending = data.pending && typeof data.pending === "object" ? data.pending : {};
+  const entry = pending[sid] || null;
+  if (entry) {
+    delete pending[sid];
+    writeJson(pendingSubmitsPath(tool), { pending });
+  }
+  return entry;
+}
+
+function patchQueuedSendLatency(tool, sessionId, latencyMs) {
+  const sid = String(sessionId || "").trim();
+  if (!sid || !latencyMs) return false;
+  const events = loadQueue(tool);
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const event = events[i];
+    if (event?.interaction_kind === "send" && event._session_id === sid) {
+      event.host_response_latency_ms = latencyMs;
+      delete event._session_id;
+      saveQueue(tool, events);
+      return true;
+    }
+  }
+  return false;
+}
+
 function migrateLegacyCredentials(tool) {
   const legacy = readJson(legacyCredentialsPath(), null);
   if (!legacy?.device_token) return null;
@@ -167,7 +388,9 @@ function extractModelMeta(input) {
     input.model_name ??
     input.modelName ??
     input.modelLabel ??
-    input.model_label;
+    input.model_label ??
+    input.composer_model ??
+    input.composerModel;
   if (typeof raw !== "string" || !raw.trim()) {
     return { model_label: null, model_bucket: "unknown" };
   }
@@ -176,6 +399,25 @@ function extractModelMeta(input) {
     return { model_label: null, model_bucket: "unknown" };
   }
   return { model_label: label, model_bucket: slugToModelBucket(label) };
+}
+
+function buildModelMeta(input, tool) {
+  let base = resolveModelMeta(input, tool);
+  if (tool === "codex") {
+    const cfg = readCodexConfig();
+    if (base.model_bucket === "unknown" && cfg.model) {
+      base = { model_label: cfg.model, model_bucket: slugToModelBucket(cfg.model) };
+    }
+  }
+  const sessionId = input?.session_id ?? input?.conversation_id ?? input?.sessionId;
+  let variant = resolveModelVariant(input, tool);
+  if (!variant && sessionId) {
+    variant = agentSessionMeta(tool, sessionId)?.model_variant || null;
+  }
+  if (variant && sessionId) {
+    cacheAgentSessionMeta(tool, sessionId, { model_variant: variant });
+  }
+  return appendModelVariant(base, variant);
 }
 
 function expandHomePath(path) {
@@ -356,7 +598,13 @@ async function flushQueue(tool, clientHeader) {
       Authorization: `Bearer ${creds.device_token}`,
       "x-promptly-client": clientHeader || TOOL_CLIENT[tool] || "promptly-claude-code"
     },
-    body: JSON.stringify({ events: batch })
+    body: JSON.stringify({
+      events: batch.map((event) => {
+        const copy = { ...event };
+        delete copy._session_id;
+        return copy;
+      })
+    })
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -373,6 +621,11 @@ async function flushQueue(tool, clientHeader) {
 function hookEventToTelemetry(input, tool) {
   if (!input || typeof input !== "object") return null;
   const now = Date.now();
+  const sessionId = String(
+    input.session_id || input.conversation_id || input.sessionId || ""
+  ).trim();
+  const agentAccountEmail = resolveAgentAccountEmail(input, tool);
+  const modelMeta = buildModelMeta(input, tool);
   const eventName = String(
     input.hook_event_name || input.hookEventName || input.event || input.hook || ""
   ).toLowerCase();
@@ -397,7 +650,9 @@ function hookEventToTelemetry(input, tool) {
       composer_word_estimate: words || 1,
       composer_char_estimate: chars || 1,
       client_occurred_ms: now,
-      ...resolveModelMeta(input, tool)
+      agent_account_email: agentAccountEmail,
+      _session_id: sessionId || undefined,
+      ...modelMeta
     };
   }
 
@@ -409,7 +664,8 @@ function hookEventToTelemetry(input, tool) {
         interaction_kind: "engagement_segment",
         engagement_category: "reading_idle",
         duration_ms: Math.min(1_800_000, Math.floor(dur)),
-        client_occurred_ms: now
+        client_occurred_ms: now,
+        agent_account_email: agentAccountEmail
       };
     }
     return null;
@@ -418,12 +674,28 @@ function hookEventToTelemetry(input, tool) {
   if ((eventName.includes("stop") && !eventName.includes("subagent")) || hasStopStatus) {
     const status = String(input.status || "").toLowerCase();
     if (status === "completed" || status === "aborted" || status === "error" || !status) {
+      const pending = consumePendingSubmit(tool, sessionId);
+      const latencyMs = pending?.at
+        ? Math.min(1_800_000, Math.max(500, now - pending.at))
+        : null;
+      if (latencyMs) {
+        return {
+          tool,
+          interaction_kind: "response_latency",
+          host_response_latency_ms: latencyMs,
+          client_occurred_ms: now,
+          agent_account_email: agentAccountEmail || pending?.agent_account_email || null,
+          model_label: modelMeta.model_label || pending?.model_label || null,
+          model_bucket: modelMeta.model_bucket || pending?.model_bucket || "unknown"
+        };
+      }
       return {
         tool,
         interaction_kind: "engagement_segment",
         engagement_category: "waiting",
         duration_ms: 5000,
-        client_occurred_ms: now
+        client_occurred_ms: now,
+        agent_account_email: agentAccountEmail
       };
     }
     return null;
@@ -438,7 +710,8 @@ function hookEventToTelemetry(input, tool) {
       interaction_kind: "engagement_segment",
       engagement_category: "reading_idle",
       duration_ms: 2000,
-      client_occurred_ms: now
+      client_occurred_ms: now,
+      agent_account_email: agentAccountEmail
     };
   }
 
@@ -457,7 +730,24 @@ async function cmdHook(flags) {
     event = null;
   }
   if (event) {
-    enqueueEvent(tool, event);
+    const sessionId = String(
+      input?.session_id || input?.conversation_id || input?.sessionId || ""
+    ).trim();
+    if (event.interaction_kind === "send" && sessionId) {
+      recordPendingSubmit(tool, sessionId, {
+        agent_account_email: event.agent_account_email || null,
+        model_label: event.model_label || null,
+        model_bucket: event.model_bucket || "unknown"
+      });
+    }
+    if (event.interaction_kind === "response_latency" && sessionId) {
+      if (patchQueuedSendLatency(tool, sessionId, event.host_response_latency_ms)) {
+        event = null;
+      }
+    }
+    if (event) {
+      enqueueEvent(tool, event);
+    }
   }
   const clientHeader = flags.client || TOOL_CLIENT[tool];
   try {

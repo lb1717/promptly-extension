@@ -867,7 +867,7 @@ export type AccountStatsExtendedGranularity = "day" | "week";
 
 export type PromptlyIdeTool = "claude_code" | "cursor" | "codex";
 
-export type IdeInteractionKind = "send" | "engagement_segment";
+export type IdeInteractionKind = "send" | "engagement_segment" | "response_latency";
 
 export type IdeActivityEventInput = {
   tool: PromptlyIdeTool;
@@ -880,6 +880,7 @@ export type IdeActivityEventInput = {
   engagementCategory: HostEngagementCategory | null;
   engagementDurationMs: number | null;
   clientOccurredMs: number;
+  agentAccountEmail: string | null;
 };
 
 export function normalizePromptlyIdeTool(rawValue: unknown): PromptlyIdeTool | null {
@@ -1156,7 +1157,81 @@ export function normalizeIdeActivityEventInput(raw: Record<string, unknown>): Id
     const k = rawKind.trim().toLowerCase();
     if (k === "engagement_segment" || k === "engagement") {
       interactionKind = "engagement_segment";
+    } else if (k === "response_latency") {
+      interactionKind = "response_latency";
     }
+  }
+
+  const agentAccountEmail =
+    normalizeUserEmail(raw.agent_account_email ?? raw.agentAccountEmail) || null;
+
+  if (interactionKind === "response_latency") {
+    let hostResponseLatencyMs: number | null = null;
+    const hlRaw = raw.host_response_latency_ms ?? raw.hostResponseLatencyMs;
+    if (typeof hlRaw === "number" && Number.isFinite(hlRaw)) {
+      const v = Math.floor(hlRaw);
+      if (v > 0 && v <= 1_800_000) {
+        hostResponseLatencyMs = v;
+      }
+    }
+    if (!hostResponseLatencyMs) {
+      return null;
+    }
+    let modelLabelSanitized: string | null = null;
+    const labelRaw =
+      typeof raw.model_label === "string"
+        ? raw.model_label
+        : typeof raw.modelLabel === "string"
+          ? raw.modelLabel
+          : null;
+    if (typeof labelRaw === "string") {
+      const label = String(labelRaw)
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, TELEMETRY_HOST_MODEL_MAX_CHARS);
+      if (!/https?:\/\//i.test(label) && label) {
+        modelLabelSanitized = label;
+      }
+    }
+    let modelBucket = "unknown";
+    const bucketRaw =
+      typeof raw.model_bucket === "string"
+        ? raw.model_bucket
+        : typeof raw.modelBucket === "string"
+          ? raw.modelBucket
+          : null;
+    if (typeof bucketRaw === "string" && bucketRaw.trim()) {
+      modelBucket = String(bucketRaw)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 48) || "unknown";
+    } else if (modelLabelSanitized) {
+      modelBucket =
+        modelLabelSanitized
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+          .slice(0, 48) || "unknown";
+    }
+    let clientOccurredMs = Date.now();
+    const com = raw.client_occurred_ms ?? raw.clientOccurredMs;
+    if (typeof com === "number" && Number.isFinite(com)) {
+      clientOccurredMs = Math.max(0, Math.floor(com));
+    }
+    return {
+      tool,
+      interactionKind,
+      composerCharEstimate: null,
+      composerWordEstimate: null,
+      modelLabelSanitized,
+      modelBucket,
+      hostResponseLatencyMs,
+      engagementCategory: null,
+      engagementDurationMs: null,
+      clientOccurredMs,
+      agentAccountEmail
+    };
   }
 
   if (interactionKind === "engagement_segment") {
@@ -1197,7 +1272,8 @@ export function normalizeIdeActivityEventInput(raw: Record<string, unknown>): Id
       hostResponseLatencyMs: null,
       engagementCategory,
       engagementDurationMs,
-      clientOccurredMs
+      clientOccurredMs,
+      agentAccountEmail
     };
   }
 
@@ -1294,7 +1370,8 @@ export function normalizeIdeActivityEventInput(raw: Record<string, unknown>): Id
     hostResponseLatencyMs,
     engagementCategory: null,
     engagementDurationMs: null,
-    clientOccurredMs
+    clientOccurredMs,
+    agentAccountEmail
   };
 }
 
@@ -1325,6 +1402,7 @@ export async function persistIdeActivityEvents(user: PromptlyUser, rows: IdeActi
       modelBucket: row.modelBucket,
       hostResponseLatencyMs: row.hostResponseLatencyMs,
       clientOccurredMs: row.clientOccurredMs,
+      agentAccountEmail: row.agentAccountEmail,
       ...(row.engagementCategory ? { engagementCategory: row.engagementCategory } : {}),
       ...(typeof row.engagementDurationMs === "number" ? { engagementDurationMs: row.engagementDurationMs } : {})
     });
@@ -1394,7 +1472,14 @@ export type AccountIdeStatsPayload = {
     bucket: string;
     label: string | null;
     prompts: number;
+    avg_response_ms: number | null;
+    response_samples: number;
   }>;
+  agent_emails_by_tool: Record<PromptlyIdeTool, string[]>;
+  response_latency_by_tool: Record<
+    PromptlyIdeTool,
+    { avg_ms: number | null; samples: number; p50_ms: number | null }
+  >;
   events_docs_in_query: number;
   index_missing: boolean;
   likely_truncated: boolean;
@@ -1404,7 +1489,8 @@ export type AccountIdeStatsPayload = {
 export async function getAccountIdeUsageStats(
   user: PromptlyUser,
   days: number,
-  granularity: AccountStatsExtendedGranularity = "day"
+  granularity: AccountStatsExtendedGranularity = "day",
+  emailFilters?: Partial<Record<PromptlyIdeTool, Set<string>>>
 ): Promise<AccountIdeStatsPayload> {
   const rangeDays = Math.max(1, Math.min(90, Math.floor(days || 14)));
   const recentDays = getRecentDays(rangeDays);
@@ -1486,10 +1572,37 @@ export async function getAccountIdeUsageStats(
   const promptTotals = emptyIdeToolCounts();
   const screenTotals = emptyIdeToolCounts();
   const engagementTotalsMs = { drafting: 0, waiting: 0, reading_idle: 0 };
+  const agentEmailsByTool: Record<PromptlyIdeTool, Set<string>> = {
+    claude_code: new Set(),
+    cursor: new Set(),
+    codex: new Set()
+  };
+  const responseLatencyByTool: Record<PromptlyIdeTool, number[]> = {
+    claude_code: [],
+    cursor: [],
+    codex: []
+  };
   const modelBucketAgg = new Map<
     string,
-    { tool: PromptlyIdeTool; bucket: string; label: string | null; prompts: number }
+    {
+      tool: PromptlyIdeTool;
+      bucket: string;
+      label: string | null;
+      prompts: number;
+      latencyTotalMs: number;
+      latencySamples: number;
+    }
   >();
+
+  const readEventAgentEmail = (raw: Record<string, unknown>): string | null =>
+    normalizeUserEmail(raw.agentAccountEmail ?? raw.agent_account_email);
+
+  const eventPassesEmailFilter = (tool: PromptlyIdeTool, agentEmail: string | null): boolean => {
+    const filter = emailFilters?.[tool];
+    if (!filter || filter.size === 0) return true;
+    if (!agentEmail) return false;
+    return filter.has(agentEmail);
+  };
 
   for (const doc of eventsResult.docs) {
     const raw = doc.data() as Record<string, unknown>;
@@ -1501,8 +1614,53 @@ export async function getAccountIdeUsageStats(
     const tool = normalizePromptlyIdeTool(raw.tool);
     if (!tool) continue;
 
+    const agentEmail = readEventAgentEmail(raw);
+    if (agentEmail) {
+      agentEmailsByTool[tool].add(agentEmail);
+    }
+    if (!eventPassesEmailFilter(tool, agentEmail)) continue;
+
     const ik = String(raw.interactionKind ?? raw.interaction_kind ?? "send").toLowerCase();
     const isEngagement = ik === "engagement_segment" || ik === "engagement";
+    const isResponseLatency = ik === "response_latency";
+
+    if (isResponseLatency) {
+      const hlRaw = raw.hostResponseLatencyMs ?? raw.host_response_latency_ms;
+      const hlMs =
+        typeof hlRaw === "number" && Number.isFinite(hlRaw) ? Math.floor(hlRaw) : null;
+      if (hlMs !== null && hlMs > 0) {
+        row.engagement_ms.waiting[tool] += hlMs;
+        row.screen_time_ms[tool] += hlMs;
+        screenTotals[tool] += hlMs;
+        engagementTotalsMs.waiting += hlMs;
+        responseLatencyByTool[tool].push(hlMs);
+
+        const mb = String(raw.modelBucket ?? raw.model_bucket ?? "unknown")
+          .trim()
+          .slice(0, 48) || "unknown";
+        const labelRaw = raw.modelLabelSanitized ?? raw.model_label ?? raw.modelLabel;
+        const label =
+          typeof labelRaw === "string" && labelRaw.trim() && !/https?:\/\//i.test(labelRaw)
+            ? String(labelRaw).replace(/\s+/g, " ").trim().slice(0, 120)
+            : null;
+        const modelKey = `${tool}:${mb}`;
+        const modelPrev = modelBucketAgg.get(modelKey) || {
+          tool,
+          bucket: mb,
+          label,
+          prompts: 0,
+          latencyTotalMs: 0,
+          latencySamples: 0
+        };
+        modelPrev.latencyTotalMs += hlMs;
+        modelPrev.latencySamples += 1;
+        if (!modelPrev.label && label) {
+          modelPrev.label = label;
+        }
+        modelBucketAgg.set(modelKey, modelPrev);
+      }
+      continue;
+    }
 
     if (isEngagement) {
       let cat: HostEngagementCategory | null = null;
@@ -1537,7 +1695,14 @@ export async function getAccountIdeUsageStats(
         ? String(labelRaw).replace(/\s+/g, " ").trim().slice(0, 120)
         : null;
     const modelKey = `${tool}:${mb}`;
-    const modelPrev = modelBucketAgg.get(modelKey) || { tool, bucket: mb, label, prompts: 0 };
+    const modelPrev = modelBucketAgg.get(modelKey) || {
+      tool,
+      bucket: mb,
+      label,
+      prompts: 0,
+      latencyTotalMs: 0,
+      latencySamples: 0
+    };
     modelPrev.prompts += 1;
     if (!modelPrev.label && label) {
       modelPrev.label = label;
@@ -1552,8 +1717,32 @@ export async function getAccountIdeUsageStats(
       row.screen_time_ms[tool] += hlMs;
       screenTotals[tool] += hlMs;
       engagementTotalsMs.waiting += hlMs;
+      responseLatencyByTool[tool].push(hlMs);
+      modelPrev.latencyTotalMs += hlMs;
+      modelPrev.latencySamples += 1;
+      modelBucketAgg.set(modelKey, modelPrev);
     }
   }
+
+  const percentile = (values: number[], p: number): number | null => {
+    if (!values.length) return null;
+    const sorted = [...values].sort((a, b) => a - b);
+    const idx = Math.min(sorted.length - 1, Math.max(0, Math.floor((sorted.length - 1) * p)));
+    return sorted[idx] ?? null;
+  };
+
+  const responseLatencySummary = (tool: PromptlyIdeTool) => {
+    const values = responseLatencyByTool[tool];
+    if (!values.length) {
+      return { avg_ms: null, samples: 0, p50_ms: null };
+    }
+    const total = values.reduce((sum, value) => sum + value, 0);
+    return {
+      avg_ms: Math.round(total / values.length),
+      samples: values.length,
+      p50_ms: percentile(values, 0.5)
+    };
+  };
 
   const sortedBuckets = Array.from(byBucket.values()).sort((a, b) => a.bucket_day.localeCompare(b.bucket_day));
 
@@ -1633,7 +1822,26 @@ export async function getAccountIdeUsageStats(
     })),
     model_buckets: [...modelBucketAgg.values()]
       .filter((row) => row.prompts > 0)
-      .sort((a, b) => b.prompts - a.prompts || a.tool.localeCompare(b.tool)),
+      .sort((a, b) => b.prompts - a.prompts || a.tool.localeCompare(b.tool))
+      .map((row) => ({
+        tool: row.tool,
+        bucket: row.bucket,
+        label: row.label,
+        prompts: row.prompts,
+        avg_response_ms:
+          row.latencySamples > 0 ? Math.round(row.latencyTotalMs / row.latencySamples) : null,
+        response_samples: row.latencySamples
+      })),
+    agent_emails_by_tool: {
+      claude_code: [...agentEmailsByTool.claude_code].sort(),
+      cursor: [...agentEmailsByTool.cursor].sort(),
+      codex: [...agentEmailsByTool.codex].sort()
+    },
+    response_latency_by_tool: {
+      claude_code: responseLatencySummary("claude_code"),
+      cursor: responseLatencySummary("cursor"),
+      codex: responseLatencySummary("codex")
+    },
     events_docs_in_query: eventsResult.docs.length,
     index_missing: eventsResult.indexMissing,
     likely_truncated: eventsResult.docs.length >= IDE_EVENTS_QUERY_LIMIT,
