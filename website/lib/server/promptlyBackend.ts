@@ -1602,7 +1602,8 @@ export async function getAccountIdeUsageStats(
   const eventPassesEmailFilter = (tool: PromptlyIdeTool, agentEmail: string | null): boolean => {
     const filter = emailFilters?.[tool];
     if (!filter || filter.size === 0) return true;
-    if (!agentEmail) return false;
+    // Unattributed events always count — pairing is per Promptly account, not agent login email.
+    if (!agentEmail) return true;
     return filter.has(agentEmail);
   };
 

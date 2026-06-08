@@ -182,12 +182,68 @@ function readCodexAgentEmail() {
   return null;
 }
 
+function sanitizeClaudeAgentEmailCache() {
+  const codexEmail = readCodexAgentEmail();
+  if (!codexEmail) return;
+  const lastPath = lastKnownAgentEmailPath("claude_code");
+  const last = readJson(lastPath, null);
+  if (normalizeAgentEmail(last?.email) === codexEmail) {
+    try {
+      writeJson(lastPath, { email: null, updated_at: 0 });
+    } catch {
+      /* ignore */
+    }
+  }
+  const sessions = loadAgentSessionMeta("claude_code");
+  let dirty = false;
+  for (const [sid, entry] of Object.entries(sessions)) {
+    if (entry?.agent_account_email === codexEmail) {
+      delete sessions[sid].agent_account_email;
+      dirty = true;
+    }
+  }
+  if (dirty) {
+    writeJson(agentSessionMetaPath("claude_code"), { sessions });
+  }
+}
+
 function claudeConfigPaths() {
   const configDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
   return {
     stateJson: join(homedir(), ".claude.json"),
     credentialsJson: join(configDir, ".credentials.json")
   };
+}
+
+function deepFindAgentEmail(value, depth = 0) {
+  if (depth > 10 || value == null) return null;
+  if (typeof value === "string") {
+    const direct = normalizeAgentEmail(value);
+    if (direct) return direct;
+    if (value.includes(".")) {
+      const jwtEmail = decodeJwtEmail(value);
+      if (jwtEmail) return jwtEmail;
+    }
+    return null;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const email = deepFindAgentEmail(item, depth + 1);
+      if (email) return email;
+    }
+    return null;
+  }
+  if (typeof value === "object") {
+    for (const key of ["emailAddress", "email", "account_email", "login"]) {
+      const email = normalizeAgentEmail(value[key]);
+      if (email) return email;
+    }
+    for (const nested of Object.values(value)) {
+      const email = deepFindAgentEmail(nested, depth + 1);
+      if (email) return email;
+    }
+  }
+  return null;
 }
 
 function readClaudeCodeAgentEmail() {
@@ -199,6 +255,8 @@ function readClaudeCodeAgentEmail() {
       const email = normalizeAgentEmail(oauthEmail);
       if (email) return email;
     }
+    const stateEmail = deepFindAgentEmail(state);
+    if (stateEmail) return stateEmail;
     const creds = readJson(credentialsJson, null);
     if (creds && typeof creds === "object") {
       for (const key of ["email", "emailAddress", "account_email", "login"]) {
@@ -211,6 +269,8 @@ function readClaudeCodeAgentEmail() {
           if (email) return email;
         }
       }
+      const credEmail = deepFindAgentEmail(creds);
+      if (credEmail) return credEmail;
     }
   } catch {
     /* ignore */
@@ -250,32 +310,54 @@ function agentSessionMeta(tool, sessionId) {
   return entry;
 }
 
-function extractAgentAccountEmail(input, tool) {
-  const candidates = [
-    input?.user_email,
-    input?.userEmail,
-    input?.account_email,
-    input?.accountEmail,
-    input?.login_email,
-    input?.loginEmail,
-    input?.anthropic_email,
-    input?.anthropicEmail
-  ];
-  if (tool === "cursor") {
-    candidates.unshift(process.env.CURSOR_USER_EMAIL);
+function emailCandidatesFromHook(input, tool) {
+  if (!input || typeof input !== "object") return [];
+  if (tool === "claude_code") {
+    return [
+      input.anthropic_email,
+      input.anthropicEmail,
+      input.account_email,
+      input.accountEmail
+    ];
   }
-  for (const candidate of candidates) {
+  if (tool === "cursor") {
+    return [
+      process.env.CURSOR_USER_EMAIL,
+      input.user_email,
+      input.userEmail,
+      input.account_email,
+      input.accountEmail,
+      input.login_email,
+      input.loginEmail
+    ];
+  }
+  if (tool === "codex") {
+    return [
+      input.user_email,
+      input.userEmail,
+      input.account_email,
+      input.accountEmail,
+      input.login_email,
+      input.loginEmail
+    ];
+  }
+  return [];
+}
+
+function extractAgentAccountEmail(input, tool) {
+  for (const candidate of emailCandidatesFromHook(input, tool)) {
     const email = normalizeAgentEmail(candidate);
     if (email) return email;
+  }
+
+  if (tool === "claude_code") {
+    return readClaudeCodeAgentEmail();
   }
 
   const sessionId = input?.session_id ?? input?.conversation_id ?? input?.sessionId;
   const cached = agentSessionMeta(tool, sessionId);
   if (cached?.agent_account_email) return cached.agent_account_email;
 
-  if (tool === "claude_code") {
-    return readClaudeCodeAgentEmail();
-  }
   if (tool === "codex") {
     return readCodexAgentEmail();
   }
@@ -286,18 +368,29 @@ function extractAgentAccountEmail(input, tool) {
 }
 
 function resolveAgentAccountEmail(input, tool) {
-  let email = extractAgentAccountEmail(input, tool);
-  if (!email) {
+  const hookEmails = emailCandidatesFromHook(input, tool)
+    .map((candidate) => normalizeAgentEmail(candidate))
+    .filter(Boolean);
+  let email = hookEmails[0] || extractAgentAccountEmail(input, tool);
+
+  if (!email && tool !== "claude_code") {
     email = readLastKnownAgentEmail(tool);
   }
+
   const sessionId = input?.session_id ?? input?.conversation_id ?? input?.sessionId;
-  if (email) {
+  const claudeAuthEmail = tool === "claude_code" ? readClaudeCodeAgentEmail() : null;
+  const claudeVerified =
+    tool !== "claude_code" ||
+    hookEmails.includes(email) ||
+    (claudeAuthEmail && email === claudeAuthEmail);
+
+  if (email && claudeVerified) {
     rememberLastKnownAgentEmail(tool, email);
     if (sessionId) {
       cacheAgentSessionMeta(tool, sessionId, { agent_account_email: email });
     }
   }
-  return email;
+  return claudeVerified ? email : tool === "claude_code" ? null : email;
 }
 
 function resolveModelVariant(input, tool) {
@@ -692,7 +785,99 @@ async function flushQueue(tool, clientHeader) {
   return { ok: true, written: body.written ?? batch.length };
 }
 
+function hookEventName(input) {
+  return String(
+    input?.hook_event_name || input?.hookEventName || input?.event || input?.hook || ""
+  ).toLowerCase();
+}
+
+function hookModelToken(input) {
+  const raw =
+    input?.model ??
+    input?.composer_model ??
+    input?.composerModel ??
+    input?.model_label ??
+    input?.modelLabel ??
+    "";
+  return String(raw).trim().toLowerCase();
+}
+
+function isCursorHostPayload(input) {
+  const event = hookEventName(input);
+  if (event.includes("beforesubmitprompt")) return true;
+  if (input?.conversation_id && !input?.session_id && !input?.transcript_path) return true;
+  const model = hookModelToken(input);
+  if (/^composer-/.test(model)) return true;
+  if (typeof input?.loop_count === "number" && typeof input?.status === "string") return true;
+  return false;
+}
+
+function isClaudeCodeHostPayload(input) {
+  const event = hookEventName(input);
+  if (event.includes("userpromptsubmit")) return true;
+  if (input?.transcript_path) return true;
+  if (event.includes("sessionstart") || event.includes("sessionend")) {
+    if (input?.session_id) return true;
+  }
+  if ((event === "stop" || event.endsWith(".stop")) && input?.session_id) {
+    if (typeof input?.loop_count !== "number") return true;
+  }
+  if (input?.session_id && !input?.conversation_id) {
+    const model = hookModelToken(input);
+    if (!model || model.startsWith("claude")) return true;
+  }
+  return false;
+}
+
+function isCodexHostPayload(input) {
+  const event = hookEventName(input);
+  if (event.includes("beforesubmitprompt")) return true;
+  const model = hookModelToken(input);
+  if (/^(gpt-|o[0-9]|codex)/.test(model)) return true;
+  if (typeof input?.model_reasoning_effort === "string") return true;
+  if (typeof input?.reasoning_effort === "string") return true;
+  return false;
+}
+
+function isPromptSubmitPayload(input) {
+  const event = hookEventName(input);
+  if (event.includes("userpromptsubmit") || event.includes("beforesubmitprompt")) return true;
+  const hasPrompt = typeof input?.prompt === "string" && input.prompt.length > 0;
+  const hasSessionEnd =
+    typeof input?.duration_ms === "number" ||
+    typeof input?.durationMs === "number" ||
+    (typeof input?.reason === "string" &&
+      (typeof input?.session_id === "string" || typeof input?.conversation_id === "string"));
+  const hasStopStatus = typeof input?.status === "string" && typeof input?.loop_count === "number";
+  return hasPrompt && !hasSessionEnd && !hasStopStatus;
+}
+
+/**
+ * Reject cross-host *prompt* payloads (e.g. Cursor stdin reaching --tool claude_code).
+ * Lifecycle hooks (session start/end, stop) trust the hook command's --tool flag.
+ */
+function hookPayloadMatchesTool(input, tool) {
+  if (!input || typeof input !== "object") return false;
+  if (!isPromptSubmitPayload(input)) return true;
+  if (tool === "claude_code") {
+    if (isCursorHostPayload(input)) return false;
+    if (isCodexHostPayload(input) && !isClaudeCodeHostPayload(input)) return false;
+    return true;
+  }
+  if (tool === "cursor") {
+    if (isClaudeCodeHostPayload(input) && !isCursorHostPayload(input)) return false;
+    return true;
+  }
+  if (tool === "codex") {
+    if (isClaudeCodeHostPayload(input)) return false;
+    if (/^composer-/.test(hookModelToken(input))) return false;
+    return true;
+  }
+  return true;
+}
+
 function hookEventToTelemetry(input, tool) {
+  if (!hookPayloadMatchesTool(input, tool)) return null;
   if (!input || typeof input !== "object") return null;
   const now = Date.now();
   const sessionId = String(
@@ -708,7 +893,8 @@ function hookEventToTelemetry(input, tool) {
   const hasSessionEnd =
     typeof input.duration_ms === "number" ||
     typeof input.durationMs === "number" ||
-    (typeof input.reason === "string" && typeof input.session_id === "string");
+    (typeof input.reason === "string" &&
+      (typeof input.session_id === "string" || typeof input.conversation_id === "string"));
   const hasStopStatus = typeof input.status === "string" && typeof input.loop_count === "number";
 
   const isExplicitPromptEvent =
@@ -732,7 +918,7 @@ function hookEventToTelemetry(input, tool) {
 
   if (eventName.includes("sessionend") || (hasSessionEnd && !hasPrompt)) {
     const dur = Number(input.duration_ms ?? input.durationMs ?? 0);
-    if (Number.isFinite(dur) && dur >= 2000) {
+    if (Number.isFinite(dur) && dur >= 500) {
       return {
         tool,
         interaction_kind: "engagement_segment",
@@ -798,7 +984,19 @@ async function cmdHook(flags) {
     console.error("Missing --tool claude_code|cursor|codex");
     process.exit(1);
   }
+  if (tool === "claude_code") {
+    sanitizeClaudeAgentEmailCache();
+  }
   const input = await readStdinJson();
+  if (input && !hookPayloadMatchesTool(input, tool)) {
+    const clientHeader = flags.client || TOOL_CLIENT[tool];
+    try {
+      await flushQueue(tool, clientHeader);
+    } catch (err) {
+      console.error("[promptly]", String(err?.message || err));
+    }
+    process.exit(0);
+  }
   let event = hookEventToTelemetry(input, tool);
   if (event?.interaction_kind === "send" && isDuplicateSend(tool, input, event)) {
     event = null;

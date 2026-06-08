@@ -1282,7 +1282,6 @@ export function StatisticsClient() {
     setSelectedEmailsByTool((prev) => {
       const current = new Set(prev[tool]);
       if (current.has(email)) {
-        if (current.size <= 1) return prev;
         current.delete(email);
       } else {
         current.add(email);
@@ -1290,6 +1289,12 @@ export function StatisticsClient() {
       return { ...prev, [tool]: current };
     });
   }, []);
+
+  const refreshAllStats = useCallback(() => {
+    if (!user) return;
+    void loadExtended(user, days, granularity);
+    void loadIdeStats(user, days, granularity, selectedEmailsByTool);
+  }, [user, days, granularity, selectedEmailsByTool, loadExtended, loadIdeStats]);
 
   useEffect(() => {
     setSelectedEmailsByTool({
@@ -1310,7 +1315,8 @@ export function StatisticsClient() {
       };
       for (const agent of IDE_AGENT_CARDS) {
         const available = ideStats.agent_emails_by_tool[agent.key] ?? [];
-        if (!next[agent.key].size && available.length) {
+        if (!available.length) continue;
+        if (!next[agent.key].size) {
           next[agent.key] = new Set(available);
           changed = true;
           continue;
@@ -1850,11 +1856,11 @@ export function StatisticsClient() {
               </label>
               <button
                 type="button"
-                disabled={statsLoading || !user}
-                onClick={() => user && loadExtended(user, days, granularity)}
+                disabled={statsLoading || ideStatsLoading || !user}
+                onClick={refreshAllStats}
                 className="rounded-md border border-line px-2 py-0.5 text-xs text-muted hover:bg-cream-dark disabled:opacity-50"
               >
-                {statsLoading ? "Refreshing…" : "Refresh"}
+                {statsLoading || ideStatsLoading ? "Refreshing…" : "Refresh"}
               </button>
             </div>
           </div>
@@ -2120,10 +2126,7 @@ export function StatisticsClient() {
                 const paired = (conn?.device_count ?? 0) > 0;
                 const prompts = displayIdeStats?.totals.prompts[agent.key] ?? 0;
                 const active = paired || prompts > 0;
-                const agentEmails = ideStats?.agent_emails_by_tool?.[agent.key] ?? [];
-                const selectedEmails = selectedEmailsByTool[agent.key];
                 const latency = displayIdeStats?.response_latency_by_tool?.[agent.key];
-                const unattributed = displayIdeStats?.totals.prompts_without_agent_email?.[agent.key] ?? 0;
                 return (
                   <div
                     key={agent.key}
@@ -2157,54 +2160,61 @@ export function StatisticsClient() {
                         {latency.p50_ms ? ` · median ${formatResponseMs(latency.p50_ms)}` : null}
                       </p>
                     ) : null}
-                    {agentEmails.length ? (
-                      <div className="mt-3 flex flex-wrap gap-1.5">
+                  </div>
+                );
+              })}
+            </div>
+
+            {IDE_AGENT_CARDS.some((agent) => (ideStats?.agent_emails_by_tool?.[agent.key] ?? []).length > 0) ? (
+              <div className="mb-5">
+                <p className="text-[11px] text-muted">
+                  Agent login emails — click to include or exclude from the charts below.
+                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
+                  {IDE_AGENT_CARDS.map((agent) => {
+                    const agentEmails = ideStats?.agent_emails_by_tool?.[agent.key] ?? [];
+                    if (!agentEmails.length) return null;
+                    const selectedEmails = selectedEmailsByTool[agent.key];
+                    return (
+                      <div key={agent.key} className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-faint">
+                          {agent.label}
+                        </span>
                         {agentEmails.map((email) => {
                           const selected = selectedEmails.has(email);
-                          const onlyOne = agentEmails.length === 1;
                           return (
                             <button
                               key={`${agent.key}-${email}`}
                               type="button"
-                              disabled={onlyOne}
                               onClick={() => toggleAgentEmail(agent.key, email)}
-                              className={`rounded-full border px-2 py-0.5 text-[10px] transition ${
+                              className={`rounded-full border px-2.5 py-0.5 text-[10px] transition ${
                                 selected
-                                  ? "border-violet-400 bg-violet-100 text-violet-900"
-                                  : "border-line bg-white/80 text-muted line-through opacity-70"
-                              } ${onlyOne ? "cursor-default" : "hover:border-violet-300"}`}
-                              title={
-                                onlyOne
-                                  ? "Only one agent account in range"
-                                  : selected
-                                    ? "Click to exclude this account from charts below"
-                                    : "Click to include this account"
-                              }
+                                  ? "border-violet-400 bg-violet-100 font-medium text-violet-900"
+                                  : "border-line bg-white/80 text-muted hover:border-violet-200 hover:text-ink"
+                              }`}
+                              title={selected ? "Included in charts — click to exclude" : "Excluded — click to include"}
                             >
                               {email}
                             </button>
                           );
                         })}
                       </div>
-                    ) : prompts > 0 ? (
-                      <p className="mt-3 text-[10px] text-muted">
-                        No login email detected for {agent.label} in this range yet.
-                        {unattributed > 0
-                          ? ` ${unattributed.toLocaleString()} prompt${unattributed === 1 ? "" : "s"} lack an email tag.`
-                          : null}{" "}
-                        Re-run install from integrations, send a new prompt, then refresh.
-                      </p>
-                    ) : null}
-                    {agentEmails.length && unattributed > 0 ? (
-                      <p className="mt-2 text-[10px] text-faint">
-                        {unattributed.toLocaleString()} prompt{unattributed === 1 ? "" : "s"} in range have no
-                        email tag (older telemetry or hook did not report an account).
-                      </p>
-                    ) : null}
-                  </div>
-                );
-              })}
-            </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+
+            {IDE_AGENT_CARDS.some(
+              (agent) =>
+                (displayIdeStats?.totals.prompts_without_agent_email?.[agent.key] ?? 0) > 0 &&
+                !(ideStats?.agent_emails_by_tool?.[agent.key] ?? []).length
+            ) ? (
+              <p className="mb-4 text-[11px] text-muted">
+                Some prompts have no detected agent login email yet (common for Claude Code on Mac). They still count
+                toward your Promptly account totals.
+              </p>
+            ) : null}
 
             {displayIdeStats?.index_missing ? (
               <p className="mb-4 rounded-lg border border-amber-300/60 bg-amber-50/80 px-3 py-2 text-xs text-amber-950">

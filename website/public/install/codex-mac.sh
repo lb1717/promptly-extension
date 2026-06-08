@@ -72,4 +72,4 @@ echo "✓ Hooks, MCP, and /promptly verified for Codex"
 
 echo ""
 echo "✓ Promptly installed for Codex"
-echo "  Quit and reopen Codex, trust hooks (/hooks), then type: /promptly your draft here"
+echo "  Quit and reopen Codex, trust this project folder, enable Promptly hooks (/hooks), then send a prompt"

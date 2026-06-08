@@ -40,4 +40,4 @@ if (-not ((codex plugin list) -match "promptly-codex")) {
 
 Write-Host ""
 Write-Host "Promptly installed for Codex"
-Write-Host "  Quit and reopen Codex, trust hooks (/hooks), then type: /promptly your draft here"
+Write-Host "  Quit and reopen Codex, trust this project folder, enable Promptly hooks (/hooks), then send a prompt"
