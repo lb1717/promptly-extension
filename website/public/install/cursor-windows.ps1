@@ -7,11 +7,12 @@ $ZipPath = Join-Path $env:USERPROFILE "promptly.zip"
 $InstallBase = if ($env:PROMPTLY_INSTALL_BASE) { $env:PROMPTLY_INSTALL_BASE } else { "https://promptly-labs.com/install" }
 
 Invoke-Expression ((Invoke-WebRequest -Uri "$InstallBase/_ensure-node-windows.ps1" -UseBasicParsing).Content)
+Invoke-Expression ((Invoke-WebRequest -Uri "$InstallBase/_install-common-windows.ps1" -UseBasicParsing).Content)
 Ensure-NodeJs
 
 Write-Host "-> Downloading Promptly plugin pack..."
 Invoke-WebRequest -Uri $PluginPackUrl -OutFile $ZipPath
-Expand-Archive -Path $ZipPath -DestinationPath $env:USERPROFILE -Force
+Promptly-UnzipPluginPack -ZipPath $ZipPath -Dest $env:USERPROFILE
 
 if (-not (Test-Path (Join-Path $Integrations ".claude-plugin\marketplace.json"))) {
   Write-Host "Plugin pack failed - retry download"

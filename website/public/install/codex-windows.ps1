@@ -6,6 +6,7 @@ $ZipPath = Join-Path $env:USERPROFILE "promptly.zip"
 $InstallBase = if ($env:PROMPTLY_INSTALL_BASE) { $env:PROMPTLY_INSTALL_BASE } else { "https://promptly-labs.com/install" }
 
 Invoke-Expression ((Invoke-WebRequest -Uri "$InstallBase/_ensure-node-windows.ps1" -UseBasicParsing).Content)
+Invoke-Expression ((Invoke-WebRequest -Uri "$InstallBase/_install-common-windows.ps1" -UseBasicParsing).Content)
 Ensure-NodeJs
 
 $env:Path = "$(npm prefix -g)\bin;" + $env:Path
@@ -21,7 +22,7 @@ Write-Host "Codex CLI ready"
 
 Write-Host "-> Downloading Promptly plugin pack..."
 Invoke-WebRequest -Uri $PluginPackUrl -OutFile $ZipPath
-Expand-Archive -Path $ZipPath -DestinationPath $env:USERPROFILE -Force
+Promptly-UnzipPluginPack -ZipPath $ZipPath -Dest $env:USERPROFILE
 
 if (-not (Test-Path (Join-Path $Integrations ".claude-plugin\marketplace.json"))) {
   Write-Host "Plugin pack failed - retry download"
@@ -31,9 +32,8 @@ Write-Host "Plugin pack OK"
 
 Write-Host "-> Installing Promptly in Codex..."
 $env:Path = "$(npm prefix -g)\bin;" + $env:Path
-codex plugin marketplace add $Integrations
-codex plugin add promptly-codex@promptly-labs
-if ($LASTEXITCODE -ne 0) { codex plugin install promptly-codex@promptly-labs }
+Promptly-CodexMarketplaceAdd -IntegrationsPath $Integrations
+Promptly-CodexPluginReinstall
 codex plugin list
 
 if (-not ((codex plugin list) -match "promptly-codex")) {
@@ -42,6 +42,8 @@ if (-not ((codex plugin list) -match "promptly-codex")) {
 }
 
 $CodexPlugin = Join-Path $Integrations "codex"
+Promptly-SyncImproveCli -PluginDir $CodexPlugin
+Promptly-SyncCodexCommandFiles -PluginDir $CodexPlugin
 Write-Host "-> Verifying Codex plugin configuration..."
 $hooksJson = Get-Content (Join-Path $CodexPlugin "hooks\hooks.json") -Raw
 $mcpJson = Get-Content (Join-Path $CodexPlugin ".mcp.json") -Raw

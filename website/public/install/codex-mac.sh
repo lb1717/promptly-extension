@@ -10,6 +10,7 @@ if ! command -v curl >/dev/null 2>&1; then
   exit 1
 fi
 eval "$(curl -fsSL "${PROMPTLY_INSTALL_BASE}/_ensure-node-mac.sh")"
+eval "$(curl -fsSL "${PROMPTLY_INSTALL_BASE}/_install-common-mac.sh")"
 ensure_unzip_mac
 ensure_node_mac
 
@@ -26,7 +27,7 @@ echo "✓ Codex CLI ready"
 
 echo "→ Downloading Promptly plugin pack…"
 curl -fsSL -o "${HOME}/promptly.zip" "${PLUGIN_PACK_URL}"
-unzip -oq "${HOME}/promptly.zip" -d "${HOME}"
+promptly_unzip_plugin_pack "${HOME}/promptly.zip" "${HOME}"
 
 if [[ ! -f "${INTEGRATIONS}/.claude-plugin/marketplace.json" ]]; then
   echo "✗ Plugin pack failed — retry download"
@@ -36,8 +37,8 @@ echo "✓ Plugin pack OK"
 
 echo "→ Installing Promptly in Codex…"
 export PATH="$(npm prefix -g)/bin:${PATH}"
-codex plugin marketplace add "${INTEGRATIONS}"
-codex plugin add promptly-codex@promptly-labs 2>/dev/null || codex plugin install promptly-codex@promptly-labs
+promptly_codex_marketplace_add "${INTEGRATIONS}"
+promptly_codex_plugin_reinstall
 
 if ! codex plugin list 2>/dev/null | grep -q promptly-codex; then
   echo "✗ Promptly plugin not found in codex plugin list — retry this step"
@@ -45,6 +46,8 @@ if ! codex plugin list 2>/dev/null | grep -q promptly-codex; then
 fi
 
 CODEX_PLUGIN="${INTEGRATIONS}/codex"
+promptly_sync_improve_cli "${CODEX_PLUGIN}"
+promptly_sync_codex_command_files "${CODEX_PLUGIN}"
 echo "→ Verifying Codex plugin configuration…"
 if ! grep -q 'hook --tool codex' "${CODEX_PLUGIN}/hooks/hooks.json" 2>/dev/null; then
   echo "✗ Hooks are not configured for Codex (expected --tool codex)"

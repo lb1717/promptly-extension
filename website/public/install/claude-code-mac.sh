@@ -10,6 +10,7 @@ if ! command -v curl >/dev/null 2>&1; then
   exit 1
 fi
 eval "$(curl -fsSL "${PROMPTLY_INSTALL_BASE}/_ensure-node-mac.sh")"
+eval "$(curl -fsSL "${PROMPTLY_INSTALL_BASE}/_install-common-mac.sh")"
 ensure_unzip_mac
 ensure_node_mac
 
@@ -26,7 +27,7 @@ echo "✓ Claude Code CLI ready"
 
 echo "→ Downloading Promptly plugin pack…"
 curl -fsSL -o "${HOME}/promptly.zip" "${PLUGIN_PACK_URL}"
-unzip -oq "${HOME}/promptly.zip" -d "${HOME}"
+promptly_unzip_plugin_pack "${HOME}/promptly.zip" "${HOME}"
 
 if [[ ! -f "${INTEGRATIONS}/.claude-plugin/marketplace.json" ]]; then
   echo "✗ Plugin pack failed — retry download"
@@ -36,8 +37,8 @@ echo "✓ Plugin pack OK"
 
 echo "→ Installing Promptly in Claude Code…"
 export PATH="$(npm prefix -g)/bin:${PATH}"
-claude plugin marketplace add "${INTEGRATIONS}"
-claude plugin install promptly-claude-code@promptly-labs
+promptly_claude_marketplace_refresh "${INTEGRATIONS}"
+promptly_claude_plugin_reinstall
 
 if ! claude plugin list 2>/dev/null | grep -q promptly-claude-code; then
   echo "✗ Promptly plugin not found in claude plugin list — retry this step"
@@ -45,6 +46,8 @@ if ! claude plugin list 2>/dev/null | grep -q promptly-claude-code; then
 fi
 
 CLAUDE_PLUGIN="${INTEGRATIONS}/claude-code"
+promptly_sync_improve_cli "${CLAUDE_PLUGIN}"
+promptly_sync_claude_code_command_files "${CLAUDE_PLUGIN}"
 echo "→ Verifying Claude Code plugin configuration…"
 if ! grep -q 'hook --tool claude_code' "${CLAUDE_PLUGIN}/hooks/hooks.json" 2>/dev/null; then
   echo "✗ Hooks are not configured for Claude Code (expected --tool claude_code)"
@@ -67,6 +70,7 @@ echo "✓ Type /promptly in Claude Code (then /reload-plugins if it does not app
 
 echo ""
 echo "✓ Promptly installed for Claude Code"
+echo "  Run /reload-plugins in Claude Code, then type /promptly your draft"
 echo "  You can also install Cursor and Codex on this Mac — each needs its own install + pairing from promptly-labs.com/integrations."
 echo "  If you used the one-command setup, account connect runs next automatically."
 echo "  Otherwise finish step 1 on promptly-labs.com/integrations, then trust hooks (step 2)."

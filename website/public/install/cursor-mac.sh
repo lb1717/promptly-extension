@@ -11,12 +11,13 @@ if ! command -v curl >/dev/null 2>&1; then
   exit 1
 fi
 eval "$(curl -fsSL "${PROMPTLY_INSTALL_BASE}/_ensure-node-mac.sh")"
+eval "$(curl -fsSL "${PROMPTLY_INSTALL_BASE}/_install-common-mac.sh")"
 ensure_unzip_mac
 ensure_node_mac
 
 echo "→ Downloading Promptly plugin pack…"
 curl -fsSL -o "${HOME}/promptly.zip" "${PLUGIN_PACK_URL}"
-unzip -oq "${HOME}/promptly.zip" -d "${HOME}"
+promptly_unzip_plugin_pack "${HOME}/promptly.zip" "${HOME}"
 
 if [[ ! -f "${INTEGRATIONS}/.claude-plugin/marketplace.json" ]]; then
   echo "✗ Plugin pack failed — retry download"
