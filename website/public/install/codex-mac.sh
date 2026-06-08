@@ -37,6 +37,7 @@ if [[ ! -f "${INTEGRATIONS}/.claude-plugin/marketplace.json" ]]; then
   echo "✗ Plugin pack failed — retry download"
   exit 1
 fi
+promptly_prepare_plugin_pack "${INTEGRATIONS}"
 echo "✓ Plugin pack OK"
 
 CODEX_PLUGIN="${INTEGRATIONS}/codex"

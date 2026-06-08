@@ -226,6 +226,107 @@ promptly_ensure_codex_cli() {
   return 0
 }
 
+promptly_write_cursor_hooks_json() {
+  local hooks_path="$1"
+  mkdir -p "$(dirname "${hooks_path}")"
+  cat >"${hooks_path}" <<'EOF'
+{
+  "version": 1,
+  "hooks": {
+    "beforeSubmitPrompt": [
+      { "command": "node ./bin/promptly-telemetry.mjs hook --tool cursor" }
+    ],
+    "afterAgentResponse": [
+      { "command": "node ./bin/promptly-telemetry.mjs hook --tool cursor" }
+    ],
+    "stop": [
+      { "command": "node ./bin/promptly-telemetry.mjs hook --tool cursor" }
+    ],
+    "sessionStart": [
+      { "command": "node ./bin/promptly-telemetry.mjs hook --tool cursor" }
+    ],
+    "sessionEnd": [
+      { "command": "node ./bin/promptly-telemetry.mjs hook --tool cursor" }
+    ]
+  }
+}
+EOF
+}
+
+promptly_write_codex_hooks_json() {
+  local hooks_path="$1"
+  mkdir -p "$(dirname "${hooks_path}")"
+  cat >"${hooks_path}" <<'EOF'
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./bin/promptly-telemetry.mjs hook --tool codex",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./bin/promptly-telemetry.mjs hook --tool codex",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./bin/promptly-telemetry.mjs hook --tool codex",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./bin/promptly-telemetry.mjs hook --tool codex",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}
+EOF
+}
+
+promptly_prepare_plugin_pack() {
+  local integrations="${1:-${HOME}/integrations}"
+  local sync_script="${integrations}/scripts/sync-plugin-pack.mjs"
+  if [[ -f "${sync_script}" ]] && command -v node >/dev/null 2>&1; then
+    echo "→ Syncing plugin pack hooks and CLIs…"
+    node "${sync_script}" >/dev/null 2>&1 || true
+  fi
+  if [[ ! -f "${integrations}/cursor/hooks/hooks.json" ]] \
+    || ! grep -q 'afterAgentResponse' "${integrations}/cursor/hooks/hooks.json" 2>/dev/null; then
+    echo "→ Patching Cursor hooks (afterAgentResponse)…"
+    promptly_write_cursor_hooks_json "${integrations}/cursor/hooks/hooks.json"
+  fi
+  if [[ ! -f "${integrations}/codex/hooks/hooks.json" ]] \
+    || ! grep -q 'UserPromptSubmit' "${integrations}/codex/hooks/hooks.json" 2>/dev/null; then
+    echo "→ Patching Codex hooks (UserPromptSubmit)…"
+    promptly_write_codex_hooks_json "${integrations}/codex/hooks/hooks.json"
+  fi
+}
+
 promptly_verify_plugin_pack() {
   local integrations="${1:-${HOME}/integrations}"
   if [[ ! -f "${integrations}/.claude-plugin/marketplace.json" ]]; then
@@ -240,6 +341,7 @@ promptly_verify_plugin_pack() {
     echo "✗ Plugin pack missing improve CLI"
     return 1
   fi
+  promptly_prepare_plugin_pack "${integrations}"
   echo "✓ Plugin pack OK"
   return 0
 }
@@ -254,6 +356,7 @@ promptly_install_for_cursor() {
     echo "✗ Cursor plugin files missing from ${integrations}/cursor"
     return 1
   fi
+  promptly_prepare_plugin_pack "${integrations}"
   promptly_sync_telemetry_cli "${source_cursor}" || return 1
   set +e
   promptly_sync_improve_cli "${source_cursor}"
@@ -331,6 +434,7 @@ promptly_install_for_codex() {
     echo "✗ Codex plugin files missing from ${integrations}/codex"
     return 1
   fi
+  promptly_prepare_plugin_pack "${integrations}"
   promptly_sync_telemetry_cli "${codex_plugin}" || return 1
   set +e
   promptly_sync_improve_cli "${codex_plugin}"
