@@ -11,6 +11,42 @@ const INSTALL_SCRIPT_SLUG: Record<IdeToolId, string> = {
   codex: "codex"
 };
 
+export const ALL_AGENTS_SCRIPT_SLUG = "all-agents";
+
+export function allAgentsInstallScriptUrl(os: OsId): string {
+  return os === "mac"
+    ? `${INSTALL_BASE_URL}/${ALL_AGENTS_SCRIPT_SLUG}-mac.sh`
+    : `${INSTALL_BASE_URL}/${ALL_AGENTS_SCRIPT_SLUG}-windows.ps1`;
+}
+
+export function allAgentsInstallCommands(os: OsId): string[] {
+  const url = allAgentsInstallScriptUrl(os);
+  if (os === "mac") {
+    return [`curl -fsSL ${url} | bash`];
+  }
+  return [`irm ${url} | iex`];
+}
+
+export function verifyInstallCommands(os: OsId): string[] {
+  const cli = telemetryCli(os);
+  return [
+    `${cli} status`,
+    `${cli} status --tool claude_code`,
+    `${cli} status --tool cursor`,
+    `${cli} status --tool codex`
+  ];
+}
+
+export function verifyInstallCommandsPowerShell(): string[] {
+  const cli = telemetryCliPowerShell();
+  return [
+    `${cli} status`,
+    `${cli} status --tool claude_code`,
+    `${cli} status --tool cursor`,
+    `${cli} status --tool codex`
+  ];
+}
+
 export function integrationsDir(os: OsId): string {
   return os === "mac" ? "$HOME/integrations" : "%USERPROFILE%\\integrations";
 }

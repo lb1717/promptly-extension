@@ -134,3 +134,112 @@ function Promptly-CursorPluginReinstall {
   New-Item -ItemType Directory -Force -Path (Join-Path $env:USERPROFILE ".cursor\plugins\local") | Out-Null
   Copy-Item -Recurse -Force (Join-Path $Integrations "cursor") $dest
 }
+
+function Promptly-EnsureClaudeCli {
+  $globalBin = npm prefix -g 2>$null
+  if ($globalBin) { $env:Path = "$globalBin;$env:Path" }
+  if (Get-Command claude -ErrorAction SilentlyContinue) {
+    claude --version
+    return $true
+  }
+  Write-Host "-> Claude Code CLI not found; installing @anthropic-ai/claude-code..."
+  npm install -g @anthropic-ai/claude-code
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "Warning: Could not install Claude Code CLI"
+    return $false
+  }
+  $globalBin = npm prefix -g 2>$null
+  if ($globalBin) { $env:Path = "$globalBin;$env:Path" }
+  if (-not (Get-Command claude -ErrorAction SilentlyContinue)) { return $false }
+  claude --version
+  return $true
+}
+
+function Promptly-EnsureCodexCli {
+  $globalBin = npm prefix -g 2>$null
+  if ($globalBin) { $env:Path = "$globalBin;$env:Path" }
+  if (Get-Command codex -ErrorAction SilentlyContinue) {
+    codex --version
+    return $true
+  }
+  Write-Host "-> Codex CLI not found; installing @openai/codex..."
+  npm install -g @openai/codex
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "Warning: Could not install Codex CLI"
+    return $false
+  }
+  $globalBin = npm prefix -g 2>$null
+  if ($globalBin) { $env:Path = "$globalBin;$env:Path" }
+  if (-not (Get-Command codex -ErrorAction SilentlyContinue)) { return $false }
+  codex --version
+  return $true
+}
+
+function Promptly-VerifyPluginPack {
+  param([string]$Integrations)
+  if (-not (Test-Path (Join-Path $Integrations ".claude-plugin\marketplace.json"))) {
+    Write-Host "Plugin pack failed - retry download"
+    return $false
+  }
+  if (-not (Test-Path (Join-Path $Integrations "packages\telemetry-cli\bin\promptly-telemetry.mjs"))) {
+    Write-Host "Plugin pack missing telemetry CLI"
+    return $false
+  }
+  if (-not (Test-Path (Join-Path $Integrations "packages\promptly-improve\bin\promptly-improve.mjs"))) {
+    Write-Host "Plugin pack missing improve CLI"
+    return $false
+  }
+  Write-Host "Plugin pack OK"
+  return $true
+}
+
+function Promptly-InstallForCursor {
+  param([string]$Integrations)
+  Write-Host ""
+  Write-Host "=== Cursor ==="
+  $source = Join-Path $Integrations "cursor"
+  if (-not (Test-Path $source)) { Write-Host "Cursor plugin files missing"; return 1 }
+  Promptly-SyncTelemetryCli -PluginDir $source
+  try { Promptly-SyncImproveCli -PluginDir $source } catch { }
+  Promptly-CursorPluginReinstall -Integrations $Integrations
+  Promptly-SyncCursorCommandFiles -PluginDir $source
+  $plugin = Join-Path $env:USERPROFILE ".cursor\plugins\local\promptly-cursor"
+  if (-not (Select-String -Path (Join-Path $plugin "hooks\hooks.json") -Pattern 'hook --tool cursor' -Quiet)) {
+    Write-Host "Hooks not configured for Cursor"
+    return 1
+  }
+  Write-Host "Promptly installed for Cursor"
+  return 0
+}
+
+function Promptly-InstallForClaudeCode {
+  param([string]$Integrations)
+  Write-Host ""
+  Write-Host "=== Claude Code ==="
+  if (-not (Promptly-EnsureClaudeCli)) { return 2 }
+  $plugin = Join-Path $Integrations "claude-code"
+  if (-not (Test-Path $plugin)) { Write-Host "Claude Code plugin files missing"; return 1 }
+  Promptly-SyncTelemetryCli -PluginDir $plugin
+  try { Promptly-SyncImproveCli -PluginDir $plugin } catch { }
+  Promptly-SyncClaudeCodeCommandFiles -PluginDir $plugin
+  Promptly-ClaudeMarketplaceRefresh -IntegrationsPath $Integrations
+  Promptly-ClaudePluginReinstall
+  Write-Host "Promptly installed for Claude Code"
+  return 0
+}
+
+function Promptly-InstallForCodex {
+  param([string]$Integrations)
+  Write-Host ""
+  Write-Host "=== Codex ==="
+  if (-not (Promptly-EnsureCodexCli)) { return 2 }
+  $plugin = Join-Path $Integrations "codex"
+  if (-not (Test-Path $plugin)) { Write-Host "Codex plugin files missing"; return 1 }
+  Promptly-SyncTelemetryCli -PluginDir $plugin
+  try { Promptly-SyncImproveCli -PluginDir $plugin } catch { }
+  Promptly-InstallCodexSkill -PluginDir $plugin
+  Promptly-CodexMarketplaceAdd -IntegrationsPath $Integrations
+  Promptly-CodexPluginReinstall
+  Write-Host "Promptly installed for Codex"
+  return 0
+}

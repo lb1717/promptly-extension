@@ -2086,9 +2086,7 @@ export function StatisticsClient() {
               <div>
                 <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">Coding agents</h2>
                 <p className="mt-1 text-xs text-muted">
-                  Claude Code, Cursor, and Codex — separate from web chat statistics above. Pairing verifies your
-                  Promptly plan; all activity on this computer rolls up here. Use the account chips on each card to
-                  filter by the email logged into that agent.
+                  Claude Code, Cursor, and Codex — separate from web chat statistics above.
                 </p>
               </div>
               <Link
@@ -2105,6 +2103,14 @@ export function StatisticsClient() {
             {ideStatsLoading && !ideStats ? (
               <p className="text-sm text-muted">Loading coding-agent statistics…</p>
             ) : null}
+
+            <div className="mb-2">
+              <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-ink">All My Active Accounts</h3>
+              <p className="mt-1 text-[11px] text-muted">
+                Agent login emails detected from your coding tools in this date range. Toggle to filter charts
+                below — at least one account must stay selected per agent.
+              </p>
+            </div>
 
             <div className="mb-5 grid gap-3 sm:grid-cols-3">
               {IDE_AGENT_CARDS.map((agent) => {

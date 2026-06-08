@@ -129,6 +129,12 @@ export function AdminDashboardClient() {
           >
             Sales
           </Link>
+          <Link
+            href="/admin/integrations"
+            className="rounded-xl border border-violet-500/35 px-3 py-2 text-xs font-semibold text-violet-100 hover:bg-violet-500/15"
+          >
+            Integrations (preview)
+          </Link>
           <div className="rounded-xl border border-violet-500/30 bg-[#221830]/60 p-1">
             {SPANS.map((span) => (
               <button

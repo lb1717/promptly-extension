@@ -185,3 +185,171 @@ promptly_cursor_plugin_reinstall() {
   mkdir -p "${HOME}/.cursor/plugins/local"
   cp -R "${integrations}/cursor" "${dest}"
 }
+
+promptly_ensure_claude_cli() {
+  export PATH="$(npm prefix -g)/bin:${PATH}"
+  if command -v claude >/dev/null 2>&1; then
+    claude --version
+    return 0
+  fi
+  echo "→ Claude Code CLI not found; installing @anthropic-ai/claude-code…"
+  if ! npm install -g @anthropic-ai/claude-code; then
+    echo "⚠ Could not install Claude Code CLI — skip Claude Code or install it manually"
+    return 1
+  fi
+  export PATH="$(npm prefix -g)/bin:${PATH}"
+  if ! command -v claude >/dev/null 2>&1; then
+    echo "⚠ Claude Code CLI still not on PATH after install"
+    return 1
+  fi
+  claude --version
+  return 0
+}
+
+promptly_ensure_codex_cli() {
+  export PATH="$(npm prefix -g)/bin:${PATH}"
+  if command -v codex >/dev/null 2>&1; then
+    codex --version
+    return 0
+  fi
+  echo "→ Codex CLI not found; installing @openai/codex…"
+  if ! npm install -g @openai/codex; then
+    echo "⚠ Could not install Codex CLI — skip Codex or install it manually"
+    return 1
+  fi
+  export PATH="$(npm prefix -g)/bin:${PATH}"
+  if ! command -v codex >/dev/null 2>&1; then
+    echo "⚠ Codex CLI still not on PATH after install"
+    return 1
+  fi
+  codex --version
+  return 0
+}
+
+promptly_verify_plugin_pack() {
+  local integrations="${1:-${HOME}/integrations}"
+  if [[ ! -f "${integrations}/.claude-plugin/marketplace.json" ]]; then
+    echo "✗ Plugin pack failed — retry download"
+    return 1
+  fi
+  if [[ ! -f "${integrations}/packages/telemetry-cli/bin/promptly-telemetry.mjs" ]]; then
+    echo "✗ Plugin pack missing telemetry CLI"
+    return 1
+  fi
+  if [[ ! -f "${integrations}/packages/promptly-improve/bin/promptly-improve.mjs" ]]; then
+    echo "✗ Plugin pack missing improve CLI"
+    return 1
+  fi
+  echo "✓ Plugin pack OK"
+  return 0
+}
+
+promptly_install_for_cursor() {
+  local integrations="${1:-${HOME}/integrations}"
+  local source_cursor="${integrations}/cursor"
+  local cursor_plugin="${HOME}/.cursor/plugins/local/promptly-cursor"
+  echo ""
+  echo "━━━ Cursor ━━━"
+  if [[ ! -d "${source_cursor}" ]]; then
+    echo "✗ Cursor plugin files missing from ${integrations}/cursor"
+    return 1
+  fi
+  promptly_sync_telemetry_cli "${source_cursor}" || return 1
+  set +e
+  promptly_sync_improve_cli "${source_cursor}"
+  set -e
+  promptly_cursor_plugin_reinstall "${integrations}"
+  promptly_sync_cursor_command_files "${source_cursor}"
+  if ! grep -q 'hook --tool cursor' "${cursor_plugin}/hooks/hooks.json" 2>/dev/null; then
+    echo "✗ Hooks are not configured for Cursor (expected --tool cursor)"
+    return 1
+  fi
+  if ! grep -q '"PROMPTLY_TOOL": "cursor"' "${cursor_plugin}/mcp.json" 2>/dev/null; then
+    echo "✗ MCP server is not configured for Cursor"
+    return 1
+  fi
+  if [[ ! -f "${HOME}/.cursor/commands/promptly.md" ]]; then
+    echo "✗ Missing /promptly command (~/.cursor/commands/promptly.md)"
+    return 1
+  fi
+  echo "✓ Promptly installed for Cursor"
+  return 0
+}
+
+promptly_install_for_claude_code() {
+  local integrations="${1:-${HOME}/integrations}"
+  local claude_plugin="${integrations}/claude-code"
+  echo ""
+  echo "━━━ Claude Code ━━━"
+  if ! promptly_ensure_claude_cli; then
+    return 2
+  fi
+  if [[ ! -d "${claude_plugin}" ]]; then
+    echo "✗ Claude Code plugin files missing from ${integrations}/claude-code"
+    return 1
+  fi
+  promptly_sync_telemetry_cli "${claude_plugin}" || return 1
+  set +e
+  promptly_sync_improve_cli "${claude_plugin}"
+  set -e
+  promptly_sync_claude_code_command_files "${claude_plugin}"
+  promptly_claude_marketplace_refresh "${integrations}" || return 1
+  promptly_claude_plugin_reinstall || return 1
+  if ! claude plugin list 2>/dev/null | grep -q promptly-claude-code; then
+    echo "✗ Promptly plugin not found in claude plugin list — retry this step"
+    return 1
+  fi
+  if ! grep -q 'hook --tool claude_code' "${claude_plugin}/hooks/hooks.json" 2>/dev/null; then
+    echo "✗ Hooks are not configured for Claude Code"
+    return 1
+  fi
+  if ! grep -q '"PROMPTLY_TOOL": "claude_code"' "${claude_plugin}/.mcp.json" 2>/dev/null; then
+    echo "✗ MCP server is not configured for Claude Code"
+    return 1
+  fi
+  if [[ ! -f "${HOME}/.claude/commands/promptly.md" ]]; then
+    echo "✗ Missing /promptly command (~/.claude/commands/promptly.md)"
+    return 1
+  fi
+  echo "✓ Promptly installed for Claude Code"
+  return 0
+}
+
+promptly_install_for_codex() {
+  local integrations="${1:-${HOME}/integrations}"
+  local codex_plugin="${integrations}/codex"
+  echo ""
+  echo "━━━ Codex ━━━"
+  if ! promptly_ensure_codex_cli; then
+    return 2
+  fi
+  if [[ ! -d "${codex_plugin}" ]]; then
+    echo "✗ Codex plugin files missing from ${integrations}/codex"
+    return 1
+  fi
+  promptly_sync_telemetry_cli "${codex_plugin}" || return 1
+  set +e
+  promptly_sync_improve_cli "${codex_plugin}"
+  set -e
+  promptly_install_codex_skill "${codex_plugin}" || return 1
+  promptly_codex_marketplace_add "${integrations}" || return 1
+  promptly_codex_plugin_reinstall || return 1
+  if ! codex plugin list 2>/dev/null | grep -q promptly-codex; then
+    echo "✗ Promptly plugin not found in codex plugin list — retry this step"
+    return 1
+  fi
+  if ! grep -q 'hook --tool codex' "${codex_plugin}/hooks/hooks.json" 2>/dev/null; then
+    echo "✗ Hooks are not configured for Codex"
+    return 1
+  fi
+  if ! grep -q '"PROMPTLY_TOOL": "codex"' "${codex_plugin}/.mcp.json" 2>/dev/null; then
+    echo "✗ MCP server is not configured for Codex"
+    return 1
+  fi
+  if [[ ! -f "${HOME}/.codex/skills/promptly/SKILL.md" ]]; then
+    echo "✗ Missing /promptly skill (~/.codex/skills/promptly/SKILL.md)"
+    return 1
+  fi
+  echo "✓ Promptly installed for Codex"
+  return 0
+}

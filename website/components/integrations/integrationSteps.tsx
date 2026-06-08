@@ -130,6 +130,14 @@ function AgentSetup({ os, tool }: SetupProps) {
   );
 }
 
+export function HooksOnlySetup({ os, tool }: SetupProps) {
+  return (
+    <ol className="mt-2 list-none space-y-0">
+      <LiveTrackingStep n={1} tool={tool} os={os} />
+    </ol>
+  );
+}
+
 export function CodexSetup(props: SetupProps) {
   return <AgentSetup {...props} />;
 }
