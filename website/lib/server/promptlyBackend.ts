@@ -1278,7 +1278,7 @@ export function normalizeIdeActivityEventInput(raw: Record<string, unknown>): Id
     const durRaw = raw.duration_ms ?? raw.durationMs ?? raw.engagementDurationMs ?? raw.engagement_duration_ms;
     if (typeof durRaw === "number" && Number.isFinite(durRaw)) {
       const v = Math.max(0, Math.floor(durRaw));
-      if (v >= 1000 && v <= 1_800_000) {
+      if (v >= 500 && v <= 1_800_000) {
         engagementDurationMs = v;
       }
     }
@@ -1821,7 +1821,7 @@ export async function getAccountIdeUsageStats(
       const durRaw = raw.engagementDurationMs ?? raw.engagement_duration_ms ?? raw.duration_ms ?? raw.durationMs;
       const durMs =
         typeof durRaw === "number" && Number.isFinite(durRaw) ? Math.floor(durRaw) : null;
-      if (cat && durMs !== null && durMs >= 1000) {
+      if (cat && durMs !== null && durMs >= 500) {
         row.engagement_ms[cat][tool] += durMs;
         row.screen_time_ms[tool] += durMs;
         screenTotals[tool] += durMs;

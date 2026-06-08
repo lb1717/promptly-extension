@@ -56,6 +56,10 @@ if ! codex plugin list 2>/dev/null | grep -q promptly-codex; then
 fi
 
 echo "→ Verifying Codex plugin configuration…"
+if ! grep -q 'UserPromptSubmit' "${CODEX_PLUGIN}/hooks/hooks.json" 2>/dev/null; then
+  echo "✗ Codex hooks missing UserPromptSubmit (re-download plugin pack)"
+  exit 1
+fi
 if ! grep -q 'hook --tool codex' "${CODEX_PLUGIN}/hooks/hooks.json" 2>/dev/null; then
   echo "✗ Hooks are not configured for Codex (expected --tool codex)"
   exit 1

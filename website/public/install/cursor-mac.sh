@@ -38,6 +38,10 @@ promptly_cursor_plugin_reinstall "${INTEGRATIONS}"
 promptly_sync_cursor_command_files "${SOURCE_CURSOR}"
 
 echo "→ Verifying Cursor plugin configuration…"
+if ! grep -q 'afterAgentResponse' "${CURSOR_PLUGIN}/hooks/hooks.json" 2>/dev/null; then
+  echo "✗ Cursor hooks missing afterAgentResponse (re-download plugin pack)"
+  exit 1
+fi
 if ! grep -q 'hook --tool cursor' "${CURSOR_PLUGIN}/hooks/hooks.json" 2>/dev/null; then
   echo "✗ Hooks are not configured for Cursor (expected --tool cursor)"
   exit 1

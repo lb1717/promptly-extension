@@ -260,6 +260,10 @@ promptly_install_for_cursor() {
   set -e
   promptly_cursor_plugin_reinstall "${integrations}"
   promptly_sync_cursor_command_files "${source_cursor}"
+  if ! grep -q 'afterAgentResponse' "${cursor_plugin}/hooks/hooks.json" 2>/dev/null; then
+    echo "✗ Cursor hooks missing afterAgentResponse (re-download plugin pack)"
+    return 1
+  fi
   if ! grep -q 'hook --tool cursor' "${cursor_plugin}/hooks/hooks.json" 2>/dev/null; then
     echo "✗ Hooks are not configured for Cursor (expected --tool cursor)"
     return 1
@@ -336,6 +340,10 @@ promptly_install_for_codex() {
   promptly_codex_plugin_reinstall || return 1
   if ! codex plugin list 2>/dev/null | grep -q promptly-codex; then
     echo "✗ Promptly plugin not found in codex plugin list — retry this step"
+    return 1
+  fi
+  if ! grep -q 'UserPromptSubmit' "${codex_plugin}/hooks/hooks.json" 2>/dev/null; then
+    echo "✗ Codex hooks missing UserPromptSubmit (re-download plugin pack)"
     return 1
   fi
   if ! grep -q 'hook --tool codex' "${codex_plugin}/hooks/hooks.json" 2>/dev/null; then

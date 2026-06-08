@@ -85,8 +85,10 @@ function draftTimingPath(tool) {
   return join(promptlyStorageDir(), `draft-timing-${tool}.json`);
 }
 
-const DRAFT_MIN_MS = 1000;
-const ENGAGEMENT_MIN_MS = 1000;
+const DRAFT_MIN_MS = 500;
+const ENGAGEMENT_MIN_MS = 500;
+const RESPONSE_LATENCY_MIN_MS = 500;
+const HOOK_TRACE_MAX_LINES = 200;
 const DRAFT_MAX_MS = 1_800_000;
 
 function loadDraftTimingSessions(tool) {
@@ -493,35 +495,99 @@ function appendModelVariant(base, variant) {
   return { model_label: label.slice(0, 120), model_bucket: bucket };
 }
 
-function recordPendingSubmit(tool, sessionId, meta) {
-  const sid = String(sessionId || "").trim();
-  if (!sid) return;
+function primarySessionId(input, tool) {
+  if (tool === "cursor") {
+    return String(input?.conversation_id || input?.session_id || input?.sessionId || "").trim();
+  }
+  return String(input?.session_id || input?.conversation_id || input?.sessionId || "").trim();
+}
+
+function hookSessionLookupIds(input, tool) {
+  const ids = [];
+  const seen = new Set();
+  const add = (value) => {
+    const sid = String(value || "").trim();
+    if (!sid || seen.has(sid)) return;
+    seen.add(sid);
+    ids.push(sid);
+  };
+  if (tool === "cursor") {
+    add(input?.conversation_id);
+    add(input?.session_id);
+    add(input?.sessionId);
+    const generationId = String(input?.generation_id || "").trim();
+    if (generationId) add(`gen:${generationId}`);
+  } else {
+    add(input?.session_id);
+    add(input?.conversation_id);
+    add(input?.sessionId);
+  }
+  return ids;
+}
+
+function recordPendingSubmit(tool, input, meta) {
+  const primary = primarySessionId(input, tool);
+  const ids = hookSessionLookupIds(input, tool);
+  const keys = primary ? [primary, ...ids.filter((id) => id !== primary)] : ids;
+  if (!keys.length) return;
   const data = readJson(pendingSubmitsPath(tool), { pending: {} });
   const pending = data.pending && typeof data.pending === "object" ? data.pending : {};
-  pending[sid] = { at: Date.now(), ...meta };
+  const entry = { at: Date.now(), primary_id: primary || keys[0], ...meta };
+  for (const key of keys) {
+    pending[key] = entry;
+  }
   writeJson(pendingSubmitsPath(tool), { pending });
 }
 
-function consumePendingSubmit(tool, sessionId) {
-  const sid = String(sessionId || "").trim();
-  if (!sid) return null;
+function peekPendingSubmit(tool, input) {
+  const ids = hookSessionLookupIds(input, tool);
+  const primary = primarySessionId(input, tool);
+  if (primary && !ids.includes(primary)) ids.unshift(primary);
+  const pending = readJson(pendingSubmitsPath(tool), { pending: {} }).pending || {};
+  for (const id of ids) {
+    if (pending[id]) return pending[id];
+  }
+  return null;
+}
+
+function consumePendingSubmit(tool, input) {
+  const ids = hookSessionLookupIds(input, tool);
+  const primary = primarySessionId(input, tool);
+  if (primary && !ids.includes(primary)) ids.unshift(primary);
+  if (!ids.length) return null;
   const data = readJson(pendingSubmitsPath(tool), { pending: {} });
   const pending = data.pending && typeof data.pending === "object" ? data.pending : {};
-  const entry = pending[sid] || null;
-  if (entry) {
-    delete pending[sid];
-    writeJson(pendingSubmitsPath(tool), { pending });
+  let entry = null;
+  for (const id of ids) {
+    if (pending[id]) {
+      entry = pending[id];
+      break;
+    }
   }
+  if (!entry) return null;
+  const primaryKey = entry.primary_id || ids.find((id) => pending[id] === entry) || ids[0];
+  for (const [key, value] of Object.entries(pending)) {
+    if (value === entry || value?.primary_id === primaryKey || key === primaryKey) {
+      delete pending[key];
+    }
+  }
+  writeJson(pendingSubmitsPath(tool), { pending });
   return entry;
 }
 
-function patchQueuedSendLatency(tool, sessionId, latencyMs) {
-  const sid = String(sessionId || "").trim();
-  if (!sid || !latencyMs) return false;
+function patchQueuedSendLatency(tool, sessionIds, latencyMs) {
+  if (!latencyMs) return false;
+  const ids = new Set(
+    (Array.isArray(sessionIds) ? sessionIds : [sessionIds])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+  );
+  if (!ids.size) return false;
   const events = loadQueue(tool);
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const event = events[i];
-    if (event?.interaction_kind === "send" && event._session_id === sid) {
+    const sid = String(event?._session_id || "").trim();
+    if (event?.interaction_kind === "send" && sid && ids.has(sid)) {
       event.host_response_latency_ms = latencyMs;
       delete event._session_id;
       saveQueue(tool, events);
@@ -529,6 +595,34 @@ function patchQueuedSendLatency(tool, sessionId, latencyMs) {
     }
   }
   return false;
+}
+
+function hookTracePath(tool) {
+  return join(promptlyStorageDir(), `hook-trace-${tool}.jsonl`);
+}
+
+function traceHook(tool, input, event, note) {
+  try {
+    const path = hookTracePath(tool);
+    const line =
+      JSON.stringify({
+        at: Date.now(),
+        event: resolveHookEventName(input),
+        session: primarySessionId(input, tool) || null,
+        lookup_ids: hookSessionLookupIds(input, tool),
+        result: event?.interaction_kind || null,
+        note: note || null
+      }) + "\n";
+    mkdirSync(dirname(path), { recursive: true });
+    let existing = "";
+    if (existsSync(path)) {
+      existing = readFileSync(path, "utf8");
+    }
+    const lines = (existing + line).split("\n").filter(Boolean);
+    writeFileSync(path, `${lines.slice(-HOOK_TRACE_MAX_LINES).join("\n")}\n`, "utf8");
+  } catch {
+    /* tracing must never break hooks */
+  }
 }
 
 function migrateLegacyCredentials(tool) {
@@ -583,7 +677,7 @@ function enqueueEvent(tool, event) {
 }
 
 function isDuplicateSend(tool, input, event) {
-  const sid = String(input?.session_id || input?.conversation_id || input?.sessionId || "").trim() || "_";
+  const sid = primarySessionId(input, tool) || "_";
   const key = `${sid}:${event.composer_word_estimate}:${event.composer_char_estimate}`;
   const now = Date.now();
   const data = readJson(recentSendsPath(tool), { entries: [] });
@@ -857,6 +951,45 @@ function hookEventName(input) {
   ).toLowerCase();
 }
 
+function resolveHookEventName(input) {
+  const explicit = hookEventName(input);
+  if (explicit) return explicit;
+  if (!input || typeof input !== "object") return "";
+  const hasPrompt = typeof input.prompt === "string" && input.prompt.length > 0;
+  if (hasPrompt) return "beforesubmitprompt";
+  const hasStopStatus = typeof input.status === "string" && typeof input.loop_count === "number";
+  if (hasStopStatus) return "stop";
+  if (typeof input.text === "string" && input.text.length > 0 && !hasPrompt) {
+    return "afteragentresponse";
+  }
+  if (
+    typeof input.last_assistant_message === "string" ||
+    input.stop_hook_active === true ||
+    input.stopHookActive === true
+  ) {
+    return "stop";
+  }
+  if (typeof input.duration_ms === "number" || typeof input.durationMs === "number") {
+    return "sessionend";
+  }
+  if (typeof input.reason === "string" && (input.session_id || input.conversation_id)) {
+    return "sessionend";
+  }
+  return "";
+}
+
+function isResponseEndPayload(input, eventName = resolveHookEventName(input)) {
+  const name = String(eventName || "").toLowerCase();
+  if (name.includes("afteragentresponse")) return true;
+  if (name.includes("stop") && !name.includes("subagent")) return true;
+  if (typeof input?.status === "string" && typeof input?.loop_count === "number") return true;
+  if (typeof input?.last_assistant_message === "string" && input.last_assistant_message.length > 0) {
+    return true;
+  }
+  if (input?.stop_hook_active === true || input?.stopHookActive === true) return true;
+  return false;
+}
+
 function hookModelToken(input) {
   const raw =
     input?.model ??
@@ -903,10 +1036,13 @@ function isClaudeCodeHostPayload(input) {
 }
 
 function isCodexHostPayload(input) {
-  const event = hookEventName(input);
-  if (event.includes("userpromptsubmit") || event.includes("beforesubmitprompt")) return true;
+  const event = resolveHookEventName(input);
+  if (event.includes("userpromptsubmit")) return true;
   if ((event === "stop" || event.endsWith(".stop")) && input?.session_id) {
     if (typeof input?.loop_count !== "number") return true;
+  }
+  if (typeof input?.last_assistant_message === "string" || input?.stop_hook_active === true) {
+    return true;
   }
   const model = hookModelToken(input);
   if (/^(gpt-|o[0-9]|codex)/.test(model)) return true;
@@ -916,7 +1052,7 @@ function isCodexHostPayload(input) {
 }
 
 function isPromptSubmitPayload(input) {
-  const event = hookEventName(input);
+  const event = resolveHookEventName(input);
   if (event.includes("userpromptsubmit") || event.includes("beforesubmitprompt")) return true;
   const hasPrompt = typeof input?.prompt === "string" && input.prompt.length > 0;
   const hasSessionEnd =
@@ -955,10 +1091,13 @@ function stopStatusAccepted(status) {
   );
 }
 
-function buildStopTelemetryEvent(tool, sessionId, agentAccountEmail, modelMeta, now = Date.now()) {
-  const pending = consumePendingSubmit(tool, sessionId);
+function buildStopTelemetryEvent(tool, input, agentAccountEmail, modelMeta, now = Date.now()) {
+  const pending = consumePendingSubmit(tool, input);
   if (!pending?.at) return null;
-  const latencyMs = Math.min(1_800_000, Math.max(500, now - pending.at));
+  const latencyMs = Math.min(
+    1_800_000,
+    Math.max(RESPONSE_LATENCY_MIN_MS, now - pending.at)
+  );
   return {
     tool,
     interaction_kind: "response_latency",
@@ -968,6 +1107,20 @@ function buildStopTelemetryEvent(tool, sessionId, agentAccountEmail, modelMeta, 
     model_label: modelMeta.model_label || pending?.model_label || null,
     model_bucket: modelMeta.model_bucket || pending?.model_bucket || "unknown"
   };
+}
+
+function emitResponseEndEvents(tool, input, agentAccountEmail, modelMeta, now = Date.now()) {
+  const sessionId = primarySessionId(input, tool);
+  const lookupIds = hookSessionLookupIds(input, tool);
+  if (sessionId) {
+    markDraftWindowStart(tool, sessionId, now);
+  }
+  const event = buildStopTelemetryEvent(tool, input, agentAccountEmail, modelMeta, now);
+  if (!event) {
+    return { event: null, patched: false };
+  }
+  const patched = patchQueuedSendLatency(tool, lookupIds, event.host_response_latency_ms);
+  return { event, patched };
 }
 
 function hookPayloadMatchesTool(input, tool) {
@@ -996,14 +1149,10 @@ function hookEventToTelemetry(input, tool) {
   if (!hookPayloadMatchesTool(input, tool)) return null;
   if (!input || typeof input !== "object") return null;
   const now = Date.now();
-  const sessionId = String(
-    input.session_id || input.conversation_id || input.sessionId || ""
-  ).trim();
+  const sessionId = primarySessionId(input, tool);
   const agentAccountEmail = resolveAgentAccountEmail(input, tool);
   const modelMeta = buildModelMeta(input, tool);
-  const eventName = String(
-    input.hook_event_name || input.hookEventName || input.event || input.hook || ""
-  ).toLowerCase();
+  const eventName = resolveHookEventName(input);
 
   const hasPrompt = typeof input.prompt === "string" && input.prompt.length > 0;
   const hasSessionEnd =
@@ -1047,14 +1196,11 @@ function hookEventToTelemetry(input, tool) {
     return null;
   }
 
-  if (eventName.includes("afteragentresponse")) {
-    return buildStopTelemetryEvent(tool, sessionId, agentAccountEmail, modelMeta, now);
-  }
-
-  if ((eventName.includes("stop") && !eventName.includes("subagent")) || hasStopStatus) {
-    if (stopStatusAccepted(input.status)) {
-      return buildStopTelemetryEvent(tool, sessionId, agentAccountEmail, modelMeta, now);
+  if (isResponseEndPayload(input, eventName)) {
+    if (hasStopStatus && !stopStatusAccepted(input.status)) {
+      return null;
     }
+    // Response latency is assembled in cmdHook so pending is consumed once.
     return null;
   }
 
@@ -1091,23 +1237,22 @@ async function cmdHook(flags) {
   if (event?.interaction_kind === "send" && isDuplicateSend(tool, input, event)) {
     event = null;
   }
-  const sessionId = String(
-    input?.session_id || input?.conversation_id || input?.sessionId || ""
-  ).trim();
-  const hookName = String(
-    input?.hook_event_name || input?.hookEventName || input?.event || input?.hook || ""
-  ).toLowerCase();
+  const sessionId = primarySessionId(input, tool);
+  const hookName = resolveHookEventName(input);
   if (hookName.includes("sessionstart") && sessionId) {
     markSessionStarted(tool, sessionId);
   }
-  const isResponseEndHook =
-    isStopHookName(hookName) || hookName.includes("afteragentresponse");
-  if (isResponseEndHook && sessionId) {
-    markDraftWindowStart(tool, sessionId);
-    if (!event || event.interaction_kind === "send") {
-      const agentAccountEmail = resolveAgentAccountEmail(input, tool);
-      const modelMeta = buildModelMeta(input, tool);
-      event = buildStopTelemetryEvent(tool, sessionId, agentAccountEmail, modelMeta);
+  if (isResponseEndPayload(input, hookName)) {
+    const agentAccountEmail = resolveAgentAccountEmail(input, tool);
+    const modelMeta = buildModelMeta(input, tool);
+    const response = emitResponseEndEvents(tool, input, agentAccountEmail, modelMeta);
+    if (response.event) {
+      event = response.event;
+    } else if (!event || event.interaction_kind === "send") {
+      event = null;
+    }
+    if (response.patched && !response.event) {
+      traceHook(tool, input, null, "patched_send_latency_only");
     }
   }
   if (event) {
@@ -1128,7 +1273,7 @@ async function cmdHook(flags) {
           )
         );
       }
-      recordPendingSubmit(tool, sessionId, {
+      recordPendingSubmit(tool, input, {
         agent_account_email: event.agent_account_email || null,
         model_label: event.model_label || null,
         model_bucket: event.model_bucket || "unknown"
@@ -1144,6 +1289,7 @@ async function cmdHook(flags) {
     }
     enqueueEvent(tool, event);
   }
+  traceHook(tool, input, event, event ? null : "no_event_emitted");
   const clientHeader = flags.client || TOOL_CLIENT[tool];
   try {
     await flushQueue(tool, clientHeader);
@@ -1232,14 +1378,163 @@ function cmdOpenLogin(flags) {
   console.log(`${base}/auth/integrations?tool=${tool}`);
 }
 
+function explainHookSample(input, tool) {
+  if (!input) return { event: null, reason: "empty_input" };
+  if (!hookPayloadMatchesTool(input, tool)) {
+    return { event: null, reason: "payload_rejected_for_tool" };
+  }
+  const eventName = resolveHookEventName(input);
+  const sessionId = primarySessionId(input, tool);
+  if (isResponseEndPayload(input, eventName)) {
+    const lookupIds = hookSessionLookupIds(input, tool);
+    const pendingEntry = peekPendingSubmit(tool, input);
+    if (!pendingEntry?.at) {
+      return {
+        event: null,
+        reason: "response_end_without_pending_submit",
+        event_name: eventName,
+        session_id: sessionId || null,
+        lookup_ids: lookupIds
+      };
+    }
+    const agentAccountEmail = resolveAgentAccountEmail(input, tool);
+    const modelMeta = buildModelMeta(input, tool);
+    const latencyMs = Math.min(
+      1_800_000,
+      Math.max(RESPONSE_LATENCY_MIN_MS, Date.now() - pendingEntry.at)
+    );
+    return {
+      event: {
+        tool,
+        interaction_kind: "response_latency",
+        host_response_latency_ms: latencyMs,
+        client_occurred_ms: Date.now(),
+        agent_account_email: agentAccountEmail || pendingEntry.agent_account_email || null,
+        model_label: modelMeta.model_label || pendingEntry.model_label || null,
+        model_bucket: modelMeta.model_bucket || pendingEntry.model_bucket || "unknown"
+      },
+      reason: "response_end_with_pending",
+      event_name: eventName,
+      session_id: sessionId || null
+    };
+  }
+  const event = hookEventToTelemetry(input, tool);
+  if (event) {
+    return { event, reason: "mapped", event_name: eventName, session_id: sessionId || null };
+  }
+  if (eventName.includes("sessionstart")) {
+    return { event: null, reason: "session_start_lifecycle_only", event_name: eventName };
+  }
+  return { event: null, reason: "unclassified_or_below_threshold", event_name: eventName, session_id: sessionId || null };
+}
+
+function auditInstalledHooks(tool) {
+  const paths = {
+    cursor: [
+      join(homedir(), ".cursor/plugins/local/promptly-cursor/hooks/hooks.json"),
+      join(homedir(), "integrations/cursor/hooks/hooks.json")
+    ],
+    codex: [
+      join(homedir(), "integrations/codex/hooks/hooks.json")
+    ],
+    claude_code: [join(homedir(), "integrations/claude-code/hooks/hooks.json")]
+  };
+  const required = {
+    cursor: ["beforeSubmitPrompt", "afterAgentResponse", "stop"],
+    codex: ["UserPromptSubmit", "Stop"],
+    claude_code: ["UserPromptSubmit", "Stop"]
+  };
+  const out = [];
+  for (const filePath of paths[tool] || []) {
+    if (!existsSync(filePath)) {
+      out.push({ path: filePath, exists: false, ok: false });
+      continue;
+    }
+    const raw = readFileSync(filePath, "utf8");
+    const missing = (required[tool] || []).filter((key) => !raw.includes(`"${key}"`));
+    out.push({
+      path: filePath,
+      exists: true,
+      ok: missing.length === 0,
+      missing_hooks: missing
+    });
+  }
+  return out;
+}
+
+function simulateHookFlow(tool) {
+  const sessionId = `sim-${tool}-${Date.now()}`;
+  const now = Date.now();
+  const submitInput =
+    tool === "codex"
+      ? {
+          hook_event_name: "UserPromptSubmit",
+          session_id: sessionId,
+          turn_id: "turn-1",
+          prompt: "diagnostics simulate prompt",
+          model: "gpt-5.4"
+        }
+      : {
+          hook_event_name: "beforeSubmitPrompt",
+          conversation_id: sessionId,
+          generation_id: `gen-${now}`,
+          prompt: "diagnostics simulate prompt",
+          model: "composer-2.5"
+        };
+  const responseInput =
+    tool === "codex"
+      ? {
+          hook_event_name: "Stop",
+          session_id: sessionId,
+          model: "gpt-5.4",
+          last_assistant_message: "done"
+        }
+      : {
+          hook_event_name: "afterAgentResponse",
+          conversation_id: sessionId,
+          generation_id: `gen-${now}`,
+          text: "done",
+          model: "composer-2.5"
+        };
+  markSessionStarted(tool, sessionId);
+  markDraftWindowStart(tool, sessionId, now - 5000);
+  const send = hookEventToTelemetry(submitInput, tool);
+  recordPendingSubmit(tool, submitInput, {
+    agent_account_email: send?.agent_account_email || null,
+    model_label: send?.model_label || null,
+    model_bucket: send?.model_bucket || "unknown"
+  });
+  const draftMs = consumeDraftDurationMs(tool, sessionId);
+  const response = emitResponseEndEvents(
+    tool,
+    responseInput,
+    send?.agent_account_email || null,
+    { model_label: send?.model_label || null, model_bucket: send?.model_bucket || "unknown" },
+    now
+  );
+  return {
+    session_id: sessionId,
+    send,
+    drafting_ms: draftMs,
+    response: response.event,
+    patched_send_latency: response.patched
+  };
+}
+
 function cmdDiagnostics(flags) {
   const tool = normalizeTool(flags.tool) || "cursor";
   const sessionId = "promptly-diagnostics-session";
   const samples = [
     { label: "sessionStart", input: { hook_event_name: "sessionStart", session_id: sessionId } },
     {
-      label: "beforeSubmitPrompt",
-      input: { hook_event_name: "beforeSubmitPrompt", session_id: sessionId, prompt: "diagnostics hello" }
+      label: "beforeSubmitPrompt (cursor)",
+      input: {
+        hook_event_name: "beforeSubmitPrompt",
+        conversation_id: sessionId,
+        generation_id: "gen-diagnostics",
+        prompt: "diagnostics hello",
+        model: "composer-2.5"
+      }
     },
     {
       label: "UserPromptSubmit (codex)",
@@ -1256,40 +1551,80 @@ function cmdDiagnostics(flags) {
       input: {
         hook_event_name: "afterAgentResponse",
         conversation_id: sessionId,
-        text: "done"
+        text: "done",
+        model: "composer-2.5"
+      }
+    },
+    {
+      label: "Stop (codex)",
+      input: {
+        hook_event_name: "Stop",
+        session_id: sessionId,
+        model: "gpt-5.4",
+        last_assistant_message: "done"
       }
     },
     {
       label: "stop (cursor success)",
-      input: { hook_event_name: "stop", session_id: sessionId, status: "success", loop_count: 1 }
+      input: {
+        hook_event_name: "stop",
+        conversation_id: sessionId,
+        status: "success",
+        loop_count: 1,
+        model: "composer-2.5"
+      }
     },
-    { label: "Stop (codex/claude)", input: { hook_event_name: "Stop", session_id: sessionId } }
+    {
+      label: "inferred afterAgentResponse (no hook_event_name)",
+      input: { conversation_id: sessionId, text: "done", model: "composer-2.5" }
+    },
+    {
+      label: "inferred codex Stop (no hook_event_name)",
+      input: { session_id: sessionId, model: "gpt-5.4", last_assistant_message: "done" }
+    }
   ];
-  console.log(
-    JSON.stringify(
-      {
-        tool,
-        hook_samples: samples.map((sample) => ({
-          label: sample.label,
-          event: hookEventToTelemetry(sample.input, tool)
-        }))
-      },
-      null,
-      2
-    )
-  );
-  console.log(
-    "\nLocal state:\n" +
-      JSON.stringify(
-        {
-          pending: readJson(pendingSubmitsPath(tool), { pending: {} }).pending,
-          draft_timing: loadDraftTimingSessions(tool),
-          queue_depth: loadQueue(tool).length
-        },
-        null,
-        2
-      )
-  );
+  const pending = readJson(pendingSubmitsPath(tool), { pending: {} }).pending || {};
+  const pendingEntries = Object.entries(pending);
+  const output = {
+    tool,
+    hooks_audit: auditInstalledHooks(tool),
+    hook_samples: samples.map((sample) => ({
+      label: sample.label,
+      ...explainHookSample(sample.input, tool)
+    })),
+    simulate: flags.simulate ? simulateHookFlow(tool) : undefined,
+    local_state: {
+      pending_count: pendingEntries.length,
+      pending_orphans: pendingEntries.map(([key, value]) => ({
+        key,
+        age_s: value?.at ? Math.round((Date.now() - value.at) / 1000) : null,
+        primary_id: value?.primary_id || null
+      })),
+      draft_timing: loadDraftTimingSessions(tool),
+      queue_depth: loadQueue(tool).length,
+      recent_trace: (() => {
+        const path = hookTracePath(tool);
+        if (!existsSync(path)) return [];
+        return readFileSync(path, "utf8")
+          .trim()
+          .split("\n")
+          .slice(-8)
+          .map((line) => {
+            try {
+              return JSON.parse(line);
+            } catch {
+              return { raw: line };
+            }
+          });
+      })()
+    },
+    notes: [
+      "response_end_without_pending_submit means the assistant finished hook ran without a matching prompt submit — usually missing afterAgentResponse/Stop hooks or session id mismatch.",
+      "pending_orphans that grow after each prompt mean response-end hooks are not firing; reinstall the plugin pack.",
+      "Run with --simulate to exercise submit → draft → response on a fake session."
+    ]
+  };
+  console.log(JSON.stringify(output, null, 2));
 }
 
 async function cmdTestSend(flags) {
