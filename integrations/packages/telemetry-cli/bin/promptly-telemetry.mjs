@@ -85,6 +85,25 @@ function agentSessionMetaPath(tool) {
   return join(promptlyStorageDir(), `agent-session-meta-${tool}.json`);
 }
 
+function lastKnownAgentEmailPath(tool) {
+  return join(promptlyStorageDir(), `last-agent-email-${tool}.json`);
+}
+
+function readLastKnownAgentEmail(tool) {
+  const data = readJson(lastKnownAgentEmailPath(tool), null);
+  const email = normalizeAgentEmail(data?.email);
+  if (!email) return null;
+  const updatedAt = Number(data?.updated_at || 0);
+  if (!updatedAt || Date.now() - updatedAt > SESSION_MODEL_TTL_MS) return null;
+  return email;
+}
+
+function rememberLastKnownAgentEmail(tool, email) {
+  const normalized = normalizeAgentEmail(email);
+  if (!normalized) return;
+  writeJson(lastKnownAgentEmailPath(tool), { email: normalized, updated_at: Date.now() });
+}
+
 let codexConfigCache = null;
 
 function decodeJwtEmail(token) {
@@ -163,6 +182,46 @@ function readCodexAgentEmail() {
   return null;
 }
 
+function claudeConfigPaths() {
+  const configDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
+  return {
+    stateJson: join(homedir(), ".claude.json"),
+    credentialsJson: join(configDir, ".credentials.json")
+  };
+}
+
+function readClaudeCodeAgentEmail() {
+  try {
+    const { stateJson, credentialsJson } = claudeConfigPaths();
+    const state = readJson(stateJson, null);
+    const oauthEmail = state?.oauthAccount?.emailAddress;
+    if (typeof oauthEmail === "string") {
+      const email = normalizeAgentEmail(oauthEmail);
+      if (email) return email;
+    }
+    const creds = readJson(credentialsJson, null);
+    if (creds && typeof creds === "object") {
+      for (const key of ["email", "emailAddress", "account_email", "login"]) {
+        const email = normalizeAgentEmail(creds[key]);
+        if (email) return email;
+      }
+      for (const value of Object.values(creds)) {
+        if (typeof value === "string" && value.includes(".")) {
+          const email = decodeJwtEmail(value);
+          if (email) return email;
+        }
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+function readCursorAgentEmailFromEnv() {
+  return normalizeAgentEmail(process.env.CURSOR_USER_EMAIL);
+}
+
 function loadAgentSessionMeta(tool) {
   const data = readJson(agentSessionMetaPath(tool), { sessions: {} });
   return data && typeof data.sessions === "object" ? data.sessions : {};
@@ -202,6 +261,9 @@ function extractAgentAccountEmail(input, tool) {
     input?.anthropic_email,
     input?.anthropicEmail
   ];
+  if (tool === "cursor") {
+    candidates.unshift(process.env.CURSOR_USER_EMAIL);
+  }
   for (const candidate of candidates) {
     const email = normalizeAgentEmail(candidate);
     if (email) return email;
@@ -211,17 +273,29 @@ function extractAgentAccountEmail(input, tool) {
   const cached = agentSessionMeta(tool, sessionId);
   if (cached?.agent_account_email) return cached.agent_account_email;
 
+  if (tool === "claude_code") {
+    return readClaudeCodeAgentEmail();
+  }
   if (tool === "codex") {
     return readCodexAgentEmail();
+  }
+  if (tool === "cursor") {
+    return readCursorAgentEmailFromEnv();
   }
   return null;
 }
 
 function resolveAgentAccountEmail(input, tool) {
-  const email = extractAgentAccountEmail(input, tool);
+  let email = extractAgentAccountEmail(input, tool);
+  if (!email) {
+    email = readLastKnownAgentEmail(tool);
+  }
   const sessionId = input?.session_id ?? input?.conversation_id ?? input?.sessionId;
-  if (email && sessionId) {
-    cacheAgentSessionMeta(tool, sessionId, { agent_account_email: email });
+  if (email) {
+    rememberLastKnownAgentEmail(tool, email);
+    if (sessionId) {
+      cacheAgentSessionMeta(tool, sessionId, { agent_account_email: email });
+    }
   }
   return email;
 }

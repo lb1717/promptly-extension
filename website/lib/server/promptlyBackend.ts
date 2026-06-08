@@ -1439,6 +1439,7 @@ export type AccountIdeStatsPayload = {
   end_day: string;
   totals: {
     prompts: IdeToolCounts;
+    prompts_without_agent_email: IdeToolCounts;
     screen_time_minutes: IdeToolCounts;
     engagement_minutes: {
       drafting: number;
@@ -1570,6 +1571,7 @@ export async function getAccountIdeUsageStats(
   }
 
   const promptTotals = emptyIdeToolCounts();
+  const promptsWithoutAgentEmail = emptyIdeToolCounts();
   const screenTotals = emptyIdeToolCounts();
   const engagementTotalsMs = { drafting: 0, waiting: 0, reading_idle: 0 };
   const agentEmailsByTool: Record<PromptlyIdeTool, Set<string>> = {
@@ -1685,6 +1687,9 @@ export async function getAccountIdeUsageStats(
 
     row.sends[tool] += 1;
     promptTotals[tool] += 1;
+    if (!agentEmail) {
+      promptsWithoutAgentEmail[tool] += 1;
+    }
 
     const mb = String(raw.modelBucket ?? raw.model_bucket ?? "unknown")
       .trim()
@@ -1776,6 +1781,7 @@ export async function getAccountIdeUsageStats(
     end_day: endDay,
     totals: {
       prompts: promptTotals,
+      prompts_without_agent_email: promptsWithoutAgentEmail,
       screen_time_minutes: {
         claude_code: msToStatMinutes(screenTotals.claude_code),
         cursor: msToStatMinutes(screenTotals.cursor),

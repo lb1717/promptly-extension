@@ -127,6 +127,7 @@ type IdeStatsPayload = {
   granularity: "day" | "week";
   totals: {
     prompts: { claude_code: number; cursor: number; codex: number };
+    prompts_without_agent_email?: { claude_code: number; cursor: number; codex: number };
     screen_time_minutes: { claude_code: number; cursor: number; codex: number };
     engagement_minutes: { drafting: number; waiting: number; reading_idle: number };
   };
@@ -177,6 +178,7 @@ function emptyIdeStats(days: number, granularity: "day" | "week"): IdeStatsPaylo
     granularity,
     totals: {
       prompts: { claude_code: 0, cursor: 0, codex: 0 },
+      prompts_without_agent_email: { claude_code: 0, cursor: 0, codex: 0 },
       screen_time_minutes: { claude_code: 0, cursor: 0, codex: 0 },
       engagement_minutes: { drafting: 0, waiting: 0, reading_idle: 0 }
     },
@@ -2107,8 +2109,8 @@ export function StatisticsClient() {
             <div className="mb-2">
               <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-ink">All My Active Accounts</h3>
               <p className="mt-1 text-[11px] text-muted">
-                Agent login emails detected from your coding tools in this date range. Toggle to filter charts
-                below — at least one account must stay selected per agent.
+                Login emails detected per app (not your Promptly billing account). Cursor and Claude Code are
+                separate — using Claude inside Cursor counts under Cursor, not Claude Code.
               </p>
             </div>
 
@@ -2121,6 +2123,7 @@ export function StatisticsClient() {
                 const agentEmails = ideStats?.agent_emails_by_tool?.[agent.key] ?? [];
                 const selectedEmails = selectedEmailsByTool[agent.key];
                 const latency = displayIdeStats?.response_latency_by_tool?.[agent.key];
+                const unattributed = displayIdeStats?.totals.prompts_without_agent_email?.[agent.key] ?? 0;
                 return (
                   <div
                     key={agent.key}
@@ -2183,6 +2186,20 @@ export function StatisticsClient() {
                           );
                         })}
                       </div>
+                    ) : prompts > 0 ? (
+                      <p className="mt-3 text-[10px] text-muted">
+                        No login email detected for {agent.label} in this range yet.
+                        {unattributed > 0
+                          ? ` ${unattributed.toLocaleString()} prompt${unattributed === 1 ? "" : "s"} lack an email tag.`
+                          : null}{" "}
+                        Re-run install from integrations, send a new prompt, then refresh.
+                      </p>
+                    ) : null}
+                    {agentEmails.length && unattributed > 0 ? (
+                      <p className="mt-2 text-[10px] text-faint">
+                        {unattributed.toLocaleString()} prompt{unattributed === 1 ? "" : "s"} in range have no
+                        email tag (older telemetry or hook did not report an account).
+                      </p>
                     ) : null}
                   </div>
                 );
