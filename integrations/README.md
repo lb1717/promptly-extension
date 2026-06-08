@@ -1,6 +1,6 @@
 # Promptly IDE agent integrations
 
-Connect **Claude Code**, **Cursor**, and **Codex** to your Promptly account. Track prompt counts and screen time (metadata only — no prompt bodies).
+Connect **Claude Code**, **Cursor**, and **Codex** to your Promptly account. Track prompt counts and screen time (metadata only — no prompt bodies). Use **`/promptly`** in the agent chat to rewrite a draft prompt (improve mode) before you send it.
 
 ## Architecture
 
@@ -55,6 +55,12 @@ node "$HOME/integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs" logi
 Or use the Promptly MCP tool `promptly_login` after enabling the plugin MCP server.
 
 Credentials are stored per tool in `~/.promptly/credentials-<tool>.json`. You can pair **Claude Code, Cursor, and Codex on the same computer** — run `login --tool …` once per agent (three separate pairing codes). Tracking stays separate per tool.
+
+## Improve a prompt (`/promptly`)
+
+After pairing, type **`/promptly`** in Cursor, Codex, or Claude Code (MCP prompts). Enter your draft when prompted — Promptly rewrites it in **improve** mode and inserts the improved text as your message. Review it, then send.
+
+Requires the Promptly MCP server from the plugin bundle (installed with the coding-agent zip). Uses the same account credits as the browser extension.
 
 ## Local development
 

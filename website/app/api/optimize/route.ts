@@ -16,7 +16,7 @@ import {
   optimizePrompt,
   parseOptimizeTelemetryFromPayload,
   recordOptimizeTelemetryEventSafe,
-  requirePromptlyUser,
+  requirePromptlyOptimizeUser,
   weeklyTokenLimitFromDaily
 } from "@/lib/server/promptlyBackend";
 import { resolveOptimizeEngineMode } from "@/lib/server/promptOptimizeEngine";
@@ -30,7 +30,7 @@ export async function OPTIONS(request: Request) {
 export async function POST(request: Request) {
   const origin = request.headers.get("Origin");
   try {
-    const auth = await requirePromptlyUser(request);
+    const auth = await requirePromptlyOptimizeUser(request);
     const payload = await request.json().catch(() => null);
     if (!payload || typeof payload !== "object") {
       return NextResponse.json(

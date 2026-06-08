@@ -67,6 +67,13 @@ export function Step({
 }
 
 function LiveTrackingStep({ n, tool, os }: { n: number; tool: IdeToolId; os: OsId }) {
+  const improveHint = (
+    <p className="mt-2">
+      To improve a draft before sending, type <code className="text-ink">/promptly</code> in chat and enter your draft
+      when prompted.
+    </p>
+  );
+
   if (tool === "codex") {
     return (
       <Step n={n} title="Trust hooks" where="cursor_app" whereLabel="Codex">
@@ -77,6 +84,7 @@ function LiveTrackingStep({ n, tool, os }: { n: number; tool: IdeToolId; os: OsI
           </li>
           <li>Send a prompt — check Statistics → Coding agents.</li>
         </ol>
+        {improveHint}
       </Step>
     );
   }
@@ -86,6 +94,7 @@ function LiveTrackingStep({ n, tool, os }: { n: number; tool: IdeToolId; os: OsI
       <Step n={n} title="Allow hooks" where="claude_code">
         <p>Send any prompt in Claude Code. If a popup asks about Promptly hooks, click <strong className="text-ink">Allow</strong>.</p>
         <p className="mt-2">Check Statistics → Coding agents to confirm it&apos;s tracking.</p>
+        {improveHint}
       </Step>
     );
   }
@@ -99,6 +108,7 @@ function LiveTrackingStep({ n, tool, os }: { n: number; tool: IdeToolId; os: OsI
         <li>Allow Promptly hooks if asked.</li>
         <li>Send a prompt in Agent or Composer.</li>
       </ol>
+      {improveHint}
     </Step>
   );
 }

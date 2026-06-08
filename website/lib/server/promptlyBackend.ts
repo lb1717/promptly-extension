@@ -3295,6 +3295,26 @@ export async function requirePromptlyUser(request: Request): Promise<{
   throw new Error("Missing Firebase auth token");
 }
 
+/** Extension (Firebase) or IDE agent (device token) auth for POST /api/optimize. */
+export async function requirePromptlyOptimizeUser(request: Request): Promise<{
+  ok: true;
+  user: PromptlyUser;
+  clientHeader: string;
+  deviceTool: PromptlyIdeTool | null;
+}> {
+  const clientHeader = String(request.headers.get("x-promptly-client") || "")
+    .trim()
+    .toLowerCase();
+  if (clientHeader === REQUIRED_CLIENT_HEADER) {
+    const auth = await requirePromptlyUser(request);
+    return { ok: true, user: auth.user, clientHeader, deviceTool: null };
+  }
+  if (IDE_CLIENT_HEADERS.has(clientHeader)) {
+    return requireIdeTelemetryUser(request);
+  }
+  throw new Error("Missing or invalid x-promptly-client header");
+}
+
 /** Website-only routes (/account, billing): Firebase ID token in Authorization or x-promptly-firebase-token. */
 export async function requireWebFirebaseUser(request: Request): Promise<{
   ok: true;

@@ -1,6 +1,6 @@
 {
   "name": "promptly-cursor",
-  "description": "Track prompts and screen time in Cursor with your Promptly account",
+  "description": "Track prompts and screen time in Cursor with your Promptly account. Use /promptly to improve a draft before sending.",
   "version": "1.0.0",
   "author": {
     "name": "Promptly Labs"

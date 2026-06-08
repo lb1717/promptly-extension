@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Minimal Promptly MCP server — connect account and check status.
+ * Promptly MCP server — account pairing, status, and /promptly improve prompt.
  */
 import { createInterface } from "readline";
 import { homedir } from "os";
@@ -8,8 +8,14 @@ import { join } from "path";
 import { readFileSync, existsSync } from "fs";
 
 const DEFAULT_API = process.env.PROMPTLY_API_URL || "https://promptly-labs.com";
-
 const DEFAULT_TOOL = "cursor";
+const OPTIMIZE_TIMEOUT_MS = 45000;
+
+const TOOL_CLIENT = {
+  claude_code: "promptly-claude-code",
+  cursor: "promptly-cursor",
+  codex: "promptly-codex"
+};
 
 function credsPath(tool = DEFAULT_TOOL) {
   return join(homedir(), ".promptly", `credentials-${tool}.json`);
@@ -23,6 +29,14 @@ function readCreds(tool = DEFAULT_TOOL) {
   }
 }
 
+function resolveTool() {
+  const fromEnv = String(process.env.PROMPTLY_TOOL || DEFAULT_TOOL || "").trim();
+  if (fromEnv === "cursor" || fromEnv === "codex" || fromEnv === "claude_code") {
+    return fromEnv;
+  }
+  return "claude_code";
+}
+
 function send(msg) {
   process.stdout.write(JSON.stringify(msg) + "\n");
 }
@@ -31,6 +45,21 @@ function toolResult(text, isError = false) {
   return {
     content: [{ type: "text", text: String(text) }],
     isError
+  };
+}
+
+function promptTextMessage(text) {
+  return {
+    description: "Promptly improved prompt",
+    messages: [
+      {
+        role: "user",
+        content: {
+          type: "text",
+          text: String(text)
+        }
+      }
+    ]
   };
 }
 
@@ -69,9 +98,94 @@ const tools = [
   }
 ];
 
+const prompts = [
+  {
+    name: "promptly",
+    description: "Improve a draft prompt with Promptly before sending it to the agent (rewrite mode only)",
+    arguments: [
+      {
+        name: "prompt",
+        description: "Your draft prompt to rewrite and improve",
+        required: true
+      }
+    ]
+  }
+];
+
+function apiBaseUrl(creds) {
+  const fromEnv = String(process.env.PROMPTLY_API_URL || "").trim();
+  if (fromEnv) {
+    return fromEnv.replace(/\/$/, "");
+  }
+  return String(creds?.api_url || DEFAULT_API).replace(/\/$/, "");
+}
+
+async function optimizePromptViaApi(draft, tool) {
+  const creds = readCreds(tool);
+  if (!creds?.device_token) {
+    const base = apiBaseUrl(null);
+    throw new Error(
+      `Not connected to Promptly. Open ${base}/auth/integrations?tool=${tool}, sign in, copy the pairing code, then run:\nnode integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs login <CODE> --tool ${tool}`
+    );
+  }
+  const apiUrl = apiBaseUrl(creds);
+  const clientHeader = TOOL_CLIENT[tool] || TOOL_CLIENT.claude_code;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), OPTIMIZE_TIMEOUT_MS);
+  let response;
+  try {
+    response = await fetch(`${apiUrl}/api/optimize`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${creds.device_token}`,
+        "x-promptly-client": clientHeader,
+        "x-promptly-live-config": "1"
+      },
+      body: JSON.stringify({
+        prompt: draft,
+        user_instruction: "",
+        optimize_mode: "improve"
+      }),
+      signal: controller.signal
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error("Promptly improve timed out — try again with a shorter draft.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(String(body.error || `Promptly improve failed (${response.status})`));
+  }
+  const optimized = String(body.optimized_prompt || "").trim();
+  if (!optimized) {
+    throw new Error("Promptly returned an empty improved prompt.");
+  }
+  return optimized;
+}
+
+async function handlePromptGet(name, args) {
+  if (name !== "promptly") {
+    throw new Error(`Unknown prompt: ${name}`);
+  }
+  const draft = String(args?.prompt || "").trim();
+  if (!draft) {
+    return promptTextMessage(
+      "Provide your draft prompt as the `prompt` argument when invoking /promptly.\n\nExample: /promptly refactor the auth module to use OAuth2 with refresh tokens"
+    );
+  }
+  const tool = resolveTool();
+  const optimized = await optimizePromptViaApi(draft, tool);
+  return promptTextMessage(optimized);
+}
+
 async function handleToolCall(name, args) {
   if (name === "promptly_connect") {
-    const tool = args?.tool || "claude_code";
+    const tool = args?.tool || resolveTool();
     return toolResult(
       `Open this URL in your browser, sign in, and copy the pairing code:\n${DEFAULT_API.replace(/\/$/, "")}/auth/integrations?tool=${tool}\n\nThen run: promptly-telemetry login <CODE> --tool ${tool}`
     );
@@ -96,7 +210,7 @@ async function handleToolCall(name, args) {
     return toolResult(out.trim() || (r.status === 0 ? "Connected." : "Login failed"), r.status !== 0);
   }
   if (name === "promptly_status") {
-    const c = readCreds();
+    const c = readCreds(resolveTool());
     if (!c?.device_token) {
       return toolResult("Not connected. Use promptly_connect first.");
     }
@@ -124,8 +238,8 @@ rl.on("line", async (line) => {
       id,
       result: {
         protocolVersion: "2024-11-05",
-        capabilities: { tools: {} },
-        serverInfo: { name: "promptly-mcp", version: "1.0.0" }
+        capabilities: { tools: {}, prompts: {} },
+        serverInfo: { name: "promptly-mcp", version: "1.1.0" }
       }
     });
     return;
@@ -143,6 +257,26 @@ rl.on("line", async (line) => {
   if (method === "tools/call") {
     const result = await handleToolCall(params?.name, params?.arguments || {});
     send({ jsonrpc: "2.0", id, result });
+    return;
+  }
+
+  if (method === "prompts/list") {
+    send({ jsonrpc: "2.0", id, result: { prompts } });
+    return;
+  }
+
+  if (method === "prompts/get") {
+    try {
+      const result = await handlePromptGet(params?.name, params?.arguments || {});
+      send({ jsonrpc: "2.0", id, result });
+    } catch (error) {
+      const message = String(error?.message || error);
+      send({
+        jsonrpc: "2.0",
+        id,
+        result: promptTextMessage(message)
+      });
+    }
     return;
   }
 
