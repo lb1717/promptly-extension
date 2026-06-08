@@ -1257,6 +1257,43 @@ export function normalizeIdeActivityEventInput(raw: Record<string, unknown>): Id
     if (!engagementDurationMs) {
       return null;
     }
+    let modelLabelSanitized: string | null = null;
+    const labelRaw =
+      typeof raw.model_label === "string"
+        ? raw.model_label
+        : typeof raw.modelLabel === "string"
+          ? raw.modelLabel
+          : null;
+    if (typeof labelRaw === "string") {
+      const label = String(labelRaw)
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, TELEMETRY_HOST_MODEL_MAX_CHARS);
+      if (!/https?:\/\//i.test(label) && label) {
+        modelLabelSanitized = label;
+      }
+    }
+    let modelBucket = "unknown";
+    const bucketRaw =
+      typeof raw.model_bucket === "string"
+        ? raw.model_bucket
+        : typeof raw.modelBucket === "string"
+          ? raw.modelBucket
+          : null;
+    if (typeof bucketRaw === "string" && bucketRaw.trim()) {
+      modelBucket = String(bucketRaw)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 48) || "unknown";
+    } else if (modelLabelSanitized) {
+      modelBucket =
+        modelLabelSanitized
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+          .slice(0, 48) || "unknown";
+    }
     let clientOccurredMs = Date.now();
     const com = raw.client_occurred_ms ?? raw.clientOccurredMs;
     if (typeof com === "number" && Number.isFinite(com)) {
@@ -1267,8 +1304,8 @@ export function normalizeIdeActivityEventInput(raw: Record<string, unknown>): Id
       interactionKind,
       composerCharEstimate: null,
       composerWordEstimate: null,
-      modelLabelSanitized: null,
-      modelBucket: "unknown",
+      modelLabelSanitized,
+      modelBucket,
       hostResponseLatencyMs: null,
       engagementCategory,
       engagementDurationMs,
@@ -1446,6 +1483,10 @@ export type AccountIdeStatsPayload = {
       waiting: number;
       reading_idle: number;
     };
+    engagement_minutes_by_tool: Record<
+      PromptlyIdeTool,
+      { drafting: number; waiting: number; reading_idle: number }
+    >;
   };
   prompt_timeline: Array<{
     bucket: string;
@@ -1475,7 +1516,16 @@ export type AccountIdeStatsPayload = {
     prompts: number;
     avg_response_ms: number | null;
     response_samples: number;
+    avg_words: number | null;
+    word_samples: number;
+    avg_draft_ms: number | null;
+    draft_samples: number;
   }>;
+  draft_timing_by_tool: Record<
+    PromptlyIdeTool,
+    { avg_draft_ms: number | null; samples: number }
+  >;
+  avg_words_by_tool: Record<PromptlyIdeTool, { avg_words: number | null; samples: number }>;
   agent_emails_by_tool: Record<PromptlyIdeTool, string[]>;
   response_latency_by_tool: Record<
     PromptlyIdeTool,
@@ -1574,6 +1624,14 @@ export async function getAccountIdeUsageStats(
   const promptsWithoutAgentEmail = emptyIdeToolCounts();
   const screenTotals = emptyIdeToolCounts();
   const engagementTotalsMs = { drafting: 0, waiting: 0, reading_idle: 0 };
+  const engagementMsByTool: Record<
+    PromptlyIdeTool,
+    { drafting: number; waiting: number; reading_idle: number }
+  > = {
+    claude_code: { drafting: 0, waiting: 0, reading_idle: 0 },
+    cursor: { drafting: 0, waiting: 0, reading_idle: 0 },
+    codex: { drafting: 0, waiting: 0, reading_idle: 0 }
+  };
   const agentEmailsByTool: Record<PromptlyIdeTool, Set<string>> = {
     claude_code: new Set(),
     cursor: new Set(),
@@ -1593,8 +1651,16 @@ export async function getAccountIdeUsageStats(
       prompts: number;
       latencyTotalMs: number;
       latencySamples: number;
+      wordTotal: number;
+      wordSamples: number;
+      draftTotalMs: number;
+      draftSamples: number;
     }
   >();
+  const draftSegmentCountByTool: IdeToolCounts = emptyIdeToolCounts();
+  const draftTotalMsByTool: IdeToolCounts = { claude_code: 0, cursor: 0, codex: 0 };
+  const wordTotalByTool: IdeToolCounts = { claude_code: 0, cursor: 0, codex: 0 };
+  const wordSamplesByTool: IdeToolCounts = emptyIdeToolCounts();
 
   const readEventAgentEmail = (raw: Record<string, unknown>): string | null =>
     normalizeUserEmail(raw.agentAccountEmail ?? raw.agent_account_email);
@@ -1636,6 +1702,7 @@ export async function getAccountIdeUsageStats(
         row.screen_time_ms[tool] += hlMs;
         screenTotals[tool] += hlMs;
         engagementTotalsMs.waiting += hlMs;
+        engagementMsByTool[tool].waiting += hlMs;
         responseLatencyByTool[tool].push(hlMs);
 
         const mb = String(raw.modelBucket ?? raw.model_bucket ?? "unknown")
@@ -1653,7 +1720,11 @@ export async function getAccountIdeUsageStats(
           label,
           prompts: 0,
           latencyTotalMs: 0,
-          latencySamples: 0
+          latencySamples: 0,
+          wordTotal: 0,
+          wordSamples: 0,
+          draftTotalMs: 0,
+          draftSamples: 0
         };
         modelPrev.latencyTotalMs += hlMs;
         modelPrev.latencySamples += 1;
@@ -1682,6 +1753,40 @@ export async function getAccountIdeUsageStats(
         row.screen_time_ms[tool] += durMs;
         screenTotals[tool] += durMs;
         engagementTotalsMs[cat] += durMs;
+        engagementMsByTool[tool][cat] += durMs;
+        if (cat === "drafting") {
+          draftSegmentCountByTool[tool] += 1;
+          draftTotalMsByTool[tool] += durMs;
+          const mb = String(raw.modelBucket ?? raw.model_bucket ?? "unknown")
+            .trim()
+            .slice(0, 48) || "unknown";
+          const labelRaw = raw.modelLabelSanitized ?? raw.model_label ?? raw.modelLabel;
+          const label =
+            typeof labelRaw === "string" && labelRaw.trim() && !/https?:\/\//i.test(labelRaw)
+              ? String(labelRaw).replace(/\s+/g, " ").trim().slice(0, 120)
+              : null;
+          if (mb !== "unknown") {
+            const modelKey = `${tool}:${mb}`;
+            const modelPrev = modelBucketAgg.get(modelKey) || {
+              tool,
+              bucket: mb,
+              label,
+              prompts: 0,
+              latencyTotalMs: 0,
+              latencySamples: 0,
+              wordTotal: 0,
+              wordSamples: 0,
+              draftTotalMs: 0,
+              draftSamples: 0
+            };
+            modelPrev.draftTotalMs += durMs;
+            modelPrev.draftSamples += 1;
+            if (!modelPrev.label && label) {
+              modelPrev.label = label;
+            }
+            modelBucketAgg.set(modelKey, modelPrev);
+          }
+        }
       }
       continue;
     }
@@ -1707,11 +1812,23 @@ export async function getAccountIdeUsageStats(
       label,
       prompts: 0,
       latencyTotalMs: 0,
-      latencySamples: 0
+      latencySamples: 0,
+      wordTotal: 0,
+      wordSamples: 0,
+      draftTotalMs: 0,
+      draftSamples: 0
     };
     modelPrev.prompts += 1;
     if (!modelPrev.label && label) {
       modelPrev.label = label;
+    }
+    const wordsRaw = raw.composerWordEstimate ?? raw.composer_word_estimate;
+    if (typeof wordsRaw === "number" && Number.isFinite(wordsRaw)) {
+      const words = Math.min(12000, Math.max(1, Math.floor(wordsRaw)));
+      modelPrev.wordTotal += words;
+      modelPrev.wordSamples += 1;
+      wordTotalByTool[tool] += words;
+      wordSamplesByTool[tool] += 1;
     }
     modelBucketAgg.set(modelKey, modelPrev);
 
@@ -1723,6 +1840,7 @@ export async function getAccountIdeUsageStats(
       row.screen_time_ms[tool] += hlMs;
       screenTotals[tool] += hlMs;
       engagementTotalsMs.waiting += hlMs;
+      engagementMsByTool[tool].waiting += hlMs;
       responseLatencyByTool[tool].push(hlMs);
       modelPrev.latencyTotalMs += hlMs;
       modelPrev.latencySamples += 1;
@@ -1792,7 +1910,21 @@ export async function getAccountIdeUsageStats(
         drafting: msToStatMinutes(engagementTotalsMs.drafting),
         waiting: msToStatMinutes(engagementTotalsMs.waiting),
         reading_idle: msToStatMinutes(engagementTotalsMs.reading_idle)
-      }
+      },
+      engagement_minutes_by_tool: (["claude_code", "cursor", "codex"] as PromptlyIdeTool[]).reduce(
+        (acc, tool) => {
+          acc[tool] = {
+            drafting: msToStatMinutes(engagementMsByTool[tool].drafting),
+            waiting: msToStatMinutes(engagementMsByTool[tool].waiting),
+            reading_idle: msToStatMinutes(engagementMsByTool[tool].reading_idle)
+          };
+          return acc;
+        },
+        {} as Record<
+          PromptlyIdeTool,
+          { drafting: number; waiting: number; reading_idle: number }
+        >
+      )
     },
     prompt_timeline: sortedBuckets.map((row) => ({
       bucket: row.bucket_day,
@@ -1828,7 +1960,7 @@ export async function getAccountIdeUsageStats(
       last_seen_at_ms: connectedByTool[tool].lastSeen
     })),
     model_buckets: [...modelBucketAgg.values()]
-      .filter((row) => row.prompts > 0)
+      .filter((row) => row.prompts > 0 || row.draftSamples > 0 || row.wordSamples > 0)
       .sort((a, b) => b.prompts - a.prompts || a.tool.localeCompare(b.tool))
       .map((row) => ({
         tool: row.tool,
@@ -1837,8 +1969,36 @@ export async function getAccountIdeUsageStats(
         prompts: row.prompts,
         avg_response_ms:
           row.latencySamples > 0 ? Math.round(row.latencyTotalMs / row.latencySamples) : null,
-        response_samples: row.latencySamples
+        response_samples: row.latencySamples,
+        avg_words: row.wordSamples > 0 ? Math.round((row.wordTotal / row.wordSamples) * 10) / 10 : null,
+        word_samples: row.wordSamples,
+        avg_draft_ms:
+          row.draftSamples > 0 ? Math.round(row.draftTotalMs / row.draftSamples) : null,
+        draft_samples: row.draftSamples
       })),
+    draft_timing_by_tool: (["claude_code", "cursor", "codex"] as PromptlyIdeTool[]).reduce(
+      (acc, tool) => {
+        const samples = draftSegmentCountByTool[tool];
+        acc[tool] = {
+          avg_draft_ms:
+            samples > 0 ? Math.round(draftTotalMsByTool[tool] / samples) : null,
+          samples
+        };
+        return acc;
+      },
+      {} as Record<PromptlyIdeTool, { avg_draft_ms: number | null; samples: number }>
+    ),
+    avg_words_by_tool: (["claude_code", "cursor", "codex"] as PromptlyIdeTool[]).reduce(
+      (acc, tool) => {
+        const samples = wordSamplesByTool[tool];
+        acc[tool] = {
+          avg_words: samples > 0 ? Math.round((wordTotalByTool[tool] / samples) * 10) / 10 : null,
+          samples
+        };
+        return acc;
+      },
+      {} as Record<PromptlyIdeTool, { avg_words: number | null; samples: number }>
+    ),
     agent_emails_by_tool: {
       claude_code: [...agentEmailsByTool.claude_code].sort(),
       cursor: [...agentEmailsByTool.cursor].sort(),

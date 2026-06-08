@@ -129,7 +129,15 @@ type IdeStatsPayload = {
     prompts: { claude_code: number; cursor: number; codex: number };
     prompts_without_agent_email?: { claude_code: number; cursor: number; codex: number };
     screen_time_minutes: { claude_code: number; cursor: number; codex: number };
-    engagement_minutes: { drafting: number; waiting: number; reading_idle: number };
+    engagement_minutes: {
+      drafting: number;
+      waiting: number;
+      reading_idle: number;
+    };
+    engagement_minutes_by_tool: Record<
+      IdeToolKey,
+      { drafting: number; waiting: number; reading_idle: number }
+    >;
   };
   prompt_timeline: Array<{
     bucket: string;
@@ -155,7 +163,16 @@ type IdeStatsPayload = {
     prompts: number;
     avg_response_ms: number | null;
     response_samples: number;
+    avg_words: number | null;
+    word_samples: number;
+    avg_draft_ms: number | null;
+    draft_samples: number;
   }>;
+  draft_timing_by_tool: Record<
+    IdeToolKey,
+    { avg_draft_ms: number | null; samples: number }
+  >;
+  avg_words_by_tool: Record<IdeToolKey, { avg_words: number | null; samples: number }>;
   agent_emails_by_tool: { claude_code: string[]; cursor: string[]; codex: string[] };
   response_latency_by_tool: Record<
     string,
@@ -180,7 +197,12 @@ function emptyIdeStats(days: number, granularity: "day" | "week"): IdeStatsPaylo
       prompts: { claude_code: 0, cursor: 0, codex: 0 },
       prompts_without_agent_email: { claude_code: 0, cursor: 0, codex: 0 },
       screen_time_minutes: { claude_code: 0, cursor: 0, codex: 0 },
-      engagement_minutes: { drafting: 0, waiting: 0, reading_idle: 0 }
+      engagement_minutes: { drafting: 0, waiting: 0, reading_idle: 0 },
+      engagement_minutes_by_tool: {
+        claude_code: { drafting: 0, waiting: 0, reading_idle: 0 },
+        cursor: { drafting: 0, waiting: 0, reading_idle: 0 },
+        codex: { drafting: 0, waiting: 0, reading_idle: 0 }
+      }
     },
     prompt_timeline: tl.map((row) => ({
       bucket: row.bucket,
@@ -200,6 +222,16 @@ function emptyIdeStats(days: number, granularity: "day" | "week"): IdeStatsPaylo
     })),
     connected_tools: [],
     model_buckets: [],
+    draft_timing_by_tool: {
+      claude_code: { avg_draft_ms: null, samples: 0 },
+      cursor: { avg_draft_ms: null, samples: 0 },
+      codex: { avg_draft_ms: null, samples: 0 }
+    },
+    avg_words_by_tool: {
+      claude_code: { avg_words: null, samples: 0 },
+      cursor: { avg_words: null, samples: 0 },
+      codex: { avg_words: null, samples: 0 }
+    },
     agent_emails_by_tool: { claude_code: [], cursor: [], codex: [] },
     response_latency_by_tool: {
       claude_code: { avg_ms: null, samples: 0, p50_ms: null },
@@ -1064,11 +1096,7 @@ function ServiceEngagementDonut({
               stroke="#FAF8F4"
               strokeWidth={2}
               label={hasSlices ? renderEngagementPiePercentLabel : false}
-              labelLine={
-                hasSlices
-                  ? { stroke: "#8A837A", strokeWidth: 1 }
-                  : false
-              }
+              labelLine={false}
             >
               {chartData.map((entry, index) => (
                 <Cell key={`${entry.name}-${index}`} fill={entry.fill} fillOpacity={hasSlices ? 0.95 : 0.3} />
@@ -1442,6 +1470,63 @@ export function StatisticsClient() {
     return (displayIdeStats?.model_buckets ?? []).some(
       (row) => row.prompts > 0 && row.bucket !== "unknown" && row.bucket !== "test-send"
     );
+  }, [displayIdeStats]);
+
+  const ideEngagementByToolRows = useMemo(() => {
+    const byTool = displayIdeStats?.totals.engagement_minutes_by_tool;
+    if (!byTool) return [];
+    return IDE_AGENT_CARDS.map((agent) => {
+      const row = byTool[agent.key];
+      const drafting = row?.drafting ?? 0;
+      const waiting = row?.waiting ?? 0;
+      const reading = row?.reading_idle ?? 0;
+      return {
+        agent: agent.label,
+        key: agent.key,
+        drafting,
+        waiting,
+        reading,
+        has_data: drafting + waiting + reading > 0
+      };
+    }).filter((row) => row.has_data);
+  }, [displayIdeStats]);
+
+  const ideAvgWordsChartRows = useMemo(() => {
+    return (displayIdeStats?.model_buckets ?? [])
+      .filter(
+        (row) =>
+          row.word_samples > 0 &&
+          row.bucket !== "unknown" &&
+          row.bucket !== "test-send" &&
+          (row.avg_words ?? 0) > 0
+      )
+      .slice(0, 10)
+      .map((row) => ({
+        label: formatIdeModelLabel(row),
+        tool: IDE_AGENT_LABELS[row.tool] ?? row.tool,
+        avg_words: row.avg_words ?? 0,
+        key: `${row.tool}:${row.bucket}`
+      }));
+  }, [displayIdeStats]);
+
+  const ideDraftResponseChartRows = useMemo(() => {
+    return IDE_AGENT_CARDS.map((agent) => {
+      const draft = displayIdeStats?.draft_timing_by_tool?.[agent.key];
+      const response = displayIdeStats?.response_latency_by_tool?.[agent.key];
+      const avgDraftS =
+        typeof draft?.avg_draft_ms === "number" ? Math.round((draft.avg_draft_ms / 1000) * 10) / 10 : null;
+      const avgResponseS =
+        typeof response?.avg_ms === "number" ? Math.round((response.avg_ms / 1000) * 10) / 10 : null;
+      return {
+        agent: agent.label,
+        key: agent.key,
+        avg_draft_s: avgDraftS ?? 0,
+        avg_response_s: avgResponseS ?? 0,
+        draft_missing: avgDraftS === null,
+        response_missing: avgResponseS === null,
+        has_data: (draft?.samples ?? 0) > 0 || (response?.samples ?? 0) > 0
+      };
+    }).filter((row) => row.has_data);
   }, [displayIdeStats]);
 
   const latencyChartRows = useMemo(() => {
@@ -1907,8 +1992,30 @@ export function StatisticsClient() {
                   <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
                   <YAxis stroke="#8A8A8A" allowDecimals={false} width={32} tick={CHART_Y_TICK} />
                   <Tooltip
-                    contentStyle={CHART_TOOLTIP_STYLE}
                     cursor={{ fill: "rgba(255,255,255,0.04)" }}
+                    content={({ active, payload, label }) => {
+                      if (!active || !payload?.length) return null;
+                      const items = payload.filter((entry) => entry.dataKey !== "volume_trend");
+                      if (!items.length) return null;
+                      return (
+                        <div style={CHART_TOOLTIP_STYLE}>
+                          {label ? (
+                            <p className="mb-1.5 text-xs font-semibold text-ink">{label}</p>
+                          ) : null}
+                          <div className="space-y-1">
+                            {items.map((entry) => (
+                              <p
+                                key={String(entry.dataKey)}
+                                className="text-xs tabular-nums"
+                                style={{ color: entry.color ?? "#1F1B16" }}
+                              >
+                                {entry.name}: {entry.value}
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    }}
                   />
                   <Legend wrapperStyle={CHART_LEGEND_STYLE} />
                   {PROMPT_VOLUME_AI_FILTERS.filter((f) => promptVolumeAiFilters[f.key]).map((filter, index, visible) => (
@@ -2273,6 +2380,114 @@ export function StatisticsClient() {
                   </div>
                 </div>
 
+                {ideEngagementByToolRows.length ||
+                ideAvgWordsChartRows.length ||
+                ideDraftResponseChartRows.length ? (
+                  <div className="space-y-6 rounded-xl border border-line bg-white/60 p-4">
+                    <div>
+                      <h3 className="text-xs font-semibold uppercase tracking-wide text-faint">
+                        Prompt &amp; time insights
+                      </h3>
+                      <p className="mt-1 text-[11px] text-muted">
+                        Draft time is estimated from when the AI finishes until your next prompt. Prompt length is a
+                        word count at submit (metadata only — never the full text).
+                      </p>
+                    </div>
+
+                    {ideEngagementByToolRows.length ? (
+                      <div>
+                        <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                          Time per agent (minutes)
+                        </h4>
+                        <div className="h-56 w-full statistics-charts sm:h-64">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={ideEngagementByToolRows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="#E0DDD6" />
+                              <XAxis dataKey="agent" tick={CHART_Y_TICK} />
+                              <YAxis tick={CHART_Y_TICK} allowDecimals />
+                              <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
+                              <Legend wrapperStyle={CHART_LEGEND_STYLE} />
+                              <Bar dataKey="drafting" name="Drafting" stackId="time" fill={COLOR_DRAFTING} />
+                              <Bar dataKey="waiting" name="Waiting for AI" stackId="time" fill={COLOR_NATIVE_WEB} />
+                              <Bar
+                                dataKey="reading"
+                                name="Reading / idle"
+                                stackId="time"
+                                fill={COLOR_READING_IDLE}
+                                radius={[2, 2, 0, 0]}
+                              />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {ideDraftResponseChartRows.length ? (
+                      <div>
+                        <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                          Average draft vs response time (seconds)
+                        </h4>
+                        <div className="h-52 w-full statistics-charts">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <BarChart
+                              data={ideDraftResponseChartRows}
+                              margin={{ top: 8, right: 8, bottom: 0, left: 0 }}
+                            >
+                              <CartesianGrid strokeDasharray="3 3" stroke="#E0DDD6" />
+                              <XAxis dataKey="agent" tick={CHART_Y_TICK} />
+                              <YAxis tick={CHART_Y_TICK} unit="s" />
+                              <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
+                              <Legend wrapperStyle={CHART_LEGEND_STYLE} />
+                              <Bar dataKey="avg_draft_s" name="Avg draft" fill={COLOR_DRAFTING} radius={[4, 4, 0, 0]} />
+                              <Bar
+                                dataKey="avg_response_s"
+                                name="Avg response"
+                                fill={COLOR_NATIVE_WEB}
+                                radius={[4, 4, 0, 0]}
+                              />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {ideAvgWordsChartRows.length ? (
+                      <div>
+                        <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                          Average prompt length (words)
+                        </h4>
+                        <div
+                          className="w-full statistics-charts"
+                          style={{ height: Math.max(160, ideAvgWordsChartRows.length * 36 + 48) }}
+                        >
+                          <ResponsiveContainer width="100%" height="100%">
+                            <BarChart
+                              data={ideAvgWordsChartRows}
+                              layout="vertical"
+                              margin={{ top: 4, right: 12, bottom: 4, left: 4 }}
+                              barCategoryGap="20%"
+                            >
+                              <CartesianGrid strokeDasharray="3 3" stroke="#E0DDD6" horizontal={false} />
+                              <XAxis type="number" tick={CHART_Y_TICK} allowDecimals />
+                              <YAxis
+                                type="category"
+                                dataKey="label"
+                                width={120}
+                                tick={{ ...CHART_Y_TICK, fontSize: 9 }}
+                              />
+                              <Tooltip
+                                contentStyle={CHART_TOOLTIP_STYLE}
+                                formatter={(value: number) => [`${value} words`, "Avg length"]}
+                              />
+                              <Bar dataKey="avg_words" name="Avg words" fill="#7c3aed" radius={[0, 4, 4, 0]} barSize={14} />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
                 {IDE_AGENT_CARDS.map((agent) => {
                   const toolRows = ideModelsByTool.get(agent.key) ?? [];
                   const toolTotal = displayIdeStats?.totals.prompts[agent.key] ?? 0;
@@ -2289,6 +2504,7 @@ export function StatisticsClient() {
                               <th className="px-4 py-2 font-semibold">Model</th>
                               <th className="px-4 py-2 font-semibold">Prompts</th>
                               <th className="px-4 py-2 font-semibold">Share</th>
+                              <th className="px-4 py-2 font-semibold">Avg words</th>
                               <th className="px-4 py-2 font-semibold">Avg response</th>
                             </tr>
                           </thead>
@@ -2302,6 +2518,9 @@ export function StatisticsClient() {
                                   </td>
                                   <td className="px-4 py-2 tabular-nums text-ink">{row.prompts.toLocaleString()}</td>
                                   <td className="px-4 py-2 tabular-nums text-muted">{share}%</td>
+                                  <td className="px-4 py-2 tabular-nums text-muted">
+                                    {row.avg_words != null ? row.avg_words.toLocaleString() : "—"}
+                                  </td>
                                   <td className="px-4 py-2 tabular-nums text-muted">
                                     {formatResponseMs(row.avg_response_ms)}
                                   </td>

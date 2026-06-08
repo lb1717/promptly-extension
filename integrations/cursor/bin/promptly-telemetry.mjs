@@ -81,6 +81,71 @@ function pendingSubmitsPath(tool) {
   return join(promptlyStorageDir(), `pending-submits-${tool}.json`);
 }
 
+function draftTimingPath(tool) {
+  return join(promptlyStorageDir(), `draft-timing-${tool}.json`);
+}
+
+const DRAFT_MIN_MS = 2000;
+const DRAFT_MAX_MS = 1_800_000;
+
+function loadDraftTimingSessions(tool) {
+  const data = readJson(draftTimingPath(tool), { sessions: {} });
+  return data.sessions && typeof data.sessions === "object" ? data.sessions : {};
+}
+
+function saveDraftTimingSessions(tool, sessions) {
+  const pruned = Object.fromEntries(
+    Object.entries(sessions)
+      .sort((a, b) => (b[1]?.updated_at || 0) - (a[1]?.updated_at || 0))
+      .slice(0, MAX_SESSION_MODELS)
+  );
+  writeJson(draftTimingPath(tool), { sessions: pruned });
+}
+
+function markDraftWindowStart(tool, sessionId, atMs = Date.now()) {
+  const sid = String(sessionId || "").trim();
+  if (!sid) return;
+  const sessions = loadDraftTimingSessions(tool);
+  const prev = sessions[sid] && typeof sessions[sid] === "object" ? sessions[sid] : {};
+  sessions[sid] = { ...prev, draft_window_start_ms: atMs, updated_at: atMs };
+  saveDraftTimingSessions(tool, sessions);
+}
+
+function markSessionStarted(tool, sessionId, atMs = Date.now()) {
+  const sid = String(sessionId || "").trim();
+  if (!sid) return;
+  const sessions = loadDraftTimingSessions(tool);
+  sessions[sid] = { draft_window_start_ms: atMs, session_started_ms: atMs, updated_at: atMs };
+  saveDraftTimingSessions(tool, sessions);
+}
+
+function consumeDraftDurationMs(tool, sessionId, atMs = Date.now()) {
+  const sid = String(sessionId || "").trim();
+  if (!sid) return null;
+  const sessions = loadDraftTimingSessions(tool);
+  const entry = sessions[sid];
+  const start = entry?.draft_window_start_ms ?? entry?.session_started_ms;
+  if (!start) return null;
+  const ms = atMs - start;
+  sessions[sid] = { ...entry, draft_window_start_ms: null, updated_at: atMs };
+  saveDraftTimingSessions(tool, sessions);
+  if (ms < DRAFT_MIN_MS || ms > DRAFT_MAX_MS) return null;
+  return Math.floor(ms);
+}
+
+function buildDraftingSegment(tool, sessionId, draftMs, agentAccountEmail, modelMeta) {
+  return {
+    tool,
+    interaction_kind: "engagement_segment",
+    engagement_category: "drafting",
+    duration_ms: draftMs,
+    client_occurred_ms: Date.now(),
+    agent_account_email: agentAccountEmail || null,
+    model_label: modelMeta?.model_label || null,
+    model_bucket: modelMeta?.model_bucket || "unknown"
+  };
+}
+
 function agentSessionMetaPath(tool) {
   return join(promptlyStorageDir(), `agent-session-meta-${tool}.json`);
 }
@@ -1001,16 +1066,46 @@ async function cmdHook(flags) {
   if (event?.interaction_kind === "send" && isDuplicateSend(tool, input, event)) {
     event = null;
   }
+  const sessionId = String(
+    input?.session_id || input?.conversation_id || input?.sessionId || ""
+  ).trim();
+  const hookName = String(
+    input?.hook_event_name || input?.hookEventName || input?.event || input?.hook || ""
+  ).toLowerCase();
+  if (hookName.includes("sessionstart") && sessionId) {
+    markSessionStarted(tool, sessionId);
+  }
   if (event) {
-    const sessionId = String(
-      input?.session_id || input?.conversation_id || input?.sessionId || ""
-    ).trim();
     if (event.interaction_kind === "send" && sessionId) {
+      const draftMs = consumeDraftDurationMs(tool, sessionId);
+      if (draftMs) {
+        enqueueEvent(
+          tool,
+          buildDraftingSegment(
+            tool,
+            sessionId,
+            draftMs,
+            event.agent_account_email,
+            {
+              model_label: event.model_label,
+              model_bucket: event.model_bucket
+            }
+          )
+        );
+      }
       recordPendingSubmit(tool, sessionId, {
         agent_account_email: event.agent_account_email || null,
         model_label: event.model_label || null,
         model_bucket: event.model_bucket || "unknown"
       });
+    }
+    if (
+      sessionId &&
+      (event.interaction_kind === "response_latency" ||
+        (event.interaction_kind === "engagement_segment" &&
+          (event.engagement_category === "waiting" || event.engagement_category === "reading_idle")))
+    ) {
+      markDraftWindowStart(tool, sessionId);
     }
     if (event.interaction_kind === "response_latency" && sessionId) {
       if (patchQueuedSendLatency(tool, sessionId, event.host_response_latency_ms)) {
