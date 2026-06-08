@@ -47,23 +47,23 @@ export function loginCommandPowerShell(tool: string, code: string): string {
   return `${telemetryCliPowerShell()} login --tool ${tool} ${code}`;
 }
 
-export function statusCommand(os: OsId): string {
-  return `${telemetryCli(os)} status`;
+export function statusCommand(os: OsId, tool: IdeToolId): string {
+  return `${telemetryCli(os)} status --tool ${tool}`;
 }
 
-export function statusCommandPowerShell(): string {
-  return `${telemetryCliPowerShell()} status`;
+export function statusCommandPowerShell(tool: IdeToolId): string {
+  return `${telemetryCliPowerShell()} status --tool ${tool}`;
 }
 
-export function connectCommands(os: OsId, tool: string, code: string): string[] {
+export function connectCommands(os: OsId, tool: IdeToolId, code: string): string[] {
   const login = loginCommand(os, tool, code);
-  const status = statusCommand(os);
+  const status = statusCommand(os, tool);
   return [`${login} && ${status}`];
 }
 
-export function connectCommandsPowerShell(tool: string, code: string): string[] {
+export function connectCommandsPowerShell(tool: IdeToolId, code: string): string[] {
   const login = loginCommandPowerShell(tool, code);
-  const status = statusCommandPowerShell();
+  const status = statusCommandPowerShell(tool);
   return [`${login}; if ($LASTEXITCODE -eq 0) { ${status} }`];
 }
 

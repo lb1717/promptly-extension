@@ -6,6 +6,7 @@ import { createInterface } from "readline";
 import { homedir } from "os";
 import { join } from "path";
 import { readFileSync, existsSync } from "fs";
+import { fileURLToPath } from "url";
 
 const DEFAULT_API = process.env.PROMPTLY_API_URL || "https://promptly-labs.com";
 const DEFAULT_TOOL = process.env.PROMPTLY_TOOL || "claude_code";
@@ -17,24 +18,66 @@ const TOOL_CLIENT = {
   codex: "promptly-codex"
 };
 
-function credsPath(tool = DEFAULT_TOOL) {
+function normalizeTool(raw) {
+  const v = String(raw || "")
+    .trim()
+    .toLowerCase()
+    .replace(/-/g, "_");
+  if (v === "claude_code" || v === "cursor" || v === "codex") return v;
+  return null;
+}
+
+function inferToolFromPathSegment(value) {
+  const lower = String(value || "").toLowerCase();
+  if (lower.includes("promptly-cursor") || lower.includes("/cursor/") || lower.includes("\\cursor\\")) {
+    return "cursor";
+  }
+  if (lower.includes("promptly-codex") || lower.includes("/codex/") || lower.includes("\\codex\\")) {
+    return "codex";
+  }
+  if (
+    lower.includes("promptly-claude") ||
+    lower.includes("claude-code") ||
+    lower.includes("claude_code")
+  ) {
+    return "claude_code";
+  }
+  return null;
+}
+
+function resolveTool() {
+  const fromEnv = normalizeTool(process.env.PROMPTLY_TOOL);
+  if (fromEnv) return fromEnv;
+
+  for (const root of [
+    process.env.PROMPTLY_PLUGIN_ROOT,
+    process.env.CLAUDE_PLUGIN_ROOT,
+    process.env.PLUGIN_ROOT
+  ]) {
+    const inferred = inferToolFromPathSegment(root);
+    if (inferred) return inferred;
+  }
+
+  try {
+    const inferred = inferToolFromPathSegment(fileURLToPath(import.meta.url));
+    if (inferred) return inferred;
+  } catch {
+    /* ignore */
+  }
+
+  return normalizeTool(DEFAULT_TOOL) || "claude_code";
+}
+
+function credsPath(tool) {
   return join(homedir(), ".promptly", `credentials-${tool}.json`);
 }
 
-function readCreds(tool = DEFAULT_TOOL) {
+function readCreds(tool = resolveTool()) {
   try {
     return JSON.parse(readFileSync(credsPath(tool), "utf8"));
   } catch {
     return null;
   }
-}
-
-function resolveTool() {
-  const fromEnv = String(process.env.PROMPTLY_TOOL || DEFAULT_TOOL || "").trim();
-  if (fromEnv === "cursor" || fromEnv === "codex" || fromEnv === "claude_code") {
-    return fromEnv;
-  }
-  return "claude_code";
 }
 
 function send(msg) {
@@ -94,7 +137,12 @@ const tools = [
   {
     name: "promptly_status",
     description: "Check whether Promptly IDE telemetry is connected for this machine",
-    inputSchema: { type: "object", properties: {} }
+    inputSchema: {
+      type: "object",
+      properties: {
+        tool: { type: "string", enum: ["claude_code", "cursor", "codex"] }
+      }
+    }
   }
 ];
 
@@ -125,7 +173,13 @@ async function optimizePromptViaApi(draft, tool) {
   if (!creds?.device_token) {
     const base = apiBaseUrl(null);
     throw new Error(
-      `Not connected to Promptly. Open ${base}/auth/integrations?tool=${tool}, sign in, copy the pairing code, then run:\nnode integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs login <CODE> --tool ${tool}`
+      `Not connected to Promptly for ${tool}. Open ${base}/auth/integrations?tool=${tool}, sign in, copy the pairing code, then run:\nnode integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs login <CODE> --tool ${tool}`
+    );
+  }
+  const credTool = normalizeTool(creds.tool);
+  if (credTool && credTool !== tool) {
+    throw new Error(
+      `Credentials file for ${tool} is paired as ${credTool}. Generate a new code for ${tool} on promptly-labs.com and run login again with --tool ${tool}.`
     );
   }
   const apiUrl = apiBaseUrl(creds);
@@ -185,14 +239,14 @@ async function handlePromptGet(name, args) {
 
 async function handleToolCall(name, args) {
   if (name === "promptly_connect") {
-    const tool = args?.tool || resolveTool();
+    const tool = normalizeTool(args?.tool) || resolveTool();
     return toolResult(
       `Open this URL in your browser, sign in, and copy the pairing code:\n${DEFAULT_API.replace(/\/$/, "")}/auth/integrations?tool=${tool}\n\nThen run: promptly-telemetry login <CODE> --tool ${tool}`
     );
   }
   if (name === "promptly_login") {
     const code = String(args?.code || "").trim();
-    const tool = String(args?.tool || "").trim();
+    const tool = normalizeTool(args?.tool) || resolveTool();
     if (!code || !tool) {
       return toolResult("code and tool are required", true);
     }
@@ -210,11 +264,12 @@ async function handleToolCall(name, args) {
     return toolResult(out.trim() || (r.status === 0 ? "Connected." : "Login failed"), r.status !== 0);
   }
   if (name === "promptly_status") {
-    const c = readCreds(resolveTool());
+    const tool = normalizeTool(args?.tool) || resolveTool();
+    const c = readCreds(tool);
     if (!c?.device_token) {
-      return toolResult("Not connected. Use promptly_connect first.");
+      return toolResult(`Not connected for ${tool}. Use promptly_connect first.`);
     }
-    return toolResult(`Connected as ${c.email || c.uid} (${c.tool})`);
+    return toolResult(`Connected as ${c.email || c.uid} (${c.tool || tool})`);
   }
   return toolResult(`Unknown tool: ${name}`, true);
 }
@@ -239,7 +294,7 @@ rl.on("line", async (line) => {
       result: {
         protocolVersion: "2024-11-05",
         capabilities: { tools: {}, prompts: {} },
-        serverInfo: { name: "promptly-mcp", version: "1.1.0" }
+        serverInfo: { name: "promptly-mcp", version: "1.2.0" }
       }
     });
     return;

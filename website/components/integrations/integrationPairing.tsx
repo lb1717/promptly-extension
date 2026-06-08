@@ -101,6 +101,10 @@ function installSuccessHint(tool: IdeToolId): string {
   return "Promptly installed for Cursor";
 }
 
+function toolStatusSnippet(tool: IdeToolId): string {
+  return `"tool": "${tool}" and "connected": true`;
+}
+
 export function ConnectAccountStep({
   n,
   os,
@@ -173,7 +177,7 @@ export function ConnectAccountStep({
             <StepValidation
               items={[
                 `"${installSuccessHint(tool)}" in the output`,
-                '"connected": true at the end'
+                toolStatusSnippet(tool)
               ]}
             />
           </>

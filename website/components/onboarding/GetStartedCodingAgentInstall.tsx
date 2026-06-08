@@ -26,6 +26,10 @@ const TOOLS: { id: IdeToolId; label: string; bg: string; hooks: string }[] = [
   }
 ];
 
+function toolStatusSnippet(tool: IdeToolId): string {
+  return `"tool": "${tool}" and "connected": true`;
+}
+
 function installSuccessHint(tool: IdeToolId): string {
   if (tool === "claude_code") return "Promptly installed for Claude Code";
   if (tool === "codex") return "Promptly installed for Codex";
@@ -73,7 +77,7 @@ function CodingAgentPanel({
           </p>
           <CopyBlock lines={fullSetupCommands(os, tool, pairCode)} onCopy={() => onCommandCopy?.(tool)} />
           <p className="text-[11px] text-faint">
-            Success: &quot;{installSuccessHint(tool)}&quot; and &quot;connected&quot;: true
+            Success: &quot;{installSuccessHint(tool)}&quot; and {toolStatusSnippet(tool)} in the status JSON
           </p>
         </>
       ) : (

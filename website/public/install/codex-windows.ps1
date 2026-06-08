@@ -41,6 +41,20 @@ if (-not ((codex plugin list) -match "promptly-codex")) {
   exit 1
 }
 
+$CodexPlugin = Join-Path $Integrations "codex"
+Write-Host "-> Verifying Codex plugin configuration..."
+$hooksJson = Get-Content (Join-Path $CodexPlugin "hooks\hooks.json") -Raw
+$mcpJson = Get-Content (Join-Path $CodexPlugin ".mcp.json") -Raw
+if ($hooksJson -notmatch 'hook --tool codex') {
+  Write-Host "Hooks are not configured for Codex (expected --tool codex)"
+  exit 1
+}
+if ($mcpJson -notmatch '"PROMPTLY_TOOL": "codex"') {
+  Write-Host "MCP server is not configured for Codex"
+  exit 1
+}
+Write-Host "Hooks and MCP verified for Codex"
+
 Write-Host ""
 Write-Host "Promptly installed for Codex"
 Write-Host "  You can also install Claude Code and Cursor on this PC - each needs its own install + pairing from promptly-labs.com/integrations."

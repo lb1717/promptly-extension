@@ -61,6 +61,10 @@ ensure_node_mac() {
         echo "✗ npm not found. Reinstall Node.js from https://nodejs.org/"
         exit 1
       fi
+      if ! node -e "process.exit(0)" >/dev/null 2>&1; then
+        echo "✗ Node.js found but not runnable — close Terminal, reopen, and retry."
+        exit 1
+      fi
       echo "✓ Node.js OK"
       return 0
     fi
@@ -109,5 +113,9 @@ ensure_node_mac() {
   fi
 
   node --version
+  if ! node -e "process.exit(0)" >/dev/null 2>&1; then
+    echo "✗ Node.js installed but not runnable — close Terminal, reopen, and retry."
+    exit 1
+  fi
   echo "✓ Node.js OK"
 }

@@ -70,5 +70,10 @@ function Ensure-NodeJs {
   }
 
   node --version
+  node -e "process.exit(0)" 2>$null | Out-Null
+  if (-not $?) {
+    Write-Host "Node.js installed but not runnable - close PowerShell, reopen, and retry."
+    exit 1
+  }
   Write-Host "Node.js OK"
 }

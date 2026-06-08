@@ -503,7 +503,12 @@ async function cmdLogin(flags) {
     api_url: apiUrl,
     connected_at: new Date().toISOString()
   });
-  console.log(`Connected to Promptly as ${body.email || body.uid} (${body.tool})`);
+  const pairedTool = normalizeTool(body.tool) || tool;
+  if (pairedTool !== tool) {
+    console.error(`Warning: server paired as ${pairedTool} but --tool ${tool} was requested.`);
+  }
+  console.log(`Connected to Promptly as ${body.email || body.uid} (${pairedTool})`);
+  console.log(`Verify: promptly-telemetry status --tool ${pairedTool}`);
   console.log(
     `Saved pairing for ${body.tool}. You can pair Claude Code, Cursor, and Codex on the same computer — run login once per agent.`
   );

@@ -34,6 +34,17 @@ if [[ ! -d "${CURSOR_PLUGIN}/.cursor-plugin" ]]; then
   exit 1
 fi
 
+echo "→ Verifying Cursor plugin configuration…"
+if ! grep -q 'hook --tool cursor' "${CURSOR_PLUGIN}/hooks/hooks.json" 2>/dev/null; then
+  echo "✗ Hooks are not configured for Cursor (expected --tool cursor)"
+  exit 1
+fi
+if ! grep -q '"PROMPTLY_TOOL": "cursor"' "${CURSOR_PLUGIN}/mcp.json" 2>/dev/null; then
+  echo "✗ MCP server is not configured for Cursor"
+  exit 1
+fi
+echo "✓ Hooks and MCP verified for Cursor"
+
 echo ""
 echo "✓ Promptly installed for Cursor"
 echo "  You can also install Claude Code and Codex on this Mac — each needs its own install + pairing from promptly-labs.com/integrations."

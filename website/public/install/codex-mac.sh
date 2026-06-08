@@ -44,6 +44,18 @@ if ! codex plugin list 2>/dev/null | grep -q promptly-codex; then
   exit 1
 fi
 
+CODEX_PLUGIN="${INTEGRATIONS}/codex"
+echo "→ Verifying Codex plugin configuration…"
+if ! grep -q 'hook --tool codex' "${CODEX_PLUGIN}/hooks/hooks.json" 2>/dev/null; then
+  echo "✗ Hooks are not configured for Codex (expected --tool codex)"
+  exit 1
+fi
+if ! grep -q '"PROMPTLY_TOOL": "codex"' "${CODEX_PLUGIN}/.mcp.json" 2>/dev/null; then
+  echo "✗ MCP server is not configured for Codex"
+  exit 1
+fi
+echo "✓ Hooks and MCP verified for Codex"
+
 echo ""
 echo "✓ Promptly installed for Codex"
 echo "  You can also install Claude Code and Cursor on this Mac — each needs its own install + pairing from promptly-labs.com/integrations."
