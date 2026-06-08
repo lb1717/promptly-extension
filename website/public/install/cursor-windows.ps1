@@ -4,14 +4,10 @@ $PluginPackUrl = if ($env:PROMPTLY_PLUGIN_PACK_URL) { $env:PROMPTLY_PLUGIN_PACK_
 $Integrations = Join-Path $env:USERPROFILE "integrations"
 $CursorPlugin = Join-Path $env:USERPROFILE ".cursor\plugins\local\promptly-cursor"
 $ZipPath = Join-Path $env:USERPROFILE "promptly.zip"
+$InstallBase = if ($env:PROMPTLY_INSTALL_BASE) { $env:PROMPTLY_INSTALL_BASE } else { "https://promptly-labs.com/install" }
 
-Write-Host "-> Checking Node.js..."
-if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-  Write-Host "Node.js not found. Install Node.js 18+ from https://nodejs.org/ then rerun."
-  exit 1
-}
-node --version
-Write-Host "Node.js OK"
+Invoke-Expression ((Invoke-WebRequest -Uri "$InstallBase/_ensure-node-windows.ps1" -UseBasicParsing).Content)
+Ensure-NodeJs
 
 Write-Host "-> Downloading Promptly plugin pack..."
 Invoke-WebRequest -Uri $PluginPackUrl -OutFile $ZipPath

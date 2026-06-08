@@ -11,6 +11,8 @@ Connect **Claude Code**, **Cursor**, and **Codex** to your Promptly account. Tra
 
 ## Quick install
 
+Install scripts at [promptly-labs.com/install](https://promptly-labs.com/install) check for **Node.js 18+** first and try to install it automatically (Homebrew or official binary on Mac; winget/Chocolatey on Windows) before installing Promptly.
+
 1. Download [promptly-coding-agents.zip](https://promptly-labs.com/downloads/promptly-coding-agents.zip)
 2. Unzip to your user folder (creates `~/integrations` on Mac or `%USERPROFILE%\integrations` on Windows)
 3. Follow [promptly-labs.com/integrations](https://promptly-labs.com/integrations) — pick **Mac** or **Windows** and your coding agent

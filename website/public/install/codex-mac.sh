@@ -3,14 +3,15 @@ set -euo pipefail
 
 PLUGIN_PACK_URL="${PROMPTLY_PLUGIN_PACK_URL:-https://promptly-labs.com/downloads/promptly-coding-agents.zip}"
 INTEGRATIONS="${HOME}/integrations"
+PROMPTLY_INSTALL_BASE="${PROMPTLY_INSTALL_BASE:-https://promptly-labs.com/install}"
 
-echo "→ Checking Node.js…"
-if ! command -v node >/dev/null 2>&1; then
-  echo "✗ Node.js not found. Install Node.js 18+ from https://nodejs.org/ then rerun."
+if ! command -v curl >/dev/null 2>&1; then
+  echo "✗ curl is required. On Mac run: xcode-select --install"
   exit 1
 fi
-node --version
-echo "✓ Node.js OK"
+eval "$(curl -fsSL "${PROMPTLY_INSTALL_BASE}/_ensure-node-mac.sh")"
+ensure_unzip_mac
+ensure_node_mac
 
 export PATH="$(npm prefix -g)/bin:${PATH}"
 
