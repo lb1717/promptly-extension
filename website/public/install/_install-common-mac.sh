@@ -106,6 +106,17 @@ promptly_codex_plugin_reinstall() {
     || codex plugin install promptly-codex@promptly-labs
 }
 
+promptly_sync_codex_plugin_cache() {
+  local src="${HOME}/integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs"
+  local cache_root="${HOME}/.codex/plugins/cache/promptly-labs/promptly-codex"
+  [[ -f "${src}" ]] || return 0
+  for bin_dir in "${cache_root}"/*/bin "${cache_root}"/*/codex/bin; do
+    if [[ -d "${bin_dir}" ]]; then
+      cp "${src}" "${bin_dir}/promptly-telemetry.mjs"
+    fi
+  done
+}
+
 promptly_sync_claude_code_command_files() {
   local plugin_dir="${1:-${HOME}/integrations/claude-code}"
   mkdir -p "${plugin_dir}/commands" "${plugin_dir}/user-commands"
@@ -466,6 +477,7 @@ promptly_install_for_codex() {
   promptly_install_codex_skill "${codex_plugin}" || return 1
   promptly_codex_marketplace_add "${integrations}" || return 1
   promptly_codex_plugin_reinstall || return 1
+  promptly_sync_codex_plugin_cache
   if ! codex plugin list 2>/dev/null | grep -q promptly-codex; then
     echo "✗ Promptly plugin not found in codex plugin list — retry this step"
     return 1
