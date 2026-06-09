@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PLUGIN_PACK_URL="${PROMPTLY_PLUGIN_PACK_URL:-https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.2}"
+PLUGIN_PACK_URL="${PROMPTLY_PLUGIN_PACK_URL:-https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.3}"
 INTEGRATIONS="${HOME}/integrations"
 PROMPTLY_INSTALL_BASE="${PROMPTLY_INSTALL_BASE:-https://promptly-labs.com/install}"
 
@@ -60,7 +60,10 @@ if ((${#FAILED[@]})); then
   echo "  ✗ Failed: ${FAILED[*]}"
 fi
 echo ""
-echo "Next: pair each agent on the integrations page (one pairing code per agent)."
+echo "Next: get ONE pairing code on the integrations page, then:"
+echo "  promptly-telemetry login --tool claude_code YOUR_CODE"
+echo "  promptly-telemetry login --tool cursor --from-sibling"
+echo "  promptly-telemetry login --tool codex --from-sibling"
 echo "  node ${INTEGRATIONS}/packages/telemetry-cli/bin/promptly-telemetry.mjs status"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 

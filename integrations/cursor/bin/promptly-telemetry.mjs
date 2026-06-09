@@ -70,6 +70,130 @@ function credentialsPathForTool(tool) {
   return join(promptlyStorageDir(), `credentials-${tool}.json`);
 }
 
+function devicePrimaryPath() {
+  return join(promptlyStorageDir(), "device-primary.json");
+}
+
+function readDevicePrimary() {
+  const saved = readJson(devicePrimaryPath(), null);
+  if (saved?.uid) return saved;
+  let earliest = null;
+  for (const tool of ALL_TOOLS) {
+    const creds = getCredentials(tool);
+    if (!creds?.uid || !creds?.device_token) continue;
+    const at = String(creds.connected_at || "");
+    if (!earliest || at < earliest.connected_at) {
+      earliest = {
+        uid: creds.uid,
+        email: creds.email || null,
+        connected_at: at || new Date(0).toISOString(),
+        first_tool: tool
+      };
+    }
+  }
+  return earliest;
+}
+
+function writeDevicePrimary(creds, tool) {
+  const existing = readDevicePrimary();
+  if (existing?.uid) return existing;
+  const row = {
+    uid: creds.uid,
+    email: creds.email || null,
+    connected_at: creds.connected_at || new Date().toISOString(),
+    first_tool: tool
+  };
+  writeJson(devicePrimaryPath(), row);
+  return row;
+}
+
+function clearDevicePrimary() {
+  try {
+    if (existsSync(devicePrimaryPath())) {
+      writeFileSync(devicePrimaryPath(), "{}", "utf8");
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function findPairedTool(excludeTool) {
+  for (const tool of ALL_TOOLS) {
+    if (tool === excludeTool) continue;
+    const creds = getCredentials(tool);
+    if (creds?.device_token) return tool;
+  }
+  return null;
+}
+
+function findPairedToolForUid(uid, excludeTool) {
+  for (const tool of ALL_TOOLS) {
+    if (tool === excludeTool) continue;
+    const creds = getCredentials(tool);
+    if (creds?.device_token && creds.uid === uid) return tool;
+  }
+  return null;
+}
+
+function saveCredentialsFromExchange(tool, body, apiUrl) {
+  saveCredentials(tool, {
+    device_token: body.device_token,
+    uid: body.uid,
+    email: body.email,
+    tool: body.tool,
+    api_url: apiUrl,
+    connected_at: new Date().toISOString()
+  });
+}
+
+async function exchangeSiblingTool(apiUrl, anchorTool, targetTool) {
+  const anchorCreds = getCredentials(anchorTool);
+  if (!anchorCreds?.device_token) {
+    throw new Error(`Anchor tool ${anchorTool} is not paired on this computer`);
+  }
+  const res = await fetch(`${apiUrl}/api/integrations/exchange-sibling`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${anchorCreds.device_token}`,
+      "x-promptly-client": TOOL_CLIENT[anchorTool]
+    },
+    body: JSON.stringify({
+      tool: targetTool,
+      device_label: `${targetTool}-${process.platform}`
+    })
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(body.error || `Sibling pairing failed (${res.status})`);
+  }
+  return body;
+}
+
+async function alignToolsToDevicePrimary(apiUrl) {
+  const primary = readDevicePrimary();
+  if (!primary?.uid) return { aligned: [], primary: null };
+  const anchorTool =
+    findPairedToolForUid(primary.uid, null) ||
+    (primary.first_tool && getCredentials(primary.first_tool)?.device_token ? primary.first_tool : null) ||
+    findPairedTool(null);
+  if (!anchorTool) return { aligned: [], primary };
+
+  const aligned = [];
+  for (const tool of ALL_TOOLS) {
+    const creds = getCredentials(tool);
+    if (creds?.device_token && creds.uid === primary.uid) continue;
+    try {
+      const body = await exchangeSiblingTool(apiUrl, anchorTool, tool);
+      saveCredentialsFromExchange(tool, body, apiUrl);
+      aligned.push(tool);
+    } catch (err) {
+      console.error(`[promptly] Could not align ${tool}: ${String(err?.message || err)}`);
+    }
+  }
+  return { aligned, primary };
+}
+
 function queuePathForTool(tool) {
   return join(promptlyStorageDir(), `event-queue-${tool}.json`);
 }
@@ -1428,15 +1552,47 @@ async function cmdHook(flags) {
 async function cmdLogin(flags) {
   const code = String(flags._rest[0] || flags.code || "").trim();
   const tool = normalizeTool(flags.tool);
-  if (!code) {
-    console.error("Usage: promptly-telemetry login --tool claude_code|cursor|codex <CODE>");
-    process.exit(1);
-  }
+  const fromSibling = flags["from-sibling"] === true || flags["from-sibling"] === "true";
+  const resetPrimary = flags["reset-primary"] === true || flags["reset-primary"] === "true";
+  const apiUrl = (flags["api-url"] || DEFAULT_API_URL).replace(/\/$/, "");
+
   if (!tool) {
     console.error("Missing --tool. Usage: promptly-telemetry login --tool codex <CODE>");
     process.exit(1);
   }
-  const apiUrl = (flags["api-url"] || DEFAULT_API_URL).replace(/\/$/, "");
+
+  if (resetPrimary) {
+    clearDevicePrimary();
+  }
+
+  if (fromSibling || (!code && findPairedTool(tool))) {
+    const anchorTool = findPairedTool(tool);
+    if (!anchorTool) {
+      console.error(
+        "No other coding agent is paired on this computer yet. Pair one agent with a code from promptly-labs.com/integrations first."
+      );
+      process.exit(1);
+    }
+    try {
+      const body = await exchangeSiblingTool(apiUrl, anchorTool, tool);
+      saveCredentialsFromExchange(tool, body, apiUrl);
+      const primary = readDevicePrimary() || writeDevicePrimary(getCredentials(tool), tool);
+      console.log(`Connected ${tool} to the same Promptly account as ${anchorTool}: ${body.email || body.uid}`);
+      console.log(`Device primary: ${primary.email || primary.uid} (first paired on this computer)`);
+      console.log(`Verify: promptly-telemetry status --tool ${tool}`);
+      return;
+    } catch (err) {
+      console.error(String(err?.message || err));
+      process.exit(1);
+    }
+  }
+
+  if (!code) {
+    console.error("Usage: promptly-telemetry login --tool claude_code|cursor|codex <CODE>");
+    console.error("       promptly-telemetry login --tool cursor --from-sibling");
+    process.exit(1);
+  }
+
   const res = await fetch(`${apiUrl}/api/integrations/exchange`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1451,23 +1607,70 @@ async function cmdLogin(flags) {
     console.error(body.error || `Exchange failed (${res.status})`);
     process.exit(1);
   }
-  saveCredentials(tool, {
-    device_token: body.device_token,
-    uid: body.uid,
-    email: body.email,
-    tool: body.tool,
-    api_url: apiUrl,
-    connected_at: new Date().toISOString()
-  });
+
+  const primary = resetPrimary ? null : readDevicePrimary();
+  if (primary?.uid && body.uid && body.uid !== primary.uid) {
+    console.error(
+      `This pairing code is for ${body.email || body.uid}, but this computer already sends stats to ${primary.email || primary.uid}.`
+    );
+    console.error(
+      `Use: promptly-telemetry login --tool ${tool} --from-sibling   (no code needed — copies your first Promptly account on this computer)`
+    );
+    console.error(
+      `Or reset the device primary: promptly-telemetry login --tool ${tool} --reset-primary ${code}`
+    );
+    process.exit(1);
+  }
+
+  saveCredentialsFromExchange(tool, body, apiUrl);
   const pairedTool = normalizeTool(body.tool) || tool;
   if (pairedTool !== tool) {
     console.error(`Warning: server paired as ${pairedTool} but --tool ${tool} was requested.`);
   }
+  const devicePrimary = writeDevicePrimary(getCredentials(tool), tool);
+  const alignment = await alignToolsToDevicePrimary(apiUrl);
   console.log(`Connected to Promptly as ${body.email || body.uid} (${pairedTool})`);
+  console.log(`Device primary on this computer: ${devicePrimary.email || devicePrimary.uid}`);
+  if (alignment.aligned.length) {
+    console.log(`Also aligned: ${alignment.aligned.join(", ")}`);
+  }
   console.log(`Verify: promptly-telemetry status --tool ${pairedTool}`);
   console.log(
-    `Saved pairing for ${body.tool}. You can pair Claude Code, Cursor, and Codex on the same computer — run login once per agent.`
+    "Pair other agents with: promptly-telemetry login --tool <cursor|codex|claude_code> --from-sibling"
   );
+}
+
+async function cmdAlignDevice(flags) {
+  const apiUrl = (flags["api-url"] || DEFAULT_API_URL).replace(/\/$/, "");
+  const primary = readDevicePrimary();
+  if (!primary?.uid) {
+    console.error("No device primary yet. Pair one agent with a code from promptly-labs.com/integrations.");
+    process.exit(1);
+  }
+  const alignment = await alignToolsToDevicePrimary(apiUrl);
+  console.log(
+    JSON.stringify(
+      {
+        device_primary: primary,
+        aligned_tools: alignment.aligned,
+        tools: ALL_TOOLS.map((tool) => {
+          const creds = getCredentials(tool);
+          return {
+            tool,
+            connected: Boolean(creds?.device_token),
+            uid: creds?.uid || null,
+            email: creds?.email || null,
+            matches_primary: creds?.uid === primary.uid
+          };
+        })
+      },
+      null,
+      2
+    )
+  );
+  if (!alignment.aligned.length) {
+    console.log("All paired agents already use the same Promptly account on this computer.");
+  }
 }
 
 function cmdStatus(flags) {
@@ -1488,7 +1691,8 @@ function cmdStatus(flags) {
           tool: creds.tool,
           api_url: creds.api_url || DEFAULT_API_URL,
           website_login_hint:
-            "Statistics on promptly-labs.com only show events for the account with this uid/email. Sign in with the same Google/email before checking Statistics.",
+            "Statistics show events for this computer's Promptly account. Sign in on promptly-labs.com with the same email, or run: promptly-telemetry align-device",
+          device_primary: readDevicePrimary(),
           last_flush: lastFlush,
           queue_depth: loadQueue(tool).length,
           recent_trace: (() => {
@@ -1516,17 +1720,29 @@ function cmdStatus(flags) {
 
   const summary = ALL_TOOLS.map((id) => {
     const creds = getCredentials(id);
+    const primary = readDevicePrimary();
     return {
       tool: id,
       connected: Boolean(creds?.device_token),
-      email: creds?.email || null
+      email: creds?.email || null,
+      uid: creds?.uid || null,
+      matches_device_primary: primary?.uid ? creds?.uid === primary.uid : null
     };
   });
   if (!summary.some((row) => row.connected)) {
-    console.log("Not connected. Open https://promptly-labs.com/integrations to get pairing codes.");
+    console.log("Not connected. Open https://promptly-labs.com/integrations to get a pairing code.");
     process.exit(1);
   }
-  console.log(JSON.stringify({ tools: summary }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        device_primary: readDevicePrimary(),
+        tools: summary
+      },
+      null,
+      2
+    )
+  );
 }
 
 function cmdOpenLogin(flags) {
@@ -1850,6 +2066,9 @@ async function main() {
     case "login":
       await cmdLogin(flags);
       break;
+    case "align-device":
+      await cmdAlignDevice(flags);
+      break;
     case "status":
       cmdStatus(flags);
       break;
@@ -1882,6 +2101,8 @@ async function main() {
 Commands:
   hook --tool <tool>          Process hook stdin and upload events
   login --tool <tool> <CODE>  Exchange pairing code for device token
+  login --tool <tool> --from-sibling  Pair this agent to the same Promptly account as another agent on this computer
+  align-device                Re-pair mismatched agents to this computer's first Promptly account
   test-send --tool <tool>     Upload one test prompt (verify stats pipeline)
   diagnostics [--tool <tool>] Simulate hook payloads and show local timing state
   status [--tool <tool>]      Show connection status for one or all tools

@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-$PluginPackUrl = if ($env:PROMPTLY_PLUGIN_PACK_URL) { $env:PROMPTLY_PLUGIN_PACK_URL } else { "https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.2" }
+$PluginPackUrl = if ($env:PROMPTLY_PLUGIN_PACK_URL) { $env:PROMPTLY_PLUGIN_PACK_URL } else { "https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.3" }
 $Integrations = Join-Path $env:USERPROFILE "integrations"
 $ZipPath = Join-Path $env:USERPROFILE "promptly.zip"
 $InstallBase = if ($env:PROMPTLY_INSTALL_BASE) { $env:PROMPTLY_INSTALL_BASE } else { "https://promptly-labs.com/install" }
@@ -40,6 +40,9 @@ if ($installed.Count) { Write-Host "  Installed: $($installed -join ', ')" }
 if ($skipped.Count) { Write-Host "  Skipped (CLI not available): $($skipped -join ', ')" }
 if ($failed.Count) { Write-Host "  Failed: $($failed -join ', ')" }
 Write-Host ""
-Write-Host "Next: pair each agent on the integrations page (one pairing code per agent)."
+Write-Host "Next: get ONE pairing code on the integrations page, then:"
+Write-Host "  promptly-telemetry login --tool claude_code YOUR_CODE"
+Write-Host "  promptly-telemetry login --tool cursor --from-sibling"
+Write-Host "  promptly-telemetry login --tool codex --from-sibling"
 
 if (-not $installed.Count) { exit 1 }
