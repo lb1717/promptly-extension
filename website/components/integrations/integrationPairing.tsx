@@ -367,9 +367,9 @@ export function AlignDeviceConnectStep({
           <CopyBlock lines={commandLines} label={terminalLabel} />
           <StepValidation
             items={[
-              'Output shows "ok": true and your email',
+              'Output shows "ok": true and live_tracking all ok',
               "All three tools show matches_primary: true",
-              "Done message with promptly-labs.com statistics link"
+              "Restart agents if they were open, then send a real prompt"
             ]}
           />
         </>

@@ -1755,6 +1755,64 @@ function collectAllKnownLocalUids() {
 }
 
 /** One-shot: code account = only Promptly account on this computer; merge split stats. */
+function stripLegacyCredentialsIfStale(targetUid) {
+  const legacy = readJson(legacyCredentialsPath(), null);
+  if (!legacy?.device_token) return;
+  if (String(legacy.uid || "") === String(targetUid)) return;
+  writeJson(legacyCredentialsPath(), {
+    archived: true,
+    archived_uid: legacy.uid || null,
+    migrated_to_uid: targetUid,
+    note: "Use credentials-claude_code.json, credentials-cursor.json, credentials-codex.json"
+  });
+}
+
+function stampAllCredentialsForTarget(targetUid, targetEmail, apiUrl) {
+  for (const tool of ALL_TOOLS) {
+    const creds = getCredentials(tool);
+    if (!creds?.device_token) continue;
+    saveCredentials(tool, {
+      ...creds,
+      uid: targetUid,
+      email: targetEmail || creds.email || null,
+      api_url: apiUrl,
+      tool
+    });
+  }
+}
+
+async function verifyLiveTrackingForAllTools() {
+  console.log("Step 4/4: Verifying live tracking (test upload per agent)…");
+  const results = [];
+  for (const tool of ALL_TOOLS) {
+    try {
+      const creds = getCredentials(tool);
+      if (!creds?.device_token) {
+        throw new Error("not paired");
+      }
+      enqueueEvent(tool, {
+        tool,
+        interaction_kind: "send",
+        composer_word_estimate: 1,
+        composer_char_estimate: 4,
+        client_occurred_ms: Date.now(),
+        model_label: "fix-account-verify",
+        model_bucket: "fix-account-verify"
+      });
+      const flush = await flushQueue(tool, TOOL_CLIENT[tool]);
+      if (!flush.ok) {
+        throw new Error(flush.error || "upload failed");
+      }
+      results.push({ tool, ok: true, written: flush.written ?? 1 });
+      console.log(`  ✓ ${tool}: live tracking OK`);
+    } catch (err) {
+      results.push({ tool, ok: false, error: String(err?.message || err) });
+      console.error(`  ✗ ${tool}: ${String(err?.message || err)}`);
+    }
+  }
+  return results;
+}
+
 async function cmdFixAccount(flags) {
   const code = normalizePairCode(flags.code || flags._rest[0] || flags["set-primary"]);
   const apiUrl = (flags["api-url"] || DEFAULT_API_URL).replace(/\/$/, "");
@@ -1769,7 +1827,7 @@ async function cmdFixAccount(flags) {
   const sourceUidsBefore = collectAllKnownLocalUids();
   clearDevicePrimary();
 
-  console.log("Step 1/3: Pairing with your code…");
+  console.log("Step 1/4: Pairing with your code…");
   let body;
   try {
     body = await exchangePrimaryFromCode(apiUrl, anchorTool, code);
@@ -1782,7 +1840,7 @@ async function cmdFixAccount(flags) {
   const targetEmail = body.email || targetUid;
   console.log(`Main Promptly account on this computer: ${targetEmail}`);
 
-  console.log("Step 2/3: Re-pairing Claude Code, Cursor, and Codex to that account…");
+  console.log("Step 2/4: Re-pairing Claude Code, Cursor, and Codex to that account…");
   const aligned = [];
   for (const tool of ALL_TOOLS) {
     if (tool === anchorTool) {
@@ -1798,8 +1856,10 @@ async function cmdFixAccount(flags) {
     }
   }
   setDevicePrimary(getCredentials(anchorTool), anchorTool);
+  stampAllCredentialsForTarget(targetUid, targetEmail, apiUrl);
+  stripLegacyCredentialsIfStale(targetUid);
 
-  console.log("Step 3/3: Merging any split stats onto that account…");
+  console.log("Step 3/4: Merging any split stats onto that account…");
   const sourceUids = [...new Set([...sourceUidsBefore, ...collectAllKnownLocalUids()])].filter(
     (uid) => uid && uid !== targetUid
   );
@@ -1820,6 +1880,9 @@ async function cmdFixAccount(flags) {
     console.log("No split stats found to merge.");
   }
 
+  const liveChecks = await verifyLiveTrackingForAllTools();
+  const liveOk = liveChecks.every((row) => row.ok);
+
   const tools = ALL_TOOLS.map((tool) => {
     const creds = getCredentials(tool);
     return {
@@ -1836,6 +1899,13 @@ async function cmdFixAccount(flags) {
     process.exit(1);
   }
 
+  if (!liveOk) {
+    console.error(
+      "[promptly] Pairing succeeded but live test uploads failed for some agents. Re-run fix-account after restarting Claude Code, Cursor, and Codex."
+    );
+    process.exit(1);
+  }
+
   console.log(
     JSON.stringify(
       {
@@ -1844,13 +1914,16 @@ async function cmdFixAccount(flags) {
         uid: targetUid,
         aligned_tools: aligned,
         consolidation,
+        live_tracking: liveChecks,
         tools
       },
       null,
       2
     )
   );
-  console.log(`Done. View coding-agent stats at https://promptly-labs.com/account/statistics as ${targetEmail}.`);
+  console.log(`Done. New prompts from all agents will track live to ${targetEmail}.`);
+  console.log("Restart Claude Code, Cursor, and Codex if they were open during this fix.");
+  console.log(`View stats: https://promptly-labs.com/account/statistics`);
 }
 
 function cmdStatus(flags) {

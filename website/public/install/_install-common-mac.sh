@@ -144,6 +144,22 @@ promptly_sync_claude_plugin_cache() {
   fi
 }
 
+# Push latest telemetry CLI + hooks into every runtime path agents actually invoke (not only ~/integrations).
+promptly_sync_all_agent_runtimes() {
+  local integrations="${1:-${HOME}/integrations}"
+  for plugin in claude-code cursor codex; do
+    if [[ -d "${integrations}/${plugin}" ]]; then
+      promptly_sync_telemetry_cli "${integrations}/${plugin}" 2>/dev/null || true
+    fi
+  done
+  promptly_sync_claude_plugin_cache
+  promptly_sync_codex_plugin_cache
+  if [[ -d "${integrations}/cursor" ]]; then
+    promptly_cursor_plugin_reinstall "${integrations}" 2>/dev/null || true
+  fi
+  echo "✓ Synced live hooks + telemetry CLI for Claude Code, Cursor, and Codex"
+}
+
 promptly_sync_claude_code_command_files() {
   local plugin_dir="${1:-${HOME}/integrations/claude-code}"
   mkdir -p "${plugin_dir}/commands" "${plugin_dir}/user-commands"
