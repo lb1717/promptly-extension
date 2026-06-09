@@ -88,11 +88,10 @@ export function AdminIntegrationsClient() {
       </section>
 
       <section className="mb-8 rounded-2xl border border-amber-500/25 bg-amber-950/20 p-5">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-200">Fix split stats</h2>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-200">Fix split stats (one command)</h2>
         <p className="mt-2 text-sm text-amber-100/75">
-          If Claude Code, Cursor, or Codex were paired under different Promptly accounts, sign in below with the account
-          you want to keep. One terminal command re-pairs every agent on this computer to that account and merges old
-          stats onto it.
+          Sign in with the Promptly account you want, generate a code, and paste one curl command. It always downloads
+          the latest fix, clears the old split setup, and makes that email the only account tracking data on this Mac.
         </p>
         <div className="mt-4 [&_.text-muted]:text-amber-100/70 [&_.text-faint]:text-amber-200/60 [&_.bg-ink]:bg-black/50 [&_.text-cream]:text-amber-50">
           <AlignDeviceConnectStep

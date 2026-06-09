@@ -1,7 +1,7 @@
 export type OsId = "mac" | "windows";
 export type IdeToolId = "claude_code" | "cursor" | "codex";
 
-export const PLUGIN_PACK_VERSION = "1.4.5";
+export const PLUGIN_PACK_VERSION = "1.4.6";
 export const PLUGIN_PACK_URL = `https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=${PLUGIN_PACK_VERSION}`;
 export const INSTALL_BASE_URL = "https://promptly-labs.com/install";
 export const NODE_INSTALL_URL = "https://nodejs.org/";
@@ -88,23 +88,27 @@ export function siblingLoginCommandPowerShell(tool: IdeToolId): string {
   return `${telemetryCliPowerShell()} login --tool ${tool} --from-sibling`;
 }
 
-export function alignDeviceCommand(os: OsId): string {
-  return `${telemetryCli(os)} align-device`;
+export function fixAccountScriptUrl(os: OsId): string {
+  return os === "mac"
+    ? `${INSTALL_BASE_URL}/fix-account-mac.sh`
+    : `${INSTALL_BASE_URL}/fix-account-windows.ps1`;
 }
 
-export function alignDeviceCommands(os: OsId, code: string): string[] {
-  const align = `${telemetryCli(os)} align-device --set-primary ${code}`;
-  const status = `${telemetryCli(os)} status`;
+/** One curl command: download latest CLI + fix split accounts with one pairing code. */
+export function fixAccountCurlCommand(os: OsId, code: string): string {
+  const url = fixAccountScriptUrl(os);
   if (os === "mac") {
-    return [`${align} && ${status}`];
+    return `curl -fsSL ${url} | bash -s -- ${code}`;
   }
-  return [`${align}; if ($LASTEXITCODE -eq 0) { ${status} }`];
+  return `irm ${url} | iex; Fix-PromptlyAccount -Code ${code}`;
 }
 
-export function alignDeviceCommandsPowerShell(code: string): string[] {
-  const align = `${telemetryCliPowerShell()} align-device --set-primary ${code}`;
-  const status = `${telemetryCliPowerShell()} status`;
-  return [`${align}; if ($LASTEXITCODE -eq 0) { ${status} }`];
+export function fixAccountCommands(os: OsId, code: string): string[] {
+  return [fixAccountCurlCommand(os, code)];
+}
+
+export function fixAccountLocalCommand(os: OsId, code: string): string {
+  return `${telemetryCli(os)} fix-account ${code}`;
 }
 
 export function loginCommandPowerShell(tool: string, code: string): string {
@@ -135,30 +139,15 @@ export type AllAgentsPairCodes = Record<IdeToolId, string>;
 
 const ALL_IDE_TOOLS: IdeToolId[] = ["claude_code", "cursor", "codex"];
 
-/** One paste: fresh install all agents, pair once, sibling-pair the rest, verify telemetry CLI. */
+/** One paste: fresh install all agents, then one fix-account command. */
 export function allAgentsFullSetupCommands(os: OsId, codes: AllAgentsPairCodes): string[] {
   const code = codes.claude_code;
   const install = allAgentsInstallCommands(os)[0]!;
   if (os === "mac") {
-    const parts = [
-      install,
-      loginCommand(os, "claude_code", code),
-      siblingLoginCommand(os, "cursor"),
-      siblingLoginCommand(os, "codex"),
-      alignDeviceCommand(os),
-      ...ALL_IDE_TOOLS.map((tool) => statusCommand(os, tool))
-    ];
-    return [parts.join(" && ")];
+    return [`${install} && ${fixAccountLocalCommand(os, code)} && ${telemetryCli(os)} status`];
   }
-  let ps = `${install}; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }`;
-  ps += `; ${loginCommandPowerShell("claude_code", code)}; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }`;
-  ps += `; ${siblingLoginCommandPowerShell("cursor")}; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }`;
-  ps += `; ${siblingLoginCommandPowerShell("codex")}; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }`;
-  ps += `; ${telemetryCliPowerShell()} align-device`;
-  for (const tool of ALL_IDE_TOOLS) {
-    ps += `; ${statusCommandPowerShell(tool)}`;
-  }
-  return [ps];
+  const fix = fixAccountLocalCommand("windows", code);
+  return [`${install}; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; ${fix}; if ($LASTEXITCODE -eq 0) { ${telemetryCliPowerShell()} status }`];
 }
 
 export function allAgentsSetupValidationItems(): string[] {

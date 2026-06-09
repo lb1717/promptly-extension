@@ -8,7 +8,7 @@ import { CopyBlock } from "./integrationCopyBlock";
 import {
   allAgentsFullSetupCommands,
   allAgentsSetupValidationItems,
-  alignDeviceCommands,
+  fixAccountCommands,
   fullSetupCommands,
   type AllAgentsPairCodes,
   type IdeToolId,
@@ -317,7 +317,7 @@ export function AlignDeviceConnectStep({
   const { loading, pairCode, expiresAt, busy, error, signInAndConnect, refreshCode } =
     useIntegrationPairing("claude_code");
   const terminalLabel = os === "mac" ? "Terminal" : "PowerShell";
-  const commandLines = pairCode ? alignDeviceCommands(os, pairCode) : [];
+  const commandLines = pairCode ? fixAccountCommands(os, pairCode) : [];
 
   const inner = (
     <>
@@ -350,15 +350,14 @@ export function AlignDeviceConnectStep({
 
       {!pairCode ? (
         <p className="mt-3 text-sm text-muted">
-          Sign in with the Promptly account you want all coding-agent stats on (e.g. your personal Gmail). Then copy
-          one command into {terminalLabel}. It re-pairs Claude Code, Cursor, and Codex to that account and merges any
-          split stats from earlier mismatched pairings.
+          Sign in with the Promptly account you want all coding-agent stats on. Copy one command into{" "}
+          {terminalLabel} — it downloads the latest CLI, sets that account as the only one on this computer,
+          re-pairs all agents, and merges any split stats.
         </p>
       ) : (
         <>
           <p className="mt-3 text-sm text-muted">
-            Copy into {terminalLabel}. Uses your pairing code to set this computer&apos;s account, re-pair all agents,
-            and merge historical stats onto it.
+            Copy into {terminalLabel} (works even if Promptly was installed before — always pulls the latest fix).
           </p>
           {expiresAt ? (
             <p className="mt-1 text-xs text-faint">
@@ -368,9 +367,9 @@ export function AlignDeviceConnectStep({
           <CopyBlock lines={commandLines} label={terminalLabel} />
           <StepValidation
             items={[
-              "device_primary shows your chosen email/uid",
+              'Output shows "ok": true and your email',
               "All three tools show matches_primary: true",
-              "Consolidated historical stats line (if you had a split before)"
+              "Done message with promptly-labs.com statistics link"
             ]}
           />
         </>

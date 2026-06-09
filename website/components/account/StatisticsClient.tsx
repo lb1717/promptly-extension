@@ -2314,9 +2314,11 @@ export function StatisticsClient() {
               {user?.email ? (
                 <p className="mt-2 text-[10px] text-muted">
                   Viewing stats as <span className="font-medium text-ink">{user.email}</span>. If coding-agent stats
-                  look empty, pair agents with this same account or run{" "}
-                  <code className="rounded bg-white/80 px-1 py-0.5 text-[9px]">promptly-telemetry align-device</code>{" "}
-                  in Terminal.
+                  look                   empty, pair agents with this same account or run the fix command from{" "}
+                  <Link href="/admin/integrations" className="font-medium text-violet-900 underline">
+                    admin integrations
+                  </Link>
+                  .
                 </p>
               ) : null}
             </div>

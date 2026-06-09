@@ -235,7 +235,7 @@ async function exchangePrimaryFromCode(apiUrl, tool, code) {
 }
 
 async function alignToolsToDevicePrimary(apiUrl) {
-  const primary = readDevicePrimary();
+  const primary = readExplicitDevicePrimary() || readDevicePrimary();
   if (!primary?.uid) return { aligned: [], primary: null };
   const anchorTool =
     findPairedToolForUid(primary.uid, null) ||
@@ -1726,74 +1726,131 @@ async function cmdLogin(flags) {
 }
 
 async function cmdAlignDevice(flags) {
-  const apiUrl = (flags["api-url"] || DEFAULT_API_URL).replace(/\/$/, "");
-  const sourceUidsBefore = collectLocalPairedUids();
   const setPrimaryCode = String(flags["set-primary"] || flags._rest[0] || "").trim();
+  if (setPrimaryCode) {
+    flags._rest = [setPrimaryCode];
+    await cmdFixAccount(flags);
+    return;
+  }
+  console.error("To pick your Promptly account with a pairing code, run: promptly-telemetry fix-account YOUR_CODE");
+  process.exit(1);
+}
+
+function normalizePairCode(raw) {
+  return String(raw || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+function collectAllKnownLocalUids() {
+  const uids = new Set(collectLocalPairedUids());
+  const legacy = readJson(legacyCredentialsPath(), null);
+  if (legacy?.uid) uids.add(String(legacy.uid));
+  for (const tool of ALL_TOOLS) {
+    const creds = readJson(credentialsPathForTool(tool), null);
+    if (creds?.uid) uids.add(String(creds.uid));
+  }
+  return [...uids];
+}
+
+/** One-shot: code account = only Promptly account on this computer; merge split stats. */
+async function cmdFixAccount(flags) {
+  const code = normalizePairCode(flags.code || flags._rest[0] || flags["set-primary"]);
+  const apiUrl = (flags["api-url"] || DEFAULT_API_URL).replace(/\/$/, "");
   const anchorTool = normalizeTool(flags.tool) || "claude_code";
 
-  if (setPrimaryCode) {
-    clearDevicePrimary();
-    try {
-      await exchangePrimaryFromCode(apiUrl, anchorTool, setPrimaryCode);
-      console.log(`Set this computer's Promptly account from pairing code (${anchorTool}).`);
-    } catch (err) {
-      console.error(String(err?.message || err));
-      process.exit(1);
-    }
-  }
-
-  let primary = readExplicitDevicePrimary() || readDevicePrimary();
-  if (!primary?.uid) {
-    console.error(
-      "No device primary yet. Run with a pairing code: promptly-telemetry align-device --set-primary YOUR_CODE"
-    );
-    console.error("Get a code at promptly-labs.com/integrations while signed into the Promptly account you want.");
+  if (code.length !== 8) {
+    console.error("Usage: promptly-telemetry fix-account ABCD1234");
+    console.error("Get a code at https://promptly-labs.com/integrations while signed into the account you want.");
     process.exit(1);
   }
 
-  const alignment = await alignToolsToDevicePrimary(apiUrl);
-  primary = readExplicitDevicePrimary() || readDevicePrimary();
+  const sourceUidsBefore = collectAllKnownLocalUids();
+  clearDevicePrimary();
 
-  const sourceUids = [...new Set([...sourceUidsBefore, ...collectLocalPairedUids()])].filter(
-    (uid) => uid && uid !== primary.uid
+  console.log("Step 1/3: Pairing with your code…");
+  let body;
+  try {
+    body = await exchangePrimaryFromCode(apiUrl, anchorTool, code);
+  } catch (err) {
+    console.error(String(err?.message || err));
+    process.exit(1);
+  }
+
+  const targetUid = String(body.uid || "").trim();
+  const targetEmail = body.email || targetUid;
+  console.log(`Main Promptly account on this computer: ${targetEmail}`);
+
+  console.log("Step 2/3: Re-pairing Claude Code, Cursor, and Codex to that account…");
+  const aligned = [];
+  for (const tool of ALL_TOOLS) {
+    if (tool === anchorTool) {
+      aligned.push(tool);
+      continue;
+    }
+    try {
+      const sibling = await exchangeSiblingTool(apiUrl, anchorTool, tool);
+      saveCredentialsFromExchange(tool, sibling, apiUrl);
+      aligned.push(tool);
+    } catch (err) {
+      console.error(`[promptly] Could not pair ${tool}: ${String(err?.message || err)}`);
+    }
+  }
+  setDevicePrimary(getCredentials(anchorTool), anchorTool);
+
+  console.log("Step 3/3: Merging any split stats onto that account…");
+  const sourceUids = [...new Set([...sourceUidsBefore, ...collectAllKnownLocalUids()])].filter(
+    (uid) => uid && uid !== targetUid
   );
 
   let consolidation = null;
   if (sourceUids.length) {
     try {
       consolidation = await consolidateStatsOnServer(apiUrl, sourceUids);
-      console.log(
-        `Consolidated historical stats: ${consolidation.eventsMoved ?? 0} events, ${consolidation.devicesMoved ?? 0} devices → ${consolidation.target_email || primary.email || primary.uid}`
-      );
+      const moved = consolidation.eventsMoved ?? 0;
+      const devices = consolidation.devicesMoved ?? 0;
+      console.log(`Merged ${moved} historical events and ${devices} devices onto ${targetEmail}.`);
     } catch (err) {
-      console.error(`[promptly] Stats consolidation: ${String(err?.message || err)}`);
+      console.error(
+        `[promptly] Could not merge old stats (${String(err?.message || err)}). New prompts will still track to ${targetEmail}.`
+      );
     }
+  } else {
+    console.log("No split stats found to merge.");
+  }
+
+  const tools = ALL_TOOLS.map((tool) => {
+    const creds = getCredentials(tool);
+    return {
+      tool,
+      connected: Boolean(creds?.device_token),
+      uid: creds?.uid || null,
+      email: creds?.email || null,
+      matches_primary: creds?.uid === targetUid
+    };
+  });
+
+  if (!tools.every((row) => row.connected && row.matches_primary)) {
+    console.error("[promptly] Warning: not all agents paired cleanly. Re-run fix-account with a fresh code.");
+    process.exit(1);
   }
 
   console.log(
     JSON.stringify(
       {
-        device_primary: primary,
-        aligned_tools: alignment.aligned,
+        ok: true,
+        email: targetEmail,
+        uid: targetUid,
+        aligned_tools: aligned,
         consolidation,
-        tools: ALL_TOOLS.map((tool) => {
-          const creds = getCredentials(tool);
-          return {
-            tool,
-            connected: Boolean(creds?.device_token),
-            uid: creds?.uid || null,
-            email: creds?.email || null,
-            matches_primary: creds?.uid === primary.uid
-          };
-        })
+        tools
       },
       null,
       2
     )
   );
-  if (!alignment.aligned.length && !sourceUids.length) {
-    console.log("All paired agents already use the same Promptly account on this computer.");
-  }
+  console.log(`Done. View coding-agent stats at https://promptly-labs.com/account/statistics as ${targetEmail}.`);
 }
 
 function cmdStatus(flags) {
@@ -2192,6 +2249,9 @@ async function main() {
     case "align-device":
       await cmdAlignDevice(flags);
       break;
+    case "fix-account":
+      await cmdFixAccount(flags);
+      break;
     case "status":
       cmdStatus(flags);
       break;
@@ -2223,10 +2283,10 @@ async function main() {
 
 Commands:
   hook --tool <tool>          Process hook stdin and upload events
+  fix-account <CODE>          One command: set this code's account as your only Promptly account, re-pair all agents, merge split stats
   login --tool <tool> <CODE>  Exchange pairing code for device token
   login --tool <tool> --from-sibling  Pair this agent to the same Promptly account as another agent on this computer
-  align-device                Re-pair agents + merge split stats onto this computer's Promptly account
-  align-device --set-primary <CODE>  Pick account from integrations code, then re-pair + merge stats
+  align-device --set-primary <CODE>  Same as fix-account (legacy alias)
   test-send --tool <tool>     Upload one test prompt (verify stats pipeline)
   diagnostics [--tool <tool>] Simulate hook payloads and show local timing state
   status [--tool <tool>]      Show connection status for one or all tools
