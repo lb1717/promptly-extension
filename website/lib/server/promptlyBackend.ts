@@ -1564,6 +1564,17 @@ export type AccountIdeStatsPayload = {
   likely_truncated: boolean;
   quota_exceeded: boolean;
   footnotes: string[];
+  linked_promptly_accounts: Array<{
+    email: string;
+    uid: string;
+    is_primary: boolean;
+  }>;
+};
+
+export type LinkedIdeAccount = {
+  email: string;
+  uid: string;
+  linkedAtMs: number;
 };
 
 type IdeEventsQueryResult = {
@@ -1582,6 +1593,224 @@ function filterEventDocsByUtcDayRange(
     const day = readAnalyticsUtcDay(doc.data() as Record<string, unknown>);
     return Boolean(day && day >= startDay && day <= endDay);
   });
+}
+
+function parseLinkedIdeAccounts(raw: unknown): LinkedIdeAccount[] {
+  if (!Array.isArray(raw)) return [];
+  const out: LinkedIdeAccount[] = [];
+  const seen = new Set<string>();
+  for (const row of raw) {
+    if (!row || typeof row !== "object") continue;
+    const rec = row as Record<string, unknown>;
+    const uid = String(rec.uid || "").trim();
+    const email = normalizeUserEmail(rec.email);
+    if (!uid || !email || seen.has(uid)) continue;
+    seen.add(uid);
+    out.push({
+      uid,
+      email,
+      linkedAtMs: Math.max(0, Math.floor(Number(rec.linkedAtMs || rec.linked_at_ms || 0) || 0))
+    });
+  }
+  return out;
+}
+
+export async function readLinkedIdeAccounts(primaryUid: string): Promise<LinkedIdeAccount[]> {
+  const uid = String(primaryUid || "").trim();
+  if (!uid) return [];
+  const snap = await getFirebaseAdminDb().collection(USER_COLLECTION).doc(uid).get();
+  if (!snap.exists) return [];
+  return parseLinkedIdeAccounts((snap.data() || {}).linkedIdeAccounts);
+}
+
+async function readIdeStatsPrimaryOwnerUid(linkedUid: string): Promise<string | null> {
+  const uid = String(linkedUid || "").trim();
+  if (!uid) return null;
+  const snap = await getFirebaseAdminDb().collection(USER_COLLECTION).doc(uid).get();
+  if (!snap.exists) return null;
+  const owner = String((snap.data() || {}).ideStatsPrimaryUid || "").trim();
+  return owner || null;
+}
+
+async function assertLinkedUidAvailable(linkedUid: string, primaryUid: string) {
+  if (linkedUid === primaryUid) {
+    throw new Error("You cannot link the Promptly account you are already signed into.");
+  }
+  const owner = await readIdeStatsPrimaryOwnerUid(linkedUid);
+  if (owner && owner !== primaryUid) {
+    throw new Error("That Promptly account is already linked to another user.");
+  }
+}
+
+export async function linkIdeAccountForUser(
+  primaryUser: PromptlyUser,
+  linkedIdToken: string
+): Promise<LinkedIdeAccount[]> {
+  const primaryUid = String(primaryUser.uid || "").trim();
+  if (!primaryUid) {
+    throw new Error("Missing primary account");
+  }
+  const decoded = await getFirebaseAdminAuth().verifyIdToken(String(linkedIdToken || "").trim(), true);
+  const linkedEmail = normalizeUserEmail(decoded.email);
+  const linkedUid = linkedEmail
+    ? await resolveCanonicalUidForEmail(linkedEmail, decoded.uid)
+    : String(decoded.uid || "").trim();
+  if (!linkedUid) {
+    throw new Error("Could not resolve linked account");
+  }
+  if (!linkedEmail) {
+    throw new Error("Linked Google account must have an email address");
+  }
+
+  await assertLinkedUidAvailable(linkedUid, primaryUid);
+  const db = getFirebaseAdminDb();
+  const primaryRef = db.collection(USER_COLLECTION).doc(primaryUid);
+  const linkedRef = db.collection(USER_COLLECTION).doc(linkedUid);
+  const primarySnap = await primaryRef.get();
+  const existing = parseLinkedIdeAccounts((primarySnap.data() || {}).linkedIdeAccounts);
+  if (existing.some((row) => row.uid === linkedUid)) {
+    return existing;
+  }
+
+  const next = [
+    ...existing,
+    { uid: linkedUid, email: linkedEmail, linkedAtMs: Date.now() }
+  ].sort((a, b) => a.email.localeCompare(b.email));
+
+  await db.runTransaction(async (tx) => {
+    const [primaryDoc, linkedDoc] = await Promise.all([tx.get(primaryRef), tx.get(linkedRef)]);
+    const current = parseLinkedIdeAccounts((primaryDoc.data() || {}).linkedIdeAccounts);
+    if (current.some((row) => row.uid === linkedUid)) {
+      return;
+    }
+    const linkedOwner = String((linkedDoc.data() || {}).ideStatsPrimaryUid || "").trim();
+    if (linkedOwner && linkedOwner !== primaryUid) {
+      throw new Error("That Promptly account is already linked to another user.");
+    }
+    tx.set(
+      primaryRef,
+      { linkedIdeAccounts: next, updatedAt: FieldValue.serverTimestamp() },
+      { merge: true }
+    );
+    tx.set(
+      linkedRef,
+      { ideStatsPrimaryUid: primaryUid, updatedAt: FieldValue.serverTimestamp() },
+      { merge: true }
+    );
+  });
+
+  return next;
+}
+
+export async function unlinkIdeAccountForUser(
+  primaryUser: PromptlyUser,
+  targetUidOrEmail: string
+): Promise<LinkedIdeAccount[]> {
+  const primaryUid = String(primaryUser.uid || "").trim();
+  const target = String(targetUidOrEmail || "").trim();
+  if (!primaryUid || !target) {
+    throw new Error("Missing account to unlink");
+  }
+  const db = getFirebaseAdminDb();
+  const primaryRef = db.collection(USER_COLLECTION).doc(primaryUid);
+  const primarySnap = await primaryRef.get();
+  const existing = parseLinkedIdeAccounts((primarySnap.data() || {}).linkedIdeAccounts);
+  const targetLower = target.toLowerCase();
+  const removed = existing.find((row) => row.uid === target || row.email === targetLower);
+  if (!removed) {
+    throw new Error("Linked account not found");
+  }
+  const next = existing.filter((row) => row.uid !== removed.uid);
+  await db.runTransaction(async (tx) => {
+    tx.set(
+      primaryRef,
+      { linkedIdeAccounts: next, updatedAt: FieldValue.serverTimestamp() },
+      { merge: true }
+    );
+    const linkedRef = db.collection(USER_COLLECTION).doc(removed.uid);
+    const linkedSnap = await tx.get(linkedRef);
+    const owner = String((linkedSnap.data() || {}).ideStatsPrimaryUid || "").trim();
+    if (owner === primaryUid) {
+      tx.set(
+        linkedRef,
+        { ideStatsPrimaryUid: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp() },
+        { merge: true }
+      );
+    }
+  });
+  return next;
+}
+
+async function resolveIdeStatsUsers(primaryUser: PromptlyUser): Promise<PromptlyUser[]> {
+  const linked = await readLinkedIdeAccounts(primaryUser.uid);
+  const users = new Map<string, PromptlyUser>();
+  users.set(primaryUser.uid, primaryUser);
+  for (const row of linked) {
+    if (users.has(row.uid)) continue;
+    users.set(row.uid, {
+      uid: row.uid,
+      email: row.email,
+      plan: primaryUser.plan,
+      dailyTokenLimit: primaryUser.dailyTokenLimit,
+      promptsImprovedTotal: 0,
+      allTimeMaxDailyTokenUsage: 0
+    });
+  }
+  return [...users.values()];
+}
+
+function mergeIdeEventsQueryResults(results: IdeEventsQueryResult[]): IdeEventsQueryResult {
+  const docsById = new Map<string, QueryDocumentSnapshot<DocumentData>>();
+  for (const result of results) {
+    for (const doc of result.docs) {
+      docsById.set(doc.id, doc);
+    }
+  }
+  return {
+    docs: [...docsById.values()],
+    indexMissing: results.some((result) => result.indexMissing),
+    usedDesc: results.some((result) => result.usedDesc),
+    quotaExceeded: results.some((result) => result.quotaExceeded)
+  };
+}
+
+async function queryIdeEventsSupersetForUsers(
+  uids: string[],
+  opts?: { bypassCache?: boolean }
+): Promise<IdeEventsQueryResult> {
+  const unique = [...new Set(uids.map((uid) => String(uid || "").trim()).filter(Boolean))];
+  if (!unique.length) {
+    return { docs: [], indexMissing: false, usedDesc: false, quotaExceeded: false };
+  }
+  if (unique.length === 1) {
+    return queryIdeEventsSuperset(unique[0]!, opts);
+  }
+  const cacheKey = `ide-events:${unique.sort().join(",")}:superset${STATS_SUPERSET_DAYS}`;
+  return withStatsQueryCache(
+    cacheKey,
+    async () => {
+      const results = await Promise.all(unique.map((uid) => queryIdeEventsSuperset(uid, { bypassCache: true })));
+      return mergeIdeEventsQueryResults(results);
+    },
+    { bypass: opts?.bypassCache, ttlMs: STATS_QUERY_CACHE_TTL_MS }
+  );
+}
+
+async function listIntegrationDevicesForUsers(users: PromptlyUser[]) {
+  const seen = new Map<
+    string,
+    { id: string; tool: PromptlyIdeTool; deviceLabel: string | null; lastSeenAtMs: number | null }
+  >();
+  for (const user of users) {
+    const rows = await listIntegrationDevicesSafe(user);
+    for (const row of rows) {
+      const existing = seen.get(row.id);
+      if (!existing || (row.lastSeenAtMs ?? 0) >= (existing.lastSeenAtMs ?? 0)) {
+        seen.set(row.id, row);
+      }
+    }
+  }
+  return [...seen.values()];
 }
 
 async function queryIdeEventsSuperset(
@@ -1660,9 +1889,27 @@ export async function getAccountIdeUsageStats(
   const startDay = recentDays[0]!;
   const endDay = recentDays[recentDays.length - 1]!;
 
+  const statsUsers = await resolveIdeStatsUsers(user);
+  const linkedAccounts = await readLinkedIdeAccounts(user.uid);
+  const promptlyAccountsIncluded = [
+    {
+      email: user.email || user.uid,
+      uid: user.uid,
+      is_primary: true
+    },
+    ...linkedAccounts.map((row) => ({
+      email: row.email,
+      uid: row.uid,
+      is_primary: false
+    }))
+  ];
+
   const [eventsSuperset, devices] = await Promise.all([
-    queryIdeEventsSuperset(user.uid, { bypassCache: opts?.bypassCache }),
-    listIntegrationDevicesSafe(user)
+    queryIdeEventsSupersetForUsers(
+      statsUsers.map((row) => row.uid),
+      { bypassCache: opts?.bypassCache }
+    ),
+    listIntegrationDevicesForUsers(statsUsers)
   ]);
   const eventsResult = {
     ...eventsSuperset,
@@ -1970,6 +2217,11 @@ export async function getAccountIdeUsageStats(
   if (eventsResult.docs.length >= IDE_EVENTS_QUERY_LIMIT) {
     footnotes.push("Coding-agent event query hit the server cap; narrow the date range for full accuracy.");
   }
+  if (linkedAccounts.length) {
+    footnotes.push(
+      `Including coding-agent data from ${linkedAccounts.length + 1} linked Promptly account(s).`
+    );
+  }
 
   return {
     range_days: rangeDays,
@@ -2091,7 +2343,8 @@ export async function getAccountIdeUsageStats(
     index_missing: eventsResult.indexMissing,
     likely_truncated: eventsResult.docs.length >= IDE_EVENTS_QUERY_LIMIT,
     quota_exceeded: eventsResult.quotaExceeded,
-    footnotes
+    footnotes,
+    linked_promptly_accounts: promptlyAccountsIncluded
   };
 }
 

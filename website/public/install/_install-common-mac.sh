@@ -108,6 +108,7 @@ promptly_codex_plugin_reinstall() {
 
 promptly_sync_codex_plugin_cache() {
   local src="${HOME}/integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs"
+  local hooks_src="${HOME}/integrations/codex/hooks/hooks.json"
   local cache_root="${HOME}/.codex/plugins/cache/promptly-labs/promptly-codex"
   [[ -f "${src}" ]] || return 0
   for bin_dir in "${cache_root}"/*/bin "${cache_root}"/*/codex/bin; do
@@ -115,6 +116,13 @@ promptly_sync_codex_plugin_cache() {
       cp "${src}" "${bin_dir}/promptly-telemetry.mjs"
     fi
   done
+  if [[ -f "${hooks_src}" ]]; then
+    for hooks_dir in "${cache_root}"/*/hooks "${cache_root}"/*/codex/hooks; do
+      if [[ -d "${hooks_dir}" ]]; then
+        cp "${hooks_src}" "${hooks_dir}/hooks.json"
+      fi
+    done
+  fi
 }
 
 promptly_sync_claude_code_command_files() {
@@ -275,7 +283,7 @@ promptly_write_codex_hooks_json() {
         "hooks": [
           {
             "type": "command",
-            "command": "node ./bin/promptly-telemetry.mjs hook --tool codex",
+            "command": "node \"${PLUGIN_ROOT}/bin/promptly-telemetry.mjs\" hook --tool codex",
             "timeout": 15
           }
         ]
@@ -286,7 +294,7 @@ promptly_write_codex_hooks_json() {
         "hooks": [
           {
             "type": "command",
-            "command": "node ./bin/promptly-telemetry.mjs hook --tool codex",
+            "command": "node \"${PLUGIN_ROOT}/bin/promptly-telemetry.mjs\" hook --tool codex",
             "timeout": 15
           }
         ]
@@ -297,7 +305,7 @@ promptly_write_codex_hooks_json() {
         "hooks": [
           {
             "type": "command",
-            "command": "node ./bin/promptly-telemetry.mjs hook --tool codex",
+            "command": "node \"${PLUGIN_ROOT}/bin/promptly-telemetry.mjs\" hook --tool codex",
             "timeout": 15
           }
         ]
@@ -308,7 +316,7 @@ promptly_write_codex_hooks_json() {
         "hooks": [
           {
             "type": "command",
-            "command": "node ./bin/promptly-telemetry.mjs hook --tool codex",
+            "command": "node \"${PLUGIN_ROOT}/bin/promptly-telemetry.mjs\" hook --tool codex",
             "timeout": 15
           }
         ]
@@ -484,6 +492,10 @@ promptly_install_for_codex() {
   fi
   if ! grep -q 'UserPromptSubmit' "${codex_plugin}/hooks/hooks.json" 2>/dev/null; then
     echo "✗ Codex hooks missing UserPromptSubmit (re-download plugin pack)"
+    return 1
+  fi
+  if ! grep -q 'PLUGIN_ROOT' "${codex_plugin}/hooks/hooks.json" 2>/dev/null; then
+    echo "✗ Codex hooks must use \${PLUGIN_ROOT}/bin (re-run install or update plugin pack)"
     return 1
   fi
   if ! grep -q 'hook --tool codex' "${codex_plugin}/hooks/hooks.json" 2>/dev/null; then

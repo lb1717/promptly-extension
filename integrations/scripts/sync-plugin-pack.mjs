@@ -86,7 +86,7 @@ function cursorHookJson(tool) {
 }
 
 function codexHookJson(tool) {
-  const cmd = `node ./bin/promptly-telemetry.mjs hook --tool ${tool}`;
+  const cmd = `node "\${PLUGIN_ROOT}/bin/promptly-telemetry.mjs" hook --tool ${tool}`;
   const hookEntry = () => [{ hooks: [{ type: "command", command: cmd, timeout: 15 }] }];
   return {
     hooks: {

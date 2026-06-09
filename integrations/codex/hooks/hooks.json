@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ./bin/promptly-telemetry.mjs hook --tool codex",
+            "command": "node \"${PLUGIN_ROOT}/bin/promptly-telemetry.mjs\" hook --tool codex",
             "timeout": 15
           }
         ]
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ./bin/promptly-telemetry.mjs hook --tool codex",
+            "command": "node \"${PLUGIN_ROOT}/bin/promptly-telemetry.mjs\" hook --tool codex",
             "timeout": 15
           }
         ]
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ./bin/promptly-telemetry.mjs hook --tool codex",
+            "command": "node \"${PLUGIN_ROOT}/bin/promptly-telemetry.mjs\" hook --tool codex",
             "timeout": 15
           }
         ]
@@ -38,7 +38,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ./bin/promptly-telemetry.mjs hook --tool codex",
+            "command": "node \"${PLUGIN_ROOT}/bin/promptly-telemetry.mjs\" hook --tool codex",
             "timeout": 15
           }
         ]

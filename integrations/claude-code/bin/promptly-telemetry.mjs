@@ -8,6 +8,7 @@ import {
   existsSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   readSync,
   statSync,
@@ -200,12 +201,97 @@ function normalizeAgentEmail(raw) {
 function normalizeEffortToken(raw) {
   const value = String(raw || "")
     .trim()
-    .toLowerCase();
+    .toLowerCase()
+    .replace(/_/g, "-")
+    .replace(/\s+/g, " ");
   if (!value) return null;
   if (value === "minimal" || value === "none") return "low";
-  if (value === "xhigh") return "max";
-  if (["low", "medium", "high", "max"].includes(value)) return value;
+  if (value === "xhigh" || value === "extra-high" || value === "extra high" || value === "max") {
+    return "xhigh";
+  }
+  if (["low", "medium", "high"].includes(value)) return value;
   return null;
+}
+
+function formatEffortLabel(token) {
+  if (!token) return null;
+  if (token === "xhigh") return "extra high";
+  return token;
+}
+
+let codexModelsCache = null;
+
+function readCodexModelsCache() {
+  try {
+    const path = join(homedir(), ".codex", "models_cache.json");
+    if (!existsSync(path)) return codexModelsCache || { models: [] };
+    const stat = statSync(path);
+    if (codexModelsCache && codexModelsCache._mtime === stat.mtimeMs) {
+      return codexModelsCache;
+    }
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    codexModelsCache = {
+      _mtime: stat.mtimeMs,
+      models: Array.isArray(parsed?.models) ? parsed.models : []
+    };
+    return codexModelsCache;
+  } catch {
+    return codexModelsCache || { models: [] };
+  }
+}
+
+function humanizeCodexModelSlug(slug) {
+  const raw = String(slug || "").trim();
+  if (!raw) return null;
+  const entry = readCodexModelsCache().models.find((row) => String(row?.slug || "").trim() === raw);
+  if (entry?.display_name) return String(entry.display_name).trim();
+  const versioned = raw.match(/^gpt-(\d+(?:\.\d+)?)$/i);
+  if (versioned) return `GPT-${versioned[1]}`;
+  return raw;
+}
+
+function readCodexTurnContextFromTranscript(transcriptPath, turnId) {
+  try {
+    const path = expandHomePath(transcriptPath);
+    if (!path || !existsSync(path)) return null;
+    const size = statSync(path).size;
+    if (!size) return null;
+    const readSize = Math.min(size, TRANSCRIPT_TAIL_BYTES);
+    const fd = openSync(path, "r");
+    const buf = Buffer.alloc(readSize);
+    readSync(fd, buf, 0, readSize, size - readSize);
+    closeSync(fd);
+    const lines = buf.toString("utf8").split("\n").filter(Boolean);
+    const wantedTurn = String(turnId || "").trim();
+    let latest = null;
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      try {
+        const row = JSON.parse(lines[i]);
+        if (row?.type !== "turn_context") continue;
+        const payload = row?.payload;
+        if (!payload || typeof payload !== "object") continue;
+        const ctx = {
+          model: typeof payload.model === "string" ? payload.model.trim() : null,
+          effort: typeof payload.effort === "string" ? payload.effort.trim() : null,
+          turn_id: typeof payload.turn_id === "string" ? payload.turn_id.trim() : null
+        };
+        if (wantedTurn && ctx.turn_id === wantedTurn) return ctx;
+        if (!latest) latest = ctx;
+      } catch {
+        /* skip malformed tail line */
+      }
+    }
+    return latest;
+  } catch {
+    return null;
+  }
+}
+
+function readCodexHookContext(input) {
+  const transcriptPath = input?.transcript_path ?? input?.transcriptPath;
+  const turnId = input?.turn_id ?? input?.turnId;
+  if (!transcriptPath) return null;
+  return readCodexTurnContextFromTranscript(transcriptPath, turnId);
 }
 
 function readCodexConfig() {
@@ -463,15 +549,17 @@ function resolveAgentAccountEmail(input, tool) {
 
 function resolveModelVariant(input, tool) {
   if (tool === "codex") {
-    const cfg = readCodexConfig();
-    return (
-      normalizeEffortToken(
+    const hookCtx = readCodexHookContext(input);
+    const fromPayload = normalizeEffortToken(
+      input?.effort ??
         input?.model_reasoning_effort ??
-          input?.reasoning_effort ??
-          input?.reasoningEffort ??
-          cfg.model_reasoning_effort
-      ) || null
+        input?.reasoning_effort ??
+        input?.reasoningEffort ??
+        hookCtx?.effort
     );
+    if (fromPayload) return fromPayload;
+    const cfg = readCodexConfig();
+    return normalizeEffortToken(cfg.model_reasoning_effort) || null;
   }
   if (tool === "claude_code") {
     const fromPayload =
@@ -490,9 +578,10 @@ function resolveModelVariant(input, tool) {
 
 function appendModelVariant(base, variant) {
   if (!variant) return base;
-  const label = base.model_label ? `${base.model_label} · ${variant}` : `Unknown · ${variant}`;
+  const label = formatEffortLabel(variant) || variant;
+  const display = base.model_label ? `${base.model_label} · ${label}` : `Unknown · ${label}`;
   const bucket = slugToModelBucket(`${base.model_bucket}-${variant}`);
-  return { model_label: label.slice(0, 120), model_bucket: bucket };
+  return { model_label: display.slice(0, 120), model_bucket: bucket };
 }
 
 function primarySessionId(input, tool) {
@@ -731,9 +820,23 @@ function extractModelMeta(input) {
 function buildModelMeta(input, tool) {
   let base = resolveModelMeta(input, tool);
   if (tool === "codex") {
-    const cfg = readCodexConfig();
-    if (base.model_bucket === "unknown" && cfg.model) {
-      base = { model_label: cfg.model, model_bucket: slugToModelBucket(cfg.model) };
+    const hookCtx = readCodexHookContext(input);
+    const modelSlug = hookCtx?.model || input?.model;
+    if (typeof modelSlug === "string" && modelSlug.trim()) {
+      const slug = modelSlug.trim();
+      base = {
+        model_label: humanizeCodexModelSlug(slug) || slug,
+        model_bucket: slugToModelBucket(slug)
+      };
+    } else {
+      const cfg = readCodexConfig();
+      if (base.model_bucket === "unknown" && cfg.model) {
+        const slug = String(cfg.model).trim();
+        base = {
+          model_label: humanizeCodexModelSlug(slug) || slug,
+          model_bucket: slugToModelBucket(slug)
+        };
+      }
     }
   }
   const sessionId = input?.session_id ?? input?.conversation_id ?? input?.sessionId;
@@ -1214,6 +1317,11 @@ function hookEventToTelemetry(input, tool) {
   return null;
 }
 
+function recordFlushResult(tool, result) {
+  const path = join(promptlyStorageDir(), `last-flush-${tool}.json`);
+  writeJson(path, { at: Date.now(), ...result });
+}
+
 async function cmdHook(flags) {
   const tool = normalizeTool(flags.tool);
   if (!tool) {
@@ -1292,10 +1400,16 @@ async function cmdHook(flags) {
   traceHook(tool, input, event, event ? null : "no_event_emitted");
   const clientHeader = flags.client || TOOL_CLIENT[tool];
   try {
-    await flushQueue(tool, clientHeader);
+    const flushResult = await flushQueue(tool, clientHeader);
+    recordFlushResult(tool, flushResult);
+    if (!flushResult.ok) {
+      console.error("[promptly]", flushResult.error || "Upload failed");
+    }
   } catch (err) {
+    const message = String(err?.message || err);
+    recordFlushResult(tool, { ok: false, error: message });
     // Hooks must not fail the host agent
-    console.error("[promptly]", String(err?.message || err));
+    console.error("[promptly]", message);
   }
   process.exit(0);
 }
@@ -1353,7 +1467,39 @@ function cmdStatus(flags) {
       console.log(JSON.stringify({ connected: false, tool }, null, 2));
       process.exit(1);
     }
-    console.log(JSON.stringify({ connected: true, email: creds.email, tool: creds.tool, uid: creds.uid }, null, 2));
+    const lastFlush = readJson(join(promptlyStorageDir(), `last-flush-${tool}.json`), null);
+    console.log(
+      JSON.stringify(
+        {
+          connected: true,
+          email: creds.email,
+          uid: creds.uid,
+          tool: creds.tool,
+          api_url: creds.api_url || DEFAULT_API_URL,
+          website_login_hint:
+            "Statistics on promptly-labs.com only show events for the account with this uid/email. Sign in with the same Google/email before checking Statistics.",
+          last_flush: lastFlush,
+          queue_depth: loadQueue(tool).length,
+          recent_trace: (() => {
+            const path = hookTracePath(tool);
+            if (!existsSync(path)) return [];
+            return readFileSync(path, "utf8")
+              .trim()
+              .split("\n")
+              .slice(-3)
+              .map((line) => {
+                try {
+                  return JSON.parse(line);
+                } catch {
+                  return { raw: line };
+                }
+              });
+          })()
+        },
+        null,
+        2
+      )
+    );
     return;
   }
 
@@ -1434,11 +1580,21 @@ function auditInstalledHooks(tool) {
       join(homedir(), ".cursor/plugins/local/promptly-cursor/hooks/hooks.json"),
       join(homedir(), "integrations/cursor/hooks/hooks.json")
     ],
-    codex: [
-      join(homedir(), "integrations/codex/hooks/hooks.json")
-    ],
+    codex: [join(homedir(), "integrations/codex/hooks/hooks.json")],
     claude_code: [join(homedir(), "integrations/claude-code/hooks/hooks.json")]
   };
+  if (tool === "codex") {
+    const cacheRoot = join(homedir(), ".codex/plugins/cache/promptly-labs/promptly-codex");
+    if (existsSync(cacheRoot)) {
+      for (const entry of readdirSync(cacheRoot)) {
+        const versionDir = join(cacheRoot, entry);
+        for (const rel of ["hooks/hooks.json", "codex/hooks/hooks.json"]) {
+          const filePath = join(versionDir, rel);
+          if (existsSync(filePath)) paths.codex.push(filePath);
+        }
+      }
+    }
+  }
   const required = {
     cursor: ["beforeSubmitPrompt", "afterAgentResponse", "stop"],
     codex: ["UserPromptSubmit", "Stop"],
@@ -1452,11 +1608,15 @@ function auditInstalledHooks(tool) {
     }
     const raw = readFileSync(filePath, "utf8");
     const missing = (required[tool] || []).filter((key) => !raw.includes(`"${key}"`));
+    const usesPluginRoot = tool !== "codex" || raw.includes("PLUGIN_ROOT");
+    const usesRelativeBin = tool === "codex" && /node \.\/bin\/promptly-telemetry/.test(raw);
     out.push({
       path: filePath,
       exists: true,
-      ok: missing.length === 0,
-      missing_hooks: missing
+      ok: missing.length === 0 && usesPluginRoot && !usesRelativeBin,
+      missing_hooks: missing,
+      uses_plugin_root: usesPluginRoot,
+      uses_relative_bin: usesRelativeBin
     });
   }
   return out;
@@ -1472,7 +1632,8 @@ function simulateHookFlow(tool) {
           session_id: sessionId,
           turn_id: "turn-1",
           prompt: "diagnostics simulate prompt",
-          model: "gpt-5.4"
+          model: "gpt-5.5",
+          effort: "xhigh"
         }
       : {
           hook_event_name: "beforeSubmitPrompt",
@@ -1543,7 +1704,8 @@ function cmdDiagnostics(flags) {
         session_id: sessionId,
         turn_id: "turn-1",
         prompt: "diagnostics hello",
-        model: "gpt-5.4"
+        model: "gpt-5.5",
+        effort: "xhigh"
       }
     },
     {
@@ -1621,6 +1783,8 @@ function cmdDiagnostics(flags) {
     notes: [
       "response_end_without_pending_submit means the assistant finished hook ran without a matching prompt submit — usually missing afterAgentResponse/Stop hooks or session id mismatch.",
       "pending_orphans that grow after each prompt mean response-end hooks are not firing; reinstall the plugin pack.",
+      "Codex hooks must use ${PLUGIN_ROOT}/bin/promptly-telemetry.mjs — relative ./bin paths fail silently in Codex Desktop.",
+      "After updating Codex hooks, quit and reopen Codex and re-trust the Promptly plugin hooks.",
       "Run with --simulate to exercise submit → draft → response on a fake session."
     ]
   };

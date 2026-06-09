@@ -61,6 +61,10 @@ if ! grep -q 'UserPromptSubmit' "${CODEX_PLUGIN}/hooks/hooks.json" 2>/dev/null; 
   echo "✗ Codex hooks missing UserPromptSubmit (re-download plugin pack)"
   exit 1
 fi
+if ! grep -q 'PLUGIN_ROOT' "${CODEX_PLUGIN}/hooks/hooks.json" 2>/dev/null; then
+  echo "✗ Codex hooks must use \${PLUGIN_ROOT}/bin (re-run install or update plugin pack)"
+  exit 1
+fi
 if ! grep -q 'hook --tool codex' "${CODEX_PLUGIN}/hooks/hooks.json" 2>/dev/null; then
   echo "✗ Hooks are not configured for Codex (expected --tool codex)"
   exit 1
