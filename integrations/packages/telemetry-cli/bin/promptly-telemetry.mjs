@@ -94,9 +94,13 @@ function readDevicePrimary() {
   return earliest;
 }
 
-function writeDevicePrimary(creds, tool) {
-  const existing = readDevicePrimary();
-  if (existing?.uid) return existing;
+function readExplicitDevicePrimary() {
+  const saved = readJson(devicePrimaryPath(), null);
+  return saved?.uid ? saved : null;
+}
+
+/** Force this Promptly account as the one stats go to on this computer. */
+function setDevicePrimary(creds, tool) {
   const row = {
     uid: creds.uid,
     email: creds.email || null,
@@ -107,11 +111,15 @@ function writeDevicePrimary(creds, tool) {
   return row;
 }
 
+function writeDevicePrimary(creds, tool) {
+  const existing = readExplicitDevicePrimary();
+  if (existing?.uid) return existing;
+  return setDevicePrimary(creds, tool);
+}
+
 function clearDevicePrimary() {
   try {
-    if (existsSync(devicePrimaryPath())) {
-      writeFileSync(devicePrimaryPath(), "{}", "utf8");
-    }
+    writeJson(devicePrimaryPath(), {});
   } catch {
     /* ignore */
   }
@@ -222,12 +230,12 @@ async function exchangePrimaryFromCode(apiUrl, tool, code) {
     throw new Error(body.error || `Exchange failed (${res.status})`);
   }
   saveCredentialsFromExchange(tool, body, apiUrl);
-  writeDevicePrimary(getCredentials(tool), tool);
+  setDevicePrimary(getCredentials(tool), tool);
   return body;
 }
 
 async function alignToolsToDevicePrimary(apiUrl) {
-  const primary = readDevicePrimary();
+  const primary = readExplicitDevicePrimary() || readDevicePrimary();
   if (!primary?.uid) return { aligned: [], primary: null };
   const anchorTool =
     findPairedToolForUid(primary.uid, null) ||
@@ -1606,10 +1614,16 @@ async function cmdHook(flags) {
 }
 
 async function cmdLogin(flags) {
-  const code = String(flags._rest[0] || flags.code || "").trim();
   const tool = normalizeTool(flags.tool);
   const fromSibling = flags["from-sibling"] === true || flags["from-sibling"] === "true";
-  const resetPrimary = flags["reset-primary"] === true || flags["reset-primary"] === "true";
+  const resetPrimaryFlag = flags["reset-primary"];
+  const switchingPrimary =
+    resetPrimaryFlag === true ||
+    resetPrimaryFlag === "true" ||
+    (typeof resetPrimaryFlag === "string" && resetPrimaryFlag.trim().length >= 6);
+  const code = String(
+    flags._rest[0] || flags.code || (typeof resetPrimaryFlag === "string" ? resetPrimaryFlag : "") || ""
+  ).trim();
   const apiUrl = (flags["api-url"] || DEFAULT_API_URL).replace(/\/$/, "");
 
   if (!tool) {
@@ -1617,11 +1631,11 @@ async function cmdLogin(flags) {
     process.exit(1);
   }
 
-  if (resetPrimary) {
+  if (switchingPrimary) {
     clearDevicePrimary();
   }
 
-  if (fromSibling || (!code && findPairedTool(tool))) {
+  if (fromSibling || (!code && !switchingPrimary && findPairedTool(tool))) {
     const anchorTool = findPairedTool(tool);
     if (!anchorTool) {
       console.error(
@@ -1664,16 +1678,13 @@ async function cmdLogin(flags) {
     process.exit(1);
   }
 
-  const primary = resetPrimary ? null : readDevicePrimary();
-  if (primary?.uid && body.uid && body.uid !== primary.uid) {
+  const primary = switchingPrimary ? null : readExplicitDevicePrimary() || readDevicePrimary();
+  if (!switchingPrimary && primary?.uid && body.uid && body.uid !== primary.uid) {
     console.error(
       `This pairing code is for ${body.email || body.uid}, but this computer already sends stats to ${primary.email || primary.uid}.`
     );
     console.error(
-      `Use: promptly-telemetry login --tool ${tool} --from-sibling   (no code needed — copies your first Promptly account on this computer)`
-    );
-    console.error(
-      `Or reset the device primary: promptly-telemetry login --tool ${tool} --reset-primary ${code}`
+      `To switch to ${body.email || body.uid}, run: promptly-telemetry align-device --set-primary ${code}`
     );
     process.exit(1);
   }
@@ -1683,8 +1694,26 @@ async function cmdLogin(flags) {
   if (pairedTool !== tool) {
     console.error(`Warning: server paired as ${pairedTool} but --tool ${tool} was requested.`);
   }
-  const devicePrimary = writeDevicePrimary(getCredentials(tool), tool);
+  const devicePrimary = switchingPrimary
+    ? setDevicePrimary(getCredentials(tool), tool)
+    : writeDevicePrimary(getCredentials(tool), tool);
+  const sourceUidsBefore = switchingPrimary ? collectLocalPairedUids() : [];
   const alignment = await alignToolsToDevicePrimary(apiUrl);
+  if (switchingPrimary) {
+    const sourceUids = [...new Set([...sourceUidsBefore, ...collectLocalPairedUids()])].filter(
+      (uid) => uid && uid !== devicePrimary.uid
+    );
+    if (sourceUids.length) {
+      try {
+        const consolidation = await consolidateStatsOnServer(apiUrl, sourceUids);
+        console.log(
+          `Consolidated historical stats: ${consolidation.eventsMoved ?? 0} events → ${consolidation.target_email || devicePrimary.email || devicePrimary.uid}`
+        );
+      } catch (err) {
+        console.error(`[promptly] Stats consolidation: ${String(err?.message || err)}`);
+      }
+    }
+  }
   console.log(`Connected to Promptly as ${body.email || body.uid} (${pairedTool})`);
   console.log(`Device primary on this computer: ${devicePrimary.email || devicePrimary.uid}`);
   if (alignment.aligned.length) {
@@ -1713,7 +1742,7 @@ async function cmdAlignDevice(flags) {
     }
   }
 
-  const primary = readDevicePrimary();
+  let primary = readExplicitDevicePrimary() || readDevicePrimary();
   if (!primary?.uid) {
     console.error(
       "No device primary yet. Run with a pairing code: promptly-telemetry align-device --set-primary YOUR_CODE"
@@ -1723,6 +1752,7 @@ async function cmdAlignDevice(flags) {
   }
 
   const alignment = await alignToolsToDevicePrimary(apiUrl);
+  primary = readExplicitDevicePrimary() || readDevicePrimary();
 
   const sourceUids = [...new Set([...sourceUidsBefore, ...collectLocalPairedUids()])].filter(
     (uid) => uid && uid !== primary.uid
