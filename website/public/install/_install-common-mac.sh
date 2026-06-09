@@ -125,6 +125,25 @@ promptly_sync_codex_plugin_cache() {
   fi
 }
 
+promptly_sync_claude_plugin_cache() {
+  local src="${HOME}/integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs"
+  local hooks_src="${HOME}/integrations/claude-code/hooks/hooks.json"
+  local cache_root="${HOME}/.claude/plugins/cache/promptly-labs/promptly-claude-code"
+  [[ -f "${src}" ]] || return 0
+  for bin_dir in "${cache_root}"/*/bin; do
+    if [[ -d "${bin_dir}" ]]; then
+      cp "${src}" "${bin_dir}/promptly-telemetry.mjs"
+    fi
+  done
+  if [[ -f "${hooks_src}" ]]; then
+    for hooks_dir in "${cache_root}"/*/hooks; do
+      if [[ -d "${hooks_dir}" ]]; then
+        cp "${hooks_src}" "${hooks_dir}/hooks.json"
+      fi
+    done
+  fi
+}
+
 promptly_sync_claude_code_command_files() {
   local plugin_dir="${1:-${HOME}/integrations/claude-code}"
   mkdir -p "${plugin_dir}/commands" "${plugin_dir}/user-commands"
@@ -445,6 +464,7 @@ promptly_install_for_claude_code() {
   promptly_sync_claude_code_command_files "${claude_plugin}"
   promptly_claude_marketplace_refresh "${integrations}" || return 1
   promptly_claude_plugin_reinstall || return 1
+  promptly_sync_claude_plugin_cache
   if ! claude plugin list 2>/dev/null | grep -q promptly-claude-code; then
     echo "✗ Promptly plugin not found in claude plugin list — retry this step"
     return 1

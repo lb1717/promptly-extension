@@ -11,6 +11,8 @@ import { getFirebaseAuth, getGoogleProvider } from "@/lib/firebaseClient";
 
 export const PROMPTLY_GOOGLE_SIGN_IN_DONE = "PROMPTLY_GOOGLE_SIGN_IN_DONE";
 export const PROMPTLY_GOOGLE_SIGN_IN_ERROR = "PROMPTLY_GOOGLE_SIGN_IN_ERROR";
+export const PROMPTLY_IDE_LINK_DONE = "PROMPTLY_IDE_LINK_DONE";
+export const PROMPTLY_IDE_LINK_ERROR = "PROMPTLY_IDE_LINK_ERROR";
 
 const REDIRECT_PENDING_KEY = "promptly_google_redirect_pending";
 const REDIRECT_PENDING_MAX_AGE_MS = 15 * 60 * 1000;
@@ -23,7 +25,7 @@ export function resetGoogleRedirectAuthState(): void {
   redirectFlowStarted = false;
 }
 
-export function googleAuthCallbackPath(returnTo?: string, fromAccount = false): string {
+export function googleAuthCallbackPath(returnTo?: string, fromAccount = false, purpose?: string): string {
   const path =
     returnTo ||
     (typeof window !== "undefined" ? `${window.location.pathname}${window.location.search}` : "/account");
@@ -31,7 +33,24 @@ export function googleAuthCallbackPath(returnTo?: string, fromAccount = false): 
   if (fromAccount) {
     params.set("from", "account");
   }
+  if (purpose) {
+    params.set("purpose", purpose);
+  }
   return `/auth/google?${params.toString()}`;
+}
+
+/** Sign in to a second Promptly account in a new tab (for linking coding-agent stats). */
+export function googleAuthCallbackPathForIdeLink(): string {
+  return googleAuthCallbackPath("/account/statistics", true, "ide-link");
+}
+
+export function openIdeLinkAccountInNewTab(): void {
+  if (typeof window === "undefined") return;
+  const url = googleAuthCallbackPathForIdeLink();
+  const opened = window.open(url, "_blank");
+  if (!opened) {
+    window.location.assign(url);
+  }
 }
 
 /** Open Google sign-in in a new tab (falls back to same-tab navigation if blocked). */
@@ -148,6 +167,16 @@ export function notifyGoogleSignInOpenerSuccess(): void {
 export function notifyGoogleSignInOpenerError(message: string): void {
   if (typeof window === "undefined" || !window.opener || window.opener.closed) return;
   window.opener.postMessage({ type: PROMPTLY_GOOGLE_SIGN_IN_ERROR, message }, window.location.origin);
+}
+
+export function notifyIdeLinkOpenerSuccess(linkedIdToken: string): void {
+  if (typeof window === "undefined" || !window.opener || window.opener.closed) return;
+  window.opener.postMessage({ type: PROMPTLY_IDE_LINK_DONE, linkedIdToken }, window.location.origin);
+}
+
+export function notifyIdeLinkOpenerError(message: string): void {
+  if (typeof window === "undefined" || !window.opener || window.opener.closed) return;
+  window.opener.postMessage({ type: PROMPTLY_IDE_LINK_ERROR, message }, window.location.origin);
 }
 
 export function tryCloseGoogleSignInTab(): void {

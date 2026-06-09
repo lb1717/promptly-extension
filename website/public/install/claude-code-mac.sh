@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PLUGIN_PACK_URL="${PROMPTLY_PLUGIN_PACK_URL:-https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.1}"
+PLUGIN_PACK_URL="${PROMPTLY_PLUGIN_PACK_URL:-https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.2}"
 INTEGRATIONS="${HOME}/integrations"
 PROMPTLY_INSTALL_BASE="${PROMPTLY_INSTALL_BASE:-https://promptly-labs.com/install}"
 
@@ -49,6 +49,7 @@ promptly_sync_claude_code_command_files "${CLAUDE_PLUGIN}"
 echo "→ Installing Promptly in Claude Code…"
 promptly_claude_marketplace_refresh "${INTEGRATIONS}"
 promptly_claude_plugin_reinstall
+promptly_sync_claude_plugin_cache
 
 if ! claude plugin list 2>/dev/null | grep -q promptly-claude-code; then
   echo "✗ Promptly plugin not found in claude plugin list — retry this step"

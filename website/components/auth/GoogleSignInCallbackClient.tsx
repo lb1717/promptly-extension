@@ -5,6 +5,8 @@ import {
   consumeGoogleSignInRedirectResult,
   notifyGoogleSignInOpenerError,
   notifyGoogleSignInOpenerSuccess,
+  notifyIdeLinkOpenerError,
+  notifyIdeLinkOpenerSuccess,
   resetGoogleRedirectAuthState,
   signInWithGooglePopupInTab,
   startGoogleSignInRedirect,
@@ -29,6 +31,7 @@ export function GoogleSignInCallbackClient() {
   const searchParams = useSearchParams();
   const returnTo = searchParams.get("returnTo")?.trim() || "/account";
   const openedFromAccount = searchParams.get("from") === "account";
+  const isIdeLink = searchParams.get("purpose") === "ide-link";
   const [status, setStatus] = useState<Status>("loading");
   const [errorMessage, setErrorMessage] = useState("");
   const [errorCode, setErrorCode] = useState("");
@@ -40,20 +43,41 @@ export function GoogleSignInCallbackClient() {
     finishedRef.current = true;
     clearGoogleRedirectPending();
     await syncPromptlyUserDoc(user);
+
+    if (isIdeLink) {
+      try {
+        const linkedIdToken = await user.getIdToken();
+        notifyIdeLinkOpenerSuccess(linkedIdToken);
+        setStatus("done");
+        tryCloseGoogleSignInTab();
+      } catch (error) {
+        const resolved = resolveGoogleSignInError(error);
+        finishError(resolved.message, getFirebaseErrorCode(error));
+      }
+      return;
+    }
+
     setStatus("done");
     notifyGoogleSignInOpenerSuccess();
     tryCloseGoogleSignInTab();
-  }, []);
+  }, [isIdeLink]);
 
-  const finishError = useCallback((message: string, code = "") => {
-    if (finishedRef.current) return;
-    finishedRef.current = true;
-    clearGoogleRedirectPending();
-    setErrorMessage(message);
-    setErrorCode(code);
-    setStatus("error");
-    notifyGoogleSignInOpenerError(message);
-  }, []);
+  const finishError = useCallback(
+    (message: string, code = "") => {
+      if (finishedRef.current) return;
+      finishedRef.current = true;
+      clearGoogleRedirectPending();
+      setErrorMessage(message);
+      setErrorCode(code);
+      setStatus("error");
+      if (isIdeLink) {
+        notifyIdeLinkOpenerError(message);
+      } else {
+        notifyGoogleSignInOpenerError(message);
+      }
+    },
+    [isIdeLink]
+  );
 
   const startRedirectSignIn = useCallback(async () => {
     if (finishedRef.current || redirectStartedRef.current) return;
@@ -86,13 +110,18 @@ export function GoogleSignInCallbackClient() {
         finishedRef.current = true;
         clearGoogleRedirectPending();
         setStatus("cancelled");
-        notifyGoogleSignInOpenerError("Google sign-in was cancelled.");
+        const message = "Google sign-in was cancelled.";
+        if (isIdeLink) {
+          notifyIdeLinkOpenerError(message);
+        } else {
+          notifyGoogleSignInOpenerError(message);
+        }
         return;
       }
 
       await startRedirectSignIn();
     }
-  }, [finishSuccess, startRedirectSignIn]);
+  }, [finishSuccess, isIdeLink, startRedirectSignIn]);
 
   useEffect(() => {
     let cancelled = false;
@@ -125,14 +154,18 @@ export function GoogleSignInCallbackClient() {
           }
           finishedRef.current = true;
           setStatus("cancelled");
-          notifyGoogleSignInOpenerError(
-            "Google sign-in did not finish. Close this tab, go back to Promptly, and try again."
-          );
+          const message =
+            "Google sign-in did not finish. Close this tab, go back to Promptly, and try again.";
+          if (isIdeLink) {
+            notifyIdeLinkOpenerError(message);
+          } else {
+            notifyGoogleSignInOpenerError(message);
+          }
           return;
         }
 
         const hasOpener = Boolean(window.opener && !window.opener.closed);
-        if (openedFromAccount && hasOpener) {
+        if ((openedFromAccount || isIdeLink) && hasOpener) {
           await startRedirectSignIn();
           return;
         }
@@ -150,22 +183,32 @@ export function GoogleSignInCallbackClient() {
     return () => {
       cancelled = true;
     };
-  }, [finishError, finishSuccess, openedFromAccount, startRedirectSignIn]);
+  }, [finishError, finishSuccess, isIdeLink, openedFromAccount, startRedirectSignIn]);
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-page px-6 py-16 text-ink">
       <img src="/images/promptly-logo.png" alt="Promptly" className="h-12 w-auto object-contain" />
-      <h1 className="mt-4 text-xl font-semibold">Google sign-in</h1>
+      <h1 className="mt-4 text-xl font-semibold">
+        {isIdeLink ? "Link another Promptly account" : "Google sign-in"}
+      </h1>
 
       {status === "loading" || status === "working" ? (
         <p className="mt-3 text-sm text-muted">
-          {status === "working" ? "Redirecting to Google…" : "Completing sign-in…"}
+          {status === "working"
+            ? isIdeLink
+              ? "Redirecting to Google to verify your other account…"
+              : "Redirecting to Google…"
+            : "Completing sign-in…"}
         </p>
       ) : null}
 
       {status === "ready" ? (
         <div className="mt-6 flex max-w-sm flex-col items-center gap-4 text-center">
-          <p className="text-sm text-muted">Continue in this tab to connect your Promptly account with Google.</p>
+          <p className="text-sm text-muted">
+            {isIdeLink
+              ? "Sign in with the Google account you use in Cursor, Codex, or Claude Code. School and work accounts usually work best on this full page."
+              : "Continue in this tab to connect your Promptly account with Google."}
+          </p>
           <button
             type="button"
             onClick={() => {
@@ -187,7 +230,11 @@ export function GoogleSignInCallbackClient() {
 
       {status === "done" ? (
         <div className="mt-4 max-w-sm text-center">
-          <p className="text-sm text-muted">You&apos;re signed in. You can close this tab and return to Promptly.</p>
+          <p className="text-sm text-muted">
+            {isIdeLink
+              ? "Account verified. This tab will close automatically and your statistics page will update."
+              : "You&apos;re signed in. You can close this tab and return to Promptly."}
+          </p>
           <Link href={returnTo} className="mt-4 inline-block text-sm font-semibold text-ink underline">
             Continue to Promptly
           </Link>
@@ -220,6 +267,12 @@ export function GoogleSignInCallbackClient() {
       {status === "error" ? (
         <div className="mt-4 max-w-sm text-center">
           <p className="text-sm text-red-700">{errorMessage || "Google sign-in failed."}</p>
+          {isIdeLink ? (
+            <p className="mt-2 text-xs text-muted">
+              School or work Google accounts often block pop-ups. Use Try again below to sign in on this page
+              instead.
+            </p>
+          ) : null}
           {errorCode ? <p className="mt-2 font-mono text-xs text-muted">Error code: {errorCode}</p> : null}
           <button
             type="button"

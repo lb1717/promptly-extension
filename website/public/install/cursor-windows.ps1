@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-$PluginPackUrl = if ($env:PROMPTLY_PLUGIN_PACK_URL) { $env:PROMPTLY_PLUGIN_PACK_URL } else { "https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.1" }
+$PluginPackUrl = if ($env:PROMPTLY_PLUGIN_PACK_URL) { $env:PROMPTLY_PLUGIN_PACK_URL } else { "https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.2" }
 $Integrations = Join-Path $env:USERPROFILE "integrations"
 $CursorPlugin = Join-Path $env:USERPROFILE ".cursor\plugins\local\promptly-cursor"
 $ZipPath = Join-Path $env:USERPROFILE "promptly.zip"

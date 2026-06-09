@@ -1119,8 +1119,12 @@ function isClaudeCodeHostPayload(input) {
   if (event.includes("userpromptsubmit")) {
     const model = hookModelToken(input);
     if (/^(gpt-|o[0-9]|codex)/.test(model)) return false;
-    if (input?.turn_id && !input?.transcript_path) return false;
-    return true;
+    if (input?.transcript_path) return true;
+    if (model.startsWith("claude")) return true;
+    // Claude Code often sends turn_id without transcript_path on prompt submit.
+    if (input?.turn_id && typeof input?.session_id === "string") return true;
+    if (input?.session_id && !input?.conversation_id) return true;
+    return false;
   }
   if (input?.transcript_path) return true;
   if (event.includes("sessionstart") || event.includes("sessionend")) {
@@ -1140,7 +1144,13 @@ function isClaudeCodeHostPayload(input) {
 
 function isCodexHostPayload(input) {
   const event = resolveHookEventName(input);
-  if (event.includes("userpromptsubmit")) return true;
+  if (event.includes("userpromptsubmit")) {
+    const model = hookModelToken(input);
+    if (/^(gpt-|o[0-9]|codex)/.test(model)) return true;
+    if (typeof input?.effort === "string" || typeof input?.model_reasoning_effort === "string") return true;
+    if (typeof input?.reasoning_effort === "string") return true;
+    return false;
+  }
   if ((event === "stop" || event.endsWith(".stop")) && input?.session_id) {
     if (typeof input?.loop_count !== "number") return true;
   }
@@ -1232,7 +1242,8 @@ function hookPayloadMatchesTool(input, tool) {
   if (tool === "codex" && isCodexHostPayload(input)) return true;
   if (tool === "claude_code") {
     if (isCursorHostPayload(input)) return false;
-    if (isCodexHostPayload(input) && !isClaudeCodeHostPayload(input)) return false;
+    if (isClaudeCodeHostPayload(input)) return true;
+    if (isCodexHostPayload(input)) return false;
     return true;
   }
   if (tool === "cursor") {
@@ -1695,6 +1706,16 @@ function cmdDiagnostics(flags) {
         generation_id: "gen-diagnostics",
         prompt: "diagnostics hello",
         model: "composer-2.5"
+      }
+    },
+    {
+      label: "UserPromptSubmit (claude)",
+      input: {
+        hook_event_name: "UserPromptSubmit",
+        session_id: sessionId,
+        turn_id: "turn-claude-1",
+        prompt: "diagnostics hello",
+        model: "claude-sonnet-4-20250514"
       }
     },
     {

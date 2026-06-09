@@ -1404,8 +1404,8 @@ export function StatisticsClient() {
       refreshAllStats();
     } catch (e) {
       const raw = String(e instanceof Error ? e.message : e);
-      if (/popup-closed-by-user|cancelled-popup-request/i.test(raw)) {
-        setLinkedAccountsError("");
+      if (/cancelled|popup-closed|timed out/i.test(raw)) {
+        setLinkedAccountsError(raw.includes("timed out") ? raw : "");
       } else {
         setLinkedAccountsError(raw);
       }
@@ -2349,7 +2349,7 @@ export function StatisticsClient() {
                   <p className="mt-1 max-w-2xl text-[11px] text-muted">
                     One Promptly sign-in can combine coding-agent stats from multiple Google accounts you own — for
                     example if Cursor/Codex were paired while signed in with a school email but you prefer viewing
-                    stats from your personal Gmail.
+                    stats from your personal Gmail. Link opens a new tab so school SSO can sign in on the full page.
                   </p>
                 </div>
                 <button
@@ -2358,7 +2358,7 @@ export function StatisticsClient() {
                   disabled={!user || linkedAccountsBusy || ideStatsLoading}
                   className="rounded-lg border border-violet-300 bg-white px-3 py-1.5 text-[11px] font-medium text-violet-900 transition hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {linkedAccountsBusy ? "Linking…" : "+ Link Google account"}
+                  {linkedAccountsBusy ? "Linking…" : "+ Link account"}
                 </button>
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
