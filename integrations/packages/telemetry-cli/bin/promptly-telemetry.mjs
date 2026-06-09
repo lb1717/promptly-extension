@@ -170,6 +170,62 @@ async function exchangeSiblingTool(apiUrl, anchorTool, targetTool) {
   return body;
 }
 
+function collectLocalPairedUids() {
+  const uids = new Set();
+  for (const tool of ALL_TOOLS) {
+    const creds = getCredentials(tool);
+    if (creds?.uid) uids.add(creds.uid);
+  }
+  const primary = readDevicePrimary();
+  if (primary?.uid) uids.add(primary.uid);
+  return [...uids];
+}
+
+async function consolidateStatsOnServer(apiUrl, sourceUids) {
+  const anchorTool =
+    ALL_TOOLS.find((tool) => {
+      const creds = getCredentials(tool);
+      return creds?.device_token;
+    }) || null;
+  if (!anchorTool) {
+    throw new Error("No paired coding agent found to authorize stats consolidation");
+  }
+  const creds = getCredentials(anchorTool);
+  const res = await fetch(`${apiUrl}/api/integrations/consolidate-stats`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${creds.device_token}`,
+      "x-promptly-client": TOOL_CLIENT[anchorTool]
+    },
+    body: JSON.stringify({ source_uids: sourceUids })
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(body.error || `Stats consolidation failed (${res.status})`);
+  }
+  return body;
+}
+
+async function exchangePrimaryFromCode(apiUrl, tool, code) {
+  const res = await fetch(`${apiUrl}/api/integrations/exchange`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      code: code.toUpperCase(),
+      tool,
+      device_label: `${tool}-${process.platform}-align`
+    })
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(body.error || `Exchange failed (${res.status})`);
+  }
+  saveCredentialsFromExchange(tool, body, apiUrl);
+  writeDevicePrimary(getCredentials(tool), tool);
+  return body;
+}
+
 async function alignToolsToDevicePrimary(apiUrl) {
   const primary = readDevicePrimary();
   if (!primary?.uid) return { aligned: [], primary: null };
@@ -1642,17 +1698,54 @@ async function cmdLogin(flags) {
 
 async function cmdAlignDevice(flags) {
   const apiUrl = (flags["api-url"] || DEFAULT_API_URL).replace(/\/$/, "");
+  const sourceUidsBefore = collectLocalPairedUids();
+  const setPrimaryCode = String(flags["set-primary"] || flags._rest[0] || "").trim();
+  const anchorTool = normalizeTool(flags.tool) || "claude_code";
+
+  if (setPrimaryCode) {
+    clearDevicePrimary();
+    try {
+      await exchangePrimaryFromCode(apiUrl, anchorTool, setPrimaryCode);
+      console.log(`Set this computer's Promptly account from pairing code (${anchorTool}).`);
+    } catch (err) {
+      console.error(String(err?.message || err));
+      process.exit(1);
+    }
+  }
+
   const primary = readDevicePrimary();
   if (!primary?.uid) {
-    console.error("No device primary yet. Pair one agent with a code from promptly-labs.com/integrations.");
+    console.error(
+      "No device primary yet. Run with a pairing code: promptly-telemetry align-device --set-primary YOUR_CODE"
+    );
+    console.error("Get a code at promptly-labs.com/integrations while signed into the Promptly account you want.");
     process.exit(1);
   }
+
   const alignment = await alignToolsToDevicePrimary(apiUrl);
+
+  const sourceUids = [...new Set([...sourceUidsBefore, ...collectLocalPairedUids()])].filter(
+    (uid) => uid && uid !== primary.uid
+  );
+
+  let consolidation = null;
+  if (sourceUids.length) {
+    try {
+      consolidation = await consolidateStatsOnServer(apiUrl, sourceUids);
+      console.log(
+        `Consolidated historical stats: ${consolidation.eventsMoved ?? 0} events, ${consolidation.devicesMoved ?? 0} devices → ${consolidation.target_email || primary.email || primary.uid}`
+      );
+    } catch (err) {
+      console.error(`[promptly] Stats consolidation: ${String(err?.message || err)}`);
+    }
+  }
+
   console.log(
     JSON.stringify(
       {
         device_primary: primary,
         aligned_tools: alignment.aligned,
+        consolidation,
         tools: ALL_TOOLS.map((tool) => {
           const creds = getCredentials(tool);
           return {
@@ -1668,7 +1761,7 @@ async function cmdAlignDevice(flags) {
       2
     )
   );
-  if (!alignment.aligned.length) {
+  if (!alignment.aligned.length && !sourceUids.length) {
     console.log("All paired agents already use the same Promptly account on this computer.");
   }
 }
@@ -2102,7 +2195,8 @@ Commands:
   hook --tool <tool>          Process hook stdin and upload events
   login --tool <tool> <CODE>  Exchange pairing code for device token
   login --tool <tool> --from-sibling  Pair this agent to the same Promptly account as another agent on this computer
-  align-device                Re-pair mismatched agents to this computer's first Promptly account
+  align-device                Re-pair agents + merge split stats onto this computer's Promptly account
+  align-device --set-primary <CODE>  Pick account from integrations code, then re-pair + merge stats
   test-send --tool <tool>     Upload one test prompt (verify stats pipeline)
   diagnostics [--tool <tool>] Simulate hook payloads and show local timing state
   status [--tool <tool>]      Show connection status for one or all tools

@@ -1,7 +1,7 @@
 "use client";
 
 import { AdminLogoutButton } from "@/components/admin/AdminLogoutButton";
-import { AllAgentsConnectStep } from "@/components/integrations/integrationPairing";
+import { AlignDeviceConnectStep, AllAgentsConnectStep } from "@/components/integrations/integrationPairing";
 import { ClaudeCodeSetup, CodexSetup, CursorSetup, type IdeToolId } from "@/components/integrations/integrationSteps";
 import type { OsId } from "@/components/integrations/integrationOs";
 import Link from "next/link";
@@ -82,6 +82,23 @@ export function AdminIntegrationsClient() {
             os={activeOs}
             compact
             buttonLabel="Generate install & connect command"
+            errorClassName="text-red-300"
+          />
+        </div>
+      </section>
+
+      <section className="mb-8 rounded-2xl border border-amber-500/25 bg-amber-950/20 p-5">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-200">Fix split stats</h2>
+        <p className="mt-2 text-sm text-amber-100/75">
+          If Claude Code, Cursor, or Codex were paired under different Promptly accounts, sign in below with the account
+          you want to keep. One terminal command re-pairs every agent on this computer to that account and merges old
+          stats onto it.
+        </p>
+        <div className="mt-4 [&_.text-muted]:text-amber-100/70 [&_.text-faint]:text-amber-200/60 [&_.bg-ink]:bg-black/50 [&_.text-cream]:text-amber-50">
+          <AlignDeviceConnectStep
+            os={activeOs}
+            compact
+            buttonLabel="Generate fix split stats command"
             errorClassName="text-red-300"
           />
         </div>

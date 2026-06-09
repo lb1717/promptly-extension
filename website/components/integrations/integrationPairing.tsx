@@ -8,6 +8,7 @@ import { CopyBlock } from "./integrationCopyBlock";
 import {
   allAgentsFullSetupCommands,
   allAgentsSetupValidationItems,
+  alignDeviceCommands,
   fullSetupCommands,
   type AllAgentsPairCodes,
   type IdeToolId,
@@ -298,6 +299,97 @@ export function AllAgentsConnectStep({
         </div>
         {inner}
       </div>
+    </li>
+  );
+}
+
+export function AlignDeviceConnectStep({
+  os,
+  compact = false,
+  buttonLabel = "Generate fix split stats command",
+  errorClassName = "text-red-700"
+}: {
+  os: OsId;
+  compact?: boolean;
+  buttonLabel?: string;
+  errorClassName?: string;
+}) {
+  const { loading, pairCode, expiresAt, busy, error, signInAndConnect, refreshCode } =
+    useIntegrationPairing("claude_code");
+  const terminalLabel = os === "mac" ? "Terminal" : "PowerShell";
+  const commandLines = pairCode ? alignDeviceCommands(os, pairCode) : [];
+
+  const inner = (
+    <>
+      <div className={compact ? "mt-0" : "mt-3"}>
+        {loading ? (
+          <span className="text-xs text-muted">Loading…</span>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void signInAndConnect()}
+              className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:opacity-50"
+            >
+              {busy ? "Connecting…" : buttonLabel}
+            </button>
+            {pairCode ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void refreshCode()}
+                className="rounded-lg border border-line px-2.5 py-1.5 text-xs font-medium text-ink hover:bg-cream-dark disabled:opacity-50"
+              >
+                New code
+              </button>
+            ) : null}
+          </div>
+        )}
+      </div>
+
+      {!pairCode ? (
+        <p className="mt-3 text-sm text-muted">
+          Sign in with the Promptly account you want all coding-agent stats on (e.g. your personal Gmail). Then copy
+          one command into {terminalLabel}. It re-pairs Claude Code, Cursor, and Codex to that account and merges any
+          split stats from earlier mismatched pairings.
+        </p>
+      ) : (
+        <>
+          <p className="mt-3 text-sm text-muted">
+            Copy into {terminalLabel}. Uses your pairing code to set this computer&apos;s account, re-pair all agents,
+            and merge historical stats onto it.
+          </p>
+          {expiresAt ? (
+            <p className="mt-1 text-xs text-faint">
+              Code expires {new Date(expiresAt).toLocaleTimeString()} — run soon after copying.
+            </p>
+          ) : null}
+          <CopyBlock lines={commandLines} label={terminalLabel} />
+          <StepValidation
+            items={[
+              "device_primary shows your chosen email/uid",
+              "All three tools show matches_primary: true",
+              "Consolidated historical stats line (if you had a split before)"
+            ]}
+          />
+        </>
+      )}
+
+      {error ? <p className={`mt-2 text-xs ${errorClassName}`}>{error}</p> : null}
+    </>
+  );
+
+  if (compact) {
+    return inner;
+  }
+
+  return (
+    <li className="flex gap-4 pb-8 last:pb-0">
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-ink text-xs font-bold text-cream">
+        2
+      </span>
+      <div className="min-w-0 flex-1">{inner}</div>
     </li>
   );
 }

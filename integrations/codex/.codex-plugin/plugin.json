@@ -1,7 +1,7 @@
 {
   "name": "promptly-codex",
   "description": "Track prompts and screen time in Codex with your Promptly account. Use /promptly to improve a draft before sending.",
-  "version": "1.4.3",
+  "version": "1.4.4",
   "author": {
     "name": "Promptly Labs"
   },

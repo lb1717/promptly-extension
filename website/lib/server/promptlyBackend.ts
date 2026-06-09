@@ -1778,6 +1778,134 @@ export async function unlinkIdeAccountForUser(
   return next;
 }
 
+async function countIntegrationDevicesForUid(uid: string): Promise<number> {
+  const normalized = String(uid || "").trim();
+  if (!normalized) return 0;
+  const snap = await getFirebaseAdminDb()
+    .collection(INTEGRATION_DEVICES_COLLECTION)
+    .where("uid", "==", normalized)
+    .where("revoked", "==", false)
+    .limit(1)
+    .get();
+  return snap.size;
+}
+
+async function migrateIdeEventsBetweenUsers(fromUid: string, toUid: string): Promise<number> {
+  const from = String(fromUid || "").trim();
+  const to = String(toUid || "").trim();
+  if (!from || !to || from === to) return 0;
+  const db = getFirebaseAdminDb();
+  let moved = 0;
+  for (;;) {
+    const snap = await db.collection(IDE_EVENTS_COLLECTION).where("uid", "==", from).limit(400).get();
+    if (snap.empty) break;
+    const batch = db.batch();
+    for (const doc of snap.docs) {
+      batch.update(doc.ref, { uid: to });
+      moved += 1;
+    }
+    await batch.commit();
+  }
+  return moved;
+}
+
+async function migrateIntegrationDevicesBetweenUsers(
+  fromUid: string,
+  toUid: string,
+  targetEmail: string | null
+): Promise<number> {
+  const from = String(fromUid || "").trim();
+  const to = String(toUid || "").trim();
+  if (!from || !to || from === to) return 0;
+  const db = getFirebaseAdminDb();
+  const snap = await db
+    .collection(INTEGRATION_DEVICES_COLLECTION)
+    .where("uid", "==", from)
+    .where("revoked", "==", false)
+    .limit(100)
+    .get();
+  if (snap.empty) return 0;
+  const batch = db.batch();
+  for (const doc of snap.docs) {
+    batch.set(
+      doc.ref,
+      {
+        uid: to,
+        email: targetEmail,
+        updatedAt: FieldValue.serverTimestamp()
+      },
+      { merge: true }
+    );
+  }
+  await batch.commit();
+  return snap.size;
+}
+
+/** Move coding-agent stats from other Promptly uids into one account (same computer / split pairing cleanup). */
+export async function consolidateIdeStatsToUser(
+  targetUser: PromptlyUser,
+  explicitSourceUids: string[] = []
+): Promise<{ eventsMoved: number; devicesMoved: number; sourceUids: string[] }> {
+  const targetUid = String(targetUser.uid || "").trim();
+  if (!targetUid) {
+    throw new Error("Missing target account");
+  }
+
+  const linked = await readLinkedIdeAccounts(targetUid);
+  const sourceUids = new Set<string>();
+  for (const row of linked) {
+    if (row.uid && row.uid !== targetUid) sourceUids.add(row.uid);
+  }
+  for (const raw of explicitSourceUids) {
+    const uid = String(raw || "").trim();
+    if (uid && uid !== targetUid) sourceUids.add(uid);
+  }
+
+  if (!sourceUids.size) {
+    await getFirebaseAdminDb()
+      .collection(USER_COLLECTION)
+      .doc(targetUid)
+      .set({ linkedIdeAccounts: [], updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    return { eventsMoved: 0, devicesMoved: 0, sourceUids: [] };
+  }
+
+  for (const sourceUid of sourceUids) {
+    const linkedOk = linked.some((row) => row.uid === sourceUid);
+    if (!linkedOk) {
+      const deviceCount = await countIntegrationDevicesForUid(sourceUid);
+      if (deviceCount <= 0) {
+        throw new Error(`Cannot consolidate ${sourceUid}: no paired coding agents found for that account`);
+      }
+    }
+  }
+
+  let eventsMoved = 0;
+  let devicesMoved = 0;
+  const db = getFirebaseAdminDb();
+  for (const sourceUid of sourceUids) {
+    eventsMoved += await migrateIdeEventsBetweenUsers(sourceUid, targetUid);
+    devicesMoved += await migrateIntegrationDevicesBetweenUsers(sourceUid, targetUid, targetUser.email);
+    await db
+      .collection(USER_COLLECTION)
+      .doc(sourceUid)
+      .set(
+        {
+          ideStatsPrimaryUid: FieldValue.delete(),
+          linkedIdeAccounts: FieldValue.delete(),
+          updatedAt: FieldValue.serverTimestamp()
+        },
+        { merge: true }
+      );
+  }
+
+  await db
+    .collection(USER_COLLECTION)
+    .doc(targetUid)
+    .set({ linkedIdeAccounts: [], updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+
+  return { eventsMoved, devicesMoved, sourceUids: [...sourceUids] };
+}
+
 async function resolveIdeStatsUsers(primaryUser: PromptlyUser): Promise<PromptlyUser[]> {
   const linked = await readLinkedIdeAccounts(primaryUser.uid);
   const users = new Map<string, PromptlyUser>();

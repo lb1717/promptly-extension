@@ -1,7 +1,7 @@
 export type OsId = "mac" | "windows";
 export type IdeToolId = "claude_code" | "cursor" | "codex";
 
-export const PLUGIN_PACK_VERSION = "1.4.3";
+export const PLUGIN_PACK_VERSION = "1.4.4";
 export const PLUGIN_PACK_URL = `https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=${PLUGIN_PACK_VERSION}`;
 export const INSTALL_BASE_URL = "https://promptly-labs.com/install";
 export const NODE_INSTALL_URL = "https://nodejs.org/";
@@ -90,6 +90,21 @@ export function siblingLoginCommandPowerShell(tool: IdeToolId): string {
 
 export function alignDeviceCommand(os: OsId): string {
   return `${telemetryCli(os)} align-device`;
+}
+
+export function alignDeviceCommands(os: OsId, code: string): string[] {
+  const align = `${telemetryCli(os)} align-device --set-primary ${code}`;
+  const status = `${telemetryCli(os)} status`;
+  if (os === "mac") {
+    return [`${align} && ${status}`];
+  }
+  return [`${align}; if ($LASTEXITCODE -eq 0) { ${status} }`];
+}
+
+export function alignDeviceCommandsPowerShell(code: string): string[] {
+  const align = `${telemetryCliPowerShell()} align-device --set-primary ${code}`;
+  const status = `${telemetryCliPowerShell()} status`;
+  return [`${align}; if ($LASTEXITCODE -eq 0) { ${status} }`];
 }
 
 export function loginCommandPowerShell(tool: string, code: string): string {
