@@ -1,6 +1,5 @@
 "use client";
 
-import { linkIdeGoogleAccount, unlinkIdeGoogleAccount } from "@/lib/ideLinkedAccountsClient";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
 import { onAuthStateChanged, signInWithCustomToken } from "firebase/auth";
 import Link from "next/link";
@@ -1219,8 +1218,6 @@ export function StatisticsClient() {
   const [promptVolumeAiFilters, setPromptVolumeAiFilters] =
     useState<PromptVolumeAiFilterState>(DEFAULT_PROMPT_VOLUME_AI_FILTERS);
   const [reportGenerating, setReportGenerating] = useState(false);
-  const [linkedAccountsBusy, setLinkedAccountsBusy] = useState(false);
-  const [linkedAccountsError, setLinkedAccountsError] = useState("");
   const reportRef = useRef<HTMLDivElement>(null);
   const ideStatsReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -1394,42 +1391,6 @@ export function StatisticsClient() {
     void loadExtended(user, days, granularity, true);
     void loadIdeStats(user, days, granularity, selectedEmailsByTool, ideStats?.agent_emails_by_tool, true);
   }, [user, days, granularity, selectedEmailsByTool, ideStats?.agent_emails_by_tool, loadExtended, loadIdeStats]);
-
-  const handleLinkPromptlyAccount = useCallback(async () => {
-    if (!user) return;
-    setLinkedAccountsError("");
-    setLinkedAccountsBusy(true);
-    try {
-      await linkIdeGoogleAccount(user);
-      refreshAllStats();
-    } catch (e) {
-      const raw = String(e instanceof Error ? e.message : e);
-      if (/cancelled|popup-closed|timed out/i.test(raw)) {
-        setLinkedAccountsError(raw.includes("timed out") ? raw : "");
-      } else {
-        setLinkedAccountsError(raw);
-      }
-    } finally {
-      setLinkedAccountsBusy(false);
-    }
-  }, [user, refreshAllStats]);
-
-  const handleUnlinkPromptlyAccount = useCallback(
-    async (uid: string) => {
-      if (!user) return;
-      setLinkedAccountsError("");
-      setLinkedAccountsBusy(true);
-      try {
-        await unlinkIdeGoogleAccount(user, uid);
-        refreshAllStats();
-      } catch (e) {
-        setLinkedAccountsError(String(e instanceof Error ? e.message : e));
-      } finally {
-        setLinkedAccountsBusy(false);
-      }
-    },
-    [user, refreshAllStats]
-  );
 
   useEffect(() => {
     setSelectedEmailsByTool({
@@ -2336,64 +2297,28 @@ export function StatisticsClient() {
             {ideStatsError ? (
               <p className="mb-4 text-sm text-red-700">{ideStatsError}</p>
             ) : null}
-            {linkedAccountsError ? (
-              <p className="mb-4 text-sm text-red-700">{linkedAccountsError}</p>
-            ) : null}
 
             <div className="mb-5 rounded-xl border border-violet-200/80 bg-violet-50/40 p-3">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-ink">
-                    Linked Promptly accounts
-                  </h3>
-                  <p className="mt-1 max-w-2xl text-[11px] text-muted">
-                    One Promptly sign-in can combine coding-agent stats from multiple Google accounts you own — for
-                    example if Cursor/Codex were paired while signed in with a school email but you prefer viewing
-                    stats from your personal Gmail. Link opens a new tab so school SSO can sign in on the full page.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void handleLinkPromptlyAccount()}
-                  disabled={!user || linkedAccountsBusy || ideStatsLoading}
-                  className="rounded-lg border border-violet-300 bg-white px-3 py-1.5 text-[11px] font-medium text-violet-900 transition hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {linkedAccountsBusy ? "Linking…" : "+ Link account"}
-                </button>
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {(displayIdeStats?.linked_promptly_accounts?.length
-                  ? displayIdeStats.linked_promptly_accounts
-                  : user?.email
-                    ? [{ email: user.email, uid: user.uid, is_primary: true }]
-                    : []
-                ).map((account) => (
-                  <span
-                    key={account.uid}
-                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10px] ${
-                      account.is_primary
-                        ? "border-violet-400 bg-violet-100 font-medium text-violet-900"
-                        : "border-line bg-white/90 text-ink"
-                    }`}
-                  >
-                    {account.email}
-                    {account.is_primary ? (
-                      <span className="text-[9px] uppercase tracking-wide text-violet-700">primary</span>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => void handleUnlinkPromptlyAccount(account.uid)}
-                        disabled={linkedAccountsBusy}
-                        className="rounded px-1 text-muted hover:bg-red-50 hover:text-red-700 disabled:opacity-50"
-                        title="Remove linked account"
-                        aria-label={`Unlink ${account.email}`}
-                      >
-                        ×
-                      </button>
-                    )}
-                  </span>
-                ))}
-              </div>
+              <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-ink">
+                One Promptly account per computer
+              </h3>
+              <p className="mt-1 max-w-2xl text-[11px] text-muted">
+                Pair Claude Code, Cursor, and Codex on{" "}
+                <Link href="/integrations" className="font-medium text-violet-900 underline">
+                  integrations
+                </Link>{" "}
+                while signed into the Promptly account you want here ({user?.email || "sign in above"}). The first
+                agent you pair on a computer becomes the account all agents on that machine send stats to — even if
+                Cursor, Codex, or Claude Code themselves use different login emails.
+              </p>
+              {user?.email ? (
+                <p className="mt-2 text-[10px] text-muted">
+                  Viewing stats as <span className="font-medium text-ink">{user.email}</span>. If coding-agent stats
+                  look empty, pair agents with this same account or run{" "}
+                  <code className="rounded bg-white/80 px-1 py-0.5 text-[9px]">promptly-telemetry align-device</code>{" "}
+                  in Terminal.
+                </p>
+              ) : null}
             </div>
 
             {ideStatsLoading && !ideStats ? (
@@ -2403,7 +2328,7 @@ export function StatisticsClient() {
             <div className="mb-2">
               <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-ink">Connected coding agents</h3>
               <p className="mt-1 text-[11px] text-muted">
-                Pairing status for Claude Code, Cursor, and Codex on the linked Promptly account(s) above.
+                Pairing status for Claude Code, Cursor, and Codex on your Promptly account.
               </p>
             </div>
 
@@ -2456,7 +2381,7 @@ export function StatisticsClient() {
               <div className="mb-5">
                 <p className="text-[11px] text-muted">
                   In-app login emails detected inside each coding agent — click to include or exclude from the charts
-                  below. These are separate from your linked Promptly accounts above.
+                  below. These are the login emails detected inside each coding agent — separate from your Promptly account above.
                 </p>
                 <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
                   {IDE_AGENT_CARDS.map((agent) => {

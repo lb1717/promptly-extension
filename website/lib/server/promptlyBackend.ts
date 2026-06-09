@@ -1007,6 +1007,43 @@ export async function exchangeIntegrationPairCode(params: {
   };
 }
 
+export async function exchangeSiblingIntegrationDevice(params: {
+  anchorDeviceToken: string;
+  targetTool: PromptlyIdeTool;
+  deviceLabel?: string | null;
+}): Promise<{ deviceToken: string; uid: string; email: string | null; tool: PromptlyIdeTool }> {
+  const resolved = await resolveUserFromIntegrationDeviceToken(params.anchorDeviceToken);
+  if (!resolved) {
+    throw new Error("Invalid device token");
+  }
+  const targetTool = normalizePromptlyIdeTool(params.targetTool);
+  if (!targetTool) {
+    throw new Error("Invalid tool");
+  }
+
+  const deviceToken = generateDeviceToken();
+  const tokenHash = hashIntegrationSecret(deviceToken);
+  const db = getFirebaseAdminDb();
+  const deviceRef = db.collection(INTEGRATION_DEVICES_COLLECTION).doc();
+  await deviceRef.set({
+    uid: resolved.user.uid,
+    email: resolved.user.email || null,
+    tool: targetTool,
+    tokenHash,
+    deviceLabel: String(params.deviceLabel || "").trim().slice(0, 120) || null,
+    createdAt: FieldValue.serverTimestamp(),
+    lastSeenAt: FieldValue.serverTimestamp(),
+    revoked: false
+  });
+
+  return {
+    deviceToken,
+    uid: resolved.user.uid,
+    email: resolved.user.email || null,
+    tool: targetTool
+  };
+}
+
 async function resolveUserFromIntegrationDeviceToken(
   token: string
 ): Promise<{ user: PromptlyUser; deviceTool: PromptlyIdeTool } | null> {

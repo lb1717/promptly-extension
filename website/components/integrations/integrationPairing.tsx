@@ -130,44 +130,32 @@ export function useAllAgentsPairing() {
     });
   }, []);
 
-  const hasAllCodes = ALL_TOOLS.every((tool) => Boolean(pairCodes[tool]?.trim()));
+  const hasAllCodes = Boolean(pairCodes.claude_code?.trim());
 
   const createAllPairCodes = useCallback(async (current: User) => {
     setBusy(true);
     setError("");
     try {
       const token = await current.getIdToken(true);
-      const results = await Promise.all(
-        ALL_TOOLS.map(async (tool) => {
-          const res = await fetch("/api/integrations/pair", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`
-            },
-            body: JSON.stringify({ tool })
-          });
-          const data = await res.json().catch(() => ({}));
-          if (!res.ok) {
-            throw new Error(data?.error || `Pairing failed for ${tool} (${res.status})`);
-          }
-          return {
-            tool,
-            code: String(data.code || ""),
-            expiresAt: typeof data.expiresAt === "string" ? data.expiresAt : null
-          };
-        })
-      );
-      const nextCodes: Partial<AllAgentsPairCodes> = {};
-      let earliestExpiry: string | null = null;
-      for (const row of results) {
-        nextCodes[row.tool] = row.code;
-        if (row.expiresAt && (!earliestExpiry || row.expiresAt < earliestExpiry)) {
-          earliestExpiry = row.expiresAt;
-        }
+      const res = await fetch("/api/integrations/pair", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ tool: "claude_code" })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error || `Pairing failed (${res.status})`);
       }
-      setPairCodes(nextCodes);
-      setExpiresAt(earliestExpiry);
+      const code = String(data.code || "");
+      setPairCodes({
+        claude_code: code,
+        cursor: code,
+        codex: code
+      });
+      setExpiresAt(typeof data.expiresAt === "string" ? data.expiresAt : null);
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));
     } finally {
@@ -235,7 +223,7 @@ export function AllAgentsConnectStep({
     useAllAgentsPairing();
   const terminalLabel = os === "mac" ? "Terminal" : "PowerShell";
   const commandLines =
-    hasAllCodes && ALL_TOOLS.every((tool) => pairCodes[tool])
+    hasAllCodes && pairCodes.claude_code
       ? allAgentsFullSetupCommands(os, pairCodes as AllAgentsPairCodes)
       : [];
 
