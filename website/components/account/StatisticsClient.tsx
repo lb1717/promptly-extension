@@ -996,6 +996,118 @@ function mergePromptVolumeTimelines(
   });
 }
 
+type ScreenTimeTimelineMergedRow = {
+  bucket: string;
+  chatgpt: number;
+  claude: number;
+  gemini: number;
+  claude_code: number;
+  cursor: number;
+  codex: number;
+};
+
+type ScreenTimeTimelineSeriesKey = Exclude<PromptVolumeAiKey, "other">;
+
+const SCREEN_TIME_TIMELINE_KEY: Record<
+  ScreenTimeTimelineSeriesKey,
+  keyof ScreenTimeTimelineMergedRow
+> = {
+  chatgpt: "chatgpt",
+  claude: "claude",
+  gemini: "gemini",
+  claude_code: "claude_code",
+  cursor: "cursor",
+  codex: "codex"
+};
+
+const SCREEN_TIME_OVER_TIME_FILTERS = PROMPT_VOLUME_AI_FILTERS.filter(
+  (filter): filter is (typeof PROMPT_VOLUME_AI_FILTERS)[number] & { key: ScreenTimeTimelineSeriesKey } =>
+    filter.key !== "other"
+);
+
+function emptyScreenTimeTimelineRow(bucket: string): ScreenTimeTimelineMergedRow {
+  return {
+    bucket,
+    chatgpt: 0,
+    claude: 0,
+    gemini: 0,
+    claude_code: 0,
+    cursor: 0,
+    codex: 0
+  };
+}
+
+function mergeScreenTimeTimelines(
+  web: ScreenTimeTimelineBucket[],
+  ide: IdeStatsPayload["screen_time_timeline"]
+): ScreenTimeTimelineMergedRow[] {
+  const webMap = new Map(web.map((row) => [row.bucket, row]));
+  const ideMap = new Map(ide.map((row) => [row.bucket, row]));
+  const buckets = [...new Set([...web.map((row) => row.bucket), ...ide.map((row) => row.bucket)])].sort();
+  return buckets.map((bucket) => {
+    const webRow = webMap.get(bucket);
+    const ideRow = ideMap.get(bucket);
+    const merged = emptyScreenTimeTimelineRow(bucket);
+    if (webRow) {
+      merged.chatgpt = webRow.chatgpt_minutes;
+      merged.claude = webRow.claude_minutes;
+      merged.gemini = webRow.gemini_minutes;
+    }
+    if (ideRow) {
+      merged.claude_code = ideRow.claude_code_minutes;
+      merged.cursor = ideRow.cursor_minutes;
+      merged.codex = ideRow.codex_minutes;
+    }
+    return merged;
+  });
+}
+
+type EngagementTimelineMergedRow = {
+  bucket: string;
+  drafting: number;
+  waiting: number;
+  reading_idle: number;
+};
+
+function mergeEngagementTimelines(
+  web: ScreenTimeTimelineBucket[],
+  ide: IdeStatsPayload["screen_time_timeline"],
+  includeWeb: boolean,
+  includeIde: boolean
+): EngagementTimelineMergedRow[] {
+  const webMap = new Map(web.map((row) => [row.bucket, row]));
+  const ideMap = new Map(ide.map((row) => [row.bucket, row]));
+  const buckets = [...new Set([...web.map((row) => row.bucket), ...ide.map((row) => row.bucket)])].sort();
+  return buckets.map((bucket) => {
+    let drafting = 0;
+    let waiting = 0;
+    let reading_idle = 0;
+    if (includeWeb) {
+      const webRow = webMap.get(bucket);
+      if (webRow) {
+        drafting += webRow.drafting_minutes;
+        waiting += webRow.waiting_minutes;
+        reading_idle += webRow.reading_idle_minutes;
+      }
+    }
+    if (includeIde) {
+      const ideRow = ideMap.get(bucket);
+      if (ideRow) {
+        drafting += ideRow.drafting_minutes;
+        waiting += ideRow.waiting_minutes;
+        reading_idle += ideRow.reading_idle_minutes;
+      }
+    }
+    return { bucket, drafting, waiting, reading_idle };
+  });
+}
+
+const ENGAGEMENT_OVER_TIME_SERIES = [
+  { dataKey: "drafting" as const, name: "Drafting prompt", color: COLOR_DRAFTING },
+  { dataKey: "waiting" as const, name: "Waiting for AI", color: COLOR_NATIVE_WEB },
+  { dataKey: "reading_idle" as const, name: "Reading output", color: COLOR_READING_IDLE }
+];
+
 function promptVolumeBucketTotal(
   row: PromptVolumeChartBucket,
   filters: PromptVolumeAiFilterState
@@ -1127,6 +1239,51 @@ function formatVolumeDeltaPercent(pct: number): string {
 
 type EngagementSlice = { name: string; value: number; fill: string };
 
+function EngagementPieSideTooltip({
+  active,
+  payload,
+  viewBox
+}: {
+  active?: boolean;
+  payload?: Array<{ name?: string; value?: number; payload?: EngagementSlice }>;
+  viewBox?: { width?: number; height?: number };
+}) {
+  if (!active || !payload?.length) return null;
+  const boxW = viewBox?.width ?? 280;
+  const boxH = viewBox?.height ?? 208;
+  const panelW = 92;
+  const panelH = Math.min(88, 28 + payload.length * 22);
+  const x = boxW - panelW - 4;
+  const y = Math.max(6, (boxH - panelH) / 2);
+
+  return (
+    <foreignObject x={x} y={y} width={panelW} height={panelH} style={{ overflow: "visible", pointerEvents: "none" }}>
+      <div
+        xmlns="http://www.w3.org/1999/xhtml"
+        style={{
+          ...CHART_TOOLTIP_STYLE,
+          padding: "8px 10px",
+          fontSize: 11,
+          lineHeight: 1.35,
+          boxShadow: "0 4px 14px rgba(17,17,17,0.08)"
+        }}
+      >
+        {payload.map((entry, index) => (
+          <p
+            key={String(entry.name)}
+            className="tabular-nums"
+            style={{ color: entry.payload?.fill ?? "#1F1B16", margin: index === 0 ? 0 : "6px 0 0" }}
+          >
+            <span className="font-semibold">{entry.name}</span>
+            <br />
+            {typeof entry.value === "number" ? `${entry.value} min` : "—"}
+          </p>
+        ))}
+      </div>
+    </foreignObject>
+  );
+}
+
 /** Hide pie % labels on thin slices so the donut stays readable. */
 const ENGAGEMENT_PIE_MIN_LABEL_PERCENT = 10;
 
@@ -1195,14 +1352,14 @@ function ServiceEngagementDonut({
       <p className="mb-2 text-xs font-semibold uppercase tracking-wide" style={{ color: accentColor }}>
         {label}
       </p>
-      <div className="h-52 w-full max-w-[240px]">
+      <div className="h-52 w-full max-w-[280px]">
         <ResponsiveContainer width="100%" height="100%">
-          <PieChart margin={{ top: 12, right: 28, bottom: 12, left: 28 }}>
+          <PieChart margin={{ top: 12, right: 96, bottom: 12, left: 12 }}>
             <Pie
               data={chartData}
               dataKey="value"
               nameKey="name"
-              cx="50%"
+              cx="42%"
               cy="50%"
               innerRadius="52%"
               outerRadius="72%"
@@ -1218,8 +1375,10 @@ function ServiceEngagementDonut({
             </Pie>
             {hasSlices ? (
               <Tooltip
-                contentStyle={CHART_TOOLTIP_STYLE}
-                formatter={(value: number, name: string) => [`${value} min`, name]}
+                content={EngagementPieSideTooltip}
+                cursor={false}
+                isAnimationActive={false}
+                wrapperStyle={{ outline: "none", zIndex: 20 }}
               />
             ) : null}
           </PieChart>
@@ -1261,6 +1420,46 @@ function PromptVolumeAiToggleButton({
       <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: color }} aria-hidden />
       <span>{label}</span>
     </button>
+  );
+}
+
+type StatsChartHorizon = "instant" | "over_time";
+
+function StatsChartHorizonToggle({
+  value,
+  onChange
+}: {
+  value: StatsChartHorizon;
+  onChange: (value: StatsChartHorizon) => void;
+}) {
+  const options: Array<{ value: StatsChartHorizon; label: string }> = [
+    { value: "instant", label: "Instant" },
+    { value: "over_time", label: "Over time" }
+  ];
+  return (
+    <div
+      className="inline-flex shrink-0 rounded-lg border border-line bg-cream-dark p-0.5"
+      role="tablist"
+      aria-label="Chart view"
+    >
+      {options.map((opt) => {
+        const selected = value === opt.value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            onClick={() => onChange(opt.value)}
+            className={`rounded-md px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide transition-colors ${
+              selected ? "bg-ink text-cream" : "text-faint hover:text-ink"
+            }`}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -1307,6 +1506,8 @@ export function StatisticsClient() {
   });
   const [promptVolumeAiFilters, setPromptVolumeAiFilters] =
     useState<PromptVolumeAiFilterState>(DEFAULT_PROMPT_VOLUME_AI_FILTERS);
+  const [screenTimeView, setScreenTimeView] = useState<StatsChartHorizon>("instant");
+  const [engagementView, setEngagementView] = useState<StatsChartHorizon>("instant");
   const [reportGenerating, setReportGenerating] = useState(false);
   const reportRef = useRef<HTMLDivElement>(null);
   const ideStatsReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1811,7 +2012,7 @@ export function StatisticsClient() {
         });
       }
     }
-    return rows;
+    return [...rows].sort((a, b) => b.minutes - a.minutes || a.service.localeCompare(b.service));
   }, [displayStats, displayIdeStats, promptVolumeAiFilters]);
 
   const screenTimeByServiceChartHasData = useMemo(
@@ -1893,8 +2094,70 @@ export function StatisticsClient() {
       }
     }
 
-    return pies.filter((pie) => pie.hasData);
+    return pies
+      .filter((pie) => pie.hasData)
+      .sort((a, b) => b.totalMinutes - a.totalMinutes || a.label.localeCompare(b.label));
   }, [displayStats, displayIdeStats, promptVolumeAiFilters]);
+
+  const includeWebEngagementTimeline = useMemo(
+    () => (["chatgpt", "claude", "gemini"] as const).some((key) => promptVolumeAiFilters[key]),
+    [promptVolumeAiFilters]
+  );
+
+  const includeIdeEngagementTimeline = useMemo(
+    () => (["claude_code", "cursor", "codex"] as const).some((key) => promptVolumeAiFilters[key]),
+    [promptVolumeAiFilters]
+  );
+
+  const screenTimeOverTimeChartRows = useMemo(() => {
+    const web = displayStats?.screen_time_timeline ?? [];
+    const ide = displayIdeStats?.screen_time_timeline ?? [];
+    if (!web.length && !ide.length) return [];
+    const g = displayStats?.granularity ?? displayIdeStats?.granularity ?? granularity;
+    return mergeScreenTimeTimelines(web, ide).map((row) => ({
+      ...row,
+      label: g === "week" ? `wk ${formatShortDay(row.bucket)}` : formatShortDay(row.bucket),
+      has_data: SCREEN_TIME_OVER_TIME_FILTERS.some(
+        (filter) =>
+          promptVolumeAiFilters[filter.key] && (row[SCREEN_TIME_TIMELINE_KEY[filter.key]] ?? 0) > 0
+      )
+    }));
+  }, [displayStats, displayIdeStats, granularity, promptVolumeAiFilters]);
+
+  const screenTimeOverTimeHasData = useMemo(
+    () => screenTimeOverTimeChartRows.some((row) => row.has_data),
+    [screenTimeOverTimeChartRows]
+  );
+
+  const engagementOverTimeChartRows = useMemo(() => {
+    const web = displayStats?.screen_time_timeline ?? [];
+    const ide = displayIdeStats?.screen_time_timeline ?? [];
+    if ((!web.length && !ide.length) || (!includeWebEngagementTimeline && !includeIdeEngagementTimeline)) {
+      return [];
+    }
+    const g = displayStats?.granularity ?? displayIdeStats?.granularity ?? granularity;
+    return mergeEngagementTimelines(
+      web,
+      ide,
+      includeWebEngagementTimeline,
+      includeIdeEngagementTimeline
+    ).map((row) => ({
+      ...row,
+      label: g === "week" ? `wk ${formatShortDay(row.bucket)}` : formatShortDay(row.bucket),
+      has_data: row.drafting + row.waiting + row.reading_idle > 0
+    }));
+  }, [
+    displayStats,
+    displayIdeStats,
+    granularity,
+    includeWebEngagementTimeline,
+    includeIdeEngagementTimeline
+  ]);
+
+  const engagementOverTimeHasData = useMemo(
+    () => engagementOverTimeChartRows.some((row) => row.has_data),
+    [engagementOverTimeChartRows]
+  );
 
   const engagementByServiceEnabledCount = useMemo(() => {
     return PROMPT_VOLUME_AI_FILTERS.filter((f) => promptVolumeAiFilters[f.key]).length;
@@ -1918,20 +2181,23 @@ export function StatisticsClient() {
   const engagementSpendHasData = useMemo(
     () =>
       engagementByServicePies.length > 0 ||
+      engagementOverTimeHasData ||
       (displayStats?.engagement_totals?.segment_count ?? 0) > 0,
-    [engagementByServicePies, displayStats]
+    [engagementByServicePies, engagementOverTimeHasData, displayStats]
   );
 
   const screenTimeHasData = useMemo(
     () =>
       (displayStats?.engagement_totals?.segment_count ?? 0) > 0 ||
       screenTimeByServiceChartHasData ||
+      screenTimeOverTimeHasData ||
       engagementSpendHasData ||
       ideScreenTimeHasData ||
       ideEngagementHasData,
     [
       displayStats,
       screenTimeByServiceChartHasData,
+      screenTimeOverTimeHasData,
       engagementSpendHasData,
       ideScreenTimeHasData,
       ideEngagementHasData
@@ -2102,7 +2368,7 @@ export function StatisticsClient() {
   return (
     <div className="statistics-charts mx-auto w-full max-w-6xl px-4 py-6 pb-16">
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-2xl font-semibold text-ink">Prompt statistics</h1>
+        <h1 className="text-2xl font-semibold text-ink">AI Statistics</h1>
         <div className="flex flex-wrap items-center gap-2">
           <Link
             href="/account"
@@ -2306,15 +2572,59 @@ export function StatisticsClient() {
           {screenTimeHasData ? (
             <>
               <section className="mb-8 w-full rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4">
-                <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">Screen time by service</h2>
-                  <p className="text-xs font-medium tabular-nums text-muted">Last {days} days</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StatsChartHorizonToggle value={screenTimeView} onChange={setScreenTimeView} />
+                    <p className="text-xs font-medium tabular-nums text-muted">Last {days} days</p>
+                  </div>
                 </div>
                 <p className="mb-3 text-[11px] text-faint">
-                  Total foreground minutes in the selected range — filtered by Show above.
+                  {screenTimeView === "instant"
+                    ? "Total foreground minutes in the selected range — filtered by Show above."
+                    : "Stacked minutes by service or agent over time — filtered by Show above."}
                 </p>
                 {screenTimeByServiceRows.length ? (
-                  screenTimeByServiceChartHasData ? (
+                  screenTimeView === "over_time" ? (
+                    screenTimeOverTimeHasData ? (
+                      <div className="h-72 w-full sm:h-80">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart
+                            data={screenTimeOverTimeChartRows}
+                            margin={{ top: 4, right: 8, bottom: 0, left: 0 }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                            <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
+                            <YAxis stroke="#8A8A8A" allowDecimals={false} width={32} tick={CHART_Y_TICK} unit=" min" />
+                            <Tooltip
+                              cursor={{ fill: "rgba(255,255,255,0.04)" }}
+                              contentStyle={CHART_TOOLTIP_STYLE}
+                              formatter={(value: number, name: string) => [`${value} min`, name]}
+                            />
+                            <Legend wrapperStyle={CHART_LEGEND_STYLE} />
+                            {SCREEN_TIME_OVER_TIME_FILTERS.filter((f) => promptVolumeAiFilters[f.key]).map(
+                              (filter, index, visible) => (
+                                <Bar
+                                  key={filter.key}
+                                  dataKey={SCREEN_TIME_TIMELINE_KEY[filter.key]}
+                                  name={filter.legendName}
+                                  stackId="screen_time"
+                                  fill={filter.color}
+                                  radius={
+                                    index === visible.length - 1
+                                      ? ([2, 2, 0, 0] as [number, number, number, number])
+                                      : undefined
+                                  }
+                                />
+                              )
+                            )}
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted">No screen time over time for the selected services in this range yet.</p>
+                    )
+                  ) : screenTimeByServiceChartHasData ? (
                     <div className="w-full" style={{ height: screenTimeByServiceSectionHeight }}>
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart
@@ -2331,6 +2641,7 @@ export function StatisticsClient() {
                             stroke="#8A8A8A"
                             tick={CHART_Y_TICK_11}
                             width={screenTimeServiceLabelWidth}
+                            reversed
                           />
                           <Tooltip
                             contentStyle={CHART_TOOLTIP_STYLE}
@@ -2353,8 +2664,60 @@ export function StatisticsClient() {
               </section>
 
               <section className="mb-8 w-full rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4">
-                <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.22em] text-faint">How you spend your time</h2>
-                {engagementByServicePies.length > 0 ? (
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">How you spend your time</h2>
+                  <StatsChartHorizonToggle value={engagementView} onChange={setEngagementView} />
+                </div>
+                {engagementView === "over_time" ? (
+                  engagementOverTimeHasData ? (
+                    <>
+                      <div className="mb-4 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-muted">
+                        {ENGAGEMENT_OVER_TIME_SERIES.map((series) => (
+                          <span key={series.dataKey} className="inline-flex items-center gap-2">
+                            <span className="h-3 w-3 rounded-full" style={{ backgroundColor: series.color }} />
+                            {series.name}
+                          </span>
+                        ))}
+                      </div>
+                      <div className="h-72 w-full sm:h-80">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart
+                            data={engagementOverTimeChartRows}
+                            margin={{ top: 4, right: 8, bottom: 0, left: 0 }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                            <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
+                            <YAxis stroke="#8A8A8A" allowDecimals={false} width={32} tick={CHART_Y_TICK} unit=" min" />
+                            <Tooltip
+                              cursor={{ fill: "rgba(255,255,255,0.04)" }}
+                              contentStyle={CHART_TOOLTIP_STYLE}
+                              formatter={(value: number, name: string) => [`${value} min`, name]}
+                            />
+                            <Legend wrapperStyle={CHART_LEGEND_STYLE} />
+                            {ENGAGEMENT_OVER_TIME_SERIES.map((series, index) => (
+                              <Bar
+                                key={series.dataKey}
+                                dataKey={series.dataKey}
+                                name={series.name}
+                                stackId="engagement"
+                                fill={series.color}
+                                radius={
+                                  index === ENGAGEMENT_OVER_TIME_SERIES.length - 1
+                                    ? ([2, 2, 0, 0] as [number, number, number, number])
+                                    : undefined
+                                }
+                              />
+                            ))}
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </>
+                  ) : engagementByServiceEnabledCount > 0 ? (
+                    <p className="text-sm text-muted">No engagement breakdown over time for the selected services yet.</p>
+                  ) : (
+                    <p className="text-sm text-muted">Turn on at least one service under Show to view how you spend time.</p>
+                  )
+                ) : engagementByServicePies.length > 0 ? (
                   <>
                     <div className="mb-5 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-muted">
                       <span className="inline-flex items-center gap-2">
