@@ -1008,10 +1008,12 @@ type ScreenTimeTimelineMergedRow = {
 
 type ScreenTimeTimelineSeriesKey = Exclude<PromptVolumeAiKey, "other">;
 
-const SCREEN_TIME_TIMELINE_KEY: Record<
-  ScreenTimeTimelineSeriesKey,
-  keyof ScreenTimeTimelineMergedRow
-> = {
+type ScreenTimeMetricKey = keyof Pick<
+  ScreenTimeTimelineMergedRow,
+  "chatgpt" | "claude" | "gemini" | "claude_code" | "cursor" | "codex"
+>;
+
+const SCREEN_TIME_TIMELINE_KEY: Record<ScreenTimeTimelineSeriesKey, ScreenTimeMetricKey> = {
   chatgpt: "chatgpt",
   claude: "claude",
   gemini: "gemini",
@@ -2118,8 +2120,7 @@ export function StatisticsClient() {
       label: g === "week" ? `wk ${formatShortDay(row.bucket)}` : formatShortDay(row.bucket),
       has_data: SCREEN_TIME_OVER_TIME_FILTERS.some(
         (filter) =>
-          promptVolumeAiFilters[filter.key] &&
-          Number(row[SCREEN_TIME_TIMELINE_KEY[filter.key]] ?? 0) > 0
+          promptVolumeAiFilters[filter.key] && (row[SCREEN_TIME_TIMELINE_KEY[filter.key]] ?? 0) > 0
       )
     }));
   }, [displayStats, displayIdeStats, granularity, promptVolumeAiFilters]);
