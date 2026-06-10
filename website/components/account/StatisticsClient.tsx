@@ -1259,7 +1259,6 @@ function EngagementPieSideTooltip({
   return (
     <foreignObject x={x} y={y} width={panelW} height={panelH} style={{ overflow: "visible", pointerEvents: "none" }}>
       <div
-        xmlns="http://www.w3.org/1999/xhtml"
         style={{
           ...CHART_TOOLTIP_STYLE,
           padding: "8px 10px",
