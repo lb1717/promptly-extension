@@ -2118,7 +2118,8 @@ export function StatisticsClient() {
       label: g === "week" ? `wk ${formatShortDay(row.bucket)}` : formatShortDay(row.bucket),
       has_data: SCREEN_TIME_OVER_TIME_FILTERS.some(
         (filter) =>
-          promptVolumeAiFilters[filter.key] && (row[SCREEN_TIME_TIMELINE_KEY[filter.key]] ?? 0) > 0
+          promptVolumeAiFilters[filter.key] &&
+          Number(row[SCREEN_TIME_TIMELINE_KEY[filter.key]] ?? 0) > 0
       )
     }));
   }, [displayStats, displayIdeStats, granularity, promptVolumeAiFilters]);
