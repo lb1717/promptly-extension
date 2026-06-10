@@ -24,27 +24,37 @@ import {
 import { listenForGoogleSignInReturn, signInWithGoogleInteractive } from "@/lib/firebaseGoogleAuth";
 import { EmailVerificationNotice } from "@/components/auth/EmailVerificationNotice";
 import type { IdeToolId } from "@/components/integrations/integrationOs";
-import { GetStartedCodingAgentInstall } from "@/components/onboarding/GetStartedCodingAgentInstall";
+import { GetStartedAiSelection } from "@/components/onboarding/GetStartedAiSelection";
+import { GetStartedAllAgentsInstall } from "@/components/onboarding/GetStartedAllAgentsInstall";
 import { OnboardingBrowserExtensionInstall } from "@/components/onboarding/OnboardingBrowserExtensionInstall";
 import { OnboardingDoneStep } from "@/components/onboarding/OnboardingDoneStep";
 import { canFinishOnboardingInstall } from "@/lib/onboardingInstallProgress";
+import {
+  DEFAULT_ONBOARDING_PRODUCT_SELECTION,
+  hasAnyCodingAgent,
+  hasAnyOnboardingProduct,
+  selectedCodingAgentIds,
+  type OnboardingProductSelection
+} from "@/lib/onboardingProducts";
 import { canProceedWithEmailAccount } from "@/lib/emailVerification";
 import { useEmailVerificationStatus } from "@/lib/useEmailVerificationStatus";
 import { GET_STARTED_PLANS, type PaidPlanKey, type PlanKey } from "@/lib/plans";
 import {
   detectAuthTransition,
   markAuthHydrated,
-  shouldAdvanceToPlanAfterAuth,
+  shouldAdvanceAfterAccountAuth,
   welcomeContinueStep
 } from "@/lib/onboardingStepFlow";
 
-const STEPS = ["Start", "Account", "Plan", "Install", "Done"] as const;
+const STEPS = ["Start", "Account", "Connect", "Install", "Plan", "Done"] as const;
 const ACCOUNT_STEP = 2;
-const PLAN_STEP = 3;
+const CHOOSE_AI_STEP = 3;
 const INSTALL_STEP = 4;
+const PLAN_STEP = 5;
+const DONE_STEP = 6;
 
 function advanceAfterAccountAuth(goToStep: (next: number) => void) {
-  goToStep(PLAN_STEP);
+  goToStep(CHOOSE_AI_STEP);
 }
 
 type BillingPayload = {
@@ -87,6 +97,10 @@ export function GeneralOnboardingClient() {
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [extensionDetected, setExtensionDetected] = useState(false);
   const [browserStoreClicked, setBrowserStoreClicked] = useState(false);
+  const [productSelection, setProductSelection] = useState<OnboardingProductSelection>(
+    DEFAULT_ONBOARDING_PRODUCT_SELECTION
+  );
+  const [codingAgentsSetupCopied, setCodingAgentsSetupCopied] = useState(false);
   const [setupAgents, setSetupAgents] = useState<IdeToolId[]>([]);
   const [openingAi, setOpeningAi] = useState<string | null>(null);
 
@@ -109,18 +123,24 @@ export function GeneralOnboardingClient() {
 
   const currentTier = useMemo(() => normalizeTier(billing?.subscriptionTier || "free"), [billing?.subscriptionTier]);
 
+  const wantsWeb = productSelection.web;
+  const wantsCodingAgents = hasAnyCodingAgent(productSelection);
+
   const canFinishInstall = useMemo(
     () =>
       canFinishOnboardingInstall({
+        wantsWeb,
+        wantsCodingAgents,
         browserStoreClicked,
-        setupAgents
+        codingAgentsSetupCopied
       }),
-    [browserStoreClicked, setupAgents]
+    [wantsWeb, wantsCodingAgents, browserStoreClicked, codingAgentsSetupCopied]
   );
 
-  const noteAgentCommandCopy = useCallback((tool: IdeToolId) => {
-    setSetupAgents((prev) => (prev.includes(tool) ? prev : [...prev, tool]));
-  }, []);
+  const noteAgentCommandCopy = useCallback(() => {
+    setCodingAgentsSetupCopied(true);
+    setSetupAgents(selectedCodingAgentIds(productSelection));
+  }, [productSelection]);
 
   const goToStep = useCallback((next: number) => {
     setStep(next);
@@ -133,7 +153,7 @@ export function GeneralOnboardingClient() {
         setNotice("Signed in with Google.");
         setBusy(false);
         const current = getFirebaseAuth().currentUser;
-        if (shouldAdvanceToPlanAfterAuth(current, step, ACCOUNT_STEP)) {
+        if (shouldAdvanceAfterAccountAuth(current, step, ACCOUNT_STEP)) {
           advanceAfterAccountAuth(goToStep);
         }
       },
@@ -199,11 +219,11 @@ export function GeneralOnboardingClient() {
     if (authLoading) return;
 
     if (checkoutResult === "success") {
-      goToStep(INSTALL_STEP);
+      goToStep(DONE_STEP);
       return;
     }
 
-    if (step === 5) return;
+    if (step === DONE_STEP) return;
 
     if (markAuthHydrated(authHydratedRef, prevUserRef, user)) return;
 
@@ -214,7 +234,7 @@ export function GeneralOnboardingClient() {
       return;
     }
 
-    if (justSignedIn && shouldAdvanceToPlanAfterAuth(user, step, ACCOUNT_STEP)) {
+    if (justSignedIn && shouldAdvanceAfterAccountAuth(user, step, ACCOUNT_STEP)) {
       advanceAfterAccountAuth(goToStep);
     }
   }, [user, authLoading, checkoutResult, goToStep, step]);
@@ -242,7 +262,7 @@ export function GeneralOnboardingClient() {
   }, [step, user]);
 
   useEffect(() => {
-    if (step === 5 && user) {
+    if (step === DONE_STEP && user) {
       void syncWebsiteSessionToExtension(user);
     }
   }, [step, user]);
@@ -258,7 +278,7 @@ export function GeneralOnboardingClient() {
         resetVerificationStatus();
         await syncPromptlyUserDoc(flow.user);
         setNotice("Signed in with Google.");
-        if (shouldAdvanceToPlanAfterAuth(flow.user, step, ACCOUNT_STEP)) {
+        if (shouldAdvanceAfterAccountAuth(flow.user, step, ACCOUNT_STEP)) {
           advanceAfterAccountAuth(goToStep);
         }
       } else if (flow.status === "cancelled") {
@@ -290,7 +310,7 @@ export function GeneralOnboardingClient() {
       }
       notifyVerified(cred.user.email || email);
       await syncPromptlyUserDoc(cred.user);
-      if (shouldAdvanceToPlanAfterAuth(cred.user, step, ACCOUNT_STEP)) {
+      if (shouldAdvanceAfterAccountAuth(cred.user, step, ACCOUNT_STEP)) {
         advanceAfterAccountAuth(goToStep);
       }
     } catch (e) {
@@ -365,7 +385,7 @@ export function GeneralOnboardingClient() {
     const plan = GET_STARTED_PLANS.find((p) => p.key === selectedPlan);
     if (!plan) return;
     if (currentTier === plan.key) {
-      goToStep(4);
+      goToStep(DONE_STEP);
       return;
     }
     if (!checkoutStatus.stripeConfigured) {
@@ -378,7 +398,7 @@ export function GeneralOnboardingClient() {
   function continueWithFreePlan() {
     setSelectedPlan("free");
     setError("");
-    goToStep(4);
+    goToStep(DONE_STEP);
   }
 
   async function openAiTarget(key: string, url: string) {
@@ -398,8 +418,9 @@ export function GeneralOnboardingClient() {
   const stepTitle = useMemo(() => {
     if (step === 1) return "Get Started in 30 seconds";
     if (step === 2) return "Create your account";
-    if (step === 3) return "Choose your plan";
+    if (step === 3) return "What do you use?";
     if (step === 4) return "Install Promptly";
+    if (step === 5) return "Choose your plan";
     return "Setup complete";
   }, [step]);
 
@@ -461,16 +482,20 @@ export function GeneralOnboardingClient() {
               </li>
               <li className="flex gap-2">
                 <span className="text-faint">2.</span>
-                <span>Pick a plan</span>
+                <span>Choose what to connect</span>
               </li>
               <li className="flex gap-2">
                 <span className="text-faint">3.</span>
                 <span>Install Promptly</span>
               </li>
+              <li className="flex gap-2">
+                <span className="text-faint">4.</span>
+                <span>Pick a plan</span>
+              </li>
             </ul>
             <button
               type="button"
-              onClick={() => goToStep(welcomeContinueStep(user, ACCOUNT_STEP, PLAN_STEP))}
+              onClick={() => goToStep(welcomeContinueStep(user, ACCOUNT_STEP, CHOOSE_AI_STEP))}
               className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-cream hover:bg-neutral-800"
             >
               Get started
@@ -569,6 +594,71 @@ export function GeneralOnboardingClient() {
         ) : null}
 
         {step === 3 ? (
+          <>
+            <GetStartedAiSelection value={productSelection} onChange={setProductSelection} />
+            <button
+              type="button"
+              onClick={() => {
+                setBrowserStoreClicked(false);
+                setCodingAgentsSetupCopied(false);
+                setSetupAgents([]);
+                goToStep(INSTALL_STEP);
+              }}
+              disabled={!hasAnyOnboardingProduct(productSelection)}
+              className="mt-6 inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Continue
+            </button>
+            {!hasAnyOnboardingProduct(productSelection) ? (
+              <p className="mt-2 text-center text-xs text-faint">Select at least one option to continue.</p>
+            ) : null}
+            <button type="button" onClick={() => goToStep(2)} className="mt-3 text-xs text-faint hover:text-ink">
+              ← Back
+            </button>
+          </>
+        ) : null}
+
+        {step === 4 ? (
+          <div className="mt-6 space-y-4">
+            <p className="text-sm text-muted">
+              Install only what you picked. Finish each section below before continuing to choose your plan.
+            </p>
+
+            {wantsWeb ? (
+              <OnboardingBrowserExtensionInstall
+                extensionDetected={extensionDetected}
+                onStoreClick={() => setBrowserStoreClicked(true)}
+              />
+            ) : null}
+
+            {wantsCodingAgents ? (
+              <GetStartedAllAgentsInstall onCommandCopy={noteAgentCommandCopy} />
+            ) : null}
+
+            {!canFinishInstall ? (
+              <p className="text-center text-xs text-faint">
+                {wantsWeb && wantsCodingAgents
+                  ? "Add the browser extension and copy the coding-agents command to continue."
+                  : wantsWeb
+                    ? "Add to Chrome or Edge to continue."
+                    : "Copy the coding-agents install command to continue."}
+              </p>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => goToStep(PLAN_STEP)}
+              disabled={!canFinishInstall}
+              className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Continue to plan
+            </button>
+            <button type="button" onClick={() => goToStep(CHOOSE_AI_STEP)} className="text-xs text-faint hover:text-ink">
+              ← Back
+            </button>
+          </div>
+        ) : null}
+
+        {step === 5 ? (
           <div className="mt-6 space-y-4">
             <p className="text-sm text-muted">Select the plan that fits you. You can change it later from your account.</p>
             <div className="space-y-3">
@@ -617,48 +707,15 @@ export function GeneralOnboardingClient() {
                 ? "Redirecting to Stripe…"
                 : currentTier !== selectedPlan
                   ? "Continue to payment"
-                  : "Continue"}
+                  : "Finish setup"}
             </button>
-            <button type="button" onClick={() => goToStep(2)} className="text-xs text-faint hover:text-ink">
+            <button type="button" onClick={() => goToStep(INSTALL_STEP)} className="text-xs text-faint hover:text-ink">
               ← Back
             </button>
           </div>
         ) : null}
 
-        {step === 4 ? (
-          <div className="mt-6 space-y-4">
-            <p className="text-sm text-muted">
-              Install Promptly for your browser and/or for desktop apps and coding apps. You can always install
-              other options in the future so feel free to only begin with one.
-            </p>
-
-            <OnboardingBrowserExtensionInstall
-              extensionDetected={extensionDetected}
-              onStoreClick={() => setBrowserStoreClicked(true)}
-            />
-
-            <GetStartedCodingAgentInstall onAgentCommandCopy={noteAgentCommandCopy} />
-
-            {!canFinishInstall ? (
-              <p className="text-center text-xs text-faint">
-                Add to Chrome or Edge, or copy an install command above, to continue.
-              </p>
-            ) : null}
-            <button
-              type="button"
-              onClick={() => goToStep(5)}
-              disabled={!canFinishInstall}
-              className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Finish setup
-            </button>
-            <button type="button" onClick={() => goToStep(3)} className="text-xs text-faint hover:text-ink">
-              ← Back
-            </button>
-          </div>
-        ) : null}
-
-        {step === 5 ? (
+        {step === 6 ? (
           <OnboardingDoneStep
             browserStoreClicked={browserStoreClicked}
             setupAgents={setupAgents}

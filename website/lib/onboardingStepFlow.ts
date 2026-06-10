@@ -26,16 +26,25 @@ export function detectAuthTransition(
 export function welcomeContinueStep(
   user: User | null,
   accountStep: number,
-  planStep: number
+  afterAccountStep: number
 ): number {
-  if (user && canProceedWithEmailAccount(user)) return planStep;
+  if (user && canProceedWithEmailAccount(user)) return afterAccountStep;
   return accountStep;
 }
 
-export function shouldAdvanceToPlanAfterAuth(
+export function shouldAdvanceAfterAccountAuth(
   user: User | null,
   step: number,
   accountStep: number
 ): boolean {
   return step === accountStep && Boolean(user && canProceedWithEmailAccount(user));
+}
+
+/** @deprecated use shouldAdvanceAfterAccountAuth */
+export function shouldAdvanceToPlanAfterAuth(
+  user: User | null,
+  step: number,
+  accountStep: number
+): boolean {
+  return shouldAdvanceAfterAccountAuth(user, step, accountStep);
 }

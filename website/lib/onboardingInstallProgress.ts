@@ -21,10 +21,14 @@ export function formatSetupAgentList(agents: IdeToolId[]): string {
 }
 
 export function canFinishOnboardingInstall(input: {
+  wantsWeb: boolean;
+  wantsCodingAgents: boolean;
   browserStoreClicked: boolean;
-  setupAgents: IdeToolId[];
+  codingAgentsSetupCopied: boolean;
 }): boolean {
-  return input.browserStoreClicked || input.setupAgents.length > 0;
+  const webOk = !input.wantsWeb || input.browserStoreClicked;
+  const agentsOk = !input.wantsCodingAgents || input.codingAgentsSetupCopied;
+  return webOk && agentsOk;
 }
 
 export function showBrowserTryLinksOnDone(browserStoreClicked: boolean): boolean {

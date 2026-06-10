@@ -451,9 +451,11 @@ export function SalesJoinClient({ slug }: { slug: string }) {
   const canFinishInstall = useMemo(
     () =>
       canFinishOnboardingInstall({
+        wantsWeb: true,
+        wantsCodingAgents: true,
         browserStoreClicked,
-        setupAgents
-      }),
+        codingAgentsSetupCopied: setupAgents.length > 0
+      }) || browserStoreClicked || setupAgents.length > 0,
     [browserStoreClicked, setupAgents]
   );
 
