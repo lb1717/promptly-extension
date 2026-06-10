@@ -549,3 +549,62 @@ promptly_install_for_codex() {
   echo "✓ Promptly installed for Codex"
   return 0
 }
+
+promptly_install_all_agents() {
+  local integrations="${1:-${HOME}/integrations}"
+  local _installed=() _skipped=() _failed=()
+
+  _run_agent_install() {
+    local label="$1"
+    shift
+    set +e
+    "$@"
+    local code=$?
+    set -e
+    if [[ $code -eq 0 ]]; then
+      _installed+=("${label}")
+    elif [[ $code -eq 2 ]]; then
+      _skipped+=("${label}")
+    else
+      _failed+=("${label}")
+    fi
+  }
+
+  _run_agent_install "Cursor" promptly_install_for_cursor "${integrations}"
+  _run_agent_install "Claude Code" promptly_install_for_claude_code "${integrations}"
+  _run_agent_install "Codex" promptly_install_for_codex "${integrations}"
+
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "Promptly all-agents install summary"
+  if ((${#_installed[@]})); then
+    echo "  ✓ Installed: ${_installed[*]}"
+  fi
+  if ((${#_skipped[@]})); then
+    echo "  ⚠ Skipped (CLI not available): ${_skipped[*]}"
+  fi
+  if ((${#_failed[@]})); then
+    echo "  ✗ Failed: ${_failed[*]}"
+  fi
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+  ((${#_installed[@]} == 0)) && return 1
+  return 0
+}
+
+promptly_finalize_with_pair_code() {
+  local code="$1"
+  local integrations="${2:-${HOME}/integrations}"
+  local cli="${integrations}/packages/telemetry-cli/bin/promptly-telemetry.mjs"
+  if [[ ! -f "${cli}" ]]; then
+    echo "✗ Could not install telemetry CLI from plugin pack."
+    return 1
+  fi
+  echo "→ Pairing all agents, merging stats, and verifying live uploads…"
+  node "${cli}" fix-account "${code}"
+  echo "→ Syncing hooks + telemetry into Claude Code, Cursor, and Codex runtimes…"
+  promptly_sync_all_agent_runtimes "${integrations}"
+  echo ""
+  echo "✓ All set. Restart Claude Code, Cursor, and Codex if they were open, then send a test prompt."
+  echo "  Stats go to the email shown above on https://promptly-labs.com/account/statistics"
+}

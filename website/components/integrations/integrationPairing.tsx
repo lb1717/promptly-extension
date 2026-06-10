@@ -259,13 +259,13 @@ export function AllAgentsConnectStep({
 
       {!hasAllCodes ? (
         <p className="mt-3 text-sm text-muted">
-          Sign in with your Promptly account, then copy one command into {terminalLabel}. It removes old plugins,
-          reinstalls Claude Code, Cursor, and Codex, pairs all three, and runs status checks.
+          Sign in with your Promptly account, then copy one command into {terminalLabel}. It installs Claude Code,
+          Cursor, and Codex, pairs all three to that account, merges any split stats, and verifies live tracking.
         </p>
       ) : (
         <>
           <p className="mt-3 text-sm text-muted">
-            Copy this entire command into {terminalLabel} — install, connect, and verify in one paste.
+            Copy this entire command into {terminalLabel} — one paste does install, connect, sync, and verify.
           </p>
           {expiresAt ? (
             <p className="mt-1 text-xs text-faint">

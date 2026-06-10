@@ -74,8 +74,8 @@ export function AdminIntegrationsClient() {
       <section className="mb-8 rounded-2xl border border-violet-500/20 bg-[#221830]/60 p-5">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-violet-300">Install &amp; connect</h2>
         <p className="mt-2 text-sm text-violet-200/75">
-          Removes old Promptly plugins, reinstalls the full pack, pairs Claude Code + Cursor + Codex, and runs status
-          checks — all in one paste.
+          One curl command installs the full plugin pack, pairs Claude Code + Cursor + Codex to your account, merges
+          split stats if any, and syncs live hooks — same end-to-end flow as fix split stats, for first-time setup.
         </p>
         <div className="mt-4 [&_.text-muted]:text-violet-200/70 [&_.text-faint]:text-violet-300/60">
           <AllAgentsConnectStep

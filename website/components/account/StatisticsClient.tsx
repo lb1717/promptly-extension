@@ -24,20 +24,30 @@ import {
   YAxis
 } from "recharts";
 
-/** OpenAI system green (distinct from Gemini blue). ChatGPT visuals often skew turquoise but this reads clearly on dark UI. */
-const COLOR_CHATGPT = "#10a37f";
-/** Anthropic Claude accent (warm coral-orange). */
-const COLOR_CLAUDE = "#cc785c";
-/** Google Gemini / primary blue reference. */
-const COLOR_GEMINI = "#4285f4";
+/** OpenAI / ChatGPT green — web chat. */
+const COLOR_CHATGPT_WEB = "#0e9068";
+/** Codex — same green family, lighter tint. */
+const COLOR_CODEX = "#22c997";
+/** Anthropic Claude — web chat (muted coral-orange). */
+const COLOR_CLAUDE_WEB = "#b86b4a";
+/** Claude Code — same orange family, brighter tint. */
+const COLOR_CLAUDE_CODE = "#e8956f";
+/** Google Gemini / primary blue — web only. */
+const COLOR_GEMINI_WEB = "#4285f4";
 const COLOR_UNKNOWN = "#64748b";
 /** Promptly accent for “Improve / rewrite” bars. */
 const COLOR_PROMPTLY = "#ab68ff";
 const COLOR_NATIVE_WEB = "#22d3ee";
-/** Coding agents — separate from web chat palette */
-const COLOR_CLAUDE_CODE = "#D97757";
-const COLOR_CURSOR_IDE = "#00D8FF";
-const COLOR_CODEX = "#10A37F";
+/** Cursor IDE — cyan, distinct from Gemini blue. */
+const COLOR_CURSOR = "#00D8FF";
+
+/** @deprecated use COLOR_CHATGPT_WEB */
+const COLOR_CHATGPT = COLOR_CHATGPT_WEB;
+/** @deprecated use COLOR_CLAUDE_WEB */
+const COLOR_CLAUDE = COLOR_CLAUDE_WEB;
+/** @deprecated use COLOR_GEMINI_WEB */
+const COLOR_GEMINI = COLOR_GEMINI_WEB;
+const COLOR_CURSOR_IDE = COLOR_CURSOR;
 
 const IDE_AGENT_LABELS: Record<string, string> = {
   claude_code: "Claude Code",
@@ -671,9 +681,9 @@ function formatShortDay(isoYmd: string) {
 }
 
 function svcLabel(key: PromptlySvc): string {
-  if (key === "chatgpt") return "ChatGPT";
-  if (key === "claude") return "Claude";
-  if (key === "gemini") return "Gemini";
+  if (key === "chatgpt") return "ChatGPT (Web)";
+  if (key === "claude") return "Claude (Web)";
+  if (key === "gemini") return "Gemini (Web)";
   return "Other";
 }
 
@@ -882,32 +892,112 @@ function FadeInUpliftPercent({
   );
 }
 
-type PromptVolumeAiKey = "claude" | "gemini" | "chatgpt" | "other";
+type PromptVolumeAiKey =
+  | "claude"
+  | "gemini"
+  | "chatgpt"
+  | "other"
+  | "claude_code"
+  | "cursor"
+  | "codex";
 
 type PromptVolumeAiFilterState = Record<PromptVolumeAiKey, boolean>;
+
+type PromptVolumeChartBucket = CombinedPromptBucket & {
+  prompts_claude_code: number;
+  prompts_cursor: number;
+  prompts_codex: number;
+};
 
 const PROMPT_VOLUME_AI_FILTERS: Array<{
   key: PromptVolumeAiKey;
   label: string;
   color: string;
-  dataKey: keyof CombinedPromptBucket;
+  dataKey: keyof PromptVolumeChartBucket;
   legendName: string;
 }> = [
-  { key: "chatgpt", label: "ChatGPT", color: COLOR_CHATGPT, dataKey: "prompts_chatgpt", legendName: "ChatGPT" },
-  { key: "claude", label: "Claude", color: COLOR_CLAUDE, dataKey: "prompts_claude", legendName: "Claude" },
-  { key: "gemini", label: "Gemini", color: COLOR_GEMINI, dataKey: "prompts_gemini", legendName: "Gemini" },
-  { key: "other", label: "Other", color: COLOR_UNKNOWN, dataKey: "prompts_unknown", legendName: "Other" }
+  {
+    key: "chatgpt",
+    label: "ChatGPT (Web)",
+    color: COLOR_CHATGPT_WEB,
+    dataKey: "prompts_chatgpt",
+    legendName: "ChatGPT (Web)"
+  },
+  {
+    key: "codex",
+    label: "Codex",
+    color: COLOR_CODEX,
+    dataKey: "prompts_codex",
+    legendName: "Codex"
+  },
+  {
+    key: "claude",
+    label: "Claude (Web)",
+    color: COLOR_CLAUDE_WEB,
+    dataKey: "prompts_claude",
+    legendName: "Claude (Web)"
+  },
+  {
+    key: "claude_code",
+    label: "Claude Code",
+    color: COLOR_CLAUDE_CODE,
+    dataKey: "prompts_claude_code",
+    legendName: "Claude Code"
+  },
+  {
+    key: "gemini",
+    label: "Gemini (Web)",
+    color: COLOR_GEMINI_WEB,
+    dataKey: "prompts_gemini",
+    legendName: "Gemini (Web)"
+  },
+  {
+    key: "cursor",
+    label: "Cursor",
+    color: COLOR_CURSOR,
+    dataKey: "prompts_cursor",
+    legendName: "Cursor"
+  },
+  {
+    key: "other",
+    label: "Other",
+    color: COLOR_UNKNOWN,
+    dataKey: "prompts_unknown",
+    legendName: "Other"
+  }
 ];
 
 const DEFAULT_PROMPT_VOLUME_AI_FILTERS: PromptVolumeAiFilterState = {
   claude: true,
   gemini: true,
   chatgpt: true,
-  other: true
+  other: true,
+  claude_code: true,
+  cursor: true,
+  codex: true
 };
 
+function mergePromptVolumeTimelines(
+  web: CombinedPromptBucket[],
+  ide: Array<{ bucket: string; claude_code: number; cursor: number; codex: number }>
+): PromptVolumeChartBucket[] {
+  const webMap = new Map(web.map((row) => [row.bucket, row]));
+  const ideMap = new Map(ide.map((row) => [row.bucket, row]));
+  const buckets = [...new Set([...web.map((row) => row.bucket), ...ide.map((row) => row.bucket)])].sort();
+  return buckets.map((bucket) => {
+    const webRow = webMap.get(bucket) ?? emptyCombinedBucket(bucket);
+    const ideRow = ideMap.get(bucket);
+    return {
+      ...webRow,
+      prompts_claude_code: ideRow?.claude_code ?? 0,
+      prompts_cursor: ideRow?.cursor ?? 0,
+      prompts_codex: ideRow?.codex ?? 0
+    };
+  });
+}
+
 function promptVolumeBucketTotal(
-  row: CombinedPromptBucket,
+  row: PromptVolumeChartBucket,
   filters: PromptVolumeAiFilterState
 ): number {
   let total = 0;
@@ -977,7 +1067,7 @@ function promptVolumeSegmentBuckets(rangeDays: number, granularity: "day" | "wee
 }
 
 function computePromptVolumePeriodChange(
-  rows: CombinedPromptBucket[],
+  rows: PromptVolumeChartBucket[],
   rangeDays: number,
   granularity: "day" | "week",
   filters: PromptVolumeAiFilterState
@@ -985,7 +1075,7 @@ function computePromptVolumePeriodChange(
   const n = rows.length;
   if (n < 2) return null;
 
-  const sumSlice = (slice: CombinedPromptBucket[]) =>
+  const sumSlice = (slice: PromptVolumeChartBucket[]) =>
     slice.reduce((acc, row) => acc + promptVolumeBucketTotal(row, filters), 0);
 
   const unit = granularity === "week" ? "wk" : "d";
@@ -1438,14 +1528,16 @@ export function StatisticsClient() {
     });
   }, [user, loading, days, granularity, loadExtended, loadIdeStats]);
 
-  const stackedTimeline = useMemo(() => {
-    if (!displayStats?.combined_prompt_timeline) return [];
-    const g = displayStats.granularity;
-    return displayStats.combined_prompt_timeline.map((row) => ({
+  const stackedTimeline = useMemo((): Array<PromptVolumeChartBucket & { label: string }> => {
+    const webTimeline = displayStats?.combined_prompt_timeline ?? [];
+    const ideRows = displayIdeStats?.prompt_timeline ?? [];
+    if (!webTimeline.length && !ideRows.length) return [];
+    const g = displayStats?.granularity ?? displayIdeStats?.granularity ?? granularity;
+    return mergePromptVolumeTimelines(webTimeline, ideRows).map((row) => ({
       ...row,
       label: g === "week" ? `wk ${formatShortDay(row.bucket)}` : formatShortDay(row.bucket)
     }));
-  }, [displayStats]);
+  }, [displayStats, displayIdeStats, granularity]);
 
   const promptVolumeChartRows = useMemo(() => {
     const totals = stackedTimeline.map((row) => promptVolumeBucketTotal(row, promptVolumeAiFilters));
@@ -1684,24 +1776,43 @@ export function StatisticsClient() {
   );
 
   const screenTimeByServiceRows = useMemo(() => {
-    if (!displayStats?.screen_time_by_service) return [];
-    return (["chatgpt", "claude", "gemini"] as const)
-      .filter((serviceKey) => promptVolumeAiFilters[serviceKey])
-      .map((serviceKey) => {
+    const rows: Array<{ service: string; key: string; minutes: number; fill: string }> = [];
+    if (displayStats?.screen_time_by_service) {
+      for (const serviceKey of ["chatgpt", "claude", "gemini"] as const) {
+        if (!promptVolumeAiFilters[serviceKey]) continue;
         const row = displayStats.screen_time_by_service[serviceKey] ?? EMPTY_SERVICE_SCREEN_TIME;
-        return {
+        rows.push({
           service: svcLabel(serviceKey),
           key: serviceKey,
           minutes: row.total_minutes,
           fill:
             serviceKey === "chatgpt"
-              ? COLOR_CHATGPT
+              ? COLOR_CHATGPT_WEB
               : serviceKey === "claude"
-                ? COLOR_CLAUDE
-                : COLOR_GEMINI
-        };
-      });
-  }, [displayStats, promptVolumeAiFilters]);
+                ? COLOR_CLAUDE_WEB
+                : COLOR_GEMINI_WEB
+        });
+      }
+    }
+    const ideScreen = displayIdeStats?.totals.screen_time_minutes;
+    if (ideScreen) {
+      const agents: Array<{ key: IdeToolKey; label: string; color: string }> = [
+        { key: "claude_code", label: "Claude Code", color: COLOR_CLAUDE_CODE },
+        { key: "cursor", label: "Cursor", color: COLOR_CURSOR },
+        { key: "codex", label: "Codex", color: COLOR_CODEX }
+      ];
+      for (const agent of agents) {
+        if (!promptVolumeAiFilters[agent.key]) continue;
+        rows.push({
+          service: agent.label,
+          key: agent.key,
+          minutes: ideScreen[agent.key] ?? 0,
+          fill: agent.color
+        });
+      }
+    }
+    return rows;
+  }, [displayStats, displayIdeStats, promptVolumeAiFilters]);
 
   const screenTimeByServiceChartHasData = useMemo(
     () => screenTimeByServiceRows.some((row) => row.minutes > 0),
@@ -1709,21 +1820,32 @@ export function StatisticsClient() {
   );
 
   const screenTimeByServiceSectionHeight = Math.max(120, screenTimeByServiceRows.length * 44 + 24);
+  const screenTimeServiceLabelWidth = screenTimeByServiceRows.some((row) => row.service.includes("(Web)"))
+    ? 108
+    : 88;
 
   const engagementByServicePies = useMemo(() => {
-    if (!displayStats?.screen_time_by_service) return [];
-    const services: Array<{
-      key: "chatgpt" | "claude" | "gemini";
-      filterKey: PromptVolumeAiKey;
+    const pies: Array<{
+      key: string;
+      label: string;
       accent: string;
-    }> = [
-      { key: "chatgpt", filterKey: "chatgpt", accent: COLOR_CHATGPT },
-      { key: "claude", filterKey: "claude", accent: COLOR_CLAUDE },
-      { key: "gemini", filterKey: "gemini", accent: COLOR_GEMINI }
-    ];
-    return services
-      .filter((svc) => promptVolumeAiFilters[svc.filterKey])
-      .map((svc) => {
+      totalMinutes: number;
+      slices: EngagementSlice[];
+      hasData: boolean;
+    }> = [];
+
+    if (displayStats?.screen_time_by_service) {
+      const webServices: Array<{
+        key: "chatgpt" | "claude" | "gemini";
+        filterKey: PromptVolumeAiKey;
+        accent: string;
+      }> = [
+        { key: "chatgpt", filterKey: "chatgpt", accent: COLOR_CHATGPT_WEB },
+        { key: "claude", filterKey: "claude", accent: COLOR_CLAUDE_WEB },
+        { key: "gemini", filterKey: "gemini", accent: COLOR_GEMINI_WEB }
+      ];
+      for (const svc of webServices) {
+        if (!promptVolumeAiFilters[svc.filterKey]) continue;
         const row = displayStats.screen_time_by_service[svc.key] ?? EMPTY_SERVICE_SCREEN_TIME;
         const slices: EngagementSlice[] = [
           { name: "Drafting prompt", value: row.drafting_minutes, fill: COLOR_DRAFTING },
@@ -1731,24 +1853,67 @@ export function StatisticsClient() {
           { name: "Reading output", value: row.reading_idle_minutes, fill: COLOR_READING_IDLE }
         ].filter((slice) => slice.value > 0);
         const totalMinutes =
-          row.total_minutes > 0
-            ? row.total_minutes
-            : slices.reduce((sum, slice) => sum + slice.value, 0);
-        return {
+          row.total_minutes > 0 ? row.total_minutes : slices.reduce((sum, slice) => sum + slice.value, 0);
+        pies.push({
           key: svc.key,
           label: svcLabel(svc.key),
           accent: svc.accent,
           totalMinutes,
           slices,
           hasData: totalMinutes > 0
-        };
-      })
-      .filter((pie) => pie.hasData);
-  }, [displayStats, promptVolumeAiFilters]);
+        });
+      }
+    }
+
+    const ideEngagement = displayIdeStats?.totals.engagement_minutes_by_tool;
+    if (ideEngagement) {
+      const agents: Array<{ key: IdeToolKey; label: string; accent: string; filterKey: PromptVolumeAiKey }> = [
+        { key: "claude_code", label: "Claude Code", accent: COLOR_CLAUDE_CODE, filterKey: "claude_code" },
+        { key: "cursor", label: "Cursor", accent: COLOR_CURSOR, filterKey: "cursor" },
+        { key: "codex", label: "Codex", accent: COLOR_CODEX, filterKey: "codex" }
+      ];
+      for (const agent of agents) {
+        if (!promptVolumeAiFilters[agent.filterKey]) continue;
+        const row = ideEngagement[agent.key];
+        if (!row) continue;
+        const slices: EngagementSlice[] = [
+          { name: "Drafting prompt", value: row.drafting, fill: COLOR_DRAFTING },
+          { name: "Waiting for AI", value: row.waiting, fill: COLOR_NATIVE_WEB },
+          { name: "Reading output", value: row.reading_idle, fill: COLOR_READING_IDLE }
+        ].filter((slice) => slice.value > 0);
+        const totalMinutes = slices.reduce((sum, slice) => sum + slice.value, 0);
+        pies.push({
+          key: agent.key,
+          label: agent.label,
+          accent: agent.accent,
+          totalMinutes,
+          slices,
+          hasData: totalMinutes > 0
+        });
+      }
+    }
+
+    return pies.filter((pie) => pie.hasData);
+  }, [displayStats, displayIdeStats, promptVolumeAiFilters]);
 
   const engagementByServiceEnabledCount = useMemo(() => {
-    return (["chatgpt", "claude", "gemini"] as const).filter((key) => promptVolumeAiFilters[key]).length;
+    return PROMPT_VOLUME_AI_FILTERS.filter((f) => promptVolumeAiFilters[f.key]).length;
   }, [promptVolumeAiFilters]);
+
+  const ideScreenTimeHasData = useMemo(() => {
+    const st = displayIdeStats?.totals.screen_time_minutes;
+    if (!st) return false;
+    return st.claude_code + st.cursor + st.codex > 0;
+  }, [displayIdeStats]);
+
+  const ideEngagementHasData = useMemo(() => {
+    const byTool = displayIdeStats?.totals.engagement_minutes_by_tool;
+    if (!byTool) return false;
+    return (["claude_code", "cursor", "codex"] as const).some((key) => {
+      const row = byTool[key];
+      return row && row.drafting + row.waiting + row.reading_idle > 0;
+    });
+  }, [displayIdeStats]);
 
   const engagementSpendHasData = useMemo(
     () =>
@@ -1761,8 +1926,16 @@ export function StatisticsClient() {
     () =>
       (displayStats?.engagement_totals?.segment_count ?? 0) > 0 ||
       screenTimeByServiceChartHasData ||
+      engagementSpendHasData ||
+      ideScreenTimeHasData ||
+      ideEngagementHasData,
+    [
+      displayStats,
+      screenTimeByServiceChartHasData,
       engagementSpendHasData,
-    [displayStats, screenTimeByServiceChartHasData, engagementSpendHasData]
+      ideScreenTimeHasData,
+      ideEngagementHasData
+    ]
   );
 
   const statsInfoNotices = useMemo((): ReactNode[] => {
@@ -2157,7 +2330,7 @@ export function StatisticsClient() {
                             dataKey="service"
                             stroke="#8A8A8A"
                             tick={CHART_Y_TICK_11}
-                            width={72}
+                            width={screenTimeServiceLabelWidth}
                           />
                           <Tooltip
                             contentStyle={CHART_TOOLTIP_STYLE}
@@ -2175,7 +2348,7 @@ export function StatisticsClient() {
                     <p className="text-sm text-muted">No screen time for the selected services in this range yet.</p>
                   )
                 ) : (
-                  <p className="text-sm text-muted">Turn on ChatGPT, Claude, or Gemini under Show to view screen time.</p>
+                  <p className="text-sm text-muted">Turn on at least one service or agent under Show to view screen time.</p>
                 )}
               </section>
 
@@ -2203,7 +2376,7 @@ export function StatisticsClient() {
                           ? "grid-cols-1 max-w-xs mx-auto"
                           : engagementByServicePies.length === 2
                             ? "grid-cols-1 sm:grid-cols-2 max-w-2xl mx-auto"
-                            : "grid-cols-1 sm:grid-cols-3"
+                            : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
                       }`}
                     >
                       {engagementByServicePies.map((pie) => (
@@ -2228,8 +2401,9 @@ export function StatisticsClient() {
             <section className="mb-8 w-full rounded-2xl border border-line bg-cream p-4 shadow-card sm:p-5">
               <h2 className="mb-1 text-sm font-semibold uppercase tracking-[0.22em] text-faint">Screen time</h2>
               <p className="text-sm text-muted">
-                Screen time tracking starts with the latest extension. Use ChatGPT, Claude, or Gemini while signed in to
-                see time by service and how you spend it (drafting, waiting, reading).
+                Screen time tracking starts with the latest extension or coding-agent plugins. Use ChatGPT, Claude, or
+                Gemini in the browser, or Claude Code, Cursor, and Codex in the IDE while signed in to see time by
+                service and how you spend it (drafting, waiting, reading).
               </p>
             </section>
           )}
@@ -2283,7 +2457,7 @@ export function StatisticsClient() {
               <div>
                 <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">Coding agents</h2>
                 <p className="mt-1 text-xs text-muted">
-                  Claude Code, Cursor, and Codex — separate from web chat statistics above.
+                  Claude Code, Cursor, and Codex — also included in the charts above; details below.
                 </p>
               </div>
               <Link

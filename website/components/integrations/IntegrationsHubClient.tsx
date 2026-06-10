@@ -40,8 +40,8 @@ export function IntegrationsHubClient() {
           Connect Claude Code, Cursor &amp; Codex
         </h1>
         <p className="mx-auto mt-3 max-w-lg text-sm leading-relaxed text-muted">
-          Press connect, copy one command, paste in Terminal. It removes old plugins, reinstalls all three agents,
-          pairs your Promptly account, and verifies everything — then allow hooks per agent below.
+          Press connect, copy one command, paste in Terminal. It installs all three agents, pairs your Promptly
+          account, merges any split stats, syncs live hooks, and verifies tracking — then allow hooks per agent below.
         </p>
       </div>
 

@@ -13,6 +13,26 @@ const INSTALL_SCRIPT_SLUG: Record<IdeToolId, string> = {
 };
 
 export const ALL_AGENTS_SCRIPT_SLUG = "all-agents";
+export const SETUP_SCRIPT_SLUG = "setup";
+
+export function setupScriptUrl(os: OsId): string {
+  return os === "mac"
+    ? `${INSTALL_BASE_URL}/${SETUP_SCRIPT_SLUG}-mac.sh`
+    : `${INSTALL_BASE_URL}/${SETUP_SCRIPT_SLUG}-windows.ps1`;
+}
+
+/** One curl command: full install + pair all agents + merge stats + sync live hooks. */
+export function setupCurlCommand(os: OsId, code: string): string {
+  const url = setupScriptUrl(os);
+  if (os === "mac") {
+    return `curl -fsSL ${url} | bash -s -- ${code}`;
+  }
+  return `irm ${url} | iex; Setup-PromptlyAgents -Code ${code}`;
+}
+
+export function setupCommands(os: OsId, code: string): string[] {
+  return [setupCurlCommand(os, code)];
+}
 
 export function allAgentsInstallScriptUrl(os: OsId): string {
   return os === "mac"
@@ -139,22 +159,17 @@ export type AllAgentsPairCodes = Record<IdeToolId, string>;
 
 const ALL_IDE_TOOLS: IdeToolId[] = ["claude_code", "cursor", "codex"];
 
-/** One paste: fresh install all agents, then one fix-account command. */
+/** One paste: install all agents, pair, merge stats, sync live hooks, verify uploads. */
 export function allAgentsFullSetupCommands(os: OsId, codes: AllAgentsPairCodes): string[] {
-  const code = codes.claude_code;
-  const install = allAgentsInstallCommands(os)[0]!;
-  if (os === "mac") {
-    return [`${install} && ${fixAccountLocalCommand(os, code)} && ${telemetryCli(os)} status`];
-  }
-  const fix = fixAccountLocalCommand("windows", code);
-  return [`${install}; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; ${fix}; if ($LASTEXITCODE -eq 0) { ${telemetryCliPowerShell()} status }`];
+  return setupCommands(os, codes.claude_code);
 }
 
 export function allAgentsSetupValidationItems(): string[] {
   return [
     "Promptly all-agents install summary",
-    '"Promptly installed for Cursor" (or skipped if Cursor files missing)',
-    '"connected": true for claude_code, cursor, and codex in status output'
+    '"Promptly installed for Cursor" (or skipped if that CLI is missing)',
+    'fix-account output shows "ok": true and live_tracking all ok',
+    "All three tools show matches_primary: true in status"
   ];
 }
 
