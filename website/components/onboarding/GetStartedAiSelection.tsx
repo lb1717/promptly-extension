@@ -15,9 +15,7 @@ export function GetStartedAiSelection({
   return (
     <div className="mt-6 space-y-4">
       <p className="text-sm text-muted">
-        Choose what you want Promptly on today. This only sets up your install steps — nothing connects yet. You can
-        always add more from{" "}
-        <span className="font-medium text-ink">Account → Integrations</span> later.
+        You can always add more from <span className="font-medium text-ink">Account → Integrations</span> later.
       </p>
       <div className="space-y-2">
         {ONBOARDING_PRODUCT_OPTIONS.map((option) => {

@@ -40,7 +40,7 @@ export const ONBOARDING_PRODUCT_OPTIONS: Array<{
 }> = [
   {
     key: "web",
-    label: "Web AIs",
+    label: "Web AI Browsers",
     description: "ChatGPT, Claude, and Gemini in Chrome or Edge"
   },
   {

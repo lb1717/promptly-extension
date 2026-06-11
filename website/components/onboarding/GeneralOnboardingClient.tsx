@@ -416,9 +416,9 @@ export function GeneralOnboardingClient() {
   }
 
   const stepTitle = useMemo(() => {
-    if (step === 1) return "Get Started in 30 seconds";
+    if (step === 1) return "Get Started in 1 minute";
     if (step === 2) return "Create your account";
-    if (step === 3) return "What do you use?";
+    if (step === 3) return "What AI platforms do you use?";
     if (step === 4) return "Install Promptly";
     if (step === 5) return "Choose your plan";
     return "Setup complete";
@@ -427,40 +427,31 @@ export function GeneralOnboardingClient() {
   return (
     <div className="mx-auto w-full max-w-xl px-4 py-10 pb-24">
       <div className="mb-8">
-        <div className="flex items-center justify-between gap-1">
-          {STEPS.map((label, index) => {
+        <div
+          className="flex gap-1.5"
+          role="progressbar"
+          aria-valuenow={step}
+          aria-valuemin={1}
+          aria-valuemax={STEPS.length}
+          aria-label="Setup progress"
+        >
+          {STEPS.map((_, index) => {
             const num = index + 1;
-            const active = step === num;
-            const done = step > num;
+            const reached = step >= num;
             return (
-              <div key={label} className="flex flex-1 flex-col items-center gap-1">
-                <div
-                  className={`flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-bold sm:h-8 sm:w-8 sm:text-xs ${
-                    active
-                      ? "bg-ink text-cream"
-                      : done
-                        ? "bg-emerald-600 text-white"
-                        : "border border-line bg-cream-dark text-faint"
-                  }`}
-                >
-                  {done ? "✓" : num}
-                </div>
-                <span className={`hidden text-[10px] sm:block ${active ? "font-semibold text-ink" : "text-faint"}`}>
-                  {label}
-                </span>
-              </div>
+              <div
+                key={num}
+                className={`h-1.5 flex-1 rounded-sm transition-colors duration-300 ${
+                  reached ? "bg-ink" : "bg-line"
+                }`}
+              />
             );
           })}
         </div>
       </div>
 
       <div className="rounded-2xl border border-line bg-cream p-6 shadow-card sm:p-8">
-        {step !== 1 ? (
-          <p className="text-xs font-medium uppercase tracking-[0.16em] text-faint">
-            {`Step ${step} of ${STEPS.length}`}
-          </p>
-        ) : null}
-        <h1 className="mt-2 text-2xl font-semibold text-ink">{stepTitle}</h1>
+        <h1 className="text-2xl font-semibold text-ink">{stepTitle}</h1>
 
         {error ? (
           <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
@@ -474,25 +465,7 @@ export function GeneralOnboardingClient() {
         ) : null}
 
         {step === 1 ? (
-          <div className="mt-6 space-y-5">
-            <ul className="space-y-2 text-sm text-muted">
-              <li className="flex gap-2">
-                <span className="text-faint">1.</span>
-                <span>Create your account</span>
-              </li>
-              <li className="flex gap-2">
-                <span className="text-faint">2.</span>
-                <span>Choose what to connect</span>
-              </li>
-              <li className="flex gap-2">
-                <span className="text-faint">3.</span>
-                <span>Install Promptly</span>
-              </li>
-              <li className="flex gap-2">
-                <span className="text-faint">4.</span>
-                <span>Pick a plan</span>
-              </li>
-            </ul>
+          <div className="mt-6">
             <button
               type="button"
               onClick={() => goToStep(welcomeContinueStep(user, ACCOUNT_STEP, CHOOSE_AI_STEP))}
@@ -626,13 +599,17 @@ export function GeneralOnboardingClient() {
 
             {wantsWeb ? (
               <OnboardingBrowserExtensionInstall
+                stepNumber={1}
                 extensionDetected={extensionDetected}
                 onStoreClick={() => setBrowserStoreClicked(true)}
               />
             ) : null}
 
             {wantsCodingAgents ? (
-              <GetStartedAllAgentsInstall onCommandCopy={noteAgentCommandCopy} />
+              <GetStartedAllAgentsInstall
+                stepNumber={wantsWeb ? 2 : 1}
+                onCommandCopy={noteAgentCommandCopy}
+              />
             ) : null}
 
             {!canFinishInstall ? (

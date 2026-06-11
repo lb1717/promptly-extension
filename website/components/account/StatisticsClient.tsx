@@ -1349,18 +1349,18 @@ function ServiceEngagementDonut({
     : [{ name: "No activity", value: 1, fill: "#E0DDD6" }];
 
   return (
-    <div className="flex flex-col items-center">
-      <p className="mb-2 text-xs font-semibold uppercase tracking-wide" style={{ color: accentColor }}>
+    <div className="mx-auto flex w-full max-w-[240px] flex-col items-center">
+      <p className="mb-2 text-center text-xs font-semibold uppercase tracking-wide" style={{ color: accentColor }}>
         {label}
       </p>
-      <div className="h-52 w-full max-w-[280px]">
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart margin={{ top: 12, right: 96, bottom: 12, left: 12 }}>
+      <div className="h-52 w-[220px] shrink-0">
+        <ResponsiveContainer width="100%" height="100%" debounce={50}>
+          <PieChart margin={{ top: 12, right: 12, bottom: 12, left: 12 }}>
             <Pie
               data={chartData}
               dataKey="value"
               nameKey="name"
-              cx="42%"
+              cx="50%"
               cy="50%"
               innerRadius="52%"
               outerRadius="72%"
@@ -2670,7 +2670,8 @@ export function StatisticsClient() {
                   <StatsChartHorizonToggle value={engagementView} onChange={setEngagementView} />
                 </div>
                 {engagementView === "over_time" ? (
-                  engagementOverTimeHasData ? (
+                  <div key="engagement-over-time">
+                  {engagementOverTimeHasData ? (
                     <>
                       <div className="mb-4 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-muted">
                         {ENGAGEMENT_OVER_TIME_SERIES.map((series) => (
@@ -2717,9 +2718,10 @@ export function StatisticsClient() {
                     <p className="text-sm text-muted">No engagement breakdown over time for the selected services yet.</p>
                   ) : (
                     <p className="text-sm text-muted">Turn on at least one service under Show to view how you spend time.</p>
-                  )
+                  )}
+                  </div>
                 ) : engagementByServicePies.length > 0 ? (
-                  <>
+                  <div key="engagement-instant">
                     <div className="mb-5 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-muted">
                       <span className="inline-flex items-center gap-2">
                         <span className="h-3 w-3 rounded-full" style={{ backgroundColor: COLOR_DRAFTING }} />
@@ -2735,7 +2737,7 @@ export function StatisticsClient() {
                       </span>
                     </div>
                     <div
-                      className={`grid gap-8 ${
+                      className={`grid justify-items-center gap-8 ${
                         engagementByServicePies.length === 1
                           ? "grid-cols-1 max-w-xs mx-auto"
                           : engagementByServicePies.length === 2
@@ -2753,7 +2755,7 @@ export function StatisticsClient() {
                         />
                       ))}
                     </div>
-                  </>
+                  </div>
                 ) : engagementByServiceEnabledCount > 0 ? (
                   <p className="text-sm text-muted">No engagement breakdown for the selected services in this range yet.</p>
                 ) : (

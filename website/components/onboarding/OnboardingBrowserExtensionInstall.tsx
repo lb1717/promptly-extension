@@ -7,15 +7,17 @@ const EDGE_URL =
 
 export function OnboardingBrowserExtensionInstall({
   extensionDetected,
-  onStoreClick
+  onStoreClick,
+  stepNumber = 1
 }: {
   extensionDetected?: boolean;
   onStoreClick?: () => void;
+  stepNumber?: number;
 }) {
   return (
     <div className="rounded-xl border border-line bg-cream-dark p-4">
       <p className="text-base font-semibold text-ink">
-        1. Browser extension
+        {stepNumber}. Browser extension
       </p>
       <p className="mt-1 text-xs text-muted">
         For ChatGPT, Claude, and Gemini online in your browser.
