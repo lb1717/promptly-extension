@@ -126,7 +126,6 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
   const [billing, setBilling] = useState<BillingPayload | null>(null);
   const [billingLoading, setBillingLoading] = useState(false);
   const [billingError, setBillingError] = useState("");
-  const [promptVolumeRefreshKey, setPromptVolumeRefreshKey] = useState(0);
   const [dailyCredits, setDailyCredits] = useState<DailyCreditsPayload | null>(null);
   const [dailyCreditsLoading, setDailyCreditsLoading] = useState(false);
   const [dailyCreditsError, setDailyCreditsError] = useState("");
@@ -284,7 +283,6 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
         setBusy(false);
         void syncExtensionSession(nextUser);
         await Promise.all([loadBilling(nextUser), loadDailyCredits(nextUser)]);
-        setPromptVolumeRefreshKey((key) => key + 1);
       } else {
         setBilling(null);
         setDailyCredits(null);
@@ -759,19 +757,18 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
               </div>
 
               <div className="col-start-3 row-span-2 row-start-1 flex min-w-[9.25rem] flex-col gap-2 self-stretch justify-self-end sm:min-w-[11rem]">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    await Promise.all([loadBilling(user), loadDailyCredits(user)]);
-                    setPromptVolumeRefreshKey((key) => key + 1);
-                  }}
-                  disabled={billingLoading || dailyCreditsLoading}
-                  className="rounded-lg border border-line px-3 py-2.5 text-sm font-medium text-muted hover:bg-cream-dark disabled:opacity-60"
+                <Link
+                  href="/account/install-integrations"
+                  className="inline-flex items-center justify-center rounded-lg bg-ink px-3 py-2.5 text-center text-sm font-semibold text-cream hover:bg-neutral-800"
                 >
-                  {billingLoading || dailyCreditsLoading
-                    ? "Refreshing…"
-                    : "Refresh account data"}
-                </button>
+                  Install more integrations
+                </Link>
+                <Link
+                  href="/account/troubleshoot-integrations"
+                  className="inline-flex items-center justify-center rounded-lg border border-line px-3 py-2.5 text-center text-sm font-medium text-muted hover:bg-cream-dark hover:text-ink"
+                >
+                  Troubleshoot integrations
+                </Link>
                 <button
                   type="button"
                   onClick={handleSignOut}
@@ -850,15 +847,9 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
               {!extensionMode ? (
                 <div className="flex shrink-0 flex-wrap gap-2">
                   <Link
-                    href="/integrations"
-                    className="inline-flex items-center justify-center rounded-lg border border-line bg-cream-dark px-3 py-2 text-xs font-semibold text-ink hover:bg-cream"
-                  >
-                    Coding agents
-                  </Link>
-                  <Link
                     href="/account/statistics"
                     data-onboarding-tour="statistics-link"
-                    className="inline-flex items-center justify-center rounded-lg border border-line bg-cream-dark px-3 py-2 text-xs font-semibold text-ink hover:bg-cream-dark"
+                    className="inline-flex items-center justify-center rounded-lg bg-ink px-3 py-2 text-xs font-semibold text-cream hover:bg-neutral-800"
                   >
                     See full statistics
                   </Link>
@@ -876,7 +867,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
             </div>
 
             {user ? (
-              <AccountPromptVolumeChart user={user} refreshKey={promptVolumeRefreshKey} />
+              <AccountPromptVolumeChart user={user} />
             ) : null}
           </section>
 
