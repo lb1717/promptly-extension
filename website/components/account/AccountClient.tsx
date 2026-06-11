@@ -33,6 +33,7 @@ import {
   type AuthProviderHint
 } from "@/lib/firebaseAuthAccountHints";
 import { EmailVerificationNotice } from "@/components/auth/EmailVerificationNotice";
+import { AccountPromptVolumeChart } from "@/components/account/AccountPromptVolumeChart";
 import { listenForGoogleSignInReturn, signInWithGoogleInteractive } from "@/lib/firebaseGoogleAuth";
 import { useEmailVerificationStatus } from "@/lib/useEmailVerificationStatus";
 import { ACCOUNT_PLANS, isPaidPlanKey, type PaidPlanKey } from "@/lib/plans";
@@ -56,15 +57,6 @@ function tierLabel(tier: string): string {
   if (t === "enterprise") return "Enterprise";
   if (t === "student") return "Student";
   return t ? t.charAt(0).toUpperCase() + t.slice(1) : "Free";
-}
-
-function formatDurationMs(value: number): string {
-  const ms = Math.max(0, Math.floor(Number(value) || 0));
-  if (ms < 1000) return `${ms} ms`;
-  const seconds = ms / 1000;
-  if (seconds < 10) return `${seconds.toFixed(2)} s`;
-  if (seconds < 60) return `${seconds.toFixed(1)} s`;
-  return `${(seconds / 60).toFixed(1)} min`;
 }
 
 function isPermissionLikeMessage(message: string): boolean {
@@ -116,40 +108,6 @@ type DailyCreditsPayload = {
   reset_label?: string;
 };
 
-type AccountUsageStatsPayload = {
-  ok: true;
-  range_days: number;
-  totals: {
-    prompts: number;
-    tokens: number;
-    auto_prompts: number;
-    manual_prompts: number;
-    generated_prompts: number;
-  };
-  service_breakdown: {
-    chatgpt: number;
-    claude: number;
-    gemini: number;
-    unknown: number;
-  };
-  averages: {
-    prompts_per_active_day: number;
-    tokens_per_prompt: number;
-    response_time_ms: number;
-  };
-  streaks: {
-    active_days: number;
-    busiest_day: string | null;
-    busiest_day_prompts: number;
-  };
-  timeline: Array<{
-    day: string;
-    prompts: number;
-    tokens: number;
-  }>;
-};
-
-
 export function AccountClient({ extensionMode = false }: { extensionMode?: boolean }) {
   const searchParams = useSearchParams();
   const extensionIdFromUrl = extensionMode ? String(searchParams.get("extension_id") || "").trim() : "";
@@ -168,9 +126,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
   const [billing, setBilling] = useState<BillingPayload | null>(null);
   const [billingLoading, setBillingLoading] = useState(false);
   const [billingError, setBillingError] = useState("");
-  const [accountStats, setAccountStats] = useState<AccountUsageStatsPayload | null>(null);
-  const [accountStatsLoading, setAccountStatsLoading] = useState(false);
-  const [accountStatsError, setAccountStatsError] = useState("");
+  const [promptVolumeRefreshKey, setPromptVolumeRefreshKey] = useState(0);
   const [dailyCredits, setDailyCredits] = useState<DailyCreditsPayload | null>(null);
   const [dailyCreditsLoading, setDailyCreditsLoading] = useState(false);
   const [dailyCreditsError, setDailyCreditsError] = useState("");
@@ -257,27 +213,6 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
     }
   }, []);
 
-  const loadAccountStats = useCallback(async (current: User) => {
-    setAccountStatsLoading(true);
-    setAccountStatsError("");
-    try {
-      const token = await current.getIdToken();
-      const res = await fetch("/api/account/stats?days=7", {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data?.error || `Request failed (${res.status})`);
-      }
-      setAccountStats(data as AccountUsageStatsPayload);
-    } catch (e) {
-      setAccountStats(null);
-      setAccountStatsError(String(e instanceof Error ? e.message : e));
-    } finally {
-      setAccountStatsLoading(false);
-    }
-  }, []);
-
   const loadDailyCredits = useCallback(async (current: User) => {
     setDailyCreditsLoading(true);
     setDailyCreditsError("");
@@ -348,25 +283,25 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
       if (nextUser) {
         setBusy(false);
         void syncExtensionSession(nextUser);
-        await Promise.all([loadBilling(nextUser), loadAccountStats(nextUser), loadDailyCredits(nextUser)]);
+        await Promise.all([loadBilling(nextUser), loadDailyCredits(nextUser)]);
+        setPromptVolumeRefreshKey((key) => key + 1);
       } else {
         setBilling(null);
-        setAccountStats(null);
         setDailyCredits(null);
       }
     });
     return () => unsub();
-  }, [loadBilling, loadAccountStats, loadDailyCredits, syncExtensionSession]);
+  }, [loadBilling, loadDailyCredits, syncExtensionSession]);
 
   const permissionInlineMessages = useMemo(() => {
     const msgs: string[] = [];
-    for (const raw of [error, billingError, accountStatsError]) {
+    for (const raw of [error, billingError]) {
       const s = String(raw || "").trim();
       if (!s || !isPermissionLikeMessage(s)) continue;
       if (!msgs.includes(s)) msgs.push(s);
     }
     return msgs;
-  }, [error, billingError, accountStatsError]);
+  }, [error, billingError]);
 
   const currentTierKey = useMemo(() => {
     const raw = String(billing?.subscriptionTier || "free").toLowerCase();
@@ -405,24 +340,6 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
     const max = Math.max(1, Number(dailyCredits.max || 1));
     return Math.max(0, Math.min(100, Math.round((used / max) * 100)));
   }, [dailyCredits]);
-
-  const serviceBars = useMemo(() => {
-    const breakdown = accountStats?.service_breakdown;
-    if (!breakdown) {
-      return [];
-    }
-    const items = [
-      { key: "chatgpt", label: "ChatGPT", value: Math.max(0, Number(breakdown.chatgpt || 0)) },
-      { key: "claude", label: "Claude", value: Math.max(0, Number(breakdown.claude || 0)) },
-      { key: "gemini", label: "Gemini", value: Math.max(0, Number(breakdown.gemini || 0)) },
-      { key: "unknown", label: "Other", value: Math.max(0, Number(breakdown.unknown || 0)) }
-    ];
-    const max = Math.max(1, ...items.map((item) => item.value));
-    return items.map((item) => ({
-      ...item,
-      widthPct: Math.max(0, Math.min(100, (item.value / max) * 100))
-    }));
-  }, [accountStats]);
 
   async function syncUserToFirestore(currentUser: User) {
     await syncPromptlyUserDoc(currentUser);
@@ -624,7 +541,6 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
       await signOut(getFirebaseAuth());
       resetVerificationStatus();
       setBilling(null);
-      setAccountStats(null);
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));
     } finally {
@@ -846,12 +762,13 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                 <button
                   type="button"
                   onClick={async () => {
-                    await Promise.all([loadBilling(user), loadAccountStats(user), loadDailyCredits(user)]);
+                    await Promise.all([loadBilling(user), loadDailyCredits(user)]);
+                    setPromptVolumeRefreshKey((key) => key + 1);
                   }}
-                  disabled={billingLoading || accountStatsLoading || dailyCreditsLoading}
+                  disabled={billingLoading || dailyCreditsLoading}
                   className="rounded-lg border border-line px-3 py-2.5 text-sm font-medium text-muted hover:bg-cream-dark disabled:opacity-60"
                 >
-                  {billingLoading || accountStatsLoading || dailyCreditsLoading
+                  {billingLoading || dailyCreditsLoading
                     ? "Refreshing…"
                     : "Refresh account data"}
                 </button>
@@ -928,7 +845,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <h2 className="text-sm font-semibold uppercase tracking-[0.15em] text-faint">Prompt stats</h2>
-                <p className="mt-1 text-xs text-faint">Last 7 days — summary only</p>
+                <p className="mt-1 text-xs text-faint">Past 7 days</p>
               </div>
               {!extensionMode ? (
                 <div className="flex shrink-0 flex-wrap gap-2">
@@ -958,95 +875,9 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
               )}
             </div>
 
-            {accountStatsError && !isPermissionLikeMessage(accountStatsError) ? (
-              <p className="mt-4 text-sm text-amber-200/90">{accountStatsError}</p>
-            ) : accountStatsLoading && !accountStats ? (
-              <p className="mt-4 text-sm text-faint">Loading usage stats…</p>
-            ) : accountStats ? (
-              <>
-                <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  <div className="rounded-xl border border-line bg-cream-dark p-4">
-                    <p className="text-xs uppercase tracking-wider text-faint">Prompts sent</p>
-                    <p className="mt-2 text-2xl font-semibold text-ink">{accountStats.totals.prompts.toLocaleString()}</p>
-                  </div>
-                  <div className="rounded-xl border border-line bg-cream-dark p-4">
-                    <p className="text-xs uppercase tracking-wider text-faint">Avg response time</p>
-                    <p className="mt-2 text-2xl font-semibold text-ink">
-                      {formatDurationMs(accountStats.averages.response_time_ms)}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-line bg-cream-dark p-4">
-                    <p className="text-xs uppercase tracking-wider text-faint">Active days</p>
-                    <p className="mt-2 text-2xl font-semibold text-ink">{accountStats.streaks.active_days}</p>
-                  </div>
-                  <div className="rounded-xl border border-line bg-cream-dark p-4">
-                    <p className="text-xs uppercase tracking-wider text-faint">Busiest day</p>
-                    <p className="mt-2 text-base font-semibold text-ink">
-                      {accountStats.streaks.busiest_day || "—"}
-                    </p>
-                    <p className="mt-1 text-xs text-faint">
-                      {accountStats.streaks.busiest_day_prompts.toLocaleString()} prompts
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-6 grid gap-6 lg:grid-cols-2">
-                  <div className="rounded-xl border border-line bg-cream-dark p-4">
-                    <p className="text-xs uppercase tracking-wider text-faint">By AI service</p>
-                    <div className="mt-4 space-y-3">
-                      {serviceBars.map((item) => (
-                        <div key={item.key}>
-                          <div className="mb-1 flex items-center justify-between text-xs text-muted">
-                            <span>{item.label}</span>
-                            <span>{item.value.toLocaleString()}</span>
-                          </div>
-                          <div className="h-2 w-full rounded-full bg-cream-dark">
-                            <div
-                              className="h-2 rounded-full bg-ink transition-all"
-                              style={{ width: `${item.widthPct}%` }}
-                            />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-line bg-cream-dark p-4">
-                    <p className="text-xs uppercase tracking-wider text-faint">Daily prompt volume</p>
-                    <div className="mt-4 flex h-32 items-end gap-1.5">
-                      {(() => {
-                        const maxPrompts = Math.max(1, ...accountStats.timeline.map((d) => d.prompts));
-                        return accountStats.timeline.map((day) => (
-                          <div key={day.day} className="group flex h-full flex-1 flex-col justify-end">
-                            <div className="mb-1 text-center text-[10px] font-semibold text-muted">
-                              {day.prompts.toLocaleString()}
-                            </div>
-                            <div
-                              className="min-h-1 w-full rounded-t-sm bg-ink transition-all hover:bg-neutral-700"
-                              style={{ height: `${day.prompts > 0 ? Math.max(10, (day.prompts / maxPrompts) * 100) : 2}%` }}
-                              title={`${day.day}: ${day.prompts} prompts`}
-                            />
-                            <div className="mt-1 text-center text-[9px] text-faint">
-                              {new Date(`${day.day}T00:00:00Z`).toLocaleDateString(undefined, {
-                                weekday: "short"
-                              })}
-                            </div>
-                          </div>
-                        ));
-                      })()}
-                    </div>
-                    <p className="mt-2 text-xs text-faint">
-                      Avg prompts/active day: {accountStats.averages.prompts_per_active_day}
-                    </p>
-                    <p className="mt-1 text-xs text-faint">
-                      Avg tokens/prompt: {accountStats.averages.tokens_per_prompt}
-                    </p>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <p className="mt-4 text-sm text-faint">No usage stats yet.</p>
-            )}
+            {user ? (
+              <AccountPromptVolumeChart user={user} refreshKey={promptVolumeRefreshKey} />
+            ) : null}
           </section>
 
           <section className="rounded-2xl border border-line bg-cream p-6 backdrop-blur-md sm:p-8">
