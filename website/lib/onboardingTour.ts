@@ -1,7 +1,13 @@
 import { formatSetupAgentList } from "@/lib/onboardingInstallProgress";
 import type { IdeToolId } from "@/components/integrations/integrationOs";
 
-export type OnboardingTourStep = "account-nav" | "account-section" | "statistics-link" | "complete";
+export type OnboardingTourStep =
+  | "account-nav"
+  | "account-section"
+  | "account-token-usage"
+  | "statistics-link"
+  | "statistics-filters"
+  | "complete";
 
 export type OnboardingTourSetup = {
   web: boolean;
@@ -21,8 +27,26 @@ export const ONBOARDING_TOUR_EVENT = "promptly-onboarding-tour";
 export const ONBOARDING_TOUR_TARGETS: Record<Exclude<OnboardingTourStep, "complete">, string> = {
   "account-nav": '[data-onboarding-tour="account-nav"]',
   "account-section": '[data-onboarding-tour="account-section"]',
-  "statistics-link": '[data-onboarding-tour="statistics-link"]'
+  "account-token-usage": '[data-onboarding-tour="account-token-usage"]',
+  "statistics-link": '[data-onboarding-tour="statistics-link"]',
+  "statistics-filters": '[data-onboarding-tour="statistics-filters"]'
 };
+
+export const ONBOARDING_TOUR_ACCOUNT_STEPS: OnboardingTourStep[] = [
+  "account-section",
+  "account-token-usage",
+  "statistics-link"
+];
+
+export const ONBOARDING_TOUR_STATISTICS_STEPS: OnboardingTourStep[] = ["statistics-filters"];
+
+export function isOnboardingTourAccountPage(pathname: string): boolean {
+  return pathname === "/account" || pathname === "/account/";
+}
+
+export function isOnboardingTourStatisticsPage(pathname: string): boolean {
+  return pathname === "/account/statistics" || pathname.startsWith("/account/statistics/");
+}
 
 export function readOnboardingTour(): OnboardingTourState | null {
   if (typeof window === "undefined") return null;

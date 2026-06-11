@@ -893,7 +893,10 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
             ) : null}
           </section>
 
-          <section className="rounded-2xl border border-line bg-cream px-4 py-3 sm:px-6 sm:py-3.5">
+          <section
+            data-onboarding-tour="account-token-usage"
+            className="rounded-2xl border border-line bg-cream px-4 py-3 sm:px-6 sm:py-3.5"
+          >
             <div className="flex items-center justify-between gap-3">
               <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">Weekly token usage</p>
               {dailyCredits ? (

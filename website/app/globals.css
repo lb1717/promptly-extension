@@ -49,3 +49,8 @@ body {
     left: 170%;
   }
 }
+
+.onboarding-tour-spotlight-target {
+  position: relative;
+  z-index: 203 !important;
+}

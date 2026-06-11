@@ -9,15 +9,25 @@ import {
   type OnboardingTourStep
 } from "@/lib/onboardingTour";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useLayoutEffect, useState, type CSSProperties, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useState,
+  type CSSProperties,
+  type ReactNode
+} from "react";
 
 type Rect = { top: number; left: number; width: number; height: number };
+
+const SPOTLIGHT_TARGET_CLASS = "onboarding-tour-spotlight-target";
 
 function measureTarget(step: OnboardingTourStep): Rect | null {
   if (step === "complete") return null;
   const el = document.querySelector(ONBOARDING_TOUR_TARGETS[step]);
   if (!el) return null;
   const rect = el.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return null;
   return { top: rect.top, left: rect.left, width: rect.width, height: rect.height };
 }
 
@@ -75,10 +85,12 @@ function TourCard({
 
 export function OnboardingTourOverlay({
   step,
-  setup
+  setup,
+  pathname
 }: {
   step: OnboardingTourStep;
   setup: OnboardingTourSetup;
+  pathname: string;
 }) {
   const router = useRouter();
   const [targetRect, setTargetRect] = useState<Rect | null>(null);
@@ -89,12 +101,12 @@ export function OnboardingTourOverlay({
 
   useLayoutEffect(() => {
     updateRect();
-    const target =
-      step === "complete" ? null : document.querySelector(ONBOARDING_TOUR_TARGETS[step]);
+    if (step === "complete") return;
+    const target = document.querySelector(ONBOARDING_TOUR_TARGETS[step]);
     target?.scrollIntoView({ block: "center", behavior: "smooth" });
     const timer = window.setTimeout(updateRect, 350);
     return () => window.clearTimeout(timer);
-  }, [step, updateRect]);
+  }, [step, updateRect, pathname]);
 
   useEffect(() => {
     updateRect();
@@ -112,22 +124,35 @@ export function OnboardingTourOverlay({
     const id = window.setInterval(() => {
       attempts += 1;
       updateRect();
-      if (measureTarget(step) || attempts > 20) window.clearInterval(id);
+      if (measureTarget(step) || attempts > 50) window.clearInterval(id);
     }, 150);
     return () => window.clearInterval(id);
-  }, [step, updateRect]);
+  }, [step, updateRect, pathname]);
+
+  useEffect(() => {
+    if (step === "complete") return;
+    const el = document.querySelector(ONBOARDING_TOUR_TARGETS[step]);
+    if (!el) return;
+    el.classList.add(SPOTLIGHT_TARGET_CLASS);
+    return () => {
+      el.classList.remove(SPOTLIGHT_TARGET_CLASS);
+    };
+  }, [step, targetRect, pathname]);
+
+  useEffect(() => {
+    if (step !== "statistics-link") return;
+    const el = document.querySelector(ONBOARDING_TOUR_TARGETS["statistics-link"]);
+    if (!el) return;
+    const onNavigate = () => {
+      advanceOnboardingTour("statistics-filters");
+    };
+    el.addEventListener("click", onNavigate);
+    return () => el.removeEventListener("click", onNavigate);
+  }, [step, targetRect, pathname]);
 
   function goToAccount() {
     advanceOnboardingTour("account-section");
     router.push("/account");
-  }
-
-  function nextFromAccountSection() {
-    advanceOnboardingTour("statistics-link");
-  }
-
-  function nextFromStatistics() {
-    advanceOnboardingTour("complete");
   }
 
   function finishTour() {
@@ -141,8 +166,7 @@ export function OnboardingTourOverlay({
       <>
         <div className="fixed inset-0 z-[200] bg-neutral-900/45" aria-hidden />
         <TourCard
-          title="You're good to go"
-          body={`Begin prompting in ${promptTarget} and use Promptly.`}
+          body={`Guide completed. Now try it out on ${promptTarget}.`}
           style={{
             top: "50%",
             left: "50%",
@@ -171,17 +195,19 @@ export function OnboardingTourOverlay({
       window.innerWidth - cardWidth - 16
     );
     const belowTop = targetRect.top + targetRect.height + 28;
-    if (belowTop + 180 < window.innerHeight) {
+    if (belowTop + 200 < window.innerHeight) {
       return { top: belowTop, left };
     }
-    return { top: Math.max(16, targetRect.top - 180), left };
+    return { top: Math.max(16, targetRect.top - 200), left };
   })();
+
+  const waitingForTarget = !targetRect;
 
   return (
     <>
-      {targetRect ? <Spotlight rect={targetRect} /> : (
-        <div className="fixed inset-0 z-[200] bg-neutral-900/45" aria-hidden />
-      )}
+      <div className="fixed inset-0 z-[200] bg-neutral-900/45" aria-hidden />
+
+      {targetRect ? <Spotlight rect={targetRect} /> : null}
 
       {step === "account-nav" ? (
         <TourCard body="Go to my account page" style={cardStyle}>
@@ -200,13 +226,38 @@ export function OnboardingTourOverlay({
 
       {step === "account-section" ? (
         <TourCard
-          body="This is where you can see and manage your account."
+          body={
+            waitingForTarget
+              ? "Loading your account overview…"
+              : "This is your account overview."
+          }
           style={cardStyle}
         >
           <button
             type="button"
-            onClick={nextFromAccountSection}
-            className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800"
+            disabled={waitingForTarget}
+            onClick={() => advanceOnboardingTour("account-token-usage")}
+            className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:opacity-50"
+          >
+            Next
+          </button>
+        </TourCard>
+      ) : null}
+
+      {step === "account-token-usage" ? (
+        <TourCard
+          body={
+            waitingForTarget
+              ? "Loading token usage…"
+              : "This is where you see your token usage."
+          }
+          style={cardStyle}
+        >
+          <button
+            type="button"
+            disabled={waitingForTarget}
+            onClick={() => advanceOnboardingTour("statistics-link")}
+            className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:opacity-50"
           >
             Next
           </button>
@@ -215,19 +266,37 @@ export function OnboardingTourOverlay({
 
       {step === "statistics-link" ? (
         <TourCard
-          body="This is where you can see all the statistics for your AI usage and prompting."
+          body={
+            waitingForTarget
+              ? "Loading…"
+              : "Press See full statistics to view all of your AI usage and prompting stats."
+          }
           style={cardStyle}
         >
           <div className="flex flex-col items-center gap-2">
             <ArrowUp />
-            <button
-              type="button"
-              onClick={nextFromStatistics}
-              className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800"
-            >
-              Next
-            </button>
+            <p className="text-center text-xs text-faint">Tap the highlighted button above.</p>
           </div>
+        </TourCard>
+      ) : null}
+
+      {step === "statistics-filters" ? (
+        <TourCard
+          body={
+            waitingForTarget
+              ? "Loading statistics…"
+              : "Filter and see full statistics."
+          }
+          style={cardStyle}
+        >
+          <button
+            type="button"
+            disabled={waitingForTarget}
+            onClick={() => advanceOnboardingTour("complete")}
+            className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:opacity-50"
+          >
+            Next
+          </button>
         </TourCard>
       ) : null}
     </>

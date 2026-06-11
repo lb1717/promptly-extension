@@ -2,7 +2,11 @@
 
 import { OnboardingTourOverlay } from "@/components/onboarding/OnboardingTourOverlay";
 import {
+  isOnboardingTourAccountPage,
+  isOnboardingTourStatisticsPage,
+  ONBOARDING_TOUR_ACCOUNT_STEPS,
   ONBOARDING_TOUR_EVENT,
+  ONBOARDING_TOUR_STATISTICS_STEPS,
   readOnboardingTour,
   type OnboardingTourState
 } from "@/lib/onboardingTour";
@@ -25,13 +29,23 @@ export function OnboardingTourHost() {
 
   if (!tour?.active) return null;
 
-  if (tour.step === "account-section" || tour.step === "statistics-link") {
-    if (!pathname.startsWith("/account")) return null;
-  }
-
-  if (tour.step === "account-nav" && pathname.startsWith("/account")) {
+  if (tour.step === "account-nav" && isOnboardingTourAccountPage(pathname)) {
     return null;
   }
 
-  return <OnboardingTourOverlay step={tour.step} setup={tour.setup} />;
+  if (
+    ONBOARDING_TOUR_ACCOUNT_STEPS.includes(tour.step) &&
+    !isOnboardingTourAccountPage(pathname)
+  ) {
+    return null;
+  }
+
+  if (
+    ONBOARDING_TOUR_STATISTICS_STEPS.includes(tour.step) &&
+    !isOnboardingTourStatisticsPage(pathname)
+  ) {
+    return null;
+  }
+
+  return <OnboardingTourOverlay step={tour.step} setup={tour.setup} pathname={pathname} />;
 }
