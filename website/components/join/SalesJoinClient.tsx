@@ -2,7 +2,6 @@
 
 import { getFirebaseAuth } from "@/lib/firebaseClient";
 import { syncPromptlyUserDoc } from "@/lib/promptlyUserSync";
-import { SITE } from "@/lib/constants";
 import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
@@ -25,29 +24,37 @@ import { EmailVerificationNotice } from "@/components/auth/EmailVerificationNoti
 import { listenForGoogleSignInReturn, signInWithGoogleInteractive } from "@/lib/firebaseGoogleAuth";
 import { canProceedWithEmailAccount } from "@/lib/emailVerification";
 import { useEmailVerificationStatus } from "@/lib/useEmailVerificationStatus";
-import type { IdeToolId } from "@/components/integrations/integrationOs";
-import { GetStartedCodingAgentInstall } from "@/components/onboarding/GetStartedCodingAgentInstall";
+import { GetStartedAiSelection } from "@/components/onboarding/GetStartedAiSelection";
+import { GetStartedAllAgentsInstall } from "@/components/onboarding/GetStartedAllAgentsInstall";
 import { OnboardingBrowserExtensionInstall } from "@/components/onboarding/OnboardingBrowserExtensionInstall";
 import { OnboardingDoneStep } from "@/components/onboarding/OnboardingDoneStep";
 import { canFinishOnboardingInstall } from "@/lib/onboardingInstallProgress";
+import {
+  DEFAULT_ONBOARDING_PRODUCT_SELECTION,
+  hasAnyCodingAgent,
+  hasAnyOnboardingProduct,
+  selectedCodingAgentIds,
+  type OnboardingProductSelection
+} from "@/lib/onboardingProducts";
 import { syncWebsiteSessionToExtension } from "@/lib/extensionBridge";
 import { planDetailsForTier } from "@/lib/plans";
 import { isSalesTeamJoinLink } from "@/lib/salesTeamOffers";
 import {
   detectAuthTransition,
   markAuthHydrated,
-  shouldAdvanceToPlanAfterAuth,
+  shouldAdvanceAfterAccountAuth,
   welcomeContinueStep
 } from "@/lib/onboardingStepFlow";
 
-const STEPS = ["Welcome", "Account", "Plan", "Install", "Done"] as const;
+const STEPS = ["Start", "Account", "Connect", "Install", "Plan", "Done"] as const;
 const ACCOUNT_STEP = 2;
-const PLAN_STEP = 3;
+const CHOOSE_AI_STEP = 3;
 const INSTALL_STEP = 4;
-const DONE_STEP = 5;
+const PLAN_STEP = 5;
+const DONE_STEP = 6;
 
 function advanceAfterAccountAuth(goToStep: (next: number) => void) {
-  goToStep(PLAN_STEP);
+  goToStep(CHOOSE_AI_STEP);
 }
 
 function salesWelcomeTitle(link: PublicSalesLink): string {
@@ -112,8 +119,10 @@ export function SalesJoinClient({ slug }: { slug: string }) {
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [extensionDetected, setExtensionDetected] = useState(false);
   const [browserStoreClicked, setBrowserStoreClicked] = useState(false);
-  const [setupAgents, setSetupAgents] = useState<IdeToolId[]>([]);
-  const [openingAi, setOpeningAi] = useState<string | null>(null);
+  const [productSelection, setProductSelection] = useState<OnboardingProductSelection>(
+    DEFAULT_ONBOARDING_PRODUCT_SELECTION
+  );
+  const [codingAgentsSetupCopied, setCodingAgentsSetupCopied] = useState(false);
 
   const [emailAuthMode, setEmailAuthMode] = useState<"signin" | "register">("register");
   const [emailAuthEmail, setEmailAuthEmail] = useState("");
@@ -133,6 +142,23 @@ export function SalesJoinClient({ slug }: { slug: string }) {
   const prevUserRef = useRef<User | null>(null);
 
   const planInfo = link ? planDetailsForTier(link.tier) : null;
+  const wantsWeb = productSelection.web;
+  const wantsCodingAgents = hasAnyCodingAgent(productSelection);
+
+  const canFinishInstall = useMemo(
+    () =>
+      canFinishOnboardingInstall({
+        wantsWeb,
+        wantsCodingAgents,
+        browserStoreClicked,
+        codingAgentsSetupCopied
+      }),
+    [wantsWeb, wantsCodingAgents, browserStoreClicked, codingAgentsSetupCopied]
+  );
+
+  const noteAgentCommandCopy = useCallback(() => {
+    setCodingAgentsSetupCopied(true);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -149,6 +175,8 @@ export function SalesJoinClient({ slug }: { slug: string }) {
           return;
         }
         setLink(data.link);
+        const name = String(data.link?.recipientName || "").trim();
+        if (name) setEmailAuthName(name);
       } catch (e) {
         if (!cancelled) {
           setLinkError(String(e instanceof Error ? e.message : e));
@@ -201,7 +229,7 @@ export function SalesJoinClient({ slug }: { slug: string }) {
         setNotice("Signed in with Google.");
         setBusy(false);
         const current = getFirebaseAuth().currentUser;
-        if (shouldAdvanceToPlanAfterAuth(current, step, ACCOUNT_STEP)) {
+        if (shouldAdvanceAfterAccountAuth(current, step, ACCOUNT_STEP)) {
           advanceAfterAccountAuth(goToStep);
         }
       },
@@ -218,9 +246,7 @@ export function SalesJoinClient({ slug }: { slug: string }) {
     const unsub = onAuthStateChanged(auth, (next) => {
       setUser(next);
       setAuthLoading(false);
-      if (next) {
-        setBusy(false);
-      }
+      if (next) setBusy(false);
     });
     return () => unsub();
   }, []);
@@ -252,13 +278,13 @@ export function SalesJoinClient({ slug }: { slug: string }) {
   useEffect(() => {
     if (!link || authLoading || linkLoading) return;
 
-    if (checkoutResult === "success" && step <= PLAN_STEP) {
-      goToStep(INSTALL_STEP);
+    if (checkoutResult === "success") {
+      goToStep(DONE_STEP);
       if (user) loadBilling(user);
       return;
     }
 
-    if (step >= DONE_STEP) return;
+    if (step === DONE_STEP) return;
 
     if (markAuthHydrated(authHydratedRef, prevUserRef, user)) return;
 
@@ -274,7 +300,7 @@ export function SalesJoinClient({ slug }: { slug: string }) {
       return;
     }
 
-    if (justSignedIn && shouldAdvanceToPlanAfterAuth(user, step, ACCOUNT_STEP)) {
+    if (justSignedIn && shouldAdvanceAfterAccountAuth(user, step, ACCOUNT_STEP)) {
       advanceAfterAccountAuth(goToStep);
     }
   }, [link, user, authLoading, linkLoading, checkoutResult, goToStep, step, loadBilling]);
@@ -323,7 +349,7 @@ export function SalesJoinClient({ slug }: { slug: string }) {
         resetVerificationStatus();
         await syncUserToFirestore(flow.user);
         setNotice("Signed in with Google.");
-        if (shouldAdvanceToPlanAfterAuth(flow.user, step, ACCOUNT_STEP)) {
+        if (shouldAdvanceAfterAccountAuth(flow.user, step, ACCOUNT_STEP)) {
           advanceAfterAccountAuth(goToStep);
         }
       } else if (flow.status === "cancelled") {
@@ -355,7 +381,7 @@ export function SalesJoinClient({ slug }: { slug: string }) {
       }
       notifyVerified(cred.user.email || email);
       await syncUserToFirestore(cred.user);
-      if (shouldAdvanceToPlanAfterAuth(cred.user, step, ACCOUNT_STEP)) {
+      if (shouldAdvanceAfterAccountAuth(cred.user, step, ACCOUNT_STEP)) {
         advanceAfterAccountAuth(goToStep);
       }
     } catch (e) {
@@ -405,20 +431,6 @@ export function SalesJoinClient({ slug }: { slug: string }) {
     }
   }
 
-  async function openAiTarget(key: string, url: string) {
-    if (!user) return;
-    setOpeningAi(key);
-    setError("");
-    try {
-      await syncWebsiteSessionToExtension(user);
-      window.open(url, "_blank", "noopener,noreferrer");
-    } catch (e) {
-      setError(String(e instanceof Error ? e.message : e));
-    } finally {
-      setOpeningAi(null);
-    }
-  }
-
   async function startCheckout() {
     if (!user || !link) return;
     setCheckoutBusy(true);
@@ -448,21 +460,6 @@ export function SalesJoinClient({ slug }: { slug: string }) {
     user && !checkoutStatus.loading && checkoutStatus.stripeConfigured && checkoutStatus.tierAvailable
   );
 
-  const canFinishInstall = useMemo(
-    () =>
-      canFinishOnboardingInstall({
-        wantsWeb: true,
-        wantsCodingAgents: true,
-        browserStoreClicked,
-        codingAgentsSetupCopied: setupAgents.length > 0
-      }) || browserStoreClicked || setupAgents.length > 0,
-    [browserStoreClicked, setupAgents]
-  );
-
-  const noteAgentCommandCopy = useCallback((tool: IdeToolId) => {
-    setSetupAgents((prev) => (prev.includes(tool) ? prev : [...prev, tool]));
-  }, []);
-
   const checkoutBlockedMessage = useMemo(() => {
     if (checkoutStatus.loading || !user) return "";
     if (!checkoutStatus.stripeConfigured) {
@@ -479,8 +476,9 @@ export function SalesJoinClient({ slug }: { slug: string }) {
     if (!link) return "";
     if (step === 1) return salesWelcomeTitle(link);
     if (step === 2) return "Create your account";
-    if (step === 3) return "Your plan";
+    if (step === 3) return "What AI platforms do you use?";
     if (step === 4) return "Install Promptly";
+    if (step === 5) return "Activate your plan";
     return "Setup complete";
   }, [link, step]);
 
@@ -501,28 +499,26 @@ export function SalesJoinClient({ slug }: { slug: string }) {
   }
 
   return (
-    <div className="mx-auto w-full max-w-lg px-4 py-10 pb-24">
+    <div className="mx-auto w-full max-w-xl px-4 py-10 pb-24">
       <div className="mb-8">
-        <div className="flex items-center justify-between gap-2">
-          {STEPS.map((label, index) => {
+        <div
+          className="flex gap-1.5"
+          role="progressbar"
+          aria-valuenow={step}
+          aria-valuemin={1}
+          aria-valuemax={STEPS.length}
+          aria-label="Setup progress"
+        >
+          {STEPS.map((_, index) => {
             const num = index + 1;
-            const active = step === num;
-            const done = step > num;
+            const reached = step >= num;
             return (
-              <div key={label} className="flex flex-1 flex-col items-center gap-1">
-                <div
-                  className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold ${
-                    active
-                      ? "bg-ink text-cream"
-                      : done
-                        ? "bg-emerald-600 text-white"
-                        : "border border-line bg-cream-dark text-faint"
-                  }`}
-                >
-                  {done ? "✓" : num}
-                </div>
-                <span className={`text-[10px] ${active ? "font-semibold text-ink" : "text-faint"}`}>{label}</span>
-              </div>
+              <div
+                key={num}
+                className={`h-1.5 flex-1 rounded-sm transition-colors duration-300 ${
+                  reached ? "bg-ink" : "bg-line"
+                }`}
+              />
             );
           })}
         </div>
@@ -544,14 +540,19 @@ export function SalesJoinClient({ slug }: { slug: string }) {
 
         {step === 1 ? (
           <div className="mt-6 space-y-4">
-            <p className="text-sm leading-relaxed text-muted">
-              {isSalesTeamJoinLink(link)
-                ? "Get started with Promptly — create your account, choose your plan, and install what you need in a few quick steps."
-                : `Thanks for using Promptly${link.recipientName.trim() ? `, ${link.recipientName.trim()}` : ""}. We've set up a quick onboarding flow for you: account, plan, and optional installs for your browser or coding apps.`}
-            </p>
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50/80 p-4">
+              <p className="text-sm font-semibold text-emerald-900">{link.offerTitle}</p>
+              <p className="mt-1 text-sm leading-relaxed text-emerald-800">{link.offerDescription}</p>
+            </div>
+            {isSalesTeamJoinLink(link) ? (
+              <p className="text-sm text-muted">
+                Get started with Promptly — create your account, install what you need, and activate your plan in a few
+                quick steps.
+              </p>
+            ) : null}
             <button
               type="button"
-              onClick={() => goToStep(welcomeContinueStep(user, ACCOUNT_STEP, PLAN_STEP))}
+              onClick={() => goToStep(welcomeContinueStep(user, ACCOUNT_STEP, CHOOSE_AI_STEP))}
               className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-cream hover:bg-neutral-800"
             >
               Get started
@@ -595,6 +596,16 @@ export function SalesJoinClient({ slug }: { slug: string }) {
                 </button>
               </div>
               <div className="mt-3 space-y-2">
+                {emailAuthMode === "register" ? (
+                  <input
+                    type="text"
+                    autoComplete="name"
+                    placeholder="Name"
+                    value={emailAuthName}
+                    onChange={(e) => setEmailAuthName(e.target.value)}
+                    className="w-full rounded-lg border border-line bg-cream px-3 py-2 text-sm text-ink outline-none focus:border-ink/30"
+                  />
+                ) : null}
                 <input
                   type="email"
                   autoComplete="email"
@@ -603,16 +614,6 @@ export function SalesJoinClient({ slug }: { slug: string }) {
                   onChange={(e) => setEmailAuthEmail(e.target.value)}
                   className="w-full rounded-lg border border-line bg-cream px-3 py-2 text-sm text-ink outline-none focus:border-ink/30"
                 />
-                {emailAuthMode === "register" ? (
-                  <input
-                    type="text"
-                    autoComplete="name"
-                    placeholder="Full name"
-                    value={emailAuthName}
-                    onChange={(e) => setEmailAuthName(e.target.value)}
-                    className="w-full rounded-lg border border-line bg-cream px-3 py-2 text-sm text-ink outline-none focus:border-ink/30"
-                  />
-                ) : null}
                 <input
                   type="password"
                   autoComplete={emailAuthMode === "signin" ? "current-password" : "new-password"}
@@ -636,7 +637,11 @@ export function SalesJoinClient({ slug }: { slug: string }) {
                 type="button"
                 onClick={emailAuthMode === "signin" ? handleEmailPasswordSignIn : handleEmailRegister}
                 disabled={busy}
-                className="mt-3 inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:opacity-60"
+                className={`mt-3 inline-flex w-full items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold disabled:opacity-60 ${
+                  emailAuthMode === "register"
+                    ? "border border-ink bg-cream text-ink hover:bg-cream-dark"
+                    : "bg-ink text-cream hover:bg-neutral-800"
+                }`}
               >
                 {busy ? "Working…" : emailAuthMode === "signin" ? "Sign in & continue" : "Create account"}
               </button>
@@ -648,13 +653,72 @@ export function SalesJoinClient({ slug }: { slug: string }) {
           </div>
         ) : null}
 
-        {step === 3 && planInfo ? (
-          <div className="mt-6 space-y-4">
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50/80 p-4">
-              <p className="text-sm font-semibold text-emerald-900">{link.offerTitle}</p>
-              <p className="mt-1 text-sm text-emerald-800">{link.offerDescription}</p>
-            </div>
+        {step === 3 ? (
+          <>
+            <GetStartedAiSelection value={productSelection} onChange={setProductSelection} />
+            <button
+              type="button"
+              onClick={() => {
+                setBrowserStoreClicked(false);
+                setCodingAgentsSetupCopied(false);
+                goToStep(INSTALL_STEP);
+              }}
+              disabled={!hasAnyOnboardingProduct(productSelection)}
+              className="mt-6 inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Continue
+            </button>
+            {!hasAnyOnboardingProduct(productSelection) ? (
+              <p className="mt-2 text-center text-xs text-faint">Select at least one option to continue.</p>
+            ) : null}
+            <button type="button" onClick={() => goToStep(ACCOUNT_STEP)} className="mt-3 text-xs text-faint hover:text-ink">
+              ← Back
+            </button>
+          </>
+        ) : null}
 
+        {step === 4 ? (
+          <div className="mt-6 space-y-4">
+            {wantsWeb ? (
+              <OnboardingBrowserExtensionInstall
+                stepNumber={1}
+                extensionDetected={extensionDetected}
+                onStoreClick={() => setBrowserStoreClicked(true)}
+              />
+            ) : null}
+
+            {wantsCodingAgents ? (
+              <GetStartedAllAgentsInstall
+                stepNumber={wantsWeb ? 2 : 1}
+                onCommandCopy={noteAgentCommandCopy}
+              />
+            ) : null}
+
+            {!canFinishInstall ? (
+              <p className="text-center text-xs text-faint">
+                {wantsWeb && wantsCodingAgents
+                  ? "Add the browser extension and copy the coding-agents command to continue."
+                  : wantsWeb
+                    ? "Add to Chrome or Edge to continue."
+                    : "Copy the coding-agents install command to continue."}
+              </p>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => goToStep(PLAN_STEP)}
+              disabled={!canFinishInstall}
+              className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Continue to plan
+            </button>
+            <button type="button" onClick={() => goToStep(CHOOSE_AI_STEP)} className="text-xs text-faint hover:text-ink">
+              ← Back
+            </button>
+          </div>
+        ) : null}
+
+        {step === 5 && planInfo ? (
+          <div className="mt-6 space-y-4">
             <article className="rounded-xl border border-line bg-cream-dark p-4">
               <h3 className="text-lg font-semibold text-ink">{planInfo.name}</h3>
               <p className="mt-1 text-sm font-semibold text-muted">{planInfo.priceDisplay}</p>
@@ -675,10 +739,10 @@ export function SalesJoinClient({ slug }: { slug: string }) {
             {paidTierActive(billing, link.tier) ? (
               <button
                 type="button"
-                onClick={() => goToStep(INSTALL_STEP)}
+                onClick={() => goToStep(DONE_STEP)}
                 className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-cream hover:bg-neutral-800"
               >
-                Continue to install
+                Finish setup
               </button>
             ) : (
               <button
@@ -699,56 +763,19 @@ export function SalesJoinClient({ slug }: { slug: string }) {
               <p className="text-xs text-faint">{checkoutBlockedMessage}</p>
             ) : null}
 
-            <button type="button" onClick={() => goToStep(ACCOUNT_STEP)} className="text-xs text-faint hover:text-ink">
+            <button type="button" onClick={() => goToStep(INSTALL_STEP)} className="text-xs text-faint hover:text-ink">
               ← Back
             </button>
           </div>
         ) : null}
 
-        {step === 4 ? (
-          <div className="mt-6 space-y-4">
-            {checkoutResult === "success" ? (
-              <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-                Payment successful — pick one option below to get started.
-              </p>
-            ) : null}
-            <p className="text-sm text-muted">
-              Install Promptly for your browser and/or for desktop apps and coding apps. You can always install
-              other options in the future so feel free to only begin with one.
-            </p>
-
-            <OnboardingBrowserExtensionInstall
-              extensionDetected={extensionDetected}
-              onStoreClick={() => setBrowserStoreClicked(true)}
-            />
-
-            <GetStartedCodingAgentInstall onAgentCommandCopy={noteAgentCommandCopy} />
-
-            {!canFinishInstall ? (
-              <p className="text-center text-xs text-faint">
-                Add to Chrome or Edge, or copy an install command above, to continue.
-              </p>
-            ) : null}
-            <button
-              type="button"
-              onClick={() => goToStep(DONE_STEP)}
-              disabled={!canFinishInstall}
-              className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Finish setup
-            </button>
-            <button type="button" onClick={() => goToStep(PLAN_STEP)} className="text-xs text-faint hover:text-ink">
-              ← Back
-            </button>
-          </div>
-        ) : null}
-
-        {step === 5 && link ? (
+        {step === 6 ? (
           <OnboardingDoneStep
-            browserStoreClicked={browserStoreClicked}
-            setupAgents={setupAgents}
-            openingAi={openingAi}
-            onOpenAi={openAiTarget}
+            tourSetup={{
+              web: productSelection.web,
+              codingAgents: hasAnyCodingAgent(productSelection),
+              setupAgents: selectedCodingAgentIds(productSelection)
+            }}
             completionDetail={
               browserStoreClicked
                 ? `You're all set${
@@ -758,7 +785,6 @@ export function SalesJoinClient({ slug }: { slug: string }) {
                     isSalesTeamJoinLink(link) || !link.recipientName.trim() ? "." : `, ${link.recipientName.trim()}.`
                   }`
             }
-            disabled={!user}
           />
         ) : null}
       </div>

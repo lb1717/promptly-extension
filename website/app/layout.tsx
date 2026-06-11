@@ -3,6 +3,7 @@ import type { Viewport } from "next";
 import { Noto_Sans_Mono } from "next/font/google";
 import { ReactNode } from "react";
 import { SiteJsonLd } from "@/components/JsonLd";
+import { OnboardingTourHost } from "@/components/onboarding/OnboardingTourHost";
 import { rootMetadata } from "@/lib/seo";
 
 const notoSansMono = Noto_Sans_Mono({
@@ -30,6 +31,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <body className="min-h-screen overflow-x-hidden bg-page font-mono text-ink antialiased">
         <SiteJsonLd />
         {children}
+        <OnboardingTourHost />
       </body>
     </html>
   );

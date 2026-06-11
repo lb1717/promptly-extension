@@ -38,6 +38,7 @@ export function Navbar() {
         <div className="flex justify-end">
           <Link
             href="/account"
+            data-onboarding-tour="account-nav"
             className="rounded-lg border border-line px-2.5 py-1 text-xs text-ink hover:bg-cream-dark sm:px-3 sm:py-1.5 sm:text-sm"
           >
             Account

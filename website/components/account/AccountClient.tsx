@@ -819,7 +819,10 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
 
       {user ? (
         <div className="space-y-6">
-          <section className="rounded-2xl border border-line bg-cream p-4 backdrop-blur-md sm:p-5">
+          <section
+            data-onboarding-tour="account-section"
+            className="rounded-2xl border border-line bg-cream p-4 backdrop-blur-md sm:p-5"
+          >
             <h2 className="text-xl font-semibold tracking-tight text-ink sm:text-2xl">Account</h2>
 
             <div className="mt-4 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] grid-rows-2 gap-x-4 gap-y-3 sm:gap-x-8 sm:gap-y-3">
@@ -934,6 +937,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                   </Link>
                   <Link
                     href="/account/statistics"
+                    data-onboarding-tour="statistics-link"
                     className="inline-flex items-center justify-center rounded-lg border border-line bg-cream-dark px-3 py-2 text-xs font-semibold text-ink hover:bg-cream-dark"
                   >
                     See full statistics

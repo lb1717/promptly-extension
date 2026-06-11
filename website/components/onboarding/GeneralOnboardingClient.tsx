@@ -23,7 +23,6 @@ import {
 } from "@/lib/firebaseAuthAccountHints";
 import { listenForGoogleSignInReturn, signInWithGoogleInteractive } from "@/lib/firebaseGoogleAuth";
 import { EmailVerificationNotice } from "@/components/auth/EmailVerificationNotice";
-import type { IdeToolId } from "@/components/integrations/integrationOs";
 import { GetStartedAiSelection } from "@/components/onboarding/GetStartedAiSelection";
 import { GetStartedAllAgentsInstall } from "@/components/onboarding/GetStartedAllAgentsInstall";
 import { OnboardingBrowserExtensionInstall } from "@/components/onboarding/OnboardingBrowserExtensionInstall";
@@ -101,8 +100,6 @@ export function GeneralOnboardingClient() {
     DEFAULT_ONBOARDING_PRODUCT_SELECTION
   );
   const [codingAgentsSetupCopied, setCodingAgentsSetupCopied] = useState(false);
-  const [setupAgents, setSetupAgents] = useState<IdeToolId[]>([]);
-  const [openingAi, setOpeningAi] = useState<string | null>(null);
 
   const [emailAuthMode, setEmailAuthMode] = useState<"signin" | "register">("register");
   const [emailAuthEmail, setEmailAuthEmail] = useState("");
@@ -139,8 +136,7 @@ export function GeneralOnboardingClient() {
 
   const noteAgentCommandCopy = useCallback(() => {
     setCodingAgentsSetupCopied(true);
-    setSetupAgents(selectedCodingAgentIds(productSelection));
-  }, [productSelection]);
+  }, []);
 
   const goToStep = useCallback((next: number) => {
     setStep(next);
@@ -401,20 +397,6 @@ export function GeneralOnboardingClient() {
     goToStep(DONE_STEP);
   }
 
-  async function openAiTarget(key: string, url: string) {
-    if (!user) return;
-    setOpeningAi(key);
-    setError("");
-    try {
-      await syncWebsiteSessionToExtension(user);
-      window.open(url, "_blank", "noopener,noreferrer");
-    } catch (e) {
-      setError(String(e instanceof Error ? e.message : e));
-    } finally {
-      setOpeningAi(null);
-    }
-  }
-
   const stepTitle = useMemo(() => {
     if (step === 1) return "Get Started in 1 minute";
     if (step === 2) return "Create your account";
@@ -574,7 +556,6 @@ export function GeneralOnboardingClient() {
               onClick={() => {
                 setBrowserStoreClicked(false);
                 setCodingAgentsSetupCopied(false);
-                setSetupAgents([]);
                 goToStep(INSTALL_STEP);
               }}
               disabled={!hasAnyOnboardingProduct(productSelection)}
@@ -593,10 +574,6 @@ export function GeneralOnboardingClient() {
 
         {step === 4 ? (
           <div className="mt-6 space-y-4">
-            <p className="text-sm text-muted">
-              Install only what you picked. Finish each section below before continuing to choose your plan.
-            </p>
-
             {wantsWeb ? (
               <OnboardingBrowserExtensionInstall
                 stepNumber={1}
@@ -694,16 +671,16 @@ export function GeneralOnboardingClient() {
 
         {step === 6 ? (
           <OnboardingDoneStep
-            browserStoreClicked={browserStoreClicked}
-            setupAgents={setupAgents}
-            openingAi={openingAi}
-            onOpenAi={openAiTarget}
+            tourSetup={{
+              web: productSelection.web,
+              codingAgents: hasAnyCodingAgent(productSelection),
+              setupAgents: selectedCodingAgentIds(productSelection)
+            }}
             completionDetail={
               browserStoreClicked
                 ? "Your account is ready. Try Promptly on your favourite AI chat."
                 : "Your account is ready."
             }
-            disabled={!user}
           />
         ) : null}
       </div>
