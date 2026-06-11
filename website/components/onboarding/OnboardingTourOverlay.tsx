@@ -32,16 +32,42 @@ function measureTarget(step: OnboardingTourStep): Rect | null {
 }
 
 function Spotlight({ rect }: { rect: Rect }) {
-  const pad = 6;
+  const pad = 8;
   return (
     <div
-      className="pointer-events-none fixed z-[201] rounded-lg ring-2 ring-ink"
+      className="pointer-events-none fixed z-[201] rounded-xl ring-2 ring-ink/80"
       style={{
         top: rect.top - pad,
         left: rect.left - pad,
         width: rect.width + pad * 2,
         height: rect.height + pad * 2,
-        boxShadow: "0 0 0 9999px rgba(15, 15, 15, 0.52)"
+        boxShadow: "0 0 0 9999px rgba(15, 15, 15, 0.55)"
+      }}
+    />
+  );
+}
+
+function TourClickTarget({
+  rect,
+  label,
+  onClick
+}: {
+  rect: Rect;
+  label: string;
+  onClick: () => void;
+}) {
+  const pad = 8;
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onClick={onClick}
+      className="fixed z-[203] rounded-xl bg-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-ink"
+      style={{
+        top: rect.top - pad,
+        left: rect.left - pad,
+        width: rect.width + pad * 2,
+        height: rect.height + pad * 2
       }}
     />
   );
@@ -146,9 +172,14 @@ export function OnboardingTourOverlay({
     const onNavigate = () => {
       advanceOnboardingTour("statistics-filters");
     };
-    el.addEventListener("click", onNavigate);
-    return () => el.removeEventListener("click", onNavigate);
+    el.addEventListener("click", onNavigate, true);
+    return () => el.removeEventListener("click", onNavigate, true);
   }, [step, targetRect, pathname]);
+
+  function openStatistics() {
+    advanceOnboardingTour("statistics-filters");
+    router.push("/account/statistics");
+  }
 
   function goToAccount() {
     advanceOnboardingTour("account-section");
@@ -205,9 +236,15 @@ export function OnboardingTourOverlay({
 
   return (
     <>
-      <div className="fixed inset-0 z-[200] bg-neutral-900/45" aria-hidden />
+      {waitingForTarget ? (
+        <div className="fixed inset-0 z-[200] bg-neutral-900/45" aria-hidden />
+      ) : null}
 
       {targetRect ? <Spotlight rect={targetRect} /> : null}
+
+      {step === "statistics-link" && targetRect ? (
+        <TourClickTarget rect={targetRect} label="See full statistics" onClick={openStatistics} />
+      ) : null}
 
       {step === "account-nav" ? (
         <TourCard body="Go to my account page" style={cardStyle}>

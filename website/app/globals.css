@@ -53,4 +53,5 @@ body {
 .onboarding-tour-spotlight-target {
   position: relative;
   z-index: 203 !important;
+  pointer-events: auto !important;
 }
