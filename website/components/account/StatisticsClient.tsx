@@ -194,6 +194,10 @@ type IdeStatsPayload = {
     avg_draft_ms: number | null;
     draft_samples: number;
   }>;
+  model_prompt_timeline?: Array<{ bucket: string; models: Record<string, number> }>;
+  model_screen_time_timeline?: Array<{ bucket: string; models: Record<string, number> }>;
+  model_engagement_by_model?: ModelEngagementByModelRow[];
+  model_series_labels?: Record<string, string | null>;
   draft_timing_by_tool: Record<
     IdeToolKey,
     { avg_draft_ms: number | null; samples: number }
@@ -464,6 +468,10 @@ type ExtendedStatsPayload = {
     word_samples: number;
   }>;
   avg_words_by_service?: Record<PromptlySvc, { avg_words: number | null; samples: number }>;
+  model_prompt_timeline?: Array<{ bucket: string; models: Record<string, number> }>;
+  model_screen_time_timeline?: Array<{ bucket: string; models: Record<string, number> }>;
+  model_engagement_by_model?: ModelEngagementByModelRow[];
+  model_series_labels?: Record<string, string | null>;
   host_passive_listener: HostPassiveLite;
   quota_exceeded?: boolean;
   footnotes: string[];
@@ -988,6 +996,62 @@ const DEFAULT_PROMPT_VOLUME_AI_FILTERS: PromptVolumeAiFilterState = {
 
 type StatsGroupMode = "service" | "model";
 
+type ModelEngagementByModelRow = {
+  bucket: string;
+  label: string | null;
+  drafting_minutes: number;
+  waiting_minutes: number;
+  reading_idle_minutes: number;
+  total_minutes: number;
+};
+
+type ModelChartSeries = {
+  bucket: string;
+  label: string;
+  color: string;
+  dataKey: string;
+};
+
+const MODEL_SUBPALETTE = [
+  "#0e9068",
+  "#22c997",
+  "#4285f4",
+  "#00D8FF",
+  "#ab68ff",
+  "#b86b4a",
+  "#e8956f",
+  "#f59e0b",
+  "#ec4899",
+  "#14b8a6",
+  "#6366f1",
+  "#84cc16",
+  "#0ea5e9",
+  "#a855f7",
+  "#ef4444"
+];
+
+function modelSeriesDataKey(bucket: string): string {
+  return `model_${bucket.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+}
+
+function buildModelTimelineChartRows(
+  timeline: Array<{ bucket: string; models: Record<string, number> }> | undefined,
+  series: ModelChartSeries[],
+  granularity: "day" | "week"
+): Array<Record<string, string | number>> {
+  if (!timeline?.length || !series.length) return [];
+  return timeline.map((row) => {
+    const out: Record<string, string | number> = {
+      bucket: row.bucket,
+      label: granularity === "week" ? `wk ${formatShortDay(row.bucket)}` : formatShortDay(row.bucket)
+    };
+    for (const item of series) {
+      out[item.dataKey] = row.models[item.bucket] ?? 0;
+    }
+    return out;
+  });
+}
+
 const IDE_SERVICE_KEYS = new Set<PromptVolumeAiKey>(["claude_code", "cursor", "codex"]);
 
 function isIdeServiceKey(key: PromptVolumeAiKey): key is IdeToolKey {
@@ -1000,8 +1064,7 @@ function webServiceFromFilterKey(key: PromptVolumeAiKey): PromptlySvc {
 
 function buildStatsScopeSearchParams(
   mode: StatsGroupMode,
-  modelService: PromptVolumeAiKey,
-  modelBuckets: Set<string>
+  modelService: PromptVolumeAiKey
 ): URLSearchParams {
   const params = new URLSearchParams();
   if (mode !== "model") return params;
@@ -1009,9 +1072,6 @@ function buildStatsScopeSearchParams(
     params.set("tool", modelService);
   } else {
     params.set("service", webServiceFromFilterKey(modelService));
-  }
-  if (modelBuckets.size) {
-    params.set("model_buckets", Array.from(modelBuckets).join(","));
   }
   return params;
 }
@@ -1795,8 +1855,8 @@ export function StatisticsClient() {
   }, []);
 
   const statsScopeParams = useMemo(
-    () => buildStatsScopeSearchParams(statsGroupMode, selectedModelService, selectedModelBuckets),
-    [statsGroupMode, selectedModelService, selectedModelBuckets]
+    () => buildStatsScopeSearchParams(statsGroupMode, selectedModelService),
+    [statsGroupMode, selectedModelService]
   );
 
   const effectivePromptVolumeAiFilters = useMemo(
@@ -1825,6 +1885,109 @@ export function StatisticsClient() {
           (a.label || a.bucket).localeCompare(b.label || b.bucket)
       );
   }, [selectedModelService, modelCatalogWeb, modelCatalogIde]);
+
+  const activeModelChartSeries = useMemo((): ModelChartSeries[] => {
+    if (statsGroupMode !== "model") return [];
+    return modelOptionsForSelectedService
+      .filter((row) => selectedModelBuckets.has(row.bucket))
+      .map((row, index) => {
+        const label = isIdeServiceKey(selectedModelService)
+          ? formatIdeModelLabel(row as IdeStatsPayload["model_buckets"][number])
+          : ("label" in row && row.label?.trim()) || row.bucket;
+        return {
+          bucket: row.bucket,
+          label,
+          color: MODEL_SUBPALETTE[index % MODEL_SUBPALETTE.length] ?? COLOR_UNKNOWN,
+          dataKey: modelSeriesDataKey(row.bucket)
+        };
+      });
+  }, [statsGroupMode, modelOptionsForSelectedService, selectedModelBuckets, selectedModelService]);
+
+  const statsGranularity = displayStats?.granularity ?? displayIdeStats?.granularity ?? granularity;
+
+  const modelPromptVolumeChartRows = useMemo(() => {
+    if (statsGroupMode !== "model") return [];
+    const timeline = isIdeServiceKey(selectedModelService)
+      ? displayIdeStats?.model_prompt_timeline
+      : displayStats?.model_prompt_timeline;
+    return buildModelTimelineChartRows(timeline, activeModelChartSeries, statsGranularity);
+  }, [
+    statsGroupMode,
+    selectedModelService,
+    displayIdeStats,
+    displayStats,
+    activeModelChartSeries,
+    statsGranularity
+  ]);
+
+  const modelScreenTimeOverTimeRows = useMemo(() => {
+    if (statsGroupMode !== "model") return [];
+    const timeline = isIdeServiceKey(selectedModelService)
+      ? displayIdeStats?.model_screen_time_timeline
+      : displayStats?.model_screen_time_timeline;
+    return buildModelTimelineChartRows(timeline, activeModelChartSeries, statsGranularity);
+  }, [
+    statsGroupMode,
+    selectedModelService,
+    displayIdeStats,
+    displayStats,
+    activeModelChartSeries,
+    statsGranularity
+  ]);
+
+  const modelEngagementByModel = useMemo((): ModelEngagementByModelRow[] => {
+    if (statsGroupMode !== "model") return [];
+    return isIdeServiceKey(selectedModelService)
+      ? displayIdeStats?.model_engagement_by_model ?? []
+      : displayStats?.model_engagement_by_model ?? [];
+  }, [statsGroupMode, selectedModelService, displayIdeStats, displayStats]);
+
+  const screenTimeByModelInstantRows = useMemo(() => {
+    if (statsGroupMode !== "model") return [];
+    return activeModelChartSeries
+      .map((series) => {
+        const row = modelEngagementByModel.find((entry) => entry.bucket === series.bucket);
+        return {
+          model: series.label,
+          key: series.bucket,
+          minutes: row?.total_minutes ?? 0,
+          fill: series.color
+        };
+      })
+      .filter((row) => row.minutes > 0)
+      .sort((a, b) => b.minutes - a.minutes || a.model.localeCompare(b.model));
+  }, [statsGroupMode, activeModelChartSeries, modelEngagementByModel]);
+
+  const modelScreenTimeOverTimeHasData = useMemo(
+    () =>
+      modelScreenTimeOverTimeRows.some((row) =>
+        activeModelChartSeries.some((series) => Number(row[series.dataKey] ?? 0) > 0)
+      ),
+    [modelScreenTimeOverTimeRows, activeModelChartSeries]
+  );
+
+  const engagementByModelPies = useMemo(() => {
+    if (statsGroupMode !== "model") return [];
+    return activeModelChartSeries
+      .map((series) => {
+        const row = modelEngagementByModel.find((entry) => entry.bucket === series.bucket);
+        if (!row || row.total_minutes <= 0) return null;
+        const slices: EngagementSlice[] = [
+          { name: "Drafting prompt", value: row.drafting_minutes, fill: COLOR_DRAFTING },
+          { name: "Waiting for AI", value: row.waiting_minutes, fill: COLOR_NATIVE_WEB },
+          { name: "Reading output", value: row.reading_idle_minutes, fill: COLOR_READING_IDLE }
+        ].filter((slice) => slice.value > 0);
+        return {
+          key: series.bucket,
+          label: series.label,
+          accent: series.color,
+          totalMinutes: row.total_minutes,
+          slices,
+          hasData: slices.length > 0
+        };
+      })
+      .filter((pie): pie is NonNullable<typeof pie> => pie !== null && pie.hasData);
+  }, [statsGroupMode, activeModelChartSeries, modelEngagementByModel]);
 
   const toggleAgentEmail = useCallback(
     (tool: IdeToolKey, email: string) => {
@@ -2398,41 +2561,34 @@ export function StatisticsClient() {
 
   const engagementInstantTotalMinutes = useMemo(() => {
     if (engagementView !== "instant") return null;
-    const total = engagementByServicePies.reduce((sum, pie) => sum + pie.totalMinutes, 0);
+    const pies = statsGroupMode === "model" ? engagementByModelPies : engagementByServicePies;
+    const total = pies.reduce((sum, pie) => sum + pie.totalMinutes, 0);
     return total > 0 ? Math.round(total * 10) / 10 : null;
-  }, [engagementView, engagementByServicePies]);
+  }, [engagementView, statsGroupMode, engagementByModelPies, engagementByServicePies]);
 
   const promptLengthChartRows = useMemo(() => {
     const rows: Array<{ label: string; avg_words: number; fill: string; key: string }> = [];
 
     if (statsGroupMode === "model") {
-      const filterMeta = PROMPT_VOLUME_AI_FILTERS.find((f) => f.key === selectedModelService);
-      for (const bucket of selectedModelBuckets) {
-        if (isIdeServiceKey(selectedModelService)) {
-          const row = modelCatalogIde.find(
-            (entry) => entry.tool === selectedModelService && entry.bucket === bucket
-          );
-          if (row?.avg_words && row.avg_words > 0) {
-            rows.push({
-              label: formatIdeModelLabel(row),
-              avg_words: row.avg_words,
-              fill: filterMeta?.color ?? COLOR_UNKNOWN,
-              key: `${row.tool}:${row.bucket}`
-            });
-          }
-        } else {
-          const svc = webServiceFromFilterKey(selectedModelService);
-          const row = modelCatalogWeb.find(
-            (entry) => entry.service === svc && entry.bucket === bucket
-          );
-          if (row?.avg_words && row.avg_words > 0) {
-            rows.push({
-              label: row.label?.trim() || row.bucket,
-              avg_words: row.avg_words,
-              fill: filterMeta?.color ?? COLOR_UNKNOWN,
-              key: `${row.service}:${row.bucket}`
-            });
-          }
+      for (const series of activeModelChartSeries) {
+        const row = isIdeServiceKey(selectedModelService)
+          ? modelCatalogIde.find(
+              (entry) => entry.tool === selectedModelService && entry.bucket === series.bucket
+            )
+          : modelCatalogWeb.find(
+              (entry) =>
+                entry.service === webServiceFromFilterKey(selectedModelService) &&
+                entry.bucket === series.bucket
+            );
+        const avgWords =
+          row && "avg_words" in row && row.avg_words && row.avg_words > 0 ? row.avg_words : null;
+        if (avgWords) {
+          rows.push({
+            label: series.label,
+            avg_words: avgWords,
+            fill: series.color,
+            key: series.bucket
+          });
         }
       }
     } else {
@@ -2470,6 +2626,7 @@ export function StatisticsClient() {
     selectedModelBuckets,
     modelCatalogIde,
     modelCatalogWeb,
+    activeModelChartSeries,
     effectivePromptVolumeAiFilters,
     displayIdeStats,
     displayStats
@@ -2495,9 +2652,10 @@ export function StatisticsClient() {
   const engagementSpendHasData = useMemo(
     () =>
       engagementByServicePies.length > 0 ||
+      engagementByModelPies.length > 0 ||
       engagementOverTimeHasData ||
       (displayStats?.engagement_totals?.segment_count ?? 0) > 0,
-    [engagementByServicePies, engagementOverTimeHasData, displayStats]
+    [engagementByServicePies, engagementByModelPies, engagementOverTimeHasData, displayStats]
   );
 
   const screenTimeHasData = useMemo(
@@ -2871,6 +3029,32 @@ export function StatisticsClient() {
             </div>
             <div className="h-72 w-full sm:h-80">
               <ResponsiveContainer width="100%" height="100%">
+                {statsGroupMode === "model" && activeModelChartSeries.length ? (
+                  <BarChart data={modelPromptVolumeChartRows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                    <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
+                    <YAxis stroke="#8A8A8A" allowDecimals={false} width={32} tick={CHART_Y_TICK} />
+                    <Tooltip
+                      cursor={{ fill: "rgba(255,255,255,0.04)" }}
+                      contentStyle={CHART_TOOLTIP_STYLE}
+                      formatter={(value: number, name: string) => [value, name]}
+                    />
+                    {activeModelChartSeries.map((series, index, visible) => (
+                      <Bar
+                        key={series.dataKey}
+                        dataKey={series.dataKey}
+                        name={series.label}
+                        stackId="model_prompts"
+                        fill={series.color}
+                        radius={
+                          index === visible.length - 1
+                            ? ([2, 2, 0, 0] as [number, number, number, number])
+                            : undefined
+                        }
+                      />
+                    ))}
+                  </BarChart>
+                ) : (
                 <ComposedChart data={promptVolumeChartRows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
                   <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
@@ -2928,26 +3112,153 @@ export function StatisticsClient() {
                     />
                   ) : null}
                 </ComposedChart>
+                )}
               </ResponsiveContainer>
             </div>
+            {statsGroupMode === "model" && activeModelChartSeries.length ? (
+              <div className="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 border-t border-line pt-3">
+                {activeModelChartSeries.map((series) => (
+                  <span key={series.bucket} className="inline-flex items-center gap-2 text-xs text-muted">
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: series.color }}
+                      aria-hidden
+                    />
+                    {series.label}
+                  </span>
+                ))}
+              </div>
+            ) : null}
           </section>
 
           {screenTimeHasData ? (
             <>
               <section className="mb-8 w-full rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                  <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">Screen time by service</h2>
+                  <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">
+                    {statsGroupMode === "model" ? "Screen time by model" : "Screen time by service"}
+                  </h2>
                   <div className="flex flex-wrap items-center gap-2">
                     <StatsChartHorizonToggle value={screenTimeView} onChange={setScreenTimeView} />
                     <p className="text-xs font-medium tabular-nums text-muted">Last {days} days</p>
                   </div>
                 </div>
                 <p className="mb-3 text-[11px] text-faint">
-                  {screenTimeView === "instant"
-                    ? "Total foreground minutes in the selected range — filtered by Show above."
-                    : "Stacked minutes by service or agent over time — filtered by Show above."}
+                  {statsGroupMode === "model"
+                    ? screenTimeView === "instant"
+                      ? "Total foreground minutes in the selected range — stacked by submodel."
+                      : "Stacked minutes by submodel over time — filtered by Show above."
+                    : screenTimeView === "instant"
+                      ? "Total foreground minutes in the selected range — filtered by Show above."
+                      : "Stacked minutes by service or agent over time — filtered by Show above."}
                 </p>
-                {screenTimeByServiceRows.length ? (
+                {statsGroupMode === "model" ? (
+                  activeModelChartSeries.length ? (
+                    screenTimeView === "over_time" ? (
+                      modelScreenTimeOverTimeHasData ? (
+                        <>
+                          <div className="h-72 w-full sm:h-80">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <BarChart
+                                data={modelScreenTimeOverTimeRows}
+                                margin={{ top: 4, right: 8, bottom: 0, left: 0 }}
+                              >
+                                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                                <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
+                                <YAxis stroke="#8A8A8A" allowDecimals={false} width={32} tick={CHART_Y_TICK} unit=" min" />
+                                <Tooltip
+                                  cursor={{ fill: "rgba(255,255,255,0.04)" }}
+                                  contentStyle={CHART_TOOLTIP_STYLE}
+                                  formatter={(value: number, name: string) => [`${value} min`, name]}
+                                />
+                                {activeModelChartSeries.map((series, index, visible) => (
+                                  <Bar
+                                    key={series.dataKey}
+                                    dataKey={series.dataKey}
+                                    name={series.label}
+                                    stackId="model_screen_time"
+                                    fill={series.color}
+                                    radius={
+                                      index === visible.length - 1
+                                        ? ([2, 2, 0, 0] as [number, number, number, number])
+                                        : undefined
+                                    }
+                                  />
+                                ))}
+                              </BarChart>
+                            </ResponsiveContainer>
+                          </div>
+                          <div className="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 border-t border-line pt-3">
+                            {activeModelChartSeries.map((series) => (
+                              <span key={series.bucket} className="inline-flex items-center gap-2 text-xs text-muted">
+                                <span
+                                  className="h-2.5 w-2.5 shrink-0 rounded-full"
+                                  style={{ backgroundColor: series.color }}
+                                  aria-hidden
+                                />
+                                {series.label}
+                              </span>
+                            ))}
+                          </div>
+                        </>
+                      ) : (
+                        <p className="text-sm text-muted">No screen time over time for the selected models in this range yet.</p>
+                      )
+                    ) : screenTimeByModelInstantRows.length ? (
+                      <>
+                        <div
+                          className="w-full"
+                          style={{ height: Math.max(120, screenTimeByModelInstantRows.length * 44 + 24) }}
+                        >
+                          <ResponsiveContainer width="100%" height="100%">
+                            <BarChart
+                              data={screenTimeByModelInstantRows}
+                              layout="vertical"
+                              margin={{ top: 4, right: 12, bottom: 4, left: 4 }}
+                              barCategoryGap="12%"
+                            >
+                              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" horizontal={false} />
+                              <XAxis type="number" stroke="#8A8A8A" tick={CHART_Y_TICK} unit=" min" />
+                              <YAxis
+                                type="category"
+                                dataKey="model"
+                                stroke="#8A8A8A"
+                                tick={CHART_Y_TICK_11}
+                                width={120}
+                                reversed
+                              />
+                              <Tooltip
+                                contentStyle={CHART_TOOLTIP_STYLE}
+                                formatter={(value: number) => [`${value} min`, "Screen time"]}
+                              />
+                              <Bar dataKey="minutes" name="Screen time" radius={[0, 4, 4, 0]} barSize={18}>
+                                {screenTimeByModelInstantRows.map((entry) => (
+                                  <Cell key={entry.key} fill={entry.fill} fillOpacity={0.95} />
+                                ))}
+                              </Bar>
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                        <div className="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 border-t border-line pt-3">
+                          {activeModelChartSeries.map((series) => (
+                            <span key={series.bucket} className="inline-flex items-center gap-2 text-xs text-muted">
+                              <span
+                                className="h-2.5 w-2.5 shrink-0 rounded-full"
+                                style={{ backgroundColor: series.color }}
+                                aria-hidden
+                              />
+                              {series.label}
+                            </span>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <p className="text-sm text-muted">No screen time for the selected models in this range yet.</p>
+                    )
+                  ) : (
+                    <p className="text-sm text-muted">Select at least one submodel under Show to view screen time.</p>
+                  )
+                ) : screenTimeByServiceRows.length ? (
                   screenTimeView === "over_time" ? (
                     screenTimeOverTimeHasData ? (
                       <div className="h-72 w-full sm:h-80">
@@ -3089,7 +3400,7 @@ export function StatisticsClient() {
                     <p className="text-sm text-muted">Turn on at least one service under Show to view how you spend time.</p>
                   )}
                   </div>
-                ) : engagementByServicePies.length > 0 ? (
+                ) : (statsGroupMode === "model" ? engagementByModelPies : engagementByServicePies).length > 0 ? (
                   <div key="engagement-instant">
                     <div className="mb-5 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-muted">
                       <span className="inline-flex items-center gap-2">
@@ -3105,16 +3416,20 @@ export function StatisticsClient() {
                         Reading output
                       </span>
                     </div>
+                    {(() => {
+                      const instantPies =
+                        statsGroupMode === "model" ? engagementByModelPies : engagementByServicePies;
+                      return (
                     <div
                       className={`grid justify-items-center gap-8 ${
-                        engagementByServicePies.length === 1
+                        instantPies.length === 1
                           ? "grid-cols-1 max-w-xs mx-auto"
-                          : engagementByServicePies.length === 2
+                          : instantPies.length === 2
                             ? "grid-cols-1 sm:grid-cols-2 max-w-2xl mx-auto"
                             : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
                       }`}
                     >
-                      {engagementByServicePies.map((pie) => (
+                      {instantPies.map((pie) => (
                         <ServiceEngagementDonut
                           key={pie.key}
                           label={pie.label}
@@ -3124,9 +3439,15 @@ export function StatisticsClient() {
                         />
                       ))}
                     </div>
+                      );
+                    })()}
                   </div>
                 ) : engagementByServiceEnabledCount > 0 ? (
-                  <p className="text-sm text-muted">No engagement breakdown for the selected services in this range yet.</p>
+                  <p className="text-sm text-muted">
+                    {statsGroupMode === "model"
+                      ? "No engagement breakdown for the selected models in this range yet."
+                      : "No engagement breakdown for the selected services in this range yet."}
+                  </p>
                 ) : (
                   <p className="text-sm text-muted">Turn on at least one service under Show to view how you spend time.</p>
                 )}

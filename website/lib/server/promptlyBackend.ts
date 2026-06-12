@@ -925,6 +925,35 @@ function passesIdeScopeFilter(
   return true;
 }
 
+function bumpNestedMetric(
+  outer: Map<string, Map<string, number>>,
+  dayKey: string,
+  seriesKey: string,
+  delta: number
+) {
+  if (!(delta > 0)) return;
+  if (!outer.has(dayKey)) outer.set(dayKey, new Map());
+  const inner = outer.get(dayKey)!;
+  inner.set(seriesKey, (inner.get(seriesKey) ?? 0) + delta);
+}
+
+function nestedMetricMapsToTimeline(
+  outer: Map<string, Map<string, number>>,
+  sortedDayKeys: string[],
+  toUnit: (value: number) => number = (value) => value
+): Array<{ bucket: string; models: Record<string, number> }> {
+  return sortedDayKeys.map((dayKey) => {
+    const inner = outer.get(dayKey);
+    const models: Record<string, number> = {};
+    if (inner) {
+      for (const [seriesKey, value] of inner) {
+        if (value > 0) models[seriesKey] = toUnit(value);
+      }
+    }
+    return { bucket: dayKey, models };
+  });
+}
+
 export type PromptlyIdeTool = "claude_code" | "cursor" | "codex";
 
 export type IdeInteractionKind = "send" | "engagement_segment" | "response_latency";
@@ -1630,6 +1659,17 @@ export type AccountIdeStatsPayload = {
     avg_draft_ms: number | null;
     draft_samples: number;
   }>;
+  model_prompt_timeline?: Array<{ bucket: string; models: Record<string, number> }>;
+  model_screen_time_timeline?: Array<{ bucket: string; models: Record<string, number> }>;
+  model_engagement_by_model?: Array<{
+    bucket: string;
+    label: string | null;
+    drafting_minutes: number;
+    waiting_minutes: number;
+    reading_idle_minutes: number;
+    total_minutes: number;
+  }>;
+  model_series_labels?: Record<string, string | null>;
   draft_timing_by_tool: Record<
     PromptlyIdeTool,
     { avg_draft_ms: number | null; samples: number }
@@ -2191,6 +2231,72 @@ export async function getAccountIdeUsageStats(
   const draftTotalMsByTool: IdeToolCounts = { claude_code: 0, cursor: 0, codex: 0 };
   const wordTotalByTool: IdeToolCounts = { claude_code: 0, cursor: 0, codex: 0 };
   const wordSamplesByTool: IdeToolCounts = emptyIdeToolCounts();
+  const trackModelSeries = Boolean(scopeFilter?.ideTool);
+  const modelPromptsByDay = new Map<string, Map<string, number>>();
+  const modelScreenMsByDay = new Map<string, Map<string, number>>();
+  const modelEngagementMsByModel = new Map<
+    string,
+    {
+      label: string | null;
+      drafting_ms: number;
+      waiting_ms: number;
+      reading_idle_ms: number;
+      screen_ms: number;
+    }
+  >();
+  const modelSeriesLabels = new Map<string, string | null>();
+
+  const rememberModelLabel = (modelSlug: string, label: string | null) => {
+    if (!modelSeriesLabels.has(modelSlug)) {
+      modelSeriesLabels.set(modelSlug, label);
+      return;
+    }
+    if (!modelSeriesLabels.get(modelSlug) && label) {
+      modelSeriesLabels.set(modelSlug, label);
+    }
+  };
+
+  const ensureModelEngagementRow = (modelSlug: string, label: string | null) => {
+    rememberModelLabel(modelSlug, label);
+    if (!modelEngagementMsByModel.has(modelSlug)) {
+      modelEngagementMsByModel.set(modelSlug, {
+        label,
+        drafting_ms: 0,
+        waiting_ms: 0,
+        reading_idle_ms: 0,
+        screen_ms: 0
+      });
+    } else if (label && !modelEngagementMsByModel.get(modelSlug)?.label) {
+      modelEngagementMsByModel.get(modelSlug)!.label = label;
+    }
+    return modelEngagementMsByModel.get(modelSlug)!;
+  };
+
+  const addModelEngagementMs = (
+    dayKey: string,
+    modelSlug: string,
+    label: string | null,
+    category: HostEngagementCategory | "waiting",
+    durMs: number
+  ) => {
+    if (!trackModelSeries || !(durMs > 0)) return;
+    bumpNestedMetric(modelScreenMsByDay, dayKey, modelSlug, durMs);
+    const row = ensureModelEngagementRow(modelSlug, label);
+    row.screen_ms += durMs;
+    if (category === "drafting") row.drafting_ms += durMs;
+    else if (category === "waiting") row.waiting_ms += durMs;
+    else row.reading_idle_ms += durMs;
+  };
+
+  const readIdeEventModel = (raw: Record<string, unknown>) => {
+    const mb = readTelemetryModelBucket(raw);
+    const labelRaw = raw.modelLabelSanitized ?? raw.model_label ?? raw.modelLabel;
+    const label =
+      typeof labelRaw === "string" && labelRaw.trim() && !/https?:\/\//i.test(labelRaw)
+        ? String(labelRaw).replace(/\s+/g, " ").trim().slice(0, 120)
+        : null;
+    return { mb, label };
+  };
 
   const readEventAgentEmail = (raw: Record<string, unknown>): string | null =>
     normalizeUserEmail(raw.agentAccountEmail ?? raw.agent_account_email);
@@ -2244,6 +2350,7 @@ export async function getAccountIdeUsageStats(
           typeof labelRaw === "string" && labelRaw.trim() && !/https?:\/\//i.test(labelRaw)
             ? String(labelRaw).replace(/\s+/g, " ").trim().slice(0, 120)
             : null;
+        addModelEngagementMs(bucket, mb, label, "waiting", hlMs);
         const modelKey = `${tool}:${mb}`;
         const modelPrev = modelBucketAgg.get(modelKey) || {
           tool,
@@ -2285,6 +2392,8 @@ export async function getAccountIdeUsageStats(
         screenTotals[tool] += durMs;
         engagementTotalsMs[cat] += durMs;
         engagementMsByTool[tool][cat] += durMs;
+        const { mb, label } = readIdeEventModel(raw);
+        addModelEngagementMs(bucket, mb, label, cat, durMs);
         if (cat === "drafting") {
           draftSegmentCountByTool[tool] += 1;
           draftTotalMsByTool[tool] += durMs;
@@ -2328,14 +2437,11 @@ export async function getAccountIdeUsageStats(
       promptsWithoutAgentEmail[tool] += 1;
     }
 
-    const mb = String(raw.modelBucket ?? raw.model_bucket ?? "unknown")
-      .trim()
-      .slice(0, 48) || "unknown";
-    const labelRaw = raw.modelLabelSanitized ?? raw.model_label ?? raw.modelLabel;
-    const label =
-      typeof labelRaw === "string" && labelRaw.trim() && !/https?:\/\//i.test(labelRaw)
-        ? String(labelRaw).replace(/\s+/g, " ").trim().slice(0, 120)
-        : null;
+    const { mb, label } = readIdeEventModel(raw);
+    if (trackModelSeries) {
+      bumpNestedMetric(modelPromptsByDay, bucket, mb, 1);
+      rememberModelLabel(mb, label);
+    }
     const modelKey = `${tool}:${mb}`;
     const modelPrev = modelBucketAgg.get(modelKey) || {
       tool,
@@ -2373,6 +2479,7 @@ export async function getAccountIdeUsageStats(
       engagementTotalsMs.waiting += hlMs;
       engagementMsByTool[tool].waiting += hlMs;
       responseLatencyByTool[tool].push(hlMs);
+      addModelEngagementMs(bucket, mb, label, "waiting", hlMs);
       modelPrev.latencyTotalMs += hlMs;
       modelPrev.latencySamples += 1;
       modelBucketAgg.set(modelKey, modelPrev);
@@ -2555,7 +2662,32 @@ export async function getAccountIdeUsageStats(
     likely_truncated: eventsResult.docs.length >= IDE_EVENTS_QUERY_LIMIT,
     quota_exceeded: eventsResult.quotaExceeded,
     footnotes,
-    linked_promptly_accounts: promptlyAccountsIncluded
+    linked_promptly_accounts: promptlyAccountsIncluded,
+    ...(trackModelSeries
+      ? {
+          model_prompt_timeline: nestedMetricMapsToTimeline(
+            modelPromptsByDay,
+            sortedBuckets.map((row) => row.bucket_day)
+          ),
+          model_screen_time_timeline: nestedMetricMapsToTimeline(
+            modelScreenMsByDay,
+            sortedBuckets.map((row) => row.bucket_day),
+            (ms) => msToStatMinutes(ms)
+          ),
+          model_engagement_by_model: [...modelEngagementMsByModel.entries()]
+            .map(([modelSlug, row]) => ({
+              bucket: modelSlug,
+              label: row.label,
+              drafting_minutes: msToStatMinutes(row.drafting_ms),
+              waiting_minutes: msToStatMinutes(row.waiting_ms),
+              reading_idle_minutes: msToStatMinutes(row.reading_idle_ms),
+              total_minutes: msToStatMinutes(row.screen_ms)
+            }))
+            .filter((row) => row.total_minutes > 0)
+            .sort((a, b) => b.total_minutes - a.total_minutes || a.bucket.localeCompare(b.bucket)),
+          model_series_labels: Object.fromEntries(modelSeriesLabels.entries())
+        }
+      : {})
   };
 }
 
@@ -2867,6 +2999,65 @@ export async function getAccountUsageStatsExtended(
   >();
   const wordTotalByService: ServicePromptCounts = emptyServicePromptCounts();
   const wordSamplesByService: ServicePromptCounts = emptyServicePromptCounts();
+  const trackWebModelSeries = Boolean(scopeFilter?.webService);
+  const webModelService = scopeFilter?.webService;
+  const bucketKeyForDay = (utcYmd: string) =>
+    granularity === "week" ? isoWeekMondayUtcDay(utcYmd) : utcYmd;
+  const webModelPromptsByDay = new Map<string, Map<string, number>>();
+  const webModelScreenMsByDay = new Map<string, Map<string, number>>();
+  const webModelEngagementMsByModel = new Map<
+    string,
+    {
+      label: string | null;
+      drafting_ms: number;
+      waiting_ms: number;
+      reading_idle_ms: number;
+      screen_ms: number;
+    }
+  >();
+  const webModelSeriesLabels = new Map<string, string | null>();
+
+  const rememberWebModelLabel = (modelSlug: string, label: string | null) => {
+    if (!webModelSeriesLabels.has(modelSlug)) {
+      webModelSeriesLabels.set(modelSlug, label);
+      return;
+    }
+    if (!webModelSeriesLabels.get(modelSlug) && label) {
+      webModelSeriesLabels.set(modelSlug, label);
+    }
+  };
+
+  const ensureWebModelEngagementRow = (modelSlug: string, label: string | null) => {
+    rememberWebModelLabel(modelSlug, label);
+    if (!webModelEngagementMsByModel.has(modelSlug)) {
+      webModelEngagementMsByModel.set(modelSlug, {
+        label,
+        drafting_ms: 0,
+        waiting_ms: 0,
+        reading_idle_ms: 0,
+        screen_ms: 0
+      });
+    } else if (label && !webModelEngagementMsByModel.get(modelSlug)?.label) {
+      webModelEngagementMsByModel.get(modelSlug)!.label = label;
+    }
+    return webModelEngagementMsByModel.get(modelSlug)!;
+  };
+
+  const addWebModelEngagementMs = (
+    dayKey: string,
+    modelSlug: string,
+    label: string | null,
+    category: HostEngagementCategory,
+    durMs: number
+  ) => {
+    if (!trackWebModelSeries || !(durMs > 0)) return;
+    bumpNestedMetric(webModelScreenMsByDay, dayKey, modelSlug, durMs);
+    const row = ensureWebModelEngagementRow(modelSlug, label);
+    row.screen_ms += durMs;
+    if (category === "drafting") row.drafting_ms += durMs;
+    else if (category === "waiting") row.waiting_ms += durMs;
+    else row.reading_idle_ms += durMs;
+  };
 
   const optimizeLatencySvc = {
     sum: emptyServicePromptCounts(),
@@ -2910,6 +3101,11 @@ export async function getAccountUsageStatsExtended(
     modelCatalogAgg.set(catalogKey, catalogPrev);
 
     if (!passesWebScopeFilter(svcDoc, raw, scopeFilter)) continue;
+
+    if (trackWebModelSeries && svcDoc === webModelService) {
+      bumpNestedMetric(webModelPromptsByDay, bucketKeyForDay(utcDay), mb, 1);
+      rememberWebModelLabel(mb, label);
+    }
 
     const row = byDayScratch.get(utcDay)!;
     row.prompts += 1;
@@ -3024,6 +3220,15 @@ export async function getAccountUsageStatsExtended(
         row.engagement_ms_by_category[engagementCategory][svc] += durMs;
         row.screen_time_ms_svc[svc] += durMs;
         row.engagement_segment_count += 1;
+        if (trackWebModelSeries && svc === webModelService) {
+          const hmb = readTelemetryModelBucket(raw);
+          const hostLabelRaw = raw.hostModelLabelSanitized ?? raw.host_model_label_sanitized;
+          const hostLabel =
+            typeof hostLabelRaw === "string" && hostLabelRaw.trim()
+              ? String(hostLabelRaw).trim().slice(0, TELEMETRY_HOST_MODEL_MAX_CHARS)
+              : null;
+          addWebModelEngagementMs(bucketKeyForDay(utcDay), hmb, hostLabel, engagementCategory, durMs);
+        }
       }
       continue;
     }
@@ -3073,6 +3278,16 @@ export async function getAccountUsageStatsExtended(
         // Auto-adjust already counts via optimize telemetry; skip duplicate native send.
       } else {
         row.native_send_by_service[svc] += 1;
+        if (trackWebModelSeries && svc === webModelService) {
+          const sendMb = readTelemetryModelBucket(raw);
+          const sendLabelRaw = raw.hostModelLabelSanitized ?? raw.host_model_label_sanitized;
+          const sendLabel =
+            typeof sendLabelRaw === "string" && sendLabelRaw.trim()
+              ? String(sendLabelRaw).trim().slice(0, TELEMETRY_HOST_MODEL_MAX_CHARS)
+              : null;
+          bumpNestedMetric(webModelPromptsByDay, bucketKeyForDay(utcDay), sendMb, 1);
+          rememberWebModelLabel(sendMb, sendLabel);
+        }
         if (typeof cc === "number" && cc > 0) {
           const fc = Math.min(CREDIT_MAX_PROMPT_CHARS, Math.floor(cc));
           nativeComposerOnSendSamples += 1;
@@ -3703,6 +3918,31 @@ export async function getAccountUsageStatsExtended(
     },
     model_catalog,
     avg_words_by_service,
+    ...(trackWebModelSeries
+      ? {
+          model_prompt_timeline: nestedMetricMapsToTimeline(
+            webModelPromptsByDay,
+            hostPassiveTimelineFlat.map((row) => row.bucket_day)
+          ),
+          model_screen_time_timeline: nestedMetricMapsToTimeline(
+            webModelScreenMsByDay,
+            hostPassiveTimelineFlat.map((row) => row.bucket_day),
+            (ms) => Math.round((ms / 60000) * 10) / 10
+          ),
+          model_engagement_by_model: [...webModelEngagementMsByModel.entries()]
+            .map(([modelSlug, row]) => ({
+              bucket: modelSlug,
+              label: row.label,
+              drafting_minutes: Math.round((row.drafting_ms / 60000) * 10) / 10,
+              waiting_minutes: Math.round((row.waiting_ms / 60000) * 10) / 10,
+              reading_idle_minutes: Math.round((row.reading_idle_ms / 60000) * 10) / 10,
+              total_minutes: Math.round((row.screen_ms / 60000) * 10) / 10
+            }))
+            .filter((row) => row.total_minutes > 0)
+            .sort((a, b) => b.total_minutes - a.total_minutes || a.bucket.localeCompare(b.bucket)),
+          model_series_labels: Object.fromEntries(webModelSeriesLabels.entries())
+        }
+      : {}),
     host_passive_listener: {
       events_docs_in_query: hostPassiveEventRows,
       native_web_sends: combined_totals_prompts_native,
