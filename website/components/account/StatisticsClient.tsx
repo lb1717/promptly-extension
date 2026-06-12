@@ -5,6 +5,7 @@ import { onAuthStateChanged, signInWithCustomToken } from "firebase/auth";
 import Link from "next/link";
 import type { User } from "firebase/auth";
 import { StatisticsPrintReport } from "@/components/account/StatisticsPrintReport";
+import VendorUsageSection from "@/components/account/VendorUsageSection";
 import { AutoDismissNoticeBar } from "@/components/ui/AutoDismissNoticeBar";
 import { buildStatisticsReportData, downloadStatisticsReportPdf } from "@/lib/statisticsReport";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -1754,11 +1755,11 @@ export function StatisticsClient() {
   const statsContainerRef = useRef<HTMLDivElement>(null);
   const filterSentinelRef = useRef<HTMLDivElement>(null);
   const filterBarRef = useRef<HTMLDivElement>(null);
-  const [filterBarPinned, setFilterBarPinned] = useState(false);
-  const [filterBarLayout, setFilterBarLayout] = useState({ width: 0, left: 0, height: 0 });
+  const [filterBarStuck, setFilterBarStuck] = useState(false);
 
   const STATS_FILTER_NAV_OFFSET_PX = 56;
   const STATS_FILTER_PINNED_TOP_GAP_PX = 12;
+  const STATS_FILTER_STICKY_TOP_PX = STATS_FILTER_NAV_OFFSET_PX + STATS_FILTER_PINNED_TOP_GAP_PX;
 
   const placeholderStats = useMemo(
     () => buildPlaceholderExtendedStats(days, granularity),
@@ -1947,50 +1948,19 @@ export function StatisticsClient() {
 
   useEffect(() => {
     const sentinel = filterSentinelRef.current;
-    const bar = filterBarRef.current;
-    if (!sentinel || !bar) return;
-
-    const syncFilterBarLayout = () => {
-      const rect = bar.getBoundingClientRect();
-      setFilterBarLayout({ width: rect.width, left: rect.left, height: rect.height });
-    };
-
-    syncFilterBarLayout();
-    const resizeObserver = new ResizeObserver(syncFilterBarLayout);
-    resizeObserver.observe(bar);
+    if (!sentinel) return;
 
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (!entry) return;
-        if (!entry.isIntersecting) {
-          syncFilterBarLayout();
-          setFilterBarPinned(true);
-        } else {
-          setFilterBarPinned(false);
-        }
+        setFilterBarStuck(!entry.isIntersecting);
       },
-      { root: null, rootMargin: `-${STATS_FILTER_NAV_OFFSET_PX}px 0px 0px 0px`, threshold: 0 }
+      { root: null, rootMargin: `-${STATS_FILTER_STICKY_TOP_PX}px 0px 0px 0px`, threshold: 0 }
     );
     observer.observe(sentinel);
 
-    const onResize = () => {
-      syncFilterBarLayout();
-      if (!statsContainerRef.current) return;
-      const containerRect = statsContainerRef.current.getBoundingClientRect();
-      setFilterBarLayout((prev) => ({
-        ...prev,
-        width: containerRect.width,
-        left: containerRect.left
-      }));
-    };
-    window.addEventListener("resize", onResize);
-
-    return () => {
-      observer.disconnect();
-      resizeObserver.disconnect();
-      window.removeEventListener("resize", onResize);
-    };
-  }, [user, stats, statsGroupMode, days, granularity, selectedModelService]);
+    return () => observer.disconnect();
+  }, [user, stats, statsGroupMode, days, granularity, selectedModelService, STATS_FILTER_STICKY_TOP_PX]);
 
   const statsScopeParams = useMemo(
     () => buildStatsScopeSearchParams(statsGroupMode, selectedModelService),
@@ -3221,16 +3191,26 @@ export function StatisticsClient() {
         <div className="flex flex-wrap items-center gap-2">
           <Link
             href="/account"
-            className="rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-muted hover:bg-cream-dark sm:text-sm"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-ink hover:bg-cream-dark sm:text-sm"
           >
+            <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 12H5M12 19l-7-7 7-7" />
+            </svg>
             Back to account
           </Link>
           <button
             type="button"
             disabled={!user || !statisticsReportData || statsLoading || reportGenerating}
             onClick={() => void handlePrintReport()}
-            className="rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-ink hover:bg-cream-dark disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-ink hover:bg-cream-dark disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm"
           >
+            <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2M6 14h12v8H6v-8z"
+              />
+            </svg>
             {reportGenerating ? "Preparing report…" : "Print Report"}
           </button>
         </div>
@@ -3251,30 +3231,15 @@ export function StatisticsClient() {
       {user && displayStats ? (
         <>
           <div ref={filterSentinelRef} className="pointer-events-none h-0 w-full" aria-hidden />
-          {filterBarPinned ? (
-            <div
-              aria-hidden
-              className="mb-4"
-              style={{ height: filterBarLayout.height > 0 ? filterBarLayout.height : undefined }}
-            />
-          ) : null}
           <div
             ref={filterBarRef}
             data-onboarding-tour="statistics-filters"
-            className={`z-40 mb-4 rounded-xl border border-black bg-cream-dark px-3 py-2.5 ${
-              filterBarPinned
-                ? "fixed shadow-[0_0_18px_6px_rgba(255,255,255,0.95),0_0_36px_14px_rgba(255,255,255,0.65),0_0_56px_24px_rgba(255,255,255,0.35)]"
+            className={`sticky z-40 mb-4 rounded-xl border border-black bg-cream-dark px-3 py-2.5 ${
+              filterBarStuck
+                ? "shadow-[0_0_18px_6px_rgba(255,255,255,0.95),0_0_36px_14px_rgba(255,255,255,0.65),0_0_56px_24px_rgba(255,255,255,0.35)]"
                 : ""
             }`}
-            style={
-              filterBarPinned
-                ? {
-                    top: STATS_FILTER_NAV_OFFSET_PX + STATS_FILTER_PINNED_TOP_GAP_PX,
-                    left: filterBarLayout.left,
-                    width: filterBarLayout.width
-                  }
-                : undefined
-            }
+            style={{ top: STATS_FILTER_STICKY_TOP_PX }}
           >
             <div className="flex flex-col gap-2">
               <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-2">
@@ -3400,7 +3365,7 @@ export function StatisticsClient() {
           {/* Prompt volume */}
           <section className="mb-8 rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">Prompt volume</h2>
+              <h2 className="text-base font-semibold uppercase tracking-[0.22em] text-ink">Prompt volume</h2>
               {promptVolumePeriodChange ? (
                 <p
                   className="text-right text-lg font-semibold tabular-nums leading-none sm:text-xl"
@@ -3526,7 +3491,7 @@ export function StatisticsClient() {
             <>
               <section className="mb-8 w-full rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                  <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">
+                  <h2 className="text-base font-semibold uppercase tracking-[0.22em] text-ink">
                     {statsGroupMode === "model" ? "Screen time by model" : "Screen time by service"}
                   </h2>
                   <div className="flex flex-wrap items-center gap-2">
@@ -3746,21 +3711,19 @@ export function StatisticsClient() {
               </section>
 
               <section className="mb-8 w-full rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4">
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                    <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">
-                      How you spend your time
-                    </h2>
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
-                      {ENGAGEMENT_OVER_TIME_SERIES.map((series) => (
-                        <span key={series.dataKey} className="inline-flex items-center gap-1.5">
-                          <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: series.color }} />
-                          {series.name}
-                        </span>
-                      ))}
-                    </div>
+                <div className="mb-3 grid grid-cols-1 items-center gap-x-2 gap-y-2 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
+                  <h2 className="text-base font-semibold uppercase tracking-[0.22em] text-ink sm:justify-self-start">
+                    How you spend your time
+                  </h2>
+                  <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-muted sm:justify-self-center">
+                    {ENGAGEMENT_OVER_TIME_SERIES.map((series) => (
+                      <span key={series.dataKey} className="inline-flex items-center gap-1.5">
+                        <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: series.color }} />
+                        {series.name}
+                      </span>
+                    ))}
                   </div>
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2 sm:justify-self-end">
                     {engagementView === "instant" ? (
                       <p className="text-xs font-medium tabular-nums text-muted">{rangeSummaryLabel}</p>
                     ) : null}
@@ -3869,7 +3832,7 @@ export function StatisticsClient() {
             </>
           ) : (
             <section className="mb-8 w-full rounded-2xl border border-line bg-cream p-4 shadow-card sm:p-5">
-              <h2 className="mb-1 text-sm font-semibold uppercase tracking-[0.22em] text-faint">Screen time</h2>
+              <h2 className="mb-1 text-base font-semibold uppercase tracking-[0.22em] text-ink">Screen time</h2>
               <p className="text-sm text-muted">
                 Screen time tracking starts with the latest extension or coding-agent plugins. Use ChatGPT, Claude, or
                 Gemini in the browser, or Claude Code, Cursor, and Codex in the IDE while signed in to see time by
@@ -3880,7 +3843,7 @@ export function StatisticsClient() {
 
           {promptLengthChartRows.length ? (
             <section className="mb-8 w-full rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4">
-              <h2 className="mb-1 text-sm font-semibold uppercase tracking-[0.22em] text-faint">
+              <h2 className="mb-1 text-base font-semibold uppercase tracking-[0.22em] text-ink">
                 Prompt length (words)
               </h2>
               <p className="mb-3 text-[11px] text-faint">
@@ -3921,7 +3884,7 @@ export function StatisticsClient() {
           {responseTimeSectionHasData ? (
             <section className="mb-8 w-full rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">
+                <h2 className="text-base font-semibold uppercase tracking-[0.22em] text-ink">
                   {statsGroupMode === "model" ? "Average AI response time by model" : "Average AI response time"}
                 </h2>
                 <div className="flex flex-wrap items-center gap-2">
@@ -4097,7 +4060,7 @@ export function StatisticsClient() {
 
           <div className="my-10 border-t border-line" role="separator" />
 
-          <h2 className="mb-6 text-sm font-semibold uppercase tracking-[0.22em] text-faint">Promptly Labs Diagnostics</h2>
+          <h2 className="mb-6 text-base font-semibold uppercase tracking-[0.22em] text-ink">Promptly Labs Diagnostics</h2>
 
           {/* Promptly impact scores (left) + average draft chart (right) */}
           {modelTimeChartRows.length ||
@@ -4110,7 +4073,7 @@ export function StatisticsClient() {
                   className="flex w-full flex-col rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4 lg:w-1/2"
                   style={{ minHeight: modelTimeChartRows.length ? modelTimeSectionHeight : undefined }}
                 >
-                  <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.22em] text-faint">Promptly impact</h2>
+                  <h2 className="mb-3 text-base font-semibold uppercase tracking-[0.22em] text-ink">Promptly impact</h2>
                   <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 sm:gap-4">
                     <div>
                       <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Prompt efficiency</p>
@@ -4145,7 +4108,7 @@ export function StatisticsClient() {
               ) : null}
               {modelTimeChartRows.length ? (
                 <section className="w-full rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4 lg:w-1/2">
-                  <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.22em] text-faint">
+                  <h2 className="mb-3 text-base font-semibold uppercase tracking-[0.22em] text-ink">
                     Average draft &amp; response time
                   </h2>
                   <div style={{ height: modelTimeSectionHeight }}>
@@ -4200,7 +4163,7 @@ export function StatisticsClient() {
 
           {/*Latency */}
           <section className="mb-12 rounded-2xl border border-line bg-cream p-6 backdrop-blur-md">
-            <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">Rewrite vs native turnaround time</h2>
+            <h2 className="text-base font-semibold uppercase tracking-[0.22em] text-ink">Rewrite vs native turnaround time</h2>
             <div className="mt-4 h-96 w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={latencyChartRows} margin={{ top: 8, right: 12, bottom: 56, left: 8 }}>
@@ -4230,7 +4193,7 @@ export function StatisticsClient() {
           {/* Pre-improve word count */}
           {preImproveWordHasData ? (
             <section className="mb-12 rounded-2xl border border-line bg-cream p-6 backdrop-blur-md">
-              <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.22em] text-faint">Words before Promptly</h2>
+              <h2 className="mb-3 text-base font-semibold uppercase tracking-[0.22em] text-ink">Words before Promptly</h2>
               {preImproveWordChangePercent !== null ? (
                 <p
                   className="mb-4 text-lg font-semibold tabular-nums leading-none sm:text-xl"
@@ -4321,6 +4284,8 @@ export function StatisticsClient() {
               </div>
             </div>
           </section>
+
+          <VendorUsageSection userEmail={user?.email} />
         </>
       ) : null}
 
