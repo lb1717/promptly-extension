@@ -2875,7 +2875,7 @@ export function StatisticsClient() {
         <>
           <div
             data-onboarding-tour="statistics-filters"
-            className="sticky top-0 z-30 mb-4 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-xl border border-line bg-cream-dark/95 px-3 py-2 shadow-sm backdrop-blur-sm"
+            className="sticky top-0 z-30 mb-4 rounded-xl border border-line bg-cream-dark/95 px-3 py-2 shadow-sm backdrop-blur-sm"
           >
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
               <div className="flex flex-wrap items-center gap-1.5">
@@ -2893,73 +2893,24 @@ export function StatisticsClient() {
                   </button>
                 ))}
               </div>
-              <div
-                className="hidden h-5 w-px shrink-0 bg-line sm:block"
-                aria-hidden
-              />
+              <div className="hidden h-5 w-px shrink-0 bg-line sm:block" aria-hidden />
               <StatsGroupModeToggle value={statsGroupMode} onChange={setStatsGroupMode} />
-              <div
-                className="hidden h-5 w-px shrink-0 bg-line sm:block"
-                aria-hidden
-              />
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-faint">Show</span>
-                {statsGroupMode === "service"
-                  ? PROMPT_VOLUME_AI_FILTERS.map((filter) => (
-                  <PromptVolumeAiToggleButton
-                    key={filter.key}
-                    label={filter.label}
-                    color={filter.color}
-                    pressed={promptVolumeAiFilters[filter.key]}
-                    disabled={
-                      promptVolumeAiFilters[filter.key] && promptVolumeAiEnabledCount <= 1
-                    }
-                    onToggle={() => togglePromptVolumeAiFilter(filter.key)}
-                  />
-                ))
-                  : (
-                    <>
-                      <label className="flex items-center gap-1.5 text-xs text-faint">
-                        Service
-                        <select
-                          value={selectedModelService}
-                          onChange={(e) =>
-                            setSelectedModelService(e.target.value as PromptVolumeAiKey)
-                          }
-                          className="max-w-[10rem] rounded-md border border-line bg-cream px-1.5 py-0.5 text-xs text-ink"
-                        >
-                          {PROMPT_VOLUME_AI_FILTERS.map((filter) => (
-                            <option key={filter.key} value={filter.key}>
-                              {filter.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      {modelOptionsForSelectedService.map((row) => {
-                        const bucket = row.bucket;
-                        const label = isIdeServiceKey(selectedModelService)
-                          ? formatIdeModelLabel(row as IdeStatsPayload["model_buckets"][number])
-                          : ("label" in row && row.label) || row.bucket;
-                        const pressed = selectedModelBuckets.has(bucket);
-                        const filterMeta = PROMPT_VOLUME_AI_FILTERS.find(
-                          (f) => f.key === selectedModelService
-                        );
-                        return (
-                          <PromptVolumeAiToggleButton
-                            key={bucket}
-                            label={label}
-                            color={filterMeta?.color ?? COLOR_UNKNOWN}
-                            pressed={pressed}
-                            disabled={pressed && selectedModelBuckets.size <= 1}
-                            onToggle={() => toggleModelBucket(bucket)}
-                          />
-                        );
-                      })}
-                    </>
-                  )}
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
+              {statsGroupMode === "model" ? (
+                <label className="flex items-center gap-1.5 text-xs text-faint">
+                  Service
+                  <select
+                    value={selectedModelService}
+                    onChange={(e) => setSelectedModelService(e.target.value as PromptVolumeAiKey)}
+                    className="max-w-[10rem] rounded-md border border-line bg-cream px-1.5 py-0.5 text-xs text-ink"
+                  >
+                    {PROMPT_VOLUME_AI_FILTERS.map((filter) => (
+                      <option key={filter.key} value={filter.key}>
+                        {filter.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
               <label className="flex items-center gap-1.5 text-xs text-faint">
                 Buckets
                 <select
@@ -2979,6 +2930,43 @@ export function StatisticsClient() {
               >
                 {statsLoading || ideStatsLoading ? "Refreshing…" : "Refresh"}
               </button>
+              <div className="hidden h-5 w-px shrink-0 bg-line sm:block" aria-hidden />
+              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+                <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-faint">Show</span>
+                {statsGroupMode === "service"
+                  ? PROMPT_VOLUME_AI_FILTERS.map((filter) => (
+                      <PromptVolumeAiToggleButton
+                        key={filter.key}
+                        label={filter.label}
+                        color={filter.color}
+                        pressed={promptVolumeAiFilters[filter.key]}
+                        disabled={
+                          promptVolumeAiFilters[filter.key] && promptVolumeAiEnabledCount <= 1
+                        }
+                        onToggle={() => togglePromptVolumeAiFilter(filter.key)}
+                      />
+                    ))
+                  : modelOptionsForSelectedService.map((row) => {
+                      const bucket = row.bucket;
+                      const label = isIdeServiceKey(selectedModelService)
+                        ? formatIdeModelLabel(row as IdeStatsPayload["model_buckets"][number])
+                        : ("label" in row && row.label) || row.bucket;
+                      const pressed = selectedModelBuckets.has(bucket);
+                      const filterMeta = PROMPT_VOLUME_AI_FILTERS.find(
+                        (f) => f.key === selectedModelService
+                      );
+                      return (
+                        <PromptVolumeAiToggleButton
+                          key={bucket}
+                          label={label}
+                          color={filterMeta?.color ?? COLOR_UNKNOWN}
+                          pressed={pressed}
+                          disabled={pressed && selectedModelBuckets.size <= 1}
+                          onToggle={() => toggleModelBucket(bucket)}
+                        />
+                      );
+                    })}
+              </div>
             </div>
           </div>
 
@@ -3451,45 +3439,6 @@ export function StatisticsClient() {
                 ) : (
                   <p className="text-sm text-muted">Turn on at least one service under Show to view how you spend time.</p>
                 )}
-                {promptLengthChartRows.length ? (
-                  <div className="mt-6 border-t border-line pt-6">
-                    <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-faint">
-                      Prompt length (words)
-                    </h3>
-                    <p className="mb-3 text-[11px] text-faint">
-                      Average prompt length at submit for the selection above — metadata only, never full text.
-                    </p>
-                    <div className="w-full" style={{ height: promptLengthSectionHeight }}>
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart
-                          data={promptLengthChartRows}
-                          layout="vertical"
-                          margin={{ top: 4, right: 12, bottom: 4, left: 4 }}
-                          barCategoryGap="18%"
-                        >
-                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" horizontal={false} />
-                          <XAxis type="number" stroke="#8A8A8A" tick={CHART_Y_TICK} allowDecimals />
-                          <YAxis
-                            type="category"
-                            dataKey="label"
-                            stroke="#8A8A8A"
-                            tick={CHART_Y_TICK_11}
-                            width={120}
-                          />
-                          <Tooltip
-                            contentStyle={CHART_TOOLTIP_STYLE}
-                            formatter={(value: number) => [`${value} words`, "Avg length"]}
-                          />
-                          <Bar dataKey="avg_words" name="Avg words" radius={[0, 4, 4, 0]} barSize={16}>
-                            {promptLengthChartRows.map((entry) => (
-                              <Cell key={entry.key} fill={entry.fill} fillOpacity={0.95} />
-                            ))}
-                          </Bar>
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-                ) : null}
               </section>
             </>
           ) : (
@@ -3502,6 +3451,46 @@ export function StatisticsClient() {
               </p>
             </section>
           )}
+
+          {promptLengthChartRows.length ? (
+            <section className="mb-8 w-full rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4">
+              <h2 className="mb-1 text-sm font-semibold uppercase tracking-[0.22em] text-faint">
+                Prompt length (words)
+              </h2>
+              <p className="mb-3 text-[11px] text-faint">
+                Average prompt length at submit for the selection above — metadata only, never full text.
+              </p>
+              <div className="w-full" style={{ height: promptLengthSectionHeight }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={promptLengthChartRows}
+                    layout="vertical"
+                    margin={{ top: 4, right: 12, bottom: 4, left: 4 }}
+                    barCategoryGap="18%"
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" horizontal={false} />
+                    <XAxis type="number" stroke="#8A8A8A" tick={CHART_Y_TICK} allowDecimals />
+                    <YAxis
+                      type="category"
+                      dataKey="label"
+                      stroke="#8A8A8A"
+                      tick={CHART_Y_TICK_11}
+                      width={120}
+                    />
+                    <Tooltip
+                      contentStyle={CHART_TOOLTIP_STYLE}
+                      formatter={(value: number) => [`${value} words`, "Avg length"]}
+                    />
+                    <Bar dataKey="avg_words" name="Avg words" radius={[0, 4, 4, 0]} barSize={16}>
+                      {promptLengthChartRows.map((entry) => (
+                        <Cell key={entry.key} fill={entry.fill} fillOpacity={0.95} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </section>
+          ) : null}
 
           {timeBalanceHasData ? (
             <section className="mb-8 w-full rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4">
