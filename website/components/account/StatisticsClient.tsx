@@ -1460,12 +1460,12 @@ function ServiceEngagementDonut({
 
   return (
     <div className="mx-auto flex w-full max-w-[240px] flex-col items-center">
-      <p className="mb-2 text-center text-xs font-semibold uppercase tracking-wide" style={{ color: accentColor }}>
+      <p className="text-center text-sm font-bold uppercase tracking-wide" style={{ color: accentColor }}>
         {label}
       </p>
       <div className="h-52 w-[220px] shrink-0">
         <ResponsiveContainer width="100%" height="100%" debounce={50}>
-          <PieChart margin={{ top: 12, right: 12, bottom: 12, left: 12 }}>
+          <PieChart margin={{ top: 4, right: 12, bottom: 12, left: 12 }}>
             <Pie
               data={chartData}
               dataKey="value"
@@ -3565,25 +3565,38 @@ export function StatisticsClient() {
                         Reading output
                       </span>
                     </div>
-                    <div
-                      className={`grid justify-items-center gap-8 ${
-                        engagementPiesVisible.length === 1
-                          ? "grid-cols-1 max-w-xs mx-auto"
-                          : engagementPiesVisible.length === 2
-                            ? "grid-cols-1 sm:grid-cols-2 max-w-2xl mx-auto"
-                            : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
-                      }`}
-                    >
-                      {engagementPiesVisible.map((pie) => (
-                        <ServiceEngagementDonut
-                          key={pie.key}
-                          label={pie.label}
-                          accentColor={pie.accent}
-                          totalMinutes={pie.totalMinutes}
-                          slices={pie.slices}
-                        />
-                      ))}
-                    </div>
+                    {(() => {
+                      const pieRows: (typeof engagementPiesVisible)[] = [];
+                      for (let i = 0; i < engagementPiesVisible.length; i += ENGAGEMENT_PIES_INITIAL_COUNT) {
+                        pieRows.push(engagementPiesVisible.slice(i, i + ENGAGEMENT_PIES_INITIAL_COUNT));
+                      }
+                      return pieRows.map((rowPies, rowIndex) => (
+                        <div
+                          key={`pie-row-${rowIndex}`}
+                          className={rowIndex > 0 ? "mt-8 border-t border-line/50 pt-8" : undefined}
+                        >
+                          <div
+                            className={`grid justify-items-center gap-8 ${
+                              rowPies.length === 1
+                                ? "grid-cols-1 max-w-xs mx-auto"
+                                : rowPies.length === 2
+                                  ? "grid-cols-1 sm:grid-cols-2 max-w-2xl mx-auto"
+                                  : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
+                            }`}
+                          >
+                            {rowPies.map((pie) => (
+                              <ServiceEngagementDonut
+                                key={pie.key}
+                                label={pie.label}
+                                accentColor={pie.accent}
+                                totalMinutes={pie.totalMinutes}
+                                slices={pie.slices}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      ));
+                    })()}
                     {engagementPiesHasMore ? (
                       <div className="mt-6 flex justify-center">
                         <button
