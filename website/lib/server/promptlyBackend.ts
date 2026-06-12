@@ -63,7 +63,7 @@ export const HOST_LLM_EVENTS_QUERY_LIMIT = 5000;
 const IDE_EVENTS_COLLECTION = "promptly_ide_events";
 export const IDE_EVENTS_QUERY_LIMIT = 5000;
 /** Widen queries to this window once, then slice in memory when the user changes range. */
-const STATS_SUPERSET_DAYS = 90;
+const STATS_SUPERSET_DAYS = 400;
 
 function isFirestoreQuotaError(err: unknown): boolean {
   const message = String(err instanceof Error ? err.message : err);
@@ -2168,7 +2168,7 @@ export async function getAccountIdeUsageStats(
   opts?: { bypassCache?: boolean; scopeFilter?: AccountStatsScopeFilter }
 ): Promise<AccountIdeStatsPayload> {
   const scopeFilter = opts?.scopeFilter;
-  const rangeDays = Math.max(1, Math.min(90, Math.floor(days || 14)));
+  const rangeDays = Math.max(1, Math.min(400, Math.floor(days || 14)));
   const recentDays = getRecentDays(rangeDays);
   const startDay = recentDays[0]!;
   const endDay = recentDays[recentDays.length - 1]!;
@@ -2903,7 +2903,7 @@ export async function getAccountUsageStatsExtended(
   opts?: { bypassCache?: boolean; scopeFilter?: AccountStatsScopeFilter }
 ) {
   const scopeFilter = opts?.scopeFilter;
-  const rangeDays = Math.max(1, Math.min(90, Math.floor(days || 14)));
+  const rangeDays = Math.max(1, Math.min(400, Math.floor(days || 14)));
   const recentDays = getRecentDays(rangeDays);
   const startDay = recentDays[0];
   const endDay = recentDays[recentDays.length - 1];

@@ -14,6 +14,7 @@ import {
   CartesianGrid,
   Cell,
   ComposedChart,
+  LabelList,
   Legend,
   Line,
   LineChart,
@@ -345,6 +346,14 @@ const EMPTY_SERVICE_SCREEN_TIME: ServiceScreenTime = {
 
 const MODEL_CHART_ORDER: PromptlySvc[] = ["gemini", "claude", "chatgpt", "unknown"];
 
+const STATS_RANGE_OPTIONS: Array<{ label: string; days: number }> = [
+  { label: "1W", days: 7 },
+  { label: "1M", days: 30 },
+  { label: "3M", days: 90 },
+  { label: "1Y", days: 365 },
+  { label: "MAX", days: 400 }
+];
+
 type PreImproveWordBucket = {
   bucket: string;
   avg_words_before: number | null;
@@ -494,7 +503,7 @@ type ExtendedStatsPayload = {
 };
 
 function getRecentDaysClient(count: number): string[] {
-  const n = Math.max(1, Math.min(90, Math.floor(count)));
+  const n = Math.max(1, Math.min(400, Math.floor(count)));
   return Array.from({ length: n }, (_, idx) => {
     const date = new Date();
     date.setUTCHours(0, 0, 0, 0);
@@ -725,6 +734,24 @@ function formatChartNumber(value: unknown): string {
   if (typeof value !== "number" || !Number.isFinite(value)) return "—";
   const rounded = Math.round(value * 10) / 10;
   return rounded.toLocaleString("en-US", { maximumFractionDigits: 1 });
+}
+
+/** Integer percent shares via largest remainder so the labels always sum to 100. */
+function withPercentShares<T extends { minutes: number }>(rows: T[]): Array<T & { percent: number }> {
+  const total = rows.reduce((sum, row) => sum + row.minutes, 0);
+  if (total <= 0) return rows.map((row) => ({ ...row, percent: 0 }));
+  const raw = rows.map((row) => (row.minutes / total) * 100);
+  const floors = raw.map((value) => Math.floor(value));
+  let remainder = 100 - floors.reduce((sum, value) => sum + value, 0);
+  const byFraction = raw
+    .map((value, index) => ({ index, fraction: value - Math.floor(value) }))
+    .sort((a, b) => b.fraction - a.fraction);
+  for (const { index } of byFraction) {
+    if (remainder <= 0) break;
+    floors[index] += 1;
+    remainder -= 1;
+  }
+  return rows.map((row, index) => ({ ...row, percent: floors[index] ?? 0 }));
 }
 
 function clampScore(n: number, lo: number, hi: number): number {
@@ -1663,7 +1690,7 @@ function ModeMiniChart({
 export function StatisticsClient() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [days, setDays] = useState(14);
+  const [days, setDays] = useState(30);
   const [granularity, setGranularity] = useState<"day" | "week">("day");
   const [stats, setStats] = useState<ExtendedStatsPayload | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
@@ -2099,18 +2126,20 @@ export function StatisticsClient() {
 
   const screenTimeByModelInstantRows = useMemo(() => {
     if (statsGroupMode !== "model") return [];
-    return activeModelChartSeries
-      .map((series) => {
-        const row = modelEngagementByModel.find((entry) => entry.bucket === series.bucket);
-        return {
-          model: series.label,
-          key: series.bucket,
-          minutes: row?.total_minutes ?? 0,
-          fill: series.color
-        };
-      })
-      .filter((row) => row.minutes > 0)
-      .sort((a, b) => b.minutes - a.minutes || a.model.localeCompare(b.model));
+    return withPercentShares(
+      activeModelChartSeries
+        .map((series) => {
+          const row = modelEngagementByModel.find((entry) => entry.bucket === series.bucket);
+          return {
+            model: series.label,
+            key: series.bucket,
+            minutes: row?.total_minutes ?? 0,
+            fill: series.color
+          };
+        })
+        .filter((row) => row.minutes > 0)
+        .sort((a, b) => b.minutes - a.minutes || a.model.localeCompare(b.model))
+    );
   }, [statsGroupMode, activeModelChartSeries, modelEngagementByModel]);
 
   const modelScreenTimeOverTimeHasData = useMemo(
@@ -2509,24 +2538,6 @@ export function StatisticsClient() {
 
   const modelTimeSectionHeight = Math.max(168, modelTimeChartRows.length * 52 + 48);
 
-  const timeBalanceChartRows = useMemo(() => {
-    if (!displayStats?.time_balance_timeline?.length) return [];
-    const g = displayStats.granularity;
-    return displayStats.time_balance_timeline.map((row) => ({
-      ...row,
-      label: g === "week" ? `wk ${formatShortDay(row.bucket)}` : formatShortDay(row.bucket),
-      has_data: row.avg_draft_minutes > 0 || row.avg_waiting_minutes > 0
-    }));
-  }, [displayStats]);
-
-  const timeBalanceHasData = useMemo(
-    () =>
-      timeBalanceChartRows.some((r) => r.has_data) ||
-      (displayStats?.time_balance_totals?.waiting_for_ai_minutes ?? 0) > 0 ||
-      (displayStats?.time_balance_totals?.draft_active_minutes ?? 0) > 0,
-    [timeBalanceChartRows, displayStats]
-  );
-
   const screenTimeByServiceRows = useMemo(() => {
     const rows: Array<{ service: string; key: string; minutes: number; fill: string }> = [];
     if (displayStats?.screen_time_by_service) {
@@ -2563,7 +2574,9 @@ export function StatisticsClient() {
         });
       }
     }
-    return [...rows].sort((a, b) => b.minutes - a.minutes || a.service.localeCompare(b.service));
+    return withPercentShares(
+      [...rows].sort((a, b) => b.minutes - a.minutes || a.service.localeCompare(b.service))
+    );
   }, [displayStats, displayIdeStats, effectivePromptVolumeAiFilters]);
 
   const screenTimeByServiceChartHasData = useMemo(
@@ -3200,16 +3213,16 @@ export function StatisticsClient() {
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-faint">Range</span>
-                    {([7, 14, 30, 90] as const).map((d) => (
+                    {STATS_RANGE_OPTIONS.map((option) => (
                       <button
-                        key={d}
+                        key={option.label}
                         type="button"
-                        onClick={() => setDays(d)}
+                        onClick={() => setDays(option.days)}
                         className={`rounded-md px-2 py-0.5 text-xs font-medium ${
-                          days === d ? "bg-ink text-cream" : "border border-line text-faint hover:bg-cream-dark"
+                          days === option.days ? "bg-ink text-cream" : "border border-line text-faint hover:bg-cream-dark"
                         }`}
                       >
-                        {d}d
+                        {option.label}
                       </button>
                     ))}
                   </div>
@@ -3232,7 +3245,7 @@ export function StatisticsClient() {
                     </label>
                   ) : null}
                 </div>
-                <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 sm:ml-8 sm:flex-1 sm:justify-center">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 sm:ml-8">
                   <label className="flex items-center gap-1.5 text-xs text-faint">
                     Buckets
                     <select
@@ -3522,7 +3535,7 @@ export function StatisticsClient() {
                             <BarChart
                               data={screenTimeByModelInstantRows}
                               layout="vertical"
-                              margin={{ top: 4, right: 12, bottom: 4, left: 4 }}
+                              margin={{ top: 4, right: 44, bottom: 4, left: 4 }}
                               barCategoryGap="12%"
                             >
                               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" horizontal={false} />
@@ -3543,6 +3556,14 @@ export function StatisticsClient() {
                                 {screenTimeByModelInstantRows.map((entry) => (
                                   <Cell key={entry.key} fill={entry.fill} fillOpacity={0.95} />
                                 ))}
+                                <LabelList
+                                  dataKey="percent"
+                                  position="right"
+                                  fill="#111111"
+                                  fontSize={11}
+                                  fontWeight={600}
+                                  formatter={(value: number) => `${value}%`}
+                                />
                               </Bar>
                             </BarChart>
                           </ResponsiveContainer>
@@ -3612,7 +3633,7 @@ export function StatisticsClient() {
                         <BarChart
                           data={screenTimeByServiceRows}
                           layout="vertical"
-                          margin={{ top: 4, right: 12, bottom: 4, left: 4 }}
+                          margin={{ top: 4, right: 44, bottom: 4, left: 4 }}
                           barCategoryGap="12%"
                         >
                           <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" horizontal={false} />
@@ -3633,6 +3654,14 @@ export function StatisticsClient() {
                             {screenTimeByServiceRows.map((entry) => (
                               <Cell key={entry.key} fill={entry.fill} fillOpacity={0.95} />
                             ))}
+                            <LabelList
+                              dataKey="percent"
+                              position="right"
+                              fill="#111111"
+                              fontSize={11}
+                              fontWeight={600}
+                              formatter={(value: number) => `${value}%`}
+                            />
                           </Bar>
                         </BarChart>
                       </ResponsiveContainer>
@@ -3992,50 +4021,6 @@ export function StatisticsClient() {
               ) : (
                 <p className="text-sm text-muted">No response time for the selected services in this range yet.</p>
               )}
-            </section>
-          ) : null}
-
-          {timeBalanceHasData ? (
-            <section className="mb-8 w-full rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4">
-              <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-                <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">Writing vs waiting for AI</h2>
-                {displayStats.time_balance_totals ? (
-                  <p className="text-right text-xs font-medium tabular-nums text-muted">
-                    Avg/send:{" "}
-                    {displayStats.time_balance_totals.draft_active_minutes != null
-                      ? `${displayStats.time_balance_totals.draft_active_minutes} min draft`
-                      : "— draft"}
-                    {" · "}
-                    {displayStats.time_balance_totals.waiting_for_ai_minutes != null
-                      ? `${displayStats.time_balance_totals.waiting_for_ai_minutes} min wait`
-                      : "— wait"}
-                  </p>
-                ) : null}
-              </div>
-              <div className="h-72 w-full sm:h-80">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={timeBalanceChartRows.filter((r) => r.has_data)} margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
-                    <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
-                    <YAxis
-                      stroke="#8A8A8A"
-                      tick={CHART_Y_TICK_11}
-                      allowDecimals
-                      label={CHART_AXIS_LABEL("Avg min / send")}
-                    />
-                    <Tooltip
-                      contentStyle={CHART_TOOLTIP_STYLE}
-                      formatter={(value: number, name: string) => {
-                        if (typeof value !== "number" || value <= 0) return ["—", name];
-                        return [`${formatChartNumber(value)} min`, name];
-                      }}
-                    />
-                    <Legend wrapperStyle={CHART_LEGEND_STYLE} />
-                    <Bar dataKey="avg_draft_minutes" name="Avg drafting" fill="#c084fc" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="avg_waiting_minutes" name="Avg waiting for AI" fill={COLOR_NATIVE_WEB} radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
             </section>
           ) : null}
 
