@@ -39,7 +39,7 @@ const COLOR_UNKNOWN = "#64748b";
 const COLOR_PROMPTLY = "#ab68ff";
 const COLOR_NATIVE_WEB = "#22d3ee";
 /** Cursor IDE — cyan, distinct from Gemini blue. */
-const COLOR_CURSOR = "#00D8FF";
+const COLOR_CURSOR = "#9333ea";
 
 /** @deprecated use COLOR_CHATGPT_WEB */
 const COLOR_CHATGPT = COLOR_CHATGPT_WEB;
@@ -1012,23 +1012,22 @@ type ModelChartSeries = {
   dataKey: string;
 };
 
-const MODEL_SUBPALETTE = [
-  "#0e9068",
-  "#22c997",
-  "#4285f4",
-  "#00D8FF",
-  "#ab68ff",
-  "#b86b4a",
-  "#e8956f",
-  "#f59e0b",
-  "#ec4899",
-  "#14b8a6",
-  "#6366f1",
-  "#84cc16",
-  "#0ea5e9",
-  "#a855f7",
-  "#ef4444"
-];
+const SERVICE_MODEL_COLOR_SPECTRUMS: Partial<Record<PromptVolumeAiKey, readonly string[]>> = {
+  claude: ["#7f1d1d", "#b91c1c", "#dc2626", "#ea580c", "#f97316", "#fb923c", "#fdba74"],
+  claude_code: ["#7c2d12", "#c2410c", "#ea580c", "#f97316", "#fb923c", "#fdba74", "#fed7aa"],
+  codex: ["#064e3b", "#047857", "#059669", "#10b981", "#22c997", "#34d399", "#6ee7b7"],
+  chatgpt: ["#064e3e", "#0e9068", "#0f766e", "#14b8a6", "#2dd4bf", "#5eead4", "#99f6e4"],
+  cursor: ["#581c87", "#7e22ce", "#9333ea", "#a855f7", "#c026d3", "#ec4899", "#f472b6"],
+  gemini: ["#1e3a8a", "#1d4ed8", "#2563eb", "#4285f4", "#60a5fa", "#93c5fd", "#bfdbfe"],
+  other: ["#334155", "#475569", "#64748b", "#94a3b8", "#cbd5e1"]
+};
+
+function modelColorForService(service: PromptVolumeAiKey, index: number, total: number): string {
+  const spectrum = SERVICE_MODEL_COLOR_SPECTRUMS[service] ?? SERVICE_MODEL_COLOR_SPECTRUMS.other!;
+  if (total <= 1) return spectrum[Math.floor(spectrum.length / 2)] ?? spectrum[0] ?? COLOR_UNKNOWN;
+  const idx = Math.round((index / (total - 1)) * (spectrum.length - 1));
+  return spectrum[idx] ?? COLOR_UNKNOWN;
+}
 
 function modelSeriesDataKey(bucket: string): string {
   return `model_${bucket.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
@@ -1922,23 +1921,99 @@ export function StatisticsClient() {
   );
 
   const modelOptionsForSelectedService = useMemo(() => {
+    const engagementRows =
+      statsGroupMode === "model"
+        ? isIdeServiceKey(selectedModelService)
+          ? displayIdeStats?.model_engagement_by_model ?? []
+          : displayStats?.model_engagement_by_model ?? []
+        : [];
+    const seriesLabels = isIdeServiceKey(selectedModelService)
+      ? displayIdeStats?.model_series_labels ?? {}
+      : displayStats?.model_series_labels ?? {};
+
+    const byBucket = new Map<
+      string,
+      {
+        bucket: string;
+        label: string | null;
+        prompts: number;
+        tool?: IdeStatsPayload["model_buckets"][number]["tool"];
+        service?: PromptlySvc;
+      }
+    >();
+
     if (isIdeServiceKey(selectedModelService)) {
-      return modelCatalogIde
-        .filter((row) => row.tool === selectedModelService && row.prompts > 0)
-        .sort(
-          (a, b) =>
-            b.prompts - a.prompts || formatIdeModelLabel(a).localeCompare(formatIdeModelLabel(b))
-        );
+      for (const row of modelCatalogIde) {
+        if (row.tool !== selectedModelService) continue;
+        if (row.prompts <= 0 && (row.draft_samples ?? 0) <= 0 && (row.word_samples ?? 0) <= 0) {
+          const engagement = engagementRows.find((entry) => entry.bucket === row.bucket);
+          if (!engagement || engagement.total_minutes <= 0) continue;
+        }
+        byBucket.set(row.bucket, row);
+      }
+    } else {
+      const svc = webServiceFromFilterKey(selectedModelService);
+      for (const row of modelCatalogWeb) {
+        if (row.service !== svc) continue;
+        if (row.prompts <= 0) {
+          const engagement = engagementRows.find((entry) => entry.bucket === row.bucket);
+          if (!engagement || engagement.total_minutes <= 0) continue;
+        }
+        byBucket.set(row.bucket, row);
+      }
     }
-    const svc = webServiceFromFilterKey(selectedModelService);
-    return modelCatalogWeb
-      .filter((row) => row.service === svc && row.prompts > 0)
-      .sort(
-        (a, b) =>
-          b.prompts - a.prompts ||
-          (a.label || a.bucket).localeCompare(b.label || b.bucket)
-      );
-  }, [selectedModelService, modelCatalogWeb, modelCatalogIde]);
+
+    for (const row of engagementRows) {
+      if (row.total_minutes <= 0 || byBucket.has(row.bucket)) continue;
+      byBucket.set(row.bucket, {
+        bucket: row.bucket,
+        label: row.label,
+        prompts: 0,
+        ...(isIdeServiceKey(selectedModelService)
+          ? { tool: selectedModelService }
+          : { service: webServiceFromFilterKey(selectedModelService) })
+      });
+    }
+
+    for (const [bucket, label] of Object.entries(seriesLabels)) {
+      if (byBucket.has(bucket)) continue;
+      byBucket.set(bucket, {
+        bucket,
+        label,
+        prompts: 0,
+        ...(isIdeServiceKey(selectedModelService)
+          ? { tool: selectedModelService }
+          : { service: webServiceFromFilterKey(selectedModelService) })
+      });
+    }
+
+    return [...byBucket.values()].sort((a, b) => {
+      const promptDelta = (b.prompts ?? 0) - (a.prompts ?? 0);
+      if (promptDelta !== 0) return promptDelta;
+      const aLabel = isIdeServiceKey(selectedModelService)
+        ? formatIdeModelLabel(a as IdeStatsPayload["model_buckets"][number])
+        : (a.label || a.bucket);
+      const bLabel = isIdeServiceKey(selectedModelService)
+        ? formatIdeModelLabel(b as IdeStatsPayload["model_buckets"][number])
+        : (b.label || b.bucket);
+      return aLabel.localeCompare(bLabel);
+    });
+  }, [
+    selectedModelService,
+    modelCatalogWeb,
+    modelCatalogIde,
+    statsGroupMode,
+    displayIdeStats,
+    displayStats
+  ]);
+
+  const modelBucketColors = useMemo(() => {
+    const map = new Map<string, string>();
+    modelOptionsForSelectedService.forEach((row, index) => {
+      map.set(row.bucket, modelColorForService(selectedModelService, index, modelOptionsForSelectedService.length));
+    });
+    return map;
+  }, [modelOptionsForSelectedService, selectedModelService]);
 
   const activeModelChartSeries = useMemo((): ModelChartSeries[] => {
     if (statsGroupMode !== "model") return [];
@@ -1951,11 +2026,11 @@ export function StatisticsClient() {
         return {
           bucket: row.bucket,
           label,
-          color: MODEL_SUBPALETTE[index % MODEL_SUBPALETTE.length] ?? COLOR_UNKNOWN,
+          color: modelBucketColors.get(row.bucket) ?? COLOR_UNKNOWN,
           dataKey: modelSeriesDataKey(row.bucket)
         };
       });
-  }, [statsGroupMode, modelOptionsForSelectedService, selectedModelBuckets, selectedModelService]);
+  }, [statsGroupMode, modelOptionsForSelectedService, selectedModelBuckets, selectedModelService, modelBucketColors]);
 
   const statsGranularity = displayStats?.granularity ?? displayIdeStats?.granularity ?? granularity;
 
@@ -2613,13 +2688,6 @@ export function StatisticsClient() {
     return PROMPT_VOLUME_AI_FILTERS.filter((f) => effectivePromptVolumeAiFilters[f.key]).length;
   }, [effectivePromptVolumeAiFilters]);
 
-  const engagementInstantTotalMinutes = useMemo(() => {
-    if (engagementView !== "instant") return null;
-    const pies = statsGroupMode === "model" ? engagementByModelPies : engagementByServicePies;
-    const total = pies.reduce((sum, pie) => sum + pie.totalMinutes, 0);
-    return total > 0 ? Math.round(total * 10) / 10 : null;
-  }, [engagementView, statsGroupMode, engagementByModelPies, engagementByServicePies]);
-
   const promptLengthChartRows = useMemo(() => {
     const rows: Array<{ label: string; avg_words: number; fill: string; key: string }> = [];
 
@@ -2951,62 +3019,65 @@ export function StatisticsClient() {
                 : undefined
             }
           >
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-faint">Range</span>
-                {([7, 14, 30, 90] as const).map((d) => (
-                  <button
-                    key={d}
-                    type="button"
-                    onClick={() => setDays(d)}
-                    className={`rounded-md px-2 py-0.5 text-xs font-medium ${
-                      days === d ? "bg-ink text-cream" : "border border-line text-faint hover:bg-cream-dark"
-                    }`}
-                  >
-                    {d}d
-                  </button>
-                ))}
-              </div>
-              <div className="hidden h-5 w-px shrink-0 bg-line sm:block" aria-hidden />
-              <StatsGroupModeToggle value={statsGroupMode} onChange={setStatsGroupMode} />
-              {statsGroupMode === "model" ? (
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-faint">Range</span>
+                  {([7, 14, 30, 90] as const).map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => setDays(d)}
+                      className={`rounded-md px-2 py-0.5 text-xs font-medium ${
+                        days === d ? "bg-ink text-cream" : "border border-line text-faint hover:bg-cream-dark"
+                      }`}
+                    >
+                      {d}d
+                    </button>
+                  ))}
+                </div>
+                <div className="hidden h-5 w-px shrink-0 bg-line sm:block" aria-hidden />
+                <StatsGroupModeToggle value={statsGroupMode} onChange={setStatsGroupMode} />
+                {statsGroupMode === "model" ? (
+                  <label className="flex items-center gap-1.5 text-xs text-faint">
+                    Service
+                    <select
+                      value={selectedModelService}
+                      onChange={(e) => setSelectedModelService(e.target.value as PromptVolumeAiKey)}
+                      className="max-w-[10rem] rounded-md border border-line bg-cream px-1.5 py-0.5 text-xs text-ink"
+                    >
+                      {PROMPT_VOLUME_AI_FILTERS.map((filter) => (
+                        <option key={filter.key} value={filter.key}>
+                          {filter.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
                 <label className="flex items-center gap-1.5 text-xs text-faint">
-                  Service
+                  Buckets
                   <select
-                    value={selectedModelService}
-                    onChange={(e) => setSelectedModelService(e.target.value as PromptVolumeAiKey)}
-                    className="max-w-[10rem] rounded-md border border-line bg-cream px-1.5 py-0.5 text-xs text-ink"
+                    value={granularity}
+                    onChange={(e) => setGranularity(e.target.value === "week" ? "week" : "day")}
+                    className="rounded-md border border-line bg-cream-dark px-1.5 py-0.5 text-xs text-ink"
                   >
-                    {PROMPT_VOLUME_AI_FILTERS.map((filter) => (
-                      <option key={filter.key} value={filter.key}>
-                        {filter.label}
-                      </option>
-                    ))}
+                    <option value="day">Daily</option>
+                    <option value="week">Weekly (UTC)</option>
                   </select>
                 </label>
-              ) : null}
-              <label className="flex items-center gap-1.5 text-xs text-faint">
-                Buckets
-                <select
-                  value={granularity}
-                  onChange={(e) => setGranularity(e.target.value === "week" ? "week" : "day")}
-                  className="rounded-md border border-line bg-cream-dark px-1.5 py-0.5 text-xs text-ink"
+                <button
+                  type="button"
+                  disabled={statsLoading || ideStatsLoading || !user}
+                  onClick={refreshAllStats}
+                  className="rounded-md border border-line px-2 py-0.5 text-xs text-muted hover:bg-cream-dark disabled:opacity-50"
                 >
-                  <option value="day">Daily</option>
-                  <option value="week">Weekly (UTC)</option>
-                </select>
-              </label>
-              <button
-                type="button"
-                disabled={statsLoading || ideStatsLoading || !user}
-                onClick={refreshAllStats}
-                className="rounded-md border border-line px-2 py-0.5 text-xs text-muted hover:bg-cream-dark disabled:opacity-50"
-              >
-                {statsLoading || ideStatsLoading ? "Refreshing…" : "Refresh"}
-              </button>
-              <div className="hidden h-5 w-px shrink-0 bg-line sm:block" aria-hidden />
-              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
-                <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-faint">Show</span>
+                  {statsLoading || ideStatsLoading ? "Refreshing…" : "Refresh"}
+                </button>
+              </div>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-2 border-t border-line/70 pt-2">
+                <span className="mr-1 shrink-0 text-[10px] font-semibold uppercase tracking-wider text-faint">
+                  Show
+                </span>
                 {statsGroupMode === "service"
                   ? PROMPT_VOLUME_AI_FILTERS.map((filter) => (
                       <PromptVolumeAiToggleButton
@@ -3026,14 +3097,11 @@ export function StatisticsClient() {
                         ? formatIdeModelLabel(row as IdeStatsPayload["model_buckets"][number])
                         : ("label" in row && row.label) || row.bucket;
                       const pressed = selectedModelBuckets.has(bucket);
-                      const filterMeta = PROMPT_VOLUME_AI_FILTERS.find(
-                        (f) => f.key === selectedModelService
-                      );
                       return (
                         <PromptVolumeAiToggleButton
                           key={bucket}
                           label={label}
-                          color={filterMeta?.color ?? COLOR_UNKNOWN}
+                          color={modelBucketColors.get(bucket) ?? COLOR_UNKNOWN}
                           pressed={pressed}
                           disabled={pressed && selectedModelBuckets.size <= 1}
                           onToggle={() => toggleModelBucket(bucket)}
@@ -3201,8 +3269,10 @@ export function StatisticsClient() {
                     {statsGroupMode === "model" ? "Screen time by model" : "Screen time by service"}
                   </h2>
                   <div className="flex flex-wrap items-center gap-2">
+                    {screenTimeView === "instant" ? (
+                      <p className="text-xs font-medium tabular-nums text-muted">Last {days} days</p>
+                    ) : null}
                     <StatsChartHorizonToggle value={screenTimeView} onChange={setScreenTimeView} />
-                    <p className="text-xs font-medium tabular-nums text-muted">Last {days} days</p>
                   </div>
                 </div>
                 <p className="mb-3 text-[11px] text-faint">
@@ -3403,13 +3473,13 @@ export function StatisticsClient() {
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">
                     How you spend your time
-                    {engagementView === "instant" && engagementInstantTotalMinutes != null ? (
-                      <span className="ml-1.5 normal-case tracking-normal text-muted">
-                        ({engagementInstantTotalMinutes} min)
-                      </span>
-                    ) : null}
                   </h2>
-                  <StatsChartHorizonToggle value={engagementView} onChange={setEngagementView} />
+                  <div className="flex flex-wrap items-center gap-2">
+                    {engagementView === "instant" ? (
+                      <p className="text-xs font-medium tabular-nums text-muted">Last {days} days</p>
+                    ) : null}
+                    <StatsChartHorizonToggle value={engagementView} onChange={setEngagementView} />
+                  </div>
                 </div>
                 {engagementView === "over_time" ? (
                   <div key="engagement-over-time">

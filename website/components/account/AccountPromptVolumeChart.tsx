@@ -21,7 +21,7 @@ const COLOR_CODEX = "#22c997";
 const COLOR_CLAUDE_WEB = "#b86b4a";
 const COLOR_CLAUDE_CODE = "#e8956f";
 const COLOR_GEMINI_WEB = "#4285f4";
-const COLOR_CURSOR = "#00D8FF";
+const COLOR_CURSOR = "#9333ea";
 const COLOR_UNKNOWN = "#64748b";
 const COLOR_VOLUME_TREND = "#525252";
 

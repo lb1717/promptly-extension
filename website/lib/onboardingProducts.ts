@@ -59,6 +59,6 @@ export const ONBOARDING_PRODUCT_OPTIONS: Array<{
     key: "cursor",
     label: "Cursor",
     description: "Cursor IDE agent",
-    accent: "#00D8FF"
+    accent: "#9333ea"
   }
 ];

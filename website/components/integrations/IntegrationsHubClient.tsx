@@ -8,7 +8,7 @@ import type { OsId } from "./integrationOs";
 
 const TOOL_TABS: { id: IdeToolId; label: string; accent: string }[] = [
   { id: "claude_code", label: "Claude Code", accent: "#D97757" },
-  { id: "cursor", label: "Cursor", accent: "#00D8FF" },
+  { id: "cursor", label: "Cursor", accent: "#9333ea" },
   { id: "codex", label: "Codex", accent: "#10A37F" }
 ];
 

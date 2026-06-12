@@ -14,7 +14,7 @@ const OS_TABS: { id: OsId; label: string }[] = [
 
 const TOOL_META: { id: IdeToolId; label: string; accent: string }[] = [
   { id: "claude_code", label: "Claude Code", accent: "#D97757" },
-  { id: "cursor", label: "Cursor", accent: "#00D8FF" },
+  { id: "cursor", label: "Cursor", accent: "#9333ea" },
   { id: "codex", label: "Codex", accent: "#10A37F" }
 ];
 

@@ -2607,8 +2607,37 @@ export async function getAccountIdeUsageStats(
       device_count: connectedByTool[tool].count,
       last_seen_at_ms: connectedByTool[tool].lastSeen
     })),
-    model_buckets: [...modelBucketAgg.values()]
-      .filter((row) => row.prompts > 0 || row.draftSamples > 0 || row.wordSamples > 0)
+    model_buckets: (() => {
+      if (trackModelSeries && scopeFilter?.ideTool) {
+        for (const [modelSlug, engagementRow] of modelEngagementMsByModel.entries()) {
+          if (engagementRow.screen_ms <= 0) continue;
+          const modelKey = `${scopeFilter.ideTool}:${modelSlug}`;
+          if (modelBucketAgg.has(modelKey)) continue;
+          modelBucketAgg.set(modelKey, {
+            tool: scopeFilter.ideTool,
+            bucket: modelSlug,
+            label: engagementRow.label,
+            prompts: 0,
+            latencyTotalMs: 0,
+            latencySamples: 0,
+            wordTotal: 0,
+            wordSamples: 0,
+            draftTotalMs: 0,
+            draftSamples: 0
+          });
+        }
+      }
+      return [...modelBucketAgg.values()];
+    })()
+      .filter(
+        (row) =>
+          row.prompts > 0 ||
+          row.draftSamples > 0 ||
+          row.wordSamples > 0 ||
+          row.latencySamples > 0 ||
+          (trackModelSeries &&
+            (modelEngagementMsByModel.get(row.bucket)?.screen_ms ?? 0) > 0)
+      )
       .sort((a, b) => b.prompts - a.prompts || a.tool.localeCompare(b.tool))
       .map((row) => ({
         tool: row.tool,
@@ -3305,6 +3334,9 @@ export async function getAccountUsageStatsExtended(
           row.host_latency_sum_ms += hlMs;
           row.waiting_sum_ms += hlMs;
           row.waiting_samples += 1;
+          if (trackWebModelSeries && svc === webModelService) {
+            addWebModelEngagementMs(bucketKeyForDay(utcDay), mb, hostLabel, "waiting", hlMs);
+          }
         }
         if (draftWallMs !== null && draftWallMs > 0) {
           row.draft_wall_sum_ms += draftWallMs;
@@ -3768,8 +3800,24 @@ export async function getAccountUsageStatsExtended(
       prompts: v.prompts
     }));
 
+  if (trackWebModelSeries && webModelService) {
+    for (const [modelSlug, engagementRow] of webModelEngagementMsByModel.entries()) {
+      if (engagementRow.screen_ms <= 0) continue;
+      const catalogKey = `${webModelService}:${modelSlug}`;
+      if (modelCatalogAgg.has(catalogKey)) continue;
+      modelCatalogAgg.set(catalogKey, {
+        service: webModelService,
+        bucket: modelSlug,
+        label: engagementRow.label,
+        prompts: 0,
+        wordTotal: 0,
+        wordSamples: 0
+      });
+    }
+  }
+
   const model_catalog = [...modelCatalogAgg.values()]
-    .filter((row) => row.prompts > 0)
+    .filter((row) => row.prompts > 0 || (trackWebModelSeries && row.service === webModelService))
     .sort(
       (a, b) =>
         b.prompts - a.prompts ||
