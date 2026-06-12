@@ -455,6 +455,15 @@ type ExtendedStatsPayload = {
     mode: { auto: number; improve: number; generate: number };
     model_buckets: Array<{ bucket: string; exemplar_label: string | null; prompts: number }>;
   };
+  model_catalog?: Array<{
+    service: PromptlySvc;
+    bucket: string;
+    label: string | null;
+    prompts: number;
+    avg_words: number | null;
+    word_samples: number;
+  }>;
+  avg_words_by_service?: Record<PromptlySvc, { avg_words: number | null; samples: number }>;
   host_passive_listener: HostPassiveLite;
   quota_exceeded?: boolean;
   footnotes: string[];
@@ -977,6 +986,48 @@ const DEFAULT_PROMPT_VOLUME_AI_FILTERS: PromptVolumeAiFilterState = {
   codex: true
 };
 
+type StatsGroupMode = "service" | "model";
+
+const IDE_SERVICE_KEYS = new Set<PromptVolumeAiKey>(["claude_code", "cursor", "codex"]);
+
+function isIdeServiceKey(key: PromptVolumeAiKey): key is IdeToolKey {
+  return IDE_SERVICE_KEYS.has(key);
+}
+
+function webServiceFromFilterKey(key: PromptVolumeAiKey): PromptlySvc {
+  return key === "other" ? "unknown" : (key as PromptlySvc);
+}
+
+function buildStatsScopeSearchParams(
+  mode: StatsGroupMode,
+  modelService: PromptVolumeAiKey,
+  modelBuckets: Set<string>
+): URLSearchParams {
+  const params = new URLSearchParams();
+  if (mode !== "model") return params;
+  if (isIdeServiceKey(modelService)) {
+    params.set("tool", modelService);
+  } else {
+    params.set("service", webServiceFromFilterKey(modelService));
+  }
+  if (modelBuckets.size) {
+    params.set("model_buckets", Array.from(modelBuckets).join(","));
+  }
+  return params;
+}
+
+function singleServiceFilterState(service: PromptVolumeAiKey): PromptVolumeAiFilterState {
+  return {
+    claude: service === "claude",
+    gemini: service === "gemini",
+    chatgpt: service === "chatgpt",
+    other: service === "other",
+    claude_code: service === "claude_code",
+    cursor: service === "cursor",
+    codex: service === "codex"
+  };
+}
+
 function mergePromptVolumeTimelines(
   web: CombinedPromptBucket[],
   ide: Array<{ bucket: string; claude_code: number; cursor: number; codex: number }>
@@ -1464,6 +1515,44 @@ function StatsChartHorizonToggle({
   );
 }
 
+function StatsGroupModeToggle({
+  value,
+  onChange
+}: {
+  value: StatsGroupMode;
+  onChange: (value: StatsGroupMode) => void;
+}) {
+  const options: Array<{ value: StatsGroupMode; label: string }> = [
+    { value: "service", label: "By service" },
+    { value: "model", label: "By model" }
+  ];
+  return (
+    <div
+      className="inline-flex shrink-0 rounded-lg border border-line bg-cream p-0.5"
+      role="tablist"
+      aria-label="Group statistics by"
+    >
+      {options.map((opt) => {
+        const selected = value === opt.value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            onClick={() => onChange(opt.value)}
+            className={`rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition-colors ${
+              selected ? "bg-ink text-cream" : "text-faint hover:text-ink"
+            }`}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function ModeMiniChart({
   modes
 }: {
@@ -1507,6 +1596,13 @@ export function StatisticsClient() {
   });
   const [promptVolumeAiFilters, setPromptVolumeAiFilters] =
     useState<PromptVolumeAiFilterState>(DEFAULT_PROMPT_VOLUME_AI_FILTERS);
+  const [statsGroupMode, setStatsGroupMode] = useState<StatsGroupMode>("service");
+  const [selectedModelService, setSelectedModelService] = useState<PromptVolumeAiKey>("chatgpt");
+  const [selectedModelBuckets, setSelectedModelBuckets] = useState<Set<string>>(new Set());
+  const [modelCatalogWeb, setModelCatalogWeb] = useState<
+    NonNullable<ExtendedStatsPayload["model_catalog"]>
+  >([]);
+  const [modelCatalogIde, setModelCatalogIde] = useState<IdeStatsPayload["model_buckets"]>([]);
   const [screenTimeView, setScreenTimeView] = useState<StatsChartHorizon>("instant");
   const [engagementView, setEngagementView] = useState<StatsChartHorizon>("instant");
   const [reportGenerating, setReportGenerating] = useState(false);
@@ -1559,7 +1655,15 @@ export function StatisticsClient() {
     });
   }, []);
 
-  const loadExtended = useCallback(async (current: User | null, d: number, g: "day" | "week", refresh = false) => {
+  const loadExtended = useCallback(
+    async (
+      current: User | null,
+      d: number,
+      g: "day" | "week",
+      scopeParams?: URLSearchParams,
+      refresh = false,
+      captureCatalog = false
+    ) => {
     if (!current) {
       setStats(null);
       return;
@@ -1573,6 +1677,9 @@ export function StatisticsClient() {
         granularity: g
       });
       if (refresh) params.set("refresh", "1");
+      for (const [key, value] of scopeParams?.entries() ?? []) {
+        params.set(key, value);
+      }
       const res = await fetch(`/api/account/stats/extended?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -1581,6 +1688,9 @@ export function StatisticsClient() {
         throw new Error(data?.error || `Request failed (${res.status})`);
       }
       setStats(data as ExtendedStatsPayload);
+      if (captureCatalog && Array.isArray(data.model_catalog)) {
+        setModelCatalogWeb(data.model_catalog);
+      }
     } catch (e) {
       const raw = String(e instanceof Error ? e.message : e);
       setStatsError(
@@ -1591,7 +1701,9 @@ export function StatisticsClient() {
     } finally {
       setStatsLoading(false);
     }
-  }, []);
+  },
+    []
+  );
 
   const loadIdeStats = useCallback(
     async (
@@ -1600,7 +1712,9 @@ export function StatisticsClient() {
       g: "day" | "week",
       emailSelection: SelectedEmailsByTool,
       availableByTool?: Record<IdeToolKey, string[]>,
-      refresh = false
+      scopeParams?: URLSearchParams,
+      refresh = false,
+      captureCatalog = false
     ) => {
     if (!current) {
       setIdeStats(null);
@@ -1616,6 +1730,9 @@ export function StatisticsClient() {
       });
       if (refresh) params.set("refresh", "1");
       appendIdeEmailFilterParams(params, emailSelection, availableByTool);
+      for (const [key, value] of scopeParams?.entries() ?? []) {
+        params.set(key, value);
+      }
       const res = await fetch(`/api/account/stats/ide?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -1624,6 +1741,9 @@ export function StatisticsClient() {
         throw new Error(data?.error || `Request failed (${res.status})`);
       }
       setIdeStats(data as IdeStatsPayload);
+      if (captureCatalog && Array.isArray(data.model_buckets)) {
+        setModelCatalogIde(data.model_buckets);
+      }
     } catch (e) {
       const raw = String(e instanceof Error ? e.message : e);
       setIdeStatsError(
@@ -1642,7 +1762,8 @@ export function StatisticsClient() {
     (
       emailSelection: SelectedEmailsByTool,
       availableByTool?: Record<IdeToolKey, string[]>,
-      refresh = false
+      refresh = false,
+      scopeParams?: URLSearchParams
     ) => {
       if (!user) return;
       if (ideStatsReloadTimerRef.current) {
@@ -1650,25 +1771,20 @@ export function StatisticsClient() {
       }
       ideStatsReloadTimerRef.current = setTimeout(() => {
         ideStatsReloadTimerRef.current = null;
-        void loadIdeStats(user, days, granularity, emailSelection, availableByTool, refresh);
+        void loadIdeStats(
+          user,
+          days,
+          granularity,
+          emailSelection,
+          availableByTool,
+          scopeParams,
+          refresh,
+          statsGroupMode !== "model"
+        );
       }, 300);
     },
-    [user, days, granularity, loadIdeStats]
+    [user, days, granularity, loadIdeStats, statsGroupMode]
   );
-
-  const toggleAgentEmail = useCallback((tool: IdeToolKey, email: string) => {
-    setSelectedEmailsByTool((prev) => {
-      const current = new Set(prev[tool]);
-      if (current.has(email)) {
-        current.delete(email);
-      } else {
-        current.add(email);
-      }
-      const next = { ...prev, [tool]: current };
-      scheduleIdeStatsReload(next, ideStats?.agent_emails_by_tool);
-      return next;
-    });
-  }, [scheduleIdeStatsReload, ideStats?.agent_emails_by_tool]);
 
   useEffect(() => {
     return () => {
@@ -1678,11 +1794,80 @@ export function StatisticsClient() {
     };
   }, []);
 
+  const statsScopeParams = useMemo(
+    () => buildStatsScopeSearchParams(statsGroupMode, selectedModelService, selectedModelBuckets),
+    [statsGroupMode, selectedModelService, selectedModelBuckets]
+  );
+
+  const effectivePromptVolumeAiFilters = useMemo(
+    () =>
+      statsGroupMode === "model"
+        ? singleServiceFilterState(selectedModelService)
+        : promptVolumeAiFilters,
+    [statsGroupMode, selectedModelService, promptVolumeAiFilters]
+  );
+
+  const modelOptionsForSelectedService = useMemo(() => {
+    if (isIdeServiceKey(selectedModelService)) {
+      return modelCatalogIde
+        .filter((row) => row.tool === selectedModelService && row.prompts > 0)
+        .sort(
+          (a, b) =>
+            b.prompts - a.prompts || formatIdeModelLabel(a).localeCompare(formatIdeModelLabel(b))
+        );
+    }
+    const svc = webServiceFromFilterKey(selectedModelService);
+    return modelCatalogWeb
+      .filter((row) => row.service === svc && row.prompts > 0)
+      .sort(
+        (a, b) =>
+          b.prompts - a.prompts ||
+          (a.label || a.bucket).localeCompare(b.label || b.bucket)
+      );
+  }, [selectedModelService, modelCatalogWeb, modelCatalogIde]);
+
+  const toggleAgentEmail = useCallback(
+    (tool: IdeToolKey, email: string) => {
+      setSelectedEmailsByTool((prev) => {
+        const current = new Set(prev[tool]);
+        if (current.has(email)) {
+          current.delete(email);
+        } else {
+          current.add(email);
+        }
+        const next = { ...prev, [tool]: current };
+        scheduleIdeStatsReload(next, ideStats?.agent_emails_by_tool, false, statsScopeParams);
+        return next;
+      });
+    },
+    [scheduleIdeStatsReload, ideStats?.agent_emails_by_tool, statsScopeParams]
+  );
+
   const refreshAllStats = useCallback(() => {
     if (!user) return;
-    void loadExtended(user, days, granularity, true);
-    void loadIdeStats(user, days, granularity, selectedEmailsByTool, ideStats?.agent_emails_by_tool, true);
-  }, [user, days, granularity, selectedEmailsByTool, ideStats?.agent_emails_by_tool, loadExtended, loadIdeStats]);
+    const captureCatalog = statsGroupMode !== "model";
+    void loadExtended(user, days, granularity, statsScopeParams, true, captureCatalog);
+    void loadIdeStats(
+      user,
+      days,
+      granularity,
+      selectedEmailsByTool,
+      ideStats?.agent_emails_by_tool,
+      statsScopeParams,
+      true,
+      captureCatalog
+    );
+  }, [
+    user,
+    days,
+    granularity,
+    selectedEmailsByTool,
+    ideStats?.agent_emails_by_tool,
+    loadExtended,
+    loadIdeStats,
+    statsScopeParams,
+    statsGroupMode
+  ]);
 
   useEffect(() => {
     setSelectedEmailsByTool({
@@ -1722,13 +1907,60 @@ export function StatisticsClient() {
 
   useEffect(() => {
     if (!user || loading) return;
-    void loadExtended(user, days, granularity);
-    void loadIdeStats(user, days, granularity, {
-      claude_code: new Set(),
-      cursor: new Set(),
-      codex: new Set()
+    const captureCatalog = statsGroupMode !== "model";
+    void loadExtended(user, days, granularity, statsScopeParams, false, captureCatalog);
+    void loadIdeStats(
+      user,
+      days,
+      granularity,
+      selectedEmailsByTool,
+      ideStats?.agent_emails_by_tool,
+      statsScopeParams,
+      false,
+      captureCatalog
+    );
+  }, [
+    user,
+    loading,
+    days,
+    granularity,
+    statsScopeParams,
+    statsGroupMode,
+    loadExtended,
+    loadIdeStats
+  ]);
+
+  const prevModelServiceRef = useRef(selectedModelService);
+  useEffect(() => {
+    if (statsGroupMode !== "model") {
+      prevModelServiceRef.current = selectedModelService;
+      return;
+    }
+    if (prevModelServiceRef.current === selectedModelService && selectedModelBuckets.size > 0) {
+      return;
+    }
+    prevModelServiceRef.current = selectedModelService;
+    const buckets = new Set<string>();
+    for (const row of modelOptionsForSelectedService) {
+      buckets.add(row.bucket);
+    }
+    setSelectedModelBuckets(buckets);
+  }, [
+    statsGroupMode,
+    selectedModelService,
+    modelOptionsForSelectedService,
+    selectedModelBuckets.size
+  ]);
+
+  const toggleModelBucket = useCallback((bucket: string) => {
+    setSelectedModelBuckets((prev) => {
+      if (prev.has(bucket) && prev.size <= 1) return prev;
+      const next = new Set(prev);
+      if (next.has(bucket)) next.delete(bucket);
+      else next.add(bucket);
+      return next;
     });
-  }, [user, loading, days, granularity, loadExtended, loadIdeStats]);
+  }, []);
 
   const stackedTimeline = useMemo((): Array<PromptVolumeChartBucket & { label: string }> => {
     const webTimeline = displayStats?.combined_prompt_timeline ?? [];
@@ -1742,14 +1974,14 @@ export function StatisticsClient() {
   }, [displayStats, displayIdeStats, granularity]);
 
   const promptVolumeChartRows = useMemo(() => {
-    const totals = stackedTimeline.map((row) => promptVolumeBucketTotal(row, promptVolumeAiFilters));
+    const totals = stackedTimeline.map((row) => promptVolumeBucketTotal(row, effectivePromptVolumeAiFilters));
     const trend = smoothTrendValues(totals);
     return stackedTimeline.map((row, index) => ({
       ...row,
       volume_total: totals[index] ?? 0,
       volume_trend: trend[index] ?? 0
     }));
-  }, [stackedTimeline, promptVolumeAiFilters]);
+  }, [stackedTimeline, effectivePromptVolumeAiFilters]);
 
   const promptVolumePeriodChange = useMemo(
     () =>
@@ -1757,14 +1989,14 @@ export function StatisticsClient() {
         stackedTimeline,
         days,
         displayStats?.granularity ?? granularity,
-        promptVolumeAiFilters
-      ),
-    [stackedTimeline, days, displayStats?.granularity, granularity, promptVolumeAiFilters]
+        effectivePromptVolumeAiFilters
+    ),
+    [stackedTimeline, days, displayStats?.granularity, granularity, effectivePromptVolumeAiFilters]
   );
 
   const promptVolumeAiEnabledCount = useMemo(
-    () => PROMPT_VOLUME_AI_FILTERS.filter((f) => promptVolumeAiFilters[f.key]).length,
-    [promptVolumeAiFilters]
+    () => PROMPT_VOLUME_AI_FILTERS.filter((f) => effectivePromptVolumeAiFilters[f.key]).length,
+    [effectivePromptVolumeAiFilters]
   );
 
   const togglePromptVolumeAiFilter = useCallback((key: PromptVolumeAiKey) => {
@@ -1981,7 +2213,7 @@ export function StatisticsClient() {
     const rows: Array<{ service: string; key: string; minutes: number; fill: string }> = [];
     if (displayStats?.screen_time_by_service) {
       for (const serviceKey of ["chatgpt", "claude", "gemini"] as const) {
-        if (!promptVolumeAiFilters[serviceKey]) continue;
+        if (!effectivePromptVolumeAiFilters[serviceKey]) continue;
         const row = displayStats.screen_time_by_service[serviceKey] ?? EMPTY_SERVICE_SCREEN_TIME;
         rows.push({
           service: svcLabel(serviceKey),
@@ -2004,7 +2236,7 @@ export function StatisticsClient() {
         { key: "codex", label: "Codex", color: COLOR_CODEX }
       ];
       for (const agent of agents) {
-        if (!promptVolumeAiFilters[agent.key]) continue;
+        if (!effectivePromptVolumeAiFilters[agent.key]) continue;
         rows.push({
           service: agent.label,
           key: agent.key,
@@ -2014,7 +2246,7 @@ export function StatisticsClient() {
       }
     }
     return [...rows].sort((a, b) => b.minutes - a.minutes || a.service.localeCompare(b.service));
-  }, [displayStats, displayIdeStats, promptVolumeAiFilters]);
+  }, [displayStats, displayIdeStats, effectivePromptVolumeAiFilters]);
 
   const screenTimeByServiceChartHasData = useMemo(
     () => screenTimeByServiceRows.some((row) => row.minutes > 0),
@@ -2047,7 +2279,7 @@ export function StatisticsClient() {
         { key: "gemini", filterKey: "gemini", accent: COLOR_GEMINI_WEB }
       ];
       for (const svc of webServices) {
-        if (!promptVolumeAiFilters[svc.filterKey]) continue;
+        if (!effectivePromptVolumeAiFilters[svc.filterKey]) continue;
         const row = displayStats.screen_time_by_service[svc.key] ?? EMPTY_SERVICE_SCREEN_TIME;
         const slices: EngagementSlice[] = [
           { name: "Drafting prompt", value: row.drafting_minutes, fill: COLOR_DRAFTING },
@@ -2075,7 +2307,7 @@ export function StatisticsClient() {
         { key: "codex", label: "Codex", accent: COLOR_CODEX, filterKey: "codex" }
       ];
       for (const agent of agents) {
-        if (!promptVolumeAiFilters[agent.filterKey]) continue;
+        if (!effectivePromptVolumeAiFilters[agent.filterKey]) continue;
         const row = ideEngagement[agent.key];
         if (!row) continue;
         const slices: EngagementSlice[] = [
@@ -2098,16 +2330,16 @@ export function StatisticsClient() {
     return pies
       .filter((pie) => pie.hasData)
       .sort((a, b) => b.totalMinutes - a.totalMinutes || a.label.localeCompare(b.label));
-  }, [displayStats, displayIdeStats, promptVolumeAiFilters]);
+  }, [displayStats, displayIdeStats, effectivePromptVolumeAiFilters]);
 
   const includeWebEngagementTimeline = useMemo(
-    () => (["chatgpt", "claude", "gemini"] as const).some((key) => promptVolumeAiFilters[key]),
-    [promptVolumeAiFilters]
+    () => (["chatgpt", "claude", "gemini"] as const).some((key) => effectivePromptVolumeAiFilters[key]),
+    [effectivePromptVolumeAiFilters]
   );
 
   const includeIdeEngagementTimeline = useMemo(
-    () => (["claude_code", "cursor", "codex"] as const).some((key) => promptVolumeAiFilters[key]),
-    [promptVolumeAiFilters]
+    () => (["claude_code", "cursor", "codex"] as const).some((key) => effectivePromptVolumeAiFilters[key]),
+    [effectivePromptVolumeAiFilters]
   );
 
   const screenTimeOverTimeChartRows = useMemo(() => {
@@ -2120,10 +2352,10 @@ export function StatisticsClient() {
       label: g === "week" ? `wk ${formatShortDay(row.bucket)}` : formatShortDay(row.bucket),
       has_data: SCREEN_TIME_OVER_TIME_FILTERS.some(
         (filter) =>
-          promptVolumeAiFilters[filter.key] && (row[SCREEN_TIME_TIMELINE_KEY[filter.key]] ?? 0) > 0
+          effectivePromptVolumeAiFilters[filter.key] && (row[SCREEN_TIME_TIMELINE_KEY[filter.key]] ?? 0) > 0
       )
     }));
-  }, [displayStats, displayIdeStats, granularity, promptVolumeAiFilters]);
+  }, [displayStats, displayIdeStats, granularity, effectivePromptVolumeAiFilters]);
 
   const screenTimeOverTimeHasData = useMemo(
     () => screenTimeOverTimeChartRows.some((row) => row.has_data),
@@ -2161,8 +2393,89 @@ export function StatisticsClient() {
   );
 
   const engagementByServiceEnabledCount = useMemo(() => {
-    return PROMPT_VOLUME_AI_FILTERS.filter((f) => promptVolumeAiFilters[f.key]).length;
-  }, [promptVolumeAiFilters]);
+    return PROMPT_VOLUME_AI_FILTERS.filter((f) => effectivePromptVolumeAiFilters[f.key]).length;
+  }, [effectivePromptVolumeAiFilters]);
+
+  const engagementInstantTotalMinutes = useMemo(() => {
+    if (engagementView !== "instant") return null;
+    const total = engagementByServicePies.reduce((sum, pie) => sum + pie.totalMinutes, 0);
+    return total > 0 ? Math.round(total * 10) / 10 : null;
+  }, [engagementView, engagementByServicePies]);
+
+  const promptLengthChartRows = useMemo(() => {
+    const rows: Array<{ label: string; avg_words: number; fill: string; key: string }> = [];
+
+    if (statsGroupMode === "model") {
+      const filterMeta = PROMPT_VOLUME_AI_FILTERS.find((f) => f.key === selectedModelService);
+      for (const bucket of selectedModelBuckets) {
+        if (isIdeServiceKey(selectedModelService)) {
+          const row = modelCatalogIde.find(
+            (entry) => entry.tool === selectedModelService && entry.bucket === bucket
+          );
+          if (row?.avg_words && row.avg_words > 0) {
+            rows.push({
+              label: formatIdeModelLabel(row),
+              avg_words: row.avg_words,
+              fill: filterMeta?.color ?? COLOR_UNKNOWN,
+              key: `${row.tool}:${row.bucket}`
+            });
+          }
+        } else {
+          const svc = webServiceFromFilterKey(selectedModelService);
+          const row = modelCatalogWeb.find(
+            (entry) => entry.service === svc && entry.bucket === bucket
+          );
+          if (row?.avg_words && row.avg_words > 0) {
+            rows.push({
+              label: row.label?.trim() || row.bucket,
+              avg_words: row.avg_words,
+              fill: filterMeta?.color ?? COLOR_UNKNOWN,
+              key: `${row.service}:${row.bucket}`
+            });
+          }
+        }
+      }
+    } else {
+      for (const filter of PROMPT_VOLUME_AI_FILTERS) {
+        if (!effectivePromptVolumeAiFilters[filter.key]) continue;
+        if (isIdeServiceKey(filter.key)) {
+          const avg = displayIdeStats?.avg_words_by_tool?.[filter.key];
+          if (avg?.avg_words && avg.avg_words > 0) {
+            rows.push({
+              label: filter.label,
+              avg_words: avg.avg_words,
+              fill: filter.color,
+              key: filter.key
+            });
+          }
+        } else {
+          const svc = webServiceFromFilterKey(filter.key);
+          const avg = displayStats?.avg_words_by_service?.[svc];
+          if (avg?.avg_words && avg.avg_words > 0) {
+            rows.push({
+              label: filter.label,
+              avg_words: avg.avg_words,
+              fill: filter.color,
+              key: filter.key
+            });
+          }
+        }
+      }
+    }
+
+    return rows.sort((a, b) => b.avg_words - a.avg_words || a.label.localeCompare(b.label));
+  }, [
+    statsGroupMode,
+    selectedModelService,
+    selectedModelBuckets,
+    modelCatalogIde,
+    modelCatalogWeb,
+    effectivePromptVolumeAiFilters,
+    displayIdeStats,
+    displayStats
+  ]);
+
+  const promptLengthSectionHeight = Math.max(140, promptLengthChartRows.length * 40 + 48);
 
   const ideScreenTimeHasData = useMemo(() => {
     const st = displayIdeStats?.totals.screen_time_minutes;
@@ -2292,16 +2605,16 @@ export function StatisticsClient() {
   const reportTotalScreenTimeMinutes = useMemo(() => {
     if (!displayStats?.screen_time_by_service) return 0;
     const services: Array<{ key: PromptlySvc; on: boolean }> = [
-      { key: "chatgpt", on: promptVolumeAiFilters.chatgpt },
-      { key: "claude", on: promptVolumeAiFilters.claude },
-      { key: "gemini", on: promptVolumeAiFilters.gemini },
-      { key: "unknown", on: promptVolumeAiFilters.other }
+      { key: "chatgpt", on: effectivePromptVolumeAiFilters.chatgpt },
+      { key: "claude", on: effectivePromptVolumeAiFilters.claude },
+      { key: "gemini", on: effectivePromptVolumeAiFilters.gemini },
+      { key: "unknown", on: effectivePromptVolumeAiFilters.other }
     ];
     return services.reduce((sum, svc) => {
       if (!svc.on) return sum;
       return sum + (displayStats.screen_time_by_service[svc.key]?.total_minutes ?? 0);
     }, 0);
-  }, [displayStats, promptVolumeAiFilters]);
+  }, [displayStats, effectivePromptVolumeAiFilters]);
 
   const statisticsReportData = useMemo(() => {
     if (!displayStats || !user) return null;
@@ -2316,7 +2629,7 @@ export function StatisticsClient() {
       userEmail: user.email || "—",
       days,
       granularity: displayStats.granularity ?? granularity,
-      filters: promptVolumeAiFilters,
+      filters: effectivePromptVolumeAiFilters,
       promptVolumeChange: promptVolumePeriodChange,
       combinedTotals: displayStats.combined_totals,
       engagementTotals: {
@@ -2343,7 +2656,7 @@ export function StatisticsClient() {
     user,
     days,
     granularity,
-    promptVolumeAiFilters,
+    effectivePromptVolumeAiFilters,
     promptVolumePeriodChange,
     reportTotalScreenTimeMinutes,
     screenTimeByServiceRows,
@@ -2404,7 +2717,7 @@ export function StatisticsClient() {
         <>
           <div
             data-onboarding-tour="statistics-filters"
-            className="mb-4 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-xl border border-line bg-cream-dark px-3 py-2"
+            className="sticky top-0 z-30 mb-4 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-xl border border-line bg-cream-dark/95 px-3 py-2 shadow-sm backdrop-blur-sm"
           >
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
               <div className="flex flex-wrap items-center gap-1.5">
@@ -2426,9 +2739,15 @@ export function StatisticsClient() {
                 className="hidden h-5 w-px shrink-0 bg-line sm:block"
                 aria-hidden
               />
+              <StatsGroupModeToggle value={statsGroupMode} onChange={setStatsGroupMode} />
+              <div
+                className="hidden h-5 w-px shrink-0 bg-line sm:block"
+                aria-hidden
+              />
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-faint">Show</span>
-                {PROMPT_VOLUME_AI_FILTERS.map((filter) => (
+                {statsGroupMode === "service"
+                  ? PROMPT_VOLUME_AI_FILTERS.map((filter) => (
                   <PromptVolumeAiToggleButton
                     key={filter.key}
                     label={filter.label}
@@ -2439,7 +2758,47 @@ export function StatisticsClient() {
                     }
                     onToggle={() => togglePromptVolumeAiFilter(filter.key)}
                   />
-                ))}
+                ))
+                  : (
+                    <>
+                      <label className="flex items-center gap-1.5 text-xs text-faint">
+                        Service
+                        <select
+                          value={selectedModelService}
+                          onChange={(e) =>
+                            setSelectedModelService(e.target.value as PromptVolumeAiKey)
+                          }
+                          className="max-w-[10rem] rounded-md border border-line bg-cream px-1.5 py-0.5 text-xs text-ink"
+                        >
+                          {PROMPT_VOLUME_AI_FILTERS.map((filter) => (
+                            <option key={filter.key} value={filter.key}>
+                              {filter.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {modelOptionsForSelectedService.map((row) => {
+                        const bucket = row.bucket;
+                        const label = isIdeServiceKey(selectedModelService)
+                          ? formatIdeModelLabel(row as IdeStatsPayload["model_buckets"][number])
+                          : ("label" in row && row.label) || row.bucket;
+                        const pressed = selectedModelBuckets.has(bucket);
+                        const filterMeta = PROMPT_VOLUME_AI_FILTERS.find(
+                          (f) => f.key === selectedModelService
+                        );
+                        return (
+                          <PromptVolumeAiToggleButton
+                            key={bucket}
+                            label={label}
+                            color={filterMeta?.color ?? COLOR_UNKNOWN}
+                            pressed={pressed}
+                            disabled={pressed && selectedModelBuckets.size <= 1}
+                            onToggle={() => toggleModelBucket(bucket)}
+                          />
+                        );
+                      })}
+                    </>
+                  )}
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -2543,7 +2902,7 @@ export function StatisticsClient() {
                     }}
                   />
                   <Legend wrapperStyle={CHART_LEGEND_STYLE} />
-                  {PROMPT_VOLUME_AI_FILTERS.filter((f) => promptVolumeAiFilters[f.key]).map((filter, index, visible) => (
+                  {PROMPT_VOLUME_AI_FILTERS.filter((f) => effectivePromptVolumeAiFilters[f.key]).map((filter, index, visible) => (
                     <Bar
                       key={filter.dataKey}
                       dataKey={filter.dataKey}
@@ -2606,7 +2965,7 @@ export function StatisticsClient() {
                               formatter={(value: number, name: string) => [`${value} min`, name]}
                             />
                             <Legend wrapperStyle={CHART_LEGEND_STYLE} />
-                            {SCREEN_TIME_OVER_TIME_FILTERS.filter((f) => promptVolumeAiFilters[f.key]).map(
+                            {SCREEN_TIME_OVER_TIME_FILTERS.filter((f) => effectivePromptVolumeAiFilters[f.key]).map(
                               (filter, index, visible) => (
                                 <Bar
                                   key={filter.key}
@@ -2669,7 +3028,14 @@ export function StatisticsClient() {
 
               <section className="mb-8 w-full rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                  <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">How you spend your time</h2>
+                  <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">
+                    How you spend your time
+                    {engagementView === "instant" && engagementInstantTotalMinutes != null ? (
+                      <span className="ml-1.5 normal-case tracking-normal text-muted">
+                        ({engagementInstantTotalMinutes} min)
+                      </span>
+                    ) : null}
+                  </h2>
                   <StatsChartHorizonToggle value={engagementView} onChange={setEngagementView} />
                 </div>
                 {engagementView === "over_time" ? (
@@ -2764,6 +3130,45 @@ export function StatisticsClient() {
                 ) : (
                   <p className="text-sm text-muted">Turn on at least one service under Show to view how you spend time.</p>
                 )}
+                {promptLengthChartRows.length ? (
+                  <div className="mt-6 border-t border-line pt-6">
+                    <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-faint">
+                      Prompt length (words)
+                    </h3>
+                    <p className="mb-3 text-[11px] text-faint">
+                      Average prompt length at submit for the selection above — metadata only, never full text.
+                    </p>
+                    <div className="w-full" style={{ height: promptLengthSectionHeight }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          data={promptLengthChartRows}
+                          layout="vertical"
+                          margin={{ top: 4, right: 12, bottom: 4, left: 4 }}
+                          barCategoryGap="18%"
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" horizontal={false} />
+                          <XAxis type="number" stroke="#8A8A8A" tick={CHART_Y_TICK} allowDecimals />
+                          <YAxis
+                            type="category"
+                            dataKey="label"
+                            stroke="#8A8A8A"
+                            tick={CHART_Y_TICK_11}
+                            width={120}
+                          />
+                          <Tooltip
+                            contentStyle={CHART_TOOLTIP_STYLE}
+                            formatter={(value: number) => [`${value} words`, "Avg length"]}
+                          />
+                          <Bar dataKey="avg_words" name="Avg words" radius={[0, 4, 4, 0]} barSize={16}>
+                            {promptLengthChartRows.map((entry) => (
+                              <Cell key={entry.key} fill={entry.fill} fillOpacity={0.95} />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                ) : null}
               </section>
             </>
           ) : (

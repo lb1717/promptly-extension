@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { parseAccountStatsScopeFilter } from "@/lib/accountStatsScopeFilter";
 import {
   type AccountStatsExtendedGranularity,
   getAccountUsageStatsExtended,
@@ -26,7 +27,11 @@ export async function GET(request: Request) {
     const rawGrain = String(searchParams.get("granularity") || "day").trim().toLowerCase();
     const granularity: AccountStatsExtendedGranularity = rawGrain === "week" ? "week" : "day";
     const bypassCache = searchParams.get("refresh") === "1";
-    const stats = await getAccountUsageStatsExtended(user, days, granularity, { bypassCache });
+    const scopeFilter = parseAccountStatsScopeFilter(searchParams);
+    const stats = await getAccountUsageStatsExtended(user, days, granularity, {
+      bypassCache,
+      scopeFilter
+    });
     return NextResponse.json(stats, { status: 200 });
   } catch (error) {
     const message = String(error instanceof Error ? error.message : error);

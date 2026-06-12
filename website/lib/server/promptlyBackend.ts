@@ -881,6 +881,50 @@ export async function persistHostLlmActivityEvents(user: PromptlyUser, rows: Hos
 
 export type AccountStatsExtendedGranularity = "day" | "week";
 
+/** Optional slice for statistics dashboards (single web service or IDE tool + model buckets). */
+export type AccountStatsScopeFilter = {
+  webService?: PromptlyService;
+  ideTool?: PromptlyIdeTool;
+  modelBuckets?: Set<string>;
+};
+
+function readTelemetryModelBucket(raw: Record<string, unknown>): string {
+  const bucketRaw =
+    raw.host_model_bucket ??
+    raw.hostModelBucket ??
+    raw.model_bucket ??
+    raw.modelBucket;
+  if (typeof bucketRaw === "string" && bucketRaw.trim()) {
+    return bucketRaw.trim().slice(0, 48) || "unknown";
+  }
+  return "unknown";
+}
+
+function passesWebScopeFilter(
+  svc: PromptlyService,
+  raw: Record<string, unknown>,
+  filter?: AccountStatsScopeFilter,
+  opts?: { requireModelMatch?: boolean }
+): boolean {
+  if (!filter?.webService && !filter?.modelBuckets?.size) return true;
+  if (filter.webService && svc !== filter.webService) return false;
+  if (opts?.requireModelMatch !== false && filter.modelBuckets?.size) {
+    if (!filter.modelBuckets.has(readTelemetryModelBucket(raw))) return false;
+  }
+  return true;
+}
+
+function passesIdeScopeFilter(
+  tool: PromptlyIdeTool,
+  raw: Record<string, unknown>,
+  filter?: AccountStatsScopeFilter
+): boolean {
+  if (!filter?.ideTool && !filter?.modelBuckets?.size) return true;
+  if (filter.ideTool && tool !== filter.ideTool) return false;
+  if (filter.modelBuckets?.size && !filter.modelBuckets.has(readTelemetryModelBucket(raw))) return false;
+  return true;
+}
+
 export type PromptlyIdeTool = "claude_code" | "cursor" | "codex";
 
 export type IdeInteractionKind = "send" | "engagement_segment" | "response_latency";
@@ -2047,8 +2091,9 @@ export async function getAccountIdeUsageStats(
   days: number,
   granularity: AccountStatsExtendedGranularity = "day",
   emailFilters?: Partial<Record<PromptlyIdeTool, Set<string>>>,
-  opts?: { bypassCache?: boolean }
+  opts?: { bypassCache?: boolean; scopeFilter?: AccountStatsScopeFilter }
 ): Promise<AccountIdeStatsPayload> {
+  const scopeFilter = opts?.scopeFilter;
   const rangeDays = Math.max(1, Math.min(90, Math.floor(days || 14)));
   const recentDays = getRecentDays(rangeDays);
   const startDay = recentDays[0]!;
@@ -2167,6 +2212,7 @@ export async function getAccountIdeUsageStats(
     const row = byBucket.get(bucket)!;
     const tool = normalizePromptlyIdeTool(raw.tool);
     if (!tool) continue;
+    if (!passesIdeScopeFilter(tool, raw, scopeFilter)) continue;
 
     const agentEmail = readEventAgentEmail(raw);
     if (agentEmail) {
@@ -2620,8 +2666,9 @@ export async function getAccountUsageStatsExtended(
   user: PromptlyUser,
   days: number,
   granularity: AccountStatsExtendedGranularity = "day",
-  opts?: { bypassCache?: boolean }
+  opts?: { bypassCache?: boolean; scopeFilter?: AccountStatsScopeFilter }
 ) {
+  const scopeFilter = opts?.scopeFilter;
   const rangeDays = Math.max(1, Math.min(90, Math.floor(days || 14)));
   const recentDays = getRecentDays(rangeDays);
   const startDay = recentDays[0];
@@ -2807,6 +2854,19 @@ export async function getAccountUsageStatsExtended(
   const modeTotals = { auto: 0, improve: 0, generate: 0 };
   /** bucket -> prompts + exemplar label */
   const modelBucketAgg = new Map<string, { prompts: number; label: string | null }>();
+  const modelCatalogAgg = new Map<
+    string,
+    {
+      service: PromptlyService;
+      bucket: string;
+      label: string | null;
+      prompts: number;
+      wordTotal: number;
+      wordSamples: number;
+    }
+  >();
+  const wordTotalByService: ServicePromptCounts = emptyServicePromptCounts();
+  const wordSamplesByService: ServicePromptCounts = emptyServicePromptCounts();
 
   const optimizeLatencySvc = {
     sum: emptyServicePromptCounts(),
@@ -2823,10 +2883,37 @@ export async function getAccountUsageStatsExtended(
     if (!utcDay || !byDayScratch.has(utcDay)) {
       continue;
     }
+    const svcDoc = normalizePromptlyService(raw.service);
+    const mb = readTelemetryModelBucket(raw);
+    const label =
+      typeof raw.hostModelLabelSanitized === "string" && raw.hostModelLabelSanitized.trim()
+        ? String(raw.hostModelLabelSanitized).trim()
+        : null;
+    const catalogKey = `${svcDoc}:${mb}`;
+    const catalogPrev = modelCatalogAgg.get(catalogKey) || {
+      service: svcDoc,
+      bucket: mb,
+      label: null,
+      prompts: 0,
+      wordTotal: 0,
+      wordSamples: 0
+    };
+    catalogPrev.prompts += 1;
+    if (!catalogPrev.label && label) {
+      catalogPrev.label = label.slice(0, TELEMETRY_HOST_MODEL_MAX_CHARS);
+    }
+    const wwRawCatalog = raw.composerWordEstimate ?? raw.composer_word_estimate;
+    if (typeof wwRawCatalog === "number" && Number.isFinite(wwRawCatalog) && wwRawCatalog > 0) {
+      catalogPrev.wordTotal += Math.min(12000, Math.floor(wwRawCatalog));
+      catalogPrev.wordSamples += 1;
+    }
+    modelCatalogAgg.set(catalogKey, catalogPrev);
+
+    if (!passesWebScopeFilter(svcDoc, raw, scopeFilter)) continue;
+
     const row = byDayScratch.get(utcDay)!;
     row.prompts += 1;
 
-    const svcDoc = normalizePromptlyService(raw.service);
     row.optimize_by_service[svcDoc] += 1;
 
     const billed = Math.max(0, Math.floor(Number(raw.billedPromptlyTokens || 0)));
@@ -2842,6 +2929,8 @@ export async function getAccountUsageStatsExtended(
     if (typeof wwRaw === "number" && Number.isFinite(wwRaw) && wwRaw > 0) {
       row.composer_word_samples += 1;
       row.composer_word_sum += Math.min(12000, Math.floor(wwRaw));
+      wordSamplesByService[svcDoc] += 1;
+      wordTotalByService[svcDoc] += Math.min(12000, Math.floor(wwRaw));
     }
 
     const owRaw = raw.optimizedWordEstimate ?? raw.optimized_word_estimate;
@@ -2867,11 +2956,6 @@ export async function getAccountUsageStatsExtended(
     else if (mode === "generate") modeTotals.generate += 1;
     else modeTotals.improve += 1;
 
-    const mb = String(raw.hostModelBucket || "unknown").slice(0, 48) || "unknown";
-    const label =
-      typeof raw.hostModelLabelSanitized === "string" && raw.hostModelLabelSanitized.trim()
-        ? String(raw.hostModelLabelSanitized).trim()
-        : null;
     const prev = modelBucketAgg.get(mb) || { prompts: 0, label: null };
     prev.prompts += 1;
     if (!prev.label && label) {
@@ -2886,7 +2970,6 @@ export async function getAccountUsageStatsExtended(
     if (!utcDay || !hostByDayScratch.has(utcDay)) {
       continue;
     }
-    const row = hostByDayScratch.get(utcDay)!;
     const ik = String(raw.interactionKind ?? raw.interaction_kind ?? "send").toLowerCase();
     const isEngagement = ik === "engagement_segment" || ik === "engagement";
     const isComposer = ik === "composer_input" || ik === "compose" || ik === "typing";
@@ -2895,8 +2978,37 @@ export async function getAccountUsageStatsExtended(
     const isMirror = sourceRaw === "optimize_api";
 
     const svc = normalizePromptlyService(raw.service);
+    const mb = readTelemetryModelBucket(raw);
+    const hostLabelRaw = raw.hostModelLabelSanitized ?? raw.host_model_label_sanitized;
+    const hostLabel =
+      typeof hostLabelRaw === "string" && hostLabelRaw.trim() ? String(hostLabelRaw).trim() : null;
+
+    if (!isEngagement && !isComposer) {
+      const catalogKey = `${svc}:${mb}`;
+      const catalogPrev = modelCatalogAgg.get(catalogKey) || {
+        service: svc,
+        bucket: mb,
+        label: null,
+        prompts: 0,
+        wordTotal: 0,
+        wordSamples: 0
+      };
+      catalogPrev.prompts += 1;
+      if (!catalogPrev.label && hostLabel) {
+        catalogPrev.label = hostLabel.slice(0, TELEMETRY_HOST_MODEL_MAX_CHARS);
+      }
+      const wwHost = raw.composerWordEstimate ?? raw.composer_word_estimate;
+      if (typeof wwHost === "number" && Number.isFinite(wwHost) && wwHost > 0) {
+        catalogPrev.wordTotal += Math.min(12000, Math.floor(wwHost));
+        catalogPrev.wordSamples += 1;
+      }
+      modelCatalogAgg.set(catalogKey, catalogPrev);
+    }
+
+    const row = hostByDayScratch.get(utcDay)!;
 
     if (isEngagement) {
+      if (!passesWebScopeFilter(svc, raw, scopeFilter, { requireModelMatch: false })) continue;
       let engagementCategory: HostEngagementCategory | null = null;
       const catRaw = raw.engagementCategory ?? raw.engagement_category;
       if (typeof catRaw === "string") {
@@ -2915,6 +3027,14 @@ export async function getAccountUsageStatsExtended(
       }
       continue;
     }
+
+    if (isComposer) {
+      if (!passesWebScopeFilter(svc, raw, scopeFilter, { requireModelMatch: false })) continue;
+      row.composer_input_events += 1;
+      continue;
+    }
+
+    if (!passesWebScopeFilter(svc, raw, scopeFilter)) continue;
 
     const cc =
       typeof raw.composerCharEstimate === "number" && Number.isFinite(raw.composerCharEstimate)
@@ -2940,9 +3060,7 @@ export async function getAccountUsageStatsExtended(
           ? draftActiveMs
           : null;
 
-    if (isComposer) {
-      row.composer_input_events += 1;
-    } else {
+    {
       const telemetrySourceRaw = raw.telemetrySource ?? raw.telemetry_source;
       const telemetrySource =
         typeof telemetrySourceRaw === "string" ? telemetrySourceRaw.trim().toLowerCase() : "";
@@ -2959,6 +3077,11 @@ export async function getAccountUsageStatsExtended(
           const fc = Math.min(CREDIT_MAX_PROMPT_CHARS, Math.floor(cc));
           nativeComposerOnSendSamples += 1;
           nativeComposerOnSendChars += fc;
+        }
+        const wwNative = raw.composerWordEstimate ?? raw.composer_word_estimate;
+        if (typeof wwNative === "number" && Number.isFinite(wwNative) && wwNative > 0) {
+          wordSamplesByService[svc] += 1;
+          wordTotalByService[svc] += Math.min(12000, Math.floor(wwNative));
         }
         if (hlMs !== null && hlMs > 0) {
           row.native_host_latency_sum_svc[svc] += hlMs;
@@ -3430,6 +3553,36 @@ export async function getAccountUsageStatsExtended(
       prompts: v.prompts
     }));
 
+  const model_catalog = [...modelCatalogAgg.values()]
+    .filter((row) => row.prompts > 0)
+    .sort(
+      (a, b) =>
+        b.prompts - a.prompts ||
+        a.service.localeCompare(b.service) ||
+        a.bucket.localeCompare(b.bucket)
+    )
+    .map((row) => ({
+      service: row.service,
+      bucket: row.bucket,
+      label: row.label,
+      prompts: row.prompts,
+      avg_words:
+        row.wordSamples > 0 ? Math.round((row.wordTotal / row.wordSamples) * 10) / 10 : null,
+      word_samples: row.wordSamples
+    }));
+
+  const avg_words_by_service = (["chatgpt", "claude", "gemini", "unknown"] as const).reduce(
+    (acc, svc) => {
+      const samples = wordSamplesByService[svc];
+      acc[svc] = {
+        avg_words: samples > 0 ? Math.round((wordTotalByService[svc] / samples) * 10) / 10 : null,
+        samples
+      };
+      return acc;
+    },
+    {} as Record<PromptlyService, { avg_words: number | null; samples: number }>
+  );
+
   const mirror_writes_total = sumSvcCounts(mergedMirrorSvc);
 
   const eventPromptsSum = [...byDayScratch.values()].reduce((s, x) => s + x.prompts, 0);
@@ -3548,6 +3701,8 @@ export async function getAccountUsageStatsExtended(
       mode: modeTotals,
       model_buckets
     },
+    model_catalog,
+    avg_words_by_service,
     host_passive_listener: {
       events_docs_in_query: hostPassiveEventRows,
       native_web_sends: combined_totals_prompts_native,

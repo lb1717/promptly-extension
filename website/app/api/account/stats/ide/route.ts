@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { parseAccountStatsScopeFilter } from "@/lib/accountStatsScopeFilter";
 import {
   type AccountStatsExtendedGranularity,
   type PromptlyIdeTool,
@@ -44,7 +45,11 @@ export async function GET(request: Request) {
       }
     }
     const bypassCache = searchParams.get("refresh") === "1";
-    const stats = await getAccountIdeUsageStats(user, days, granularity, emailFilters, { bypassCache });
+    const scopeFilter = parseAccountStatsScopeFilter(searchParams);
+    const stats = await getAccountIdeUsageStats(user, days, granularity, emailFilters, {
+      bypassCache,
+      scopeFilter
+    });
     return NextResponse.json(stats, { status: 200 });
   } catch (error) {
     const message = String(error instanceof Error ? error.message : error);
