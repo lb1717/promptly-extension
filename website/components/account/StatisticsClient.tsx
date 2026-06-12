@@ -1664,6 +1664,7 @@ export function StatisticsClient() {
   const [modelCatalogIde, setModelCatalogIde] = useState<IdeStatsPayload["model_buckets"]>([]);
   const [screenTimeView, setScreenTimeView] = useState<StatsChartHorizon>("instant");
   const [engagementView, setEngagementView] = useState<StatsChartHorizon>("instant");
+  const [engagementPiesExpanded, setEngagementPiesExpanded] = useState(false);
   const [reportGenerating, setReportGenerating] = useState(false);
   const reportRef = useRef<HTMLDivElement>(null);
   const ideStatsReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1674,6 +1675,7 @@ export function StatisticsClient() {
   const [filterBarLayout, setFilterBarLayout] = useState({ width: 0, left: 0, height: 0 });
 
   const STATS_FILTER_NAV_OFFSET_PX = 56;
+  const STATS_FILTER_PINNED_TOP_GAP_PX = 12;
 
   const placeholderStats = useMemo(
     () => buildPlaceholderExtendedStats(days, granularity),
@@ -2688,6 +2690,21 @@ export function StatisticsClient() {
     return PROMPT_VOLUME_AI_FILTERS.filter((f) => effectivePromptVolumeAiFilters[f.key]).length;
   }, [effectivePromptVolumeAiFilters]);
 
+  const engagementInstantPies = useMemo(
+    () => (statsGroupMode === "model" ? engagementByModelPies : engagementByServicePies),
+    [statsGroupMode, engagementByModelPies, engagementByServicePies]
+  );
+
+  const ENGAGEMENT_PIES_INITIAL_COUNT = 3;
+  const engagementPiesVisible = engagementPiesExpanded
+    ? engagementInstantPies
+    : engagementInstantPies.slice(0, ENGAGEMENT_PIES_INITIAL_COUNT);
+  const engagementPiesHasMore = engagementInstantPies.length > ENGAGEMENT_PIES_INITIAL_COUNT;
+
+  useEffect(() => {
+    setEngagementPiesExpanded(false);
+  }, [days, granularity, statsGroupMode, selectedModelService, selectedModelBuckets, promptVolumeAiFilters]);
+
   const promptLengthChartRows = useMemo(() => {
     const rows: Array<{ label: string; avg_words: number; fill: string; key: string }> = [];
 
@@ -3012,7 +3029,7 @@ export function StatisticsClient() {
             style={
               filterBarPinned
                 ? {
-                    top: STATS_FILTER_NAV_OFFSET_PX,
+                    top: STATS_FILTER_NAV_OFFSET_PX + STATS_FILTER_PINNED_TOP_GAP_PX,
                     left: filterBarLayout.left,
                     width: filterBarLayout.width
                   }
@@ -3020,59 +3037,63 @@ export function StatisticsClient() {
             }
           >
             <div className="flex flex-col gap-2">
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-faint">Range</span>
-                  {([7, 14, 30, 90] as const).map((d) => (
-                    <button
-                      key={d}
-                      type="button"
-                      onClick={() => setDays(d)}
-                      className={`rounded-md px-2 py-0.5 text-xs font-medium ${
-                        days === d ? "bg-ink text-cream" : "border border-line text-faint hover:bg-cream-dark"
-                      }`}
-                    >
-                      {d}d
-                    </button>
-                  ))}
+              <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-2">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-faint">Range</span>
+                    {([7, 14, 30, 90] as const).map((d) => (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => setDays(d)}
+                        className={`rounded-md px-2 py-0.5 text-xs font-medium ${
+                          days === d ? "bg-ink text-cream" : "border border-line text-faint hover:bg-cream-dark"
+                        }`}
+                      >
+                        {d}d
+                      </button>
+                    ))}
+                  </div>
+                  <div className="hidden h-5 w-px shrink-0 bg-line sm:block" aria-hidden />
+                  <StatsGroupModeToggle value={statsGroupMode} onChange={setStatsGroupMode} />
+                  {statsGroupMode === "model" ? (
+                    <label className="flex items-center gap-1.5 text-xs text-faint">
+                      Service
+                      <select
+                        value={selectedModelService}
+                        onChange={(e) => setSelectedModelService(e.target.value as PromptVolumeAiKey)}
+                        className="max-w-[10rem] rounded-md border border-line bg-cream px-1.5 py-0.5 text-xs text-ink"
+                      >
+                        {PROMPT_VOLUME_AI_FILTERS.map((filter) => (
+                          <option key={filter.key} value={filter.key}>
+                            {filter.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
                 </div>
-                <div className="hidden h-5 w-px shrink-0 bg-line sm:block" aria-hidden />
-                <StatsGroupModeToggle value={statsGroupMode} onChange={setStatsGroupMode} />
-                {statsGroupMode === "model" ? (
+                <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 sm:ml-8 sm:flex-1 sm:justify-center">
                   <label className="flex items-center gap-1.5 text-xs text-faint">
-                    Service
+                    Buckets
                     <select
-                      value={selectedModelService}
-                      onChange={(e) => setSelectedModelService(e.target.value as PromptVolumeAiKey)}
-                      className="max-w-[10rem] rounded-md border border-line bg-cream px-1.5 py-0.5 text-xs text-ink"
+                      value={granularity}
+                      onChange={(e) => setGranularity(e.target.value === "week" ? "week" : "day")}
+                      className="rounded-md border border-line bg-cream-dark px-1.5 py-0.5 text-xs text-ink"
                     >
-                      {PROMPT_VOLUME_AI_FILTERS.map((filter) => (
-                        <option key={filter.key} value={filter.key}>
-                          {filter.label}
-                        </option>
-                      ))}
+                      <option value="day">Daily</option>
+                      <option value="week">Weekly (UTC)</option>
                     </select>
                   </label>
-                ) : null}
-                <label className="flex items-center gap-1.5 text-xs text-faint">
-                  Buckets
-                  <select
-                    value={granularity}
-                    onChange={(e) => setGranularity(e.target.value === "week" ? "week" : "day")}
-                    className="rounded-md border border-line bg-cream-dark px-1.5 py-0.5 text-xs text-ink"
+                  <button
+                    type="button"
+                    disabled={statsLoading || ideStatsLoading || !user}
+                    onClick={refreshAllStats}
+                    className="rounded-md border border-line px-2 py-0.5 text-xs text-muted hover:bg-cream-dark disabled:opacity-50"
                   >
-                    <option value="day">Daily</option>
-                    <option value="week">Weekly (UTC)</option>
-                  </select>
-                </label>
-                <button
-                  type="button"
-                  disabled={statsLoading || ideStatsLoading || !user}
-                  onClick={refreshAllStats}
-                  className="rounded-md border border-line px-2 py-0.5 text-xs text-muted hover:bg-cream-dark disabled:opacity-50"
-                >
-                  {statsLoading || ideStatsLoading ? "Refreshing…" : "Refresh"}
-                </button>
+                    {statsLoading || ideStatsLoading ? "Refreshing…" : "Refresh"}
+                  </button>
+                </div>
               </div>
               <div className="flex flex-wrap items-center gap-x-2 gap-y-2 border-t border-line/70 pt-2">
                 <span className="mr-1 shrink-0 text-[10px] font-semibold uppercase tracking-wider text-faint">
@@ -3275,15 +3296,11 @@ export function StatisticsClient() {
                     <StatsChartHorizonToggle value={screenTimeView} onChange={setScreenTimeView} />
                   </div>
                 </div>
-                <p className="mb-3 text-[11px] text-faint">
-                  {statsGroupMode === "model"
-                    ? screenTimeView === "instant"
-                      ? "Total foreground minutes in the selected range — stacked by submodel."
-                      : "Stacked minutes by submodel over time — filtered by Show above."
-                    : screenTimeView === "instant"
-                      ? "Total foreground minutes in the selected range — filtered by Show above."
-                      : "Stacked minutes by service or agent over time — filtered by Show above."}
-                </p>
+                {screenTimeView === "instant" && statsGroupMode !== "model" ? (
+                  <p className="mb-3 text-[11px] text-faint">
+                    Total foreground minutes in the selected range — filtered by Show above.
+                  </p>
+                ) : null}
                 {statsGroupMode === "model" ? (
                   activeModelChartSeries.length ? (
                     screenTimeView === "over_time" ? (
@@ -3532,7 +3549,7 @@ export function StatisticsClient() {
                     <p className="text-sm text-muted">Turn on at least one service under Show to view how you spend time.</p>
                   )}
                   </div>
-                ) : (statsGroupMode === "model" ? engagementByModelPies : engagementByServicePies).length > 0 ? (
+                ) : engagementInstantPies.length > 0 ? (
                   <div key="engagement-instant">
                     <div className="mb-5 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-muted">
                       <span className="inline-flex items-center gap-2">
@@ -3548,20 +3565,16 @@ export function StatisticsClient() {
                         Reading output
                       </span>
                     </div>
-                    {(() => {
-                      const instantPies =
-                        statsGroupMode === "model" ? engagementByModelPies : engagementByServicePies;
-                      return (
                     <div
                       className={`grid justify-items-center gap-8 ${
-                        instantPies.length === 1
+                        engagementPiesVisible.length === 1
                           ? "grid-cols-1 max-w-xs mx-auto"
-                          : instantPies.length === 2
+                          : engagementPiesVisible.length === 2
                             ? "grid-cols-1 sm:grid-cols-2 max-w-2xl mx-auto"
                             : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
                       }`}
                     >
-                      {instantPies.map((pie) => (
+                      {engagementPiesVisible.map((pie) => (
                         <ServiceEngagementDonut
                           key={pie.key}
                           label={pie.label}
@@ -3571,8 +3584,19 @@ export function StatisticsClient() {
                         />
                       ))}
                     </div>
-                      );
-                    })()}
+                    {engagementPiesHasMore ? (
+                      <div className="mt-6 flex justify-center">
+                        <button
+                          type="button"
+                          onClick={() => setEngagementPiesExpanded((prev) => !prev)}
+                          className="rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-muted hover:bg-cream-dark"
+                        >
+                          {engagementPiesExpanded
+                            ? "Show less"
+                            : `See more (${engagementInstantPies.length - ENGAGEMENT_PIES_INITIAL_COUNT} more)`}
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 ) : engagementByServiceEnabledCount > 0 ? (
                   <p className="text-sm text-muted">
