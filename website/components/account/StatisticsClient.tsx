@@ -1668,6 +1668,13 @@ export function StatisticsClient() {
   const [reportGenerating, setReportGenerating] = useState(false);
   const reportRef = useRef<HTMLDivElement>(null);
   const ideStatsReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const statsContainerRef = useRef<HTMLDivElement>(null);
+  const filterSentinelRef = useRef<HTMLDivElement>(null);
+  const filterBarRef = useRef<HTMLDivElement>(null);
+  const [filterBarPinned, setFilterBarPinned] = useState(false);
+  const [filterBarLayout, setFilterBarLayout] = useState({ width: 0, left: 0, height: 0 });
+
+  const STATS_FILTER_NAV_OFFSET_PX = 56;
 
   const placeholderStats = useMemo(
     () => buildPlaceholderExtendedStats(days, granularity),
@@ -1853,6 +1860,53 @@ export function StatisticsClient() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    const sentinel = filterSentinelRef.current;
+    const bar = filterBarRef.current;
+    if (!sentinel || !bar) return;
+
+    const syncFilterBarLayout = () => {
+      const rect = bar.getBoundingClientRect();
+      setFilterBarLayout({ width: rect.width, left: rect.left, height: rect.height });
+    };
+
+    syncFilterBarLayout();
+    const resizeObserver = new ResizeObserver(syncFilterBarLayout);
+    resizeObserver.observe(bar);
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry) return;
+        if (!entry.isIntersecting) {
+          syncFilterBarLayout();
+          setFilterBarPinned(true);
+        } else {
+          setFilterBarPinned(false);
+        }
+      },
+      { root: null, rootMargin: `-${STATS_FILTER_NAV_OFFSET_PX}px 0px 0px 0px`, threshold: 0 }
+    );
+    observer.observe(sentinel);
+
+    const onResize = () => {
+      syncFilterBarLayout();
+      if (!statsContainerRef.current) return;
+      const containerRect = statsContainerRef.current.getBoundingClientRect();
+      setFilterBarLayout((prev) => ({
+        ...prev,
+        width: containerRect.width,
+        left: containerRect.left
+      }));
+    };
+    window.addEventListener("resize", onResize);
+
+    return () => {
+      observer.disconnect();
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", onResize);
+    };
+  }, [user, stats, statsGroupMode, days, granularity, selectedModelService]);
 
   const statsScopeParams = useMemo(
     () => buildStatsScopeSearchParams(statsGroupMode, selectedModelService),
@@ -2838,7 +2892,7 @@ export function StatisticsClient() {
   }, [statisticsReportData, reportGenerating, days]);
 
   return (
-    <div className="statistics-charts mx-auto w-full max-w-6xl px-4 py-6 pb-16">
+    <div ref={statsContainerRef} className="statistics-charts mx-auto w-full max-w-6xl px-4 py-6 pb-16">
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-semibold text-ink">AI Statistics</h1>
         <div className="flex flex-wrap items-center gap-2">
@@ -2873,9 +2927,29 @@ export function StatisticsClient() {
 
       {user && displayStats ? (
         <>
+          <div ref={filterSentinelRef} className="pointer-events-none h-0 w-full" aria-hidden />
+          {filterBarPinned ? (
+            <div
+              aria-hidden
+              className="mb-4"
+              style={{ height: filterBarLayout.height > 0 ? filterBarLayout.height : undefined }}
+            />
+          ) : null}
           <div
+            ref={filterBarRef}
             data-onboarding-tour="statistics-filters"
-            className="sticky top-0 z-30 mb-4 rounded-xl border border-line bg-cream-dark/95 px-3 py-2 shadow-sm backdrop-blur-sm"
+            className={`z-40 mb-4 rounded-xl border border-line bg-cream-dark px-3 py-2.5 shadow-md ${
+              filterBarPinned ? "fixed" : ""
+            }`}
+            style={
+              filterBarPinned
+                ? {
+                    top: STATS_FILTER_NAV_OFFSET_PX,
+                    left: filterBarLayout.left,
+                    width: filterBarLayout.width
+                  }
+                : undefined
+            }
           >
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
               <div className="flex flex-wrap items-center gap-1.5">
