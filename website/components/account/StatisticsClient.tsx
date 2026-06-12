@@ -3262,7 +3262,9 @@ export function StatisticsClient() {
             ref={filterBarRef}
             data-onboarding-tour="statistics-filters"
             className={`z-40 mb-4 rounded-xl border border-black bg-cream-dark px-3 py-2.5 ${
-              filterBarPinned ? "fixed shadow-[0_12px_32px_rgba(0,0,0,0.35)]" : "shadow-md"
+              filterBarPinned
+                ? "fixed shadow-[0_0_18px_6px_rgba(255,255,255,0.95),0_0_36px_14px_rgba(255,255,255,0.65),0_0_56px_24px_rgba(255,255,255,0.35)]"
+                : ""
             }`}
             style={
               filterBarPinned
