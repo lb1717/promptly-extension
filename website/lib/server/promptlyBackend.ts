@@ -954,6 +954,31 @@ function nestedMetricMapsToTimeline(
   });
 }
 
+/** Averages sum/sample nested maps into a per-bucket timeline (e.g. avg response seconds per model). */
+function nestedAvgMapsToTimeline(
+  sums: Map<string, Map<string, number>>,
+  samples: Map<string, Map<string, number>>,
+  sortedDayKeys: string[],
+  toUnit: (avg: number) => number = (value) => value
+): Array<{ bucket: string; models: Record<string, number> }> {
+  return sortedDayKeys.map((dayKey) => {
+    const sumInner = sums.get(dayKey);
+    const sampleInner = samples.get(dayKey);
+    const models: Record<string, number> = {};
+    if (sumInner && sampleInner) {
+      for (const [seriesKey, sum] of sumInner) {
+        const n = sampleInner.get(seriesKey) ?? 0;
+        if (n > 0 && sum > 0) models[seriesKey] = toUnit(sum / n);
+      }
+    }
+    return { bucket: dayKey, models };
+  });
+}
+
+function msToStatSeconds(ms: number): number {
+  return Math.round((ms / 1000) * 10) / 10;
+}
+
 export type PromptlyIdeTool = "claude_code" | "cursor" | "codex";
 
 export type IdeInteractionKind = "send" | "engagement_segment" | "response_latency";
@@ -1661,6 +1686,8 @@ export type AccountIdeStatsPayload = {
   }>;
   model_prompt_timeline?: Array<{ bucket: string; models: Record<string, number> }>;
   model_screen_time_timeline?: Array<{ bucket: string; models: Record<string, number> }>;
+  /** Average response seconds per submodel per bucket (scoped to one tool). */
+  model_response_time_timeline?: Array<{ bucket: string; models: Record<string, number> }>;
   model_engagement_by_model?: Array<{
     bucket: string;
     label: string | null;
@@ -1670,6 +1697,13 @@ export type AccountIdeStatsPayload = {
     total_minutes: number;
   }>;
   model_series_labels?: Record<string, string | null>;
+  /** Average response seconds per tool per bucket (null when no latency samples). */
+  response_time_timeline?: Array<{
+    bucket: string;
+    claude_code_s: number | null;
+    cursor_s: number | null;
+    codex_s: number | null;
+  }>;
   draft_timing_by_tool: Record<
     PromptlyIdeTool,
     { avg_draft_ms: number | null; samples: number }
@@ -2171,6 +2205,8 @@ export async function getAccountIdeUsageStats(
     sends: IdeToolCounts;
     screen_time_ms: IdeToolCounts;
     engagement_ms: IdeEngagementMsByCategory;
+    latency_sum_ms: IdeToolCounts;
+    latency_samples: IdeToolCounts;
   };
 
   const bucketKeyForDay = (utcYmd: string) =>
@@ -2186,7 +2222,9 @@ export async function getAccountIdeUsageStats(
       bucket_day: b,
       sends: emptyIdeToolCounts(),
       screen_time_ms: emptyIdeToolCounts(),
-      engagement_ms: emptyIdeEngagementMsByCategory()
+      engagement_ms: emptyIdeEngagementMsByCategory(),
+      latency_sum_ms: emptyIdeToolCounts(),
+      latency_samples: emptyIdeToolCounts()
     });
   }
 
@@ -2234,6 +2272,8 @@ export async function getAccountIdeUsageStats(
   const trackModelSeries = Boolean(scopeFilter?.ideTool);
   const modelPromptsByDay = new Map<string, Map<string, number>>();
   const modelScreenMsByDay = new Map<string, Map<string, number>>();
+  const modelLatencySumMsByDay = new Map<string, Map<string, number>>();
+  const modelLatencySamplesByDay = new Map<string, Map<string, number>>();
   const modelEngagementMsByModel = new Map<
     string,
     {
@@ -2337,6 +2377,8 @@ export async function getAccountIdeUsageStats(
       if (hlMs !== null && hlMs > 0) {
         row.engagement_ms.waiting[tool] += hlMs;
         row.screen_time_ms[tool] += hlMs;
+        row.latency_sum_ms[tool] += hlMs;
+        row.latency_samples[tool] += 1;
         screenTotals[tool] += hlMs;
         engagementTotalsMs.waiting += hlMs;
         engagementMsByTool[tool].waiting += hlMs;
@@ -2351,6 +2393,10 @@ export async function getAccountIdeUsageStats(
             ? String(labelRaw).replace(/\s+/g, " ").trim().slice(0, 120)
             : null;
         addModelEngagementMs(bucket, mb, label, "waiting", hlMs);
+        if (trackModelSeries) {
+          bumpNestedMetric(modelLatencySumMsByDay, bucket, mb, hlMs);
+          bumpNestedMetric(modelLatencySamplesByDay, bucket, mb, 1);
+        }
         const modelKey = `${tool}:${mb}`;
         const modelPrev = modelBucketAgg.get(modelKey) || {
           tool,
@@ -2475,11 +2521,17 @@ export async function getAccountIdeUsageStats(
     if (hlMs !== null && hlMs > 0) {
       row.engagement_ms.waiting[tool] += hlMs;
       row.screen_time_ms[tool] += hlMs;
+      row.latency_sum_ms[tool] += hlMs;
+      row.latency_samples[tool] += 1;
       screenTotals[tool] += hlMs;
       engagementTotalsMs.waiting += hlMs;
       engagementMsByTool[tool].waiting += hlMs;
       responseLatencyByTool[tool].push(hlMs);
       addModelEngagementMs(bucket, mb, label, "waiting", hlMs);
+      if (trackModelSeries) {
+        bumpNestedMetric(modelLatencySumMsByDay, bucket, mb, hlMs);
+        bumpNestedMetric(modelLatencySamplesByDay, bucket, mb, 1);
+      }
       modelPrev.latencyTotalMs += hlMs;
       modelPrev.latencySamples += 1;
       modelBucketAgg.set(modelKey, modelPrev);
@@ -2602,6 +2654,21 @@ export async function getAccountIdeUsageStats(
           row.engagement_ms.reading_idle.codex
       )
     })),
+    response_time_timeline: sortedBuckets.map((row) => ({
+      bucket: row.bucket_day,
+      claude_code_s:
+        row.latency_samples.claude_code > 0
+          ? msToStatSeconds(row.latency_sum_ms.claude_code / row.latency_samples.claude_code)
+          : null,
+      cursor_s:
+        row.latency_samples.cursor > 0
+          ? msToStatSeconds(row.latency_sum_ms.cursor / row.latency_samples.cursor)
+          : null,
+      codex_s:
+        row.latency_samples.codex > 0
+          ? msToStatSeconds(row.latency_sum_ms.codex / row.latency_samples.codex)
+          : null
+    })),
     connected_tools: (["claude_code", "cursor", "codex"] as PromptlyIdeTool[]).map((tool) => ({
       tool,
       device_count: connectedByTool[tool].count,
@@ -2702,6 +2769,12 @@ export async function getAccountIdeUsageStats(
             modelScreenMsByDay,
             sortedBuckets.map((row) => row.bucket_day),
             (ms) => msToStatMinutes(ms)
+          ),
+          model_response_time_timeline: nestedAvgMapsToTimeline(
+            modelLatencySumMsByDay,
+            modelLatencySamplesByDay,
+            sortedBuckets.map((row) => row.bucket_day),
+            msToStatSeconds
           ),
           model_engagement_by_model: [...modelEngagementMsByModel.entries()]
             .map(([modelSlug, row]) => ({
@@ -3034,6 +3107,9 @@ export async function getAccountUsageStatsExtended(
     granularity === "week" ? isoWeekMondayUtcDay(utcYmd) : utcYmd;
   const webModelPromptsByDay = new Map<string, Map<string, number>>();
   const webModelScreenMsByDay = new Map<string, Map<string, number>>();
+  const webModelLatencySumMsByDay = new Map<string, Map<string, number>>();
+  const webModelLatencySamplesByDay = new Map<string, Map<string, number>>();
+  const webModelLatencyAgg = new Map<string, { sum: number; samples: number }>();
   const webModelEngagementMsByModel = new Map<
     string,
     {
@@ -3336,6 +3412,12 @@ export async function getAccountUsageStatsExtended(
           row.waiting_samples += 1;
           if (trackWebModelSeries && svc === webModelService) {
             addWebModelEngagementMs(bucketKeyForDay(utcDay), mb, hostLabel, "waiting", hlMs);
+            bumpNestedMetric(webModelLatencySumMsByDay, bucketKeyForDay(utcDay), mb, hlMs);
+            bumpNestedMetric(webModelLatencySamplesByDay, bucketKeyForDay(utcDay), mb, 1);
+            const latencyPrev = webModelLatencyAgg.get(mb) ?? { sum: 0, samples: 0 };
+            latencyPrev.sum += hlMs;
+            latencyPrev.samples += 1;
+            webModelLatencyAgg.set(mb, latencyPrev);
           }
         }
         if (draftWallMs !== null && draftWallMs > 0) {
@@ -3735,6 +3817,19 @@ export async function getAccountUsageStatsExtended(
     reading_idle_minutes: msToStatMinutes(sumServicePromptCounts(row.engagement_ms_by_category.reading_idle))
   }));
 
+  const response_time_timeline = hostPassiveTimelineFlat.map((row) => {
+    const avgSecondsFor = (svc: PromptlyService) =>
+      row.native_host_latency_samples_svc[svc] > 0
+        ? msToStatSeconds(row.native_host_latency_sum_svc[svc] / row.native_host_latency_samples_svc[svc])
+        : null;
+    return {
+      bucket: row.bucket_day,
+      chatgpt_s: avgSecondsFor("chatgpt"),
+      claude_s: avgSecondsFor("claude"),
+      gemini_s: avgSecondsFor("gemini")
+    };
+  });
+
   const engagement_totals = {
     drafting_minutes: msToStatMinutes(sumServicePromptCounts(engagementTotalsMs.drafting)),
     waiting_minutes: msToStatMinutes(sumServicePromptCounts(engagementTotalsMs.waiting)),
@@ -3927,6 +4022,7 @@ export async function getAccountUsageStatsExtended(
     time_balance_timeline,
     screen_time_by_service,
     screen_time_timeline,
+    response_time_timeline,
     engagement_totals,
     time_balance_totals: {
       draft_active_ms: time_balance_totals.draft_active_ms,
@@ -3977,6 +4073,19 @@ export async function getAccountUsageStatsExtended(
             hostPassiveTimelineFlat.map((row) => row.bucket_day),
             (ms) => Math.round((ms / 60000) * 10) / 10
           ),
+          model_response_time_timeline: nestedAvgMapsToTimeline(
+            webModelLatencySumMsByDay,
+            webModelLatencySamplesByDay,
+            hostPassiveTimelineFlat.map((row) => row.bucket_day),
+            msToStatSeconds
+          ),
+          model_response_latency: [...webModelLatencyAgg.entries()]
+            .filter(([, agg]) => agg.samples > 0)
+            .map(([modelSlug, agg]) => ({
+              bucket: modelSlug,
+              avg_s: msToStatSeconds(agg.sum / agg.samples),
+              samples: agg.samples
+            })),
           model_engagement_by_model: [...webModelEngagementMsByModel.entries()]
             .map(([modelSlug, row]) => ({
               bucket: modelSlug,

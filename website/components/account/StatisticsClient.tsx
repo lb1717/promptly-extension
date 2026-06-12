@@ -16,6 +16,7 @@ import {
   ComposedChart,
   Legend,
   Line,
+  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -196,8 +197,15 @@ type IdeStatsPayload = {
   }>;
   model_prompt_timeline?: Array<{ bucket: string; models: Record<string, number> }>;
   model_screen_time_timeline?: Array<{ bucket: string; models: Record<string, number> }>;
+  model_response_time_timeline?: Array<{ bucket: string; models: Record<string, number> }>;
   model_engagement_by_model?: ModelEngagementByModelRow[];
   model_series_labels?: Record<string, string | null>;
+  response_time_timeline?: Array<{
+    bucket: string;
+    claude_code_s: number | null;
+    cursor_s: number | null;
+    codex_s: number | null;
+  }>;
   draft_timing_by_tool: Record<
     IdeToolKey,
     { avg_draft_ms: number | null; samples: number }
@@ -470,8 +478,16 @@ type ExtendedStatsPayload = {
   avg_words_by_service?: Record<PromptlySvc, { avg_words: number | null; samples: number }>;
   model_prompt_timeline?: Array<{ bucket: string; models: Record<string, number> }>;
   model_screen_time_timeline?: Array<{ bucket: string; models: Record<string, number> }>;
+  model_response_time_timeline?: Array<{ bucket: string; models: Record<string, number> }>;
+  model_response_latency?: Array<{ bucket: string; avg_s: number; samples: number }>;
   model_engagement_by_model?: ModelEngagementByModelRow[];
   model_series_labels?: Record<string, string | null>;
+  response_time_timeline?: Array<{
+    bucket: string;
+    chatgpt_s: number | null;
+    claude_s: number | null;
+    gemini_s: number | null;
+  }>;
   host_passive_listener: HostPassiveLite;
   quota_exceeded?: boolean;
   footnotes: string[];
@@ -702,6 +718,13 @@ function svcLabel(key: PromptlySvc): string {
   if (key === "claude") return "Claude (Web)";
   if (key === "gemini") return "Gemini (Web)";
   return "Other";
+}
+
+/** Rounds chart hover values to one decimal so tooltips never show long floats. */
+function formatChartNumber(value: unknown): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  const rounded = Math.round(value * 10) / 10;
+  return rounded.toLocaleString("en-US", { maximumFractionDigits: 1 });
 }
 
 function clampScore(n: number, lo: number, hi: number): number {
@@ -1387,7 +1410,7 @@ function EngagementPieSideTooltip({
           >
             <span className="font-semibold">{entry.name}</span>
             <br />
-            {typeof entry.value === "number" ? `${entry.value} min` : "—"}
+            {typeof entry.value === "number" ? `${formatChartNumber(entry.value)} min` : "—"}
           </p>
         ))}
       </div>
@@ -1664,6 +1687,7 @@ export function StatisticsClient() {
   const [modelCatalogIde, setModelCatalogIde] = useState<IdeStatsPayload["model_buckets"]>([]);
   const [screenTimeView, setScreenTimeView] = useState<StatsChartHorizon>("instant");
   const [engagementView, setEngagementView] = useState<StatsChartHorizon>("instant");
+  const [responseTimeView, setResponseTimeView] = useState<StatsChartHorizon>("instant");
   const [engagementPiesExpanded, setEngagementPiesExpanded] = useState(false);
   const [reportGenerating, setReportGenerating] = useState(false);
   const reportRef = useRef<HTMLDivElement>(null);
@@ -2705,6 +2729,141 @@ export function StatisticsClient() {
     setEngagementPiesExpanded(false);
   }, [days, granularity, statsGroupMode, selectedModelService, selectedModelBuckets, promptVolumeAiFilters]);
 
+  const responseTimeByServiceRows = useMemo(() => {
+    if (statsGroupMode === "model") return [];
+    const rows: Array<{ service: string; key: string; seconds: number; fill: string }> = [];
+    for (const row of displayStats?.latency_comparison_ai ?? []) {
+      if (row.service_key === "unknown") continue;
+      const key = row.service_key as PromptVolumeAiKey;
+      if (!effectivePromptVolumeAiFilters[key]) continue;
+      const ms = row.native_avg_host_roundtrip_ms;
+      if (typeof ms !== "number" || ms <= 0) continue;
+      const filter = PROMPT_VOLUME_AI_FILTERS.find((f) => f.key === key);
+      rows.push({
+        service: filter?.label ?? row.service_key,
+        key,
+        seconds: Math.round((ms / 1000) * 10) / 10,
+        fill: filter?.color ?? COLOR_UNKNOWN
+      });
+    }
+    for (const toolKey of ["claude_code", "cursor", "codex"] as const) {
+      if (!effectivePromptVolumeAiFilters[toolKey]) continue;
+      const summary = displayIdeStats?.response_latency_by_tool?.[toolKey];
+      if (!summary || typeof summary.avg_ms !== "number" || summary.avg_ms <= 0) continue;
+      const filter = PROMPT_VOLUME_AI_FILTERS.find((f) => f.key === toolKey);
+      rows.push({
+        service: filter?.label ?? toolKey,
+        key: toolKey,
+        seconds: Math.round((summary.avg_ms / 1000) * 10) / 10,
+        fill: filter?.color ?? COLOR_UNKNOWN
+      });
+    }
+    return rows.sort((a, b) => b.seconds - a.seconds);
+  }, [statsGroupMode, displayStats, displayIdeStats, effectivePromptVolumeAiFilters]);
+
+  const responseTimeOverTimeRows = useMemo(() => {
+    if (statsGroupMode === "model") return [];
+    const web = displayStats?.response_time_timeline ?? [];
+    const ide = displayIdeStats?.response_time_timeline ?? [];
+    if (!web.length && !ide.length) return [];
+    const webMap = new Map(web.map((row) => [row.bucket, row]));
+    const ideMap = new Map(ide.map((row) => [row.bucket, row]));
+    const buckets = [...new Set([...web.map((row) => row.bucket), ...ide.map((row) => row.bucket)])].sort();
+    return buckets.map((bucket) => {
+      const webRow = webMap.get(bucket);
+      const ideRow = ideMap.get(bucket);
+      return {
+        bucket,
+        label:
+          statsGranularity === "week" ? `wk ${formatShortDay(bucket)}` : formatShortDay(bucket),
+        chatgpt: webRow?.chatgpt_s ?? null,
+        claude: webRow?.claude_s ?? null,
+        gemini: webRow?.gemini_s ?? null,
+        claude_code: ideRow?.claude_code_s ?? null,
+        cursor: ideRow?.cursor_s ?? null,
+        codex: ideRow?.codex_s ?? null
+      };
+    });
+  }, [statsGroupMode, displayStats, displayIdeStats, statsGranularity]);
+
+  const responseTimeOverTimeHasData = useMemo(
+    () =>
+      responseTimeOverTimeRows.some((row) =>
+        SCREEN_TIME_OVER_TIME_FILTERS.some(
+          (filter) =>
+            effectivePromptVolumeAiFilters[filter.key] &&
+            (row[SCREEN_TIME_TIMELINE_KEY[filter.key]] ?? 0) > 0
+        )
+      ),
+    [responseTimeOverTimeRows, effectivePromptVolumeAiFilters]
+  );
+
+  const responseTimeByModelRows = useMemo(() => {
+    if (statsGroupMode !== "model") return [];
+    return activeModelChartSeries
+      .map((series) => {
+        let seconds: number | null = null;
+        if (isIdeServiceKey(selectedModelService)) {
+          const row = (displayIdeStats?.model_buckets ?? []).find(
+            (entry) => entry.tool === selectedModelService && entry.bucket === series.bucket
+          );
+          seconds =
+            row && typeof row.avg_response_ms === "number" && row.avg_response_ms > 0
+              ? Math.round((row.avg_response_ms / 1000) * 10) / 10
+              : null;
+        } else {
+          const row = (displayStats?.model_response_latency ?? []).find(
+            (entry) => entry.bucket === series.bucket
+          );
+          seconds = row && row.avg_s > 0 ? row.avg_s : null;
+        }
+        if (seconds === null) return null;
+        return { model: series.label, key: series.bucket, seconds, fill: series.color };
+      })
+      .filter((row): row is NonNullable<typeof row> => row !== null)
+      .sort((a, b) => b.seconds - a.seconds);
+  }, [statsGroupMode, activeModelChartSeries, selectedModelService, displayIdeStats, displayStats]);
+
+  const modelResponseTimeOverTimeRows = useMemo(() => {
+    if (statsGroupMode !== "model") return [];
+    const timeline = isIdeServiceKey(selectedModelService)
+      ? displayIdeStats?.model_response_time_timeline
+      : displayStats?.model_response_time_timeline;
+    if (!timeline?.length || !activeModelChartSeries.length) return [];
+    return timeline.map((row) => {
+      const out: Record<string, string | number | null> = {
+        bucket: row.bucket,
+        label:
+          statsGranularity === "week"
+            ? `wk ${formatShortDay(row.bucket)}`
+            : formatShortDay(row.bucket)
+      };
+      for (const series of activeModelChartSeries) {
+        const value = row.models[series.bucket];
+        out[series.dataKey] = typeof value === "number" && value > 0 ? value : null;
+      }
+      return out;
+    });
+  }, [statsGroupMode, selectedModelService, displayIdeStats, displayStats, activeModelChartSeries, statsGranularity]);
+
+  const modelResponseTimeOverTimeHasData = useMemo(
+    () =>
+      modelResponseTimeOverTimeRows.some((row) =>
+        activeModelChartSeries.some((series) => Number(row[series.dataKey] ?? 0) > 0)
+      ),
+    [modelResponseTimeOverTimeRows, activeModelChartSeries]
+  );
+
+  const responseTimeSectionHasData =
+    statsGroupMode === "model"
+      ? responseTimeByModelRows.length > 0 || modelResponseTimeOverTimeHasData
+      : responseTimeByServiceRows.length > 0 || responseTimeOverTimeHasData;
+
+  const responseTimeByServiceSectionHeight = Math.max(
+    120,
+    (statsGroupMode === "model" ? responseTimeByModelRows.length : responseTimeByServiceRows.length) * 44 + 24
+  );
+
   const promptLengthChartRows = useMemo(() => {
     const rows: Array<{ label: string; avg_words: number; fill: string; key: string }> = [];
 
@@ -3188,7 +3347,7 @@ export function StatisticsClient() {
                     <Tooltip
                       cursor={{ fill: "rgba(255,255,255,0.04)" }}
                       contentStyle={CHART_TOOLTIP_STYLE}
-                      formatter={(value: number, name: string) => [value, name]}
+                      formatter={(value: number, name: string) => [formatChartNumber(value), name]}
                     />
                     {activeModelChartSeries.map((series, index, visible) => (
                       <Bar
@@ -3228,7 +3387,7 @@ export function StatisticsClient() {
                                 className="text-xs tabular-nums"
                                 style={{ color: entry.color ?? "#1F1B16" }}
                               >
-                                {entry.name}: {entry.value}
+                                {entry.name}: {formatChartNumber(entry.value)}
                               </p>
                             ))}
                           </div>
@@ -3318,7 +3477,7 @@ export function StatisticsClient() {
                                 <Tooltip
                                   cursor={{ fill: "rgba(255,255,255,0.04)" }}
                                   contentStyle={CHART_TOOLTIP_STYLE}
-                                  formatter={(value: number, name: string) => [`${value} min`, name]}
+                                  formatter={(value: number, name: string) => [`${formatChartNumber(value)} min`, name]}
                                 />
                                 {activeModelChartSeries.map((series, index, visible) => (
                                   <Bar
@@ -3378,7 +3537,7 @@ export function StatisticsClient() {
                               />
                               <Tooltip
                                 contentStyle={CHART_TOOLTIP_STYLE}
-                                formatter={(value: number) => [`${value} min`, "Screen time"]}
+                                formatter={(value: number) => [`${formatChartNumber(value)} min`, "Screen time"]}
                               />
                               <Bar dataKey="minutes" name="Screen time" radius={[0, 4, 4, 0]} barSize={18}>
                                 {screenTimeByModelInstantRows.map((entry) => (
@@ -3422,7 +3581,7 @@ export function StatisticsClient() {
                             <Tooltip
                               cursor={{ fill: "rgba(255,255,255,0.04)" }}
                               contentStyle={CHART_TOOLTIP_STYLE}
-                              formatter={(value: number, name: string) => [`${value} min`, name]}
+                              formatter={(value: number, name: string) => [`${formatChartNumber(value)} min`, name]}
                             />
                             <Legend wrapperStyle={CHART_LEGEND_STYLE} />
                             {SCREEN_TIME_OVER_TIME_FILTERS.filter((f) => effectivePromptVolumeAiFilters[f.key]).map(
@@ -3468,7 +3627,7 @@ export function StatisticsClient() {
                           />
                           <Tooltip
                             contentStyle={CHART_TOOLTIP_STYLE}
-                            formatter={(value: number) => [`${value} min`, "Screen time"]}
+                            formatter={(value: number) => [`${formatChartNumber(value)} min`, "Screen time"]}
                           />
                           <Bar dataKey="minutes" name="Screen time" radius={[0, 4, 4, 0]} barSize={18}>
                             {screenTimeByServiceRows.map((entry) => (
@@ -3522,7 +3681,7 @@ export function StatisticsClient() {
                             <Tooltip
                               cursor={{ fill: "rgba(255,255,255,0.04)" }}
                               contentStyle={CHART_TOOLTIP_STYLE}
-                              formatter={(value: number, name: string) => [`${value} min`, name]}
+                              formatter={(value: number, name: string) => [`${formatChartNumber(value)} min`, name]}
                             />
                             <Legend wrapperStyle={CHART_LEGEND_STYLE} />
                             {ENGAGEMENT_OVER_TIME_SERIES.map((series, index) => (
@@ -3660,7 +3819,7 @@ export function StatisticsClient() {
                     />
                     <Tooltip
                       contentStyle={CHART_TOOLTIP_STYLE}
-                      formatter={(value: number) => [`${value} words`, "Avg length"]}
+                      formatter={(value: number) => [`${formatChartNumber(value)} words`, "Avg length"]}
                     />
                     <Bar dataKey="avg_words" name="Avg words" radius={[0, 4, 4, 0]} barSize={16}>
                       {promptLengthChartRows.map((entry) => (
@@ -3670,6 +3829,169 @@ export function StatisticsClient() {
                   </BarChart>
                 </ResponsiveContainer>
               </div>
+            </section>
+          ) : null}
+
+          {responseTimeSectionHasData ? (
+            <section className="mb-8 w-full rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">
+                  {statsGroupMode === "model" ? "Avg AI response time by model" : "Avg AI response time"}
+                </h2>
+                <div className="flex flex-wrap items-center gap-2">
+                  {responseTimeView === "instant" ? (
+                    <p className="text-xs font-medium tabular-nums text-muted">Last {days} days</p>
+                  ) : null}
+                  <StatsChartHorizonToggle value={responseTimeView} onChange={setResponseTimeView} />
+                </div>
+              </div>
+              {statsGroupMode === "model" ? (
+                responseTimeView === "over_time" ? (
+                  modelResponseTimeOverTimeHasData ? (
+                    <>
+                      <div className="h-72 w-full sm:h-80">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart
+                            data={modelResponseTimeOverTimeRows}
+                            margin={{ top: 4, right: 8, bottom: 0, left: 0 }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                            <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
+                            <YAxis stroke="#8A8A8A" width={40} tick={CHART_Y_TICK} unit=" s" allowDecimals />
+                            <Tooltip
+                              contentStyle={CHART_TOOLTIP_STYLE}
+                              formatter={(value: number, name: string) => [`${formatChartNumber(value)} s`, name]}
+                            />
+                            {activeModelChartSeries.map((series) => (
+                              <Line
+                                key={series.dataKey}
+                                type="monotone"
+                                dataKey={series.dataKey}
+                                name={series.label}
+                                stroke={series.color}
+                                strokeWidth={2}
+                                dot={{ r: 2.5 }}
+                                connectNulls
+                              />
+                            ))}
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                      <div className="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 border-t border-line pt-3">
+                        {activeModelChartSeries.map((series) => (
+                          <span key={series.bucket} className="inline-flex items-center gap-2 text-xs text-muted">
+                            <span
+                              className="h-2.5 w-2.5 shrink-0 rounded-full"
+                              style={{ backgroundColor: series.color }}
+                              aria-hidden
+                            />
+                            {series.label}
+                          </span>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted">No response time over time for the selected models in this range yet.</p>
+                  )
+                ) : responseTimeByModelRows.length ? (
+                  <div className="w-full" style={{ height: responseTimeByServiceSectionHeight }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        data={responseTimeByModelRows}
+                        layout="vertical"
+                        margin={{ top: 4, right: 12, bottom: 4, left: 4 }}
+                        barCategoryGap="18%"
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" horizontal={false} />
+                        <XAxis type="number" stroke="#8A8A8A" tick={CHART_Y_TICK} unit=" s" allowDecimals />
+                        <YAxis
+                          type="category"
+                          dataKey="model"
+                          stroke="#8A8A8A"
+                          tick={CHART_Y_TICK_11}
+                          width={140}
+                        />
+                        <Tooltip
+                          contentStyle={CHART_TOOLTIP_STYLE}
+                          formatter={(value: number) => [`${formatChartNumber(value)} s`, "Avg response"]}
+                        />
+                        <Bar dataKey="seconds" name="Avg response" radius={[0, 4, 4, 0]} barSize={16}>
+                          {responseTimeByModelRows.map((entry) => (
+                            <Cell key={entry.key} fill={entry.fill} fillOpacity={0.95} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted">No response time for the selected models in this range yet.</p>
+                )
+              ) : responseTimeView === "over_time" ? (
+                responseTimeOverTimeHasData ? (
+                  <div className="h-72 w-full sm:h-80">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={responseTimeOverTimeRows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                        <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
+                        <YAxis stroke="#8A8A8A" width={40} tick={CHART_Y_TICK} unit=" s" allowDecimals />
+                        <Tooltip
+                          contentStyle={CHART_TOOLTIP_STYLE}
+                          formatter={(value: number, name: string) => [`${formatChartNumber(value)} s`, name]}
+                        />
+                        <Legend wrapperStyle={CHART_LEGEND_STYLE} />
+                        {SCREEN_TIME_OVER_TIME_FILTERS.filter((f) => effectivePromptVolumeAiFilters[f.key]).map(
+                          (filter) => (
+                            <Line
+                              key={filter.key}
+                              type="monotone"
+                              dataKey={SCREEN_TIME_TIMELINE_KEY[filter.key]}
+                              name={filter.legendName}
+                              stroke={filter.color}
+                              strokeWidth={2}
+                              dot={{ r: 2.5 }}
+                              connectNulls
+                            />
+                          )
+                        )}
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted">No response time over time for the selected services in this range yet.</p>
+                )
+              ) : responseTimeByServiceRows.length ? (
+                <div className="w-full" style={{ height: responseTimeByServiceSectionHeight }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={responseTimeByServiceRows}
+                      layout="vertical"
+                      margin={{ top: 4, right: 12, bottom: 4, left: 4 }}
+                      barCategoryGap="18%"
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" horizontal={false} />
+                      <XAxis type="number" stroke="#8A8A8A" tick={CHART_Y_TICK} unit=" s" allowDecimals />
+                      <YAxis
+                        type="category"
+                        dataKey="service"
+                        stroke="#8A8A8A"
+                        tick={CHART_Y_TICK_11}
+                        width={screenTimeServiceLabelWidth}
+                      />
+                      <Tooltip
+                        contentStyle={CHART_TOOLTIP_STYLE}
+                        formatter={(value: number) => [`${formatChartNumber(value)} s`, "Avg response"]}
+                      />
+                      <Bar dataKey="seconds" name="Avg response" radius={[0, 4, 4, 0]} barSize={16}>
+                        {responseTimeByServiceRows.map((entry) => (
+                          <Cell key={entry.key} fill={entry.fill} fillOpacity={0.95} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <p className="text-sm text-muted">No response time for the selected services in this range yet.</p>
+              )}
             </section>
           ) : null}
 
@@ -3705,7 +4027,7 @@ export function StatisticsClient() {
                       contentStyle={CHART_TOOLTIP_STYLE}
                       formatter={(value: number, name: string) => {
                         if (typeof value !== "number" || value <= 0) return ["—", name];
-                        return [`${value} min`, name];
+                        return [`${formatChartNumber(value)} min`, name];
                       }}
                     />
                     <Legend wrapperStyle={CHART_LEGEND_STYLE} />
@@ -4014,7 +4336,10 @@ export function StatisticsClient() {
                           <CartesianGrid strokeDasharray="3 3" stroke="#E0DDD6" />
                           <XAxis dataKey="label" tick={CHART_X_DATE_TICK} stroke={CHART_X_DATE_STROKE} />
                           <YAxis tick={CHART_Y_TICK} />
-                          <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
+                          <Tooltip
+                            contentStyle={CHART_TOOLTIP_STYLE}
+                            formatter={(value: number, name: string) => [`${formatChartNumber(value)} min`, name]}
+                          />
                           <Legend wrapperStyle={CHART_LEGEND_STYLE} />
                           <Bar
                             dataKey="claude_code_minutes"
@@ -4061,7 +4386,10 @@ export function StatisticsClient() {
                               <CartesianGrid strokeDasharray="3 3" stroke="#E0DDD6" />
                               <XAxis dataKey="agent" tick={CHART_Y_TICK} />
                               <YAxis tick={CHART_Y_TICK} allowDecimals />
-                              <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
+                              <Tooltip
+                                contentStyle={CHART_TOOLTIP_STYLE}
+                                formatter={(value: number, name: string) => [`${formatChartNumber(value)} min`, name]}
+                              />
                               <Legend wrapperStyle={CHART_LEGEND_STYLE} />
                               <Bar dataKey="drafting" name="Drafting" stackId="time" fill={COLOR_DRAFTING} />
                               <Bar dataKey="waiting" name="Waiting for AI" stackId="time" fill={COLOR_NATIVE_WEB} />
@@ -4092,7 +4420,10 @@ export function StatisticsClient() {
                               <CartesianGrid strokeDasharray="3 3" stroke="#E0DDD6" />
                               <XAxis dataKey="agent" tick={CHART_Y_TICK} />
                               <YAxis tick={CHART_Y_TICK} unit="s" />
-                              <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
+                              <Tooltip
+                                contentStyle={CHART_TOOLTIP_STYLE}
+                                formatter={(value: number, name: string) => [`${formatChartNumber(value)} s`, name]}
+                              />
                               <Legend wrapperStyle={CHART_LEGEND_STYLE} />
                               <Bar dataKey="avg_draft_s" name="Avg draft" fill={COLOR_DRAFTING} radius={[4, 4, 0, 0]} />
                               <Bar
@@ -4133,7 +4464,7 @@ export function StatisticsClient() {
                               />
                               <Tooltip
                                 contentStyle={CHART_TOOLTIP_STYLE}
-                                formatter={(value: number) => [`${value} words`, "Avg length"]}
+                                formatter={(value: number) => [`${formatChartNumber(value)} words`, "Avg length"]}
                               />
                               <Bar dataKey="avg_words" name="Avg words" fill="#7c3aed" radius={[0, 4, 4, 0]} barSize={14} />
                             </BarChart>
@@ -4222,7 +4553,7 @@ export function StatisticsClient() {
                           contentStyle={CHART_TOOLTIP_STYLE}
                           formatter={(value: number, name: string) => {
                             if (typeof value !== "number" || value <= 0) return ["—", name];
-                            return [`${value}s`, name];
+                            return [`${formatChartNumber(value)}s`, name];
                           }}
                         />
                         <Legend wrapperStyle={CHART_LEGEND_STYLE_COMPACT} />
@@ -4259,7 +4590,10 @@ export function StatisticsClient() {
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
                   <XAxis dataKey="ai" stroke="#8A8A8A" tick={CHART_Y_TICK_11} />
                   <YAxis stroke="#8A8A8A" tick={CHART_Y_TICK_11} label={CHART_AXIS_LABEL("Seconds (avg)")} />
-                  <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
+                  <Tooltip
+                    contentStyle={CHART_TOOLTIP_STYLE}
+                    formatter={(value: number, name: string) => [`${formatChartNumber(value)} s`, name]}
+                  />
                   <Legend wrapperStyle={CHART_LEGEND_STYLE} />
                   <Bar dataKey="promptly_rewrite_s" name="Promptly rewrite (avg s)" radius={[8, 8, 0, 0]} fill={COLOR_PROMPTLY}>
                     {latencyChartRows.map((entry, idx) => (
@@ -4318,7 +4652,7 @@ export function StatisticsClient() {
                             name === "Before Promptly"
                               ? (payload?.samples ?? 0)
                               : (payload?.samples_after ?? 0);
-                          return [`${value} words (${runs.toLocaleString()} runs)`, name];
+                          return [`${formatChartNumber(value)} words (${runs.toLocaleString()} runs)`, name];
                         }}
                       />
                       <Legend wrapperStyle={CHART_LEGEND_STYLE} />
