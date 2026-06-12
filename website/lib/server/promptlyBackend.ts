@@ -1641,6 +1641,8 @@ export type AccountIdeStatsPayload = {
     prompts: IdeToolCounts;
     prompts_without_agent_email: IdeToolCounts;
     screen_time_minutes: IdeToolCounts;
+    /** Screen time in the reference window right before the range; null when the query can't cover it. */
+    screen_time_minutes_prev: IdeToolCounts | null;
     engagement_minutes: {
       drafting: number;
       waiting: number;
@@ -1696,6 +1698,8 @@ export type AccountIdeStatsPayload = {
     reading_idle_minutes: number;
     total_minutes: number;
   }>;
+  /** Screen time per submodel in the reference window before the range; null when uncovered. */
+  model_screen_time_prev?: Array<{ bucket: string; total_minutes: number }> | null;
   model_series_labels?: Record<string, string | null>;
   /** Average response seconds per tool per bucket (null when no latency samples). */
   response_time_timeline?: Array<{
@@ -1748,6 +1752,32 @@ function filterEventDocsByUtcDayRange(
     const day = readAnalyticsUtcDay(doc.data() as Record<string, unknown>);
     return Boolean(day && day >= startDay && day <= endDay);
   });
+}
+
+function daysSinceUtcDay(utcYmd: string): number {
+  const diffMs = Date.parse(`${getDateDaysAgo(0)}T00:00:00Z`) - Date.parse(`${utcYmd}T00:00:00Z`);
+  return Number.isFinite(diffMs) ? Math.max(0, Math.round(diffMs / 86400000)) : 0;
+}
+
+/** Earliest event day across doc lists — lets MAX ranges start at the first data point. */
+function earliestUtcDayInDocs(
+  docLists: Array<QueryDocumentSnapshot<DocumentData>[]>
+): string | null {
+  let earliest: string | null = null;
+  for (const docs of docLists) {
+    for (const doc of docs) {
+      const day = readAnalyticsUtcDay(doc.data() as Record<string, unknown>);
+      if (day && (!earliest || day < earliest)) earliest = day;
+    }
+  }
+  return earliest;
+}
+
+/** Requests of >= STATS_SUPERSET_DAYS mean MAX: span from the first data point when known. */
+function resolveStatsRangeDays(days: number, earliestDay: string | null): number {
+  const requested = Math.max(1, Math.min(STATS_SUPERSET_DAYS, Math.floor(days || 14)));
+  if (!earliestDay) return requested;
+  return Math.max(1, Math.min(STATS_SUPERSET_DAYS, daysSinceUtcDay(earliestDay) + 1));
 }
 
 function parseLinkedIdeAccounts(raw: unknown): LinkedIdeAccount[] {
@@ -2168,10 +2198,7 @@ export async function getAccountIdeUsageStats(
   opts?: { bypassCache?: boolean; scopeFilter?: AccountStatsScopeFilter }
 ): Promise<AccountIdeStatsPayload> {
   const scopeFilter = opts?.scopeFilter;
-  const rangeDays = Math.max(1, Math.min(400, Math.floor(days || 14)));
-  const recentDays = getRecentDays(rangeDays);
-  const startDay = recentDays[0]!;
-  const endDay = recentDays[recentDays.length - 1]!;
+  const isMaxRange = Math.floor(days || 0) >= STATS_SUPERSET_DAYS;
 
   const statsUsers = await resolveIdeStatsUsers(user);
   const linkedAccounts = await readLinkedIdeAccounts(user.uid);
@@ -2195,6 +2222,23 @@ export async function getAccountIdeUsageStats(
     ),
     listIntegrationDevicesForUsers(statsUsers)
   ]);
+  const rangeDays = resolveStatsRangeDays(
+    days,
+    isMaxRange ? earliestUtcDayInDocs([eventsSuperset.docs]) : null
+  );
+  const recentDays = getRecentDays(rangeDays);
+  const startDay = recentDays[0]!;
+  const endDay = recentDays[recentDays.length - 1]!;
+  // Reference window (the rangeDays right before startDay) — only when the superset covers it; MAX has none.
+  const prevWindowCovered = !isMaxRange && rangeDays * 2 <= STATS_SUPERSET_DAYS;
+  const prevWindowDays = prevWindowCovered ? getRecentDays(rangeDays * 2).slice(0, rangeDays) : [];
+  const prevStartDay = prevWindowDays[0] ?? null;
+  const prevEndDay = prevWindowDays[prevWindowDays.length - 1] ?? null;
+  const prevWindowDocs =
+    prevStartDay && prevEndDay
+      ? filterEventDocsByUtcDayRange(eventsSuperset.docs, prevStartDay, prevEndDay)
+      : [];
+
   const eventsResult = {
     ...eventsSuperset,
     docs: filterEventDocsByUtcDayRange(eventsSuperset.docs, startDay, endDay)
@@ -2270,6 +2314,8 @@ export async function getAccountIdeUsageStats(
   const wordTotalByTool: IdeToolCounts = { claude_code: 0, cursor: 0, codex: 0 };
   const wordSamplesByTool: IdeToolCounts = emptyIdeToolCounts();
   const trackModelSeries = Boolean(scopeFilter?.ideTool);
+  const prevScreenMsByTool: IdeToolCounts = emptyIdeToolCounts();
+  const prevModelScreenMsByModel = new Map<string, number>();
   const modelPromptsByDay = new Map<string, Map<string, number>>();
   const modelScreenMsByDay = new Map<string, Map<string, number>>();
   const modelLatencySumMsByDay = new Map<string, Map<string, number>>();
@@ -2348,6 +2394,39 @@ export async function getAccountIdeUsageStats(
     if (!agentEmail) return true;
     return filter.has(agentEmail);
   };
+
+  /** Screen-time ms for events in the reference window, mirroring the in-range accumulation rules. */
+  const accumulatePrevWindowEvent = (raw: Record<string, unknown>) => {
+    const tool = normalizePromptlyIdeTool(raw.tool);
+    if (!tool) return;
+    if (!passesIdeScopeFilter(tool, raw, scopeFilter)) return;
+    if (!eventPassesEmailFilter(tool, readEventAgentEmail(raw))) return;
+    const ik = String(raw.interactionKind ?? raw.interaction_kind ?? "send").toLowerCase();
+    let screenMs = 0;
+    if (ik === "engagement_segment" || ik === "engagement") {
+      const catRaw = raw.engagementCategory ?? raw.engagement_category;
+      const cat = typeof catRaw === "string" ? catRaw.trim().toLowerCase() : "";
+      const durRaw = raw.engagementDurationMs ?? raw.engagement_duration_ms ?? raw.duration_ms ?? raw.durationMs;
+      const durMs = typeof durRaw === "number" && Number.isFinite(durRaw) ? Math.floor(durRaw) : null;
+      if ((cat === "drafting" || cat === "waiting" || cat === "reading_idle") && durMs !== null && durMs >= 500) {
+        screenMs = durMs;
+      }
+    } else if (ik === "response_latency") {
+      const hlRaw = raw.hostResponseLatencyMs ?? raw.host_response_latency_ms;
+      const hlMs = typeof hlRaw === "number" && Number.isFinite(hlRaw) ? Math.floor(hlRaw) : null;
+      if (hlMs !== null && hlMs > 0) screenMs = hlMs;
+    }
+    if (screenMs <= 0) return;
+    prevScreenMsByTool[tool] += screenMs;
+    if (trackModelSeries) {
+      const { mb } = readIdeEventModel(raw);
+      prevModelScreenMsByModel.set(mb, (prevModelScreenMsByModel.get(mb) ?? 0) + screenMs);
+    }
+  };
+
+  for (const doc of prevWindowDocs) {
+    accumulatePrevWindowEvent(doc.data() as Record<string, unknown>);
+  }
 
   for (const doc of eventsResult.docs) {
     const raw = doc.data() as Record<string, unknown>;
@@ -2606,6 +2685,13 @@ export async function getAccountIdeUsageStats(
         cursor: msToStatMinutes(screenTotals.cursor),
         codex: msToStatMinutes(screenTotals.codex)
       },
+      screen_time_minutes_prev: prevWindowCovered
+        ? {
+            claude_code: msToStatMinutes(prevScreenMsByTool.claude_code),
+            cursor: msToStatMinutes(prevScreenMsByTool.cursor),
+            codex: msToStatMinutes(prevScreenMsByTool.codex)
+          }
+        : null,
       engagement_minutes: {
         drafting: msToStatMinutes(engagementTotalsMs.drafting),
         waiting: msToStatMinutes(engagementTotalsMs.waiting),
@@ -2787,6 +2873,11 @@ export async function getAccountIdeUsageStats(
             }))
             .filter((row) => row.total_minutes > 0)
             .sort((a, b) => b.total_minutes - a.total_minutes || a.bucket.localeCompare(b.bucket)),
+          model_screen_time_prev: prevWindowCovered
+            ? [...prevModelScreenMsByModel.entries()]
+                .map(([modelSlug, ms]) => ({ bucket: modelSlug, total_minutes: msToStatMinutes(ms) }))
+                .filter((row) => row.total_minutes > 0)
+            : null,
           model_series_labels: Object.fromEntries(modelSeriesLabels.entries())
         }
       : {})
@@ -2903,10 +2994,7 @@ export async function getAccountUsageStatsExtended(
   opts?: { bypassCache?: boolean; scopeFilter?: AccountStatsScopeFilter }
 ) {
   const scopeFilter = opts?.scopeFilter;
-  const rangeDays = Math.max(1, Math.min(400, Math.floor(days || 14)));
-  const recentDays = getRecentDays(rangeDays);
-  const startDay = recentDays[0];
-  const endDay = recentDays[recentDays.length - 1];
+  const isMaxRange = Math.floor(days || 0) >= STATS_SUPERSET_DAYS;
   const supersetDays = getRecentDays(STATS_SUPERSET_DAYS);
   const queryStartDay = supersetDays[0]!;
   const queryEndDay = supersetDays[supersetDays.length - 1]!;
@@ -3018,6 +3106,23 @@ export async function getAccountUsageStatsExtended(
       ttlMs: STATS_QUERY_CACHE_TTL_MS
     })
   ]);
+  const rangeDays = resolveStatsRangeDays(
+    days,
+    isMaxRange ? earliestUtcDayInDocs([eventsSuperset.docs, hostSuperset.docs]) : null
+  );
+  const recentDays = getRecentDays(rangeDays);
+  const startDay = recentDays[0];
+  const endDay = recentDays[recentDays.length - 1];
+  // Reference window (the rangeDays right before startDay) — only when the superset covers it; MAX has none.
+  const prevWindowCovered = !isMaxRange && rangeDays * 2 <= STATS_SUPERSET_DAYS;
+  const prevWindowDays = prevWindowCovered ? getRecentDays(rangeDays * 2).slice(0, rangeDays) : [];
+  const prevStartDay = prevWindowDays[0] ?? null;
+  const prevEndDay = prevWindowDays[prevWindowDays.length - 1] ?? null;
+  const prevHostWindowDocs =
+    prevStartDay && prevEndDay
+      ? filterEventDocsByUtcDayRange(hostSuperset.docs, prevStartDay, prevEndDay)
+      : [];
+
   const eventsResult = {
     ...eventsSuperset,
     docs: filterEventDocsByUtcDayRange(eventsSuperset.docs, startDay!, endDay!)
@@ -3110,6 +3215,8 @@ export async function getAccountUsageStatsExtended(
   const webModelLatencySumMsByDay = new Map<string, Map<string, number>>();
   const webModelLatencySamplesByDay = new Map<string, Map<string, number>>();
   const webModelLatencyAgg = new Map<string, { sum: number; samples: number }>();
+  const prevScreenMsBySvc = emptyServicePromptCounts();
+  const prevWebModelScreenMsByModel = new Map<string, number>();
   const webModelEngagementMsByModel = new Map<
     string,
     {
@@ -3263,6 +3370,47 @@ export async function getAccountUsageStatsExtended(
       prev.label = label.slice(0, TELEMETRY_HOST_MODEL_MAX_CHARS);
     }
     modelBucketAgg.set(mb, prev);
+  }
+
+  /** Screen-time ms for host events in the reference window, mirroring the in-range accumulation rules. */
+  const accumulatePrevHostEvent = (raw: Record<string, unknown>) => {
+    const ik = String(raw.interactionKind ?? raw.interaction_kind ?? "send").toLowerCase();
+    const svc = normalizePromptlyService(raw.service);
+    if (ik === "engagement_segment" || ik === "engagement") {
+      if (!passesWebScopeFilter(svc, raw, scopeFilter, { requireModelMatch: false })) return;
+      const catRaw = raw.engagementCategory ?? raw.engagement_category;
+      const cat = typeof catRaw === "string" ? catRaw.trim().toLowerCase() : "";
+      const durRaw = raw.engagementDurationMs ?? raw.engagement_duration_ms ?? raw.duration_ms ?? raw.durationMs;
+      const durMs = typeof durRaw === "number" && Number.isFinite(durRaw) ? Math.floor(durRaw) : null;
+      if ((cat === "drafting" || cat === "waiting" || cat === "reading_idle") && durMs !== null && durMs >= 2000) {
+        prevScreenMsBySvc[svc] += durMs;
+        if (trackWebModelSeries && svc === webModelService) {
+          const mb = readTelemetryModelBucket(raw);
+          prevWebModelScreenMsByModel.set(mb, (prevWebModelScreenMsByModel.get(mb) ?? 0) + durMs);
+        }
+      }
+      return;
+    }
+    if (ik === "composer_input" || ik === "compose" || ik === "typing") return;
+    // Native sends: host response latency counts toward model screen time (waiting), as in-range.
+    if (!trackWebModelSeries || svc !== webModelService) return;
+    if (!passesWebScopeFilter(svc, raw, scopeFilter)) return;
+    const sourceRaw = String(raw.source ?? raw.ingest_source ?? "passive_listener");
+    if (sourceRaw === "optimize_api") return;
+    const telemetrySourceRaw = raw.telemetrySource ?? raw.telemetry_source;
+    const telemetrySource =
+      typeof telemetrySourceRaw === "string" ? telemetrySourceRaw.trim().toLowerCase() : "";
+    if (/^auto_adjust_/.test(telemetrySource)) return;
+    const hlRaw = raw.hostResponseLatencyMs ?? raw.host_response_latency_ms;
+    const hlMs = typeof hlRaw === "number" && Number.isFinite(hlRaw) ? Math.floor(hlRaw) : null;
+    if (hlMs !== null && hlMs > 0) {
+      const mb = readTelemetryModelBucket(raw);
+      prevWebModelScreenMsByModel.set(mb, (prevWebModelScreenMsByModel.get(mb) ?? 0) + hlMs);
+    }
+  };
+
+  for (const doc of prevHostWindowDocs) {
+    accumulatePrevHostEvent(doc.data() as Record<string, unknown>);
   }
 
   for (const doc of hostPassiveResult.docs) {
@@ -4021,6 +4169,14 @@ export async function getAccountUsageStatsExtended(
     latency_comparison_ai,
     time_balance_timeline,
     screen_time_by_service,
+    screen_time_by_service_prev: prevWindowCovered
+      ? {
+          chatgpt: msToStatMinutes(prevScreenMsBySvc.chatgpt),
+          claude: msToStatMinutes(prevScreenMsBySvc.claude),
+          gemini: msToStatMinutes(prevScreenMsBySvc.gemini),
+          unknown: msToStatMinutes(prevScreenMsBySvc.unknown)
+        }
+      : null,
     screen_time_timeline,
     response_time_timeline,
     engagement_totals,
@@ -4097,6 +4253,11 @@ export async function getAccountUsageStatsExtended(
             }))
             .filter((row) => row.total_minutes > 0)
             .sort((a, b) => b.total_minutes - a.total_minutes || a.bucket.localeCompare(b.bucket)),
+          model_screen_time_prev: prevWindowCovered
+            ? [...prevWebModelScreenMsByModel.entries()]
+                .map(([modelSlug, ms]) => ({ bucket: modelSlug, total_minutes: msToStatMinutes(ms) }))
+                .filter((row) => row.total_minutes > 0)
+            : null,
           model_series_labels: Object.fromEntries(webModelSeriesLabels.entries())
         }
       : {}),

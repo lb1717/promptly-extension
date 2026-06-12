@@ -17,7 +17,6 @@ import {
   LabelList,
   Legend,
   Line,
-  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -157,6 +156,7 @@ type IdeStatsPayload = {
     prompts: { claude_code: number; cursor: number; codex: number };
     prompts_without_agent_email?: { claude_code: number; cursor: number; codex: number };
     screen_time_minutes: { claude_code: number; cursor: number; codex: number };
+    screen_time_minutes_prev?: { claude_code: number; cursor: number; codex: number } | null;
     engagement_minutes: {
       drafting: number;
       waiting: number;
@@ -200,6 +200,7 @@ type IdeStatsPayload = {
   model_screen_time_timeline?: Array<{ bucket: string; models: Record<string, number> }>;
   model_response_time_timeline?: Array<{ bucket: string; models: Record<string, number> }>;
   model_engagement_by_model?: ModelEngagementByModelRow[];
+  model_screen_time_prev?: Array<{ bucket: string; total_minutes: number }> | null;
   model_series_labels?: Record<string, string | null>;
   response_time_timeline?: Array<{
     bucket: string;
@@ -346,13 +347,17 @@ const EMPTY_SERVICE_SCREEN_TIME: ServiceScreenTime = {
 
 const MODEL_CHART_ORDER: PromptlySvc[] = ["gemini", "claude", "chatgpt", "unknown"];
 
-const STATS_RANGE_OPTIONS: Array<{ label: string; days: number }> = [
-  { label: "1W", days: 7 },
-  { label: "1M", days: 30 },
-  { label: "3M", days: 90 },
-  { label: "1Y", days: 365 },
-  { label: "MAX", days: 400 }
+const STATS_RANGE_OPTIONS: Array<{ label: string; days: number; since: string | null }> = [
+  { label: "1W", days: 7, since: "last week" },
+  { label: "1M", days: 30, since: "last month" },
+  { label: "3M", days: 90, since: "last 3 months" },
+  { label: "1Y", days: 365, since: "last year" },
+  { label: "MAX", days: 400, since: null }
 ];
+
+function sinceLabelForDays(days: number): string | null {
+  return STATS_RANGE_OPTIONS.find((option) => option.days === days)?.since ?? null;
+}
 
 type PreImproveWordBucket = {
   bucket: string;
@@ -468,6 +473,7 @@ type ExtendedStatsPayload = {
   time_balance_timeline: TimeBalanceBucket[];
   time_balance_totals: TimeBalanceTotals;
   screen_time_by_service: Record<PromptlySvc, ServiceScreenTime>;
+  screen_time_by_service_prev?: Record<PromptlySvc, number> | null;
   screen_time_timeline: ScreenTimeTimelineBucket[];
   engagement_totals: EngagementTotals;
   value_insights: ValueInsights;
@@ -490,6 +496,7 @@ type ExtendedStatsPayload = {
   model_response_time_timeline?: Array<{ bucket: string; models: Record<string, number> }>;
   model_response_latency?: Array<{ bucket: string; avg_s: number; samples: number }>;
   model_engagement_by_model?: ModelEngagementByModelRow[];
+  model_screen_time_prev?: Array<{ bucket: string; total_minutes: number }> | null;
   model_series_labels?: Record<string, string | null>;
   response_time_timeline?: Array<{
     bucket: string;
@@ -752,6 +759,34 @@ function withPercentShares<T extends { minutes: number }>(rows: T[]): Array<T & 
     remainder -= 1;
   }
   return rows.map((row, index) => ({ ...row, percent: floors[index] ?? 0 }));
+}
+
+/**
+ * Bar-end label: "34%" plus, when a reference window exists, the share change
+ * in percentage points vs that window (e.g. "34% (+6% since last month)").
+ */
+function withBarLabels<T extends { key: string; percent: number }>(
+  rows: T[],
+  prevMinutesByKey: Map<string, number> | null,
+  sinceLabel: string | null
+): Array<T & { barLabel: string }> {
+  const prevTotal = prevMinutesByKey
+    ? [...prevMinutesByKey.values()].reduce((sum, value) => sum + value, 0)
+    : 0;
+  const showReference = Boolean(sinceLabel) && prevTotal > 0;
+  return rows.map((row) => {
+    if (!showReference) return { ...row, barLabel: `${row.percent}%` };
+    const prevPercent = Math.round(((prevMinutesByKey!.get(row.key) ?? 0) / prevTotal) * 100);
+    const delta = row.percent - prevPercent;
+    const sign = delta < 0 ? "−" : "+";
+    return { ...row, barLabel: `${row.percent}% (${sign}${Math.abs(delta)}% since ${sinceLabel})` };
+  });
+}
+
+/** Right chart margin sized so the bar-end label never clips. */
+function barLabelRightMargin(rows: Array<{ barLabel: string }>): number {
+  const maxLen = rows.reduce((max, row) => Math.max(max, row.barLabel.length), 0);
+  return Math.min(210, Math.max(44, Math.round(maxLen * 6.4) + 10));
 }
 
 function clampScore(n: number, lo: number, hi: number): number {
@@ -1494,12 +1529,10 @@ function renderEngagementPiePercentLabel({
 
 function ServiceEngagementDonut({
   label,
-  accentColor,
   totalMinutes,
   slices
 }: {
   label: string;
-  accentColor: string;
   totalMinutes: number;
   slices: EngagementSlice[];
 }) {
@@ -1510,9 +1543,7 @@ function ServiceEngagementDonut({
 
   return (
     <div className="mx-auto flex w-full max-w-[240px] flex-col items-center">
-      <p className="text-center text-sm font-bold uppercase tracking-wide" style={{ color: accentColor }}>
-        {label}
-      </p>
+      <p className="text-center text-sm font-bold uppercase tracking-wide text-ink">{label}</p>
       <div className="h-52 w-[220px] shrink-0">
         <ResponsiveContainer width="100%" height="100%" debounce={50}>
           <PieChart margin={{ top: 4, right: 12, bottom: 12, left: 12 }}>
@@ -1522,7 +1553,7 @@ function ServiceEngagementDonut({
               nameKey="name"
               cx="50%"
               cy="50%"
-              innerRadius="52%"
+              innerRadius="40%"
               outerRadius="72%"
               paddingAngle={hasSlices && slices.length > 1 ? 2 : 0}
               stroke="#FAF8F4"
@@ -1691,6 +1722,7 @@ export function StatisticsClient() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [days, setDays] = useState(30);
+  const rangeSummaryLabel = days >= 400 ? "All time" : `Last ${days} days`;
   const [granularity, setGranularity] = useState<"day" | "week">("day");
   const [stats, setStats] = useState<ExtendedStatsPayload | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
@@ -2126,21 +2158,43 @@ export function StatisticsClient() {
 
   const screenTimeByModelInstantRows = useMemo(() => {
     if (statsGroupMode !== "model") return [];
-    return withPercentShares(
-      activeModelChartSeries
-        .map((series) => {
-          const row = modelEngagementByModel.find((entry) => entry.bucket === series.bucket);
-          return {
-            model: series.label,
-            key: series.bucket,
-            minutes: row?.total_minutes ?? 0,
-            fill: series.color
-          };
-        })
-        .filter((row) => row.minutes > 0)
-        .sort((a, b) => b.minutes - a.minutes || a.model.localeCompare(b.model))
+    const prevEntries = isIdeServiceKey(selectedModelService)
+      ? displayIdeStats?.model_screen_time_prev
+      : displayStats?.model_screen_time_prev;
+    const prevMinutesByKey = prevEntries
+      ? new Map(
+          prevEntries
+            .filter((entry) => activeModelChartSeries.some((series) => series.bucket === entry.bucket))
+            .map((entry) => [entry.bucket, entry.total_minutes] as const)
+        )
+      : null;
+    return withBarLabels(
+      withPercentShares(
+        activeModelChartSeries
+          .map((series) => {
+            const row = modelEngagementByModel.find((entry) => entry.bucket === series.bucket);
+            return {
+              model: series.label,
+              key: series.bucket,
+              minutes: row?.total_minutes ?? 0,
+              fill: series.color
+            };
+          })
+          .filter((row) => row.minutes > 0)
+          .sort((a, b) => b.minutes - a.minutes || a.model.localeCompare(b.model))
+      ),
+      prevMinutesByKey,
+      sinceLabelForDays(days)
     );
-  }, [statsGroupMode, activeModelChartSeries, modelEngagementByModel]);
+  }, [
+    statsGroupMode,
+    activeModelChartSeries,
+    modelEngagementByModel,
+    selectedModelService,
+    displayIdeStats,
+    displayStats,
+    days
+  ]);
 
   const modelScreenTimeOverTimeHasData = useMemo(
     () =>
@@ -2540,6 +2594,7 @@ export function StatisticsClient() {
 
   const screenTimeByServiceRows = useMemo(() => {
     const rows: Array<{ service: string; key: string; minutes: number; fill: string }> = [];
+    const prevMinutesByKey = new Map<string, number>();
     if (displayStats?.screen_time_by_service) {
       for (const serviceKey of ["chatgpt", "claude", "gemini"] as const) {
         if (!effectivePromptVolumeAiFilters[serviceKey]) continue;
@@ -2555,6 +2610,9 @@ export function StatisticsClient() {
                 ? COLOR_CLAUDE_WEB
                 : COLOR_GEMINI_WEB
         });
+        if (displayStats.screen_time_by_service_prev) {
+          prevMinutesByKey.set(serviceKey, displayStats.screen_time_by_service_prev[serviceKey] ?? 0);
+        }
       }
     }
     const ideScreen = displayIdeStats?.totals.screen_time_minutes;
@@ -2564,6 +2622,7 @@ export function StatisticsClient() {
         { key: "cursor", label: "Cursor", color: COLOR_CURSOR },
         { key: "codex", label: "Codex", color: COLOR_CODEX }
       ];
+      const idePrev = displayIdeStats?.totals.screen_time_minutes_prev;
       for (const agent of agents) {
         if (!effectivePromptVolumeAiFilters[agent.key]) continue;
         rows.push({
@@ -2572,12 +2631,19 @@ export function StatisticsClient() {
           minutes: ideScreen[agent.key] ?? 0,
           fill: agent.color
         });
+        if (idePrev) {
+          prevMinutesByKey.set(agent.key, idePrev[agent.key] ?? 0);
+        }
       }
     }
-    return withPercentShares(
-      [...rows].sort((a, b) => b.minutes - a.minutes || a.service.localeCompare(b.service))
+    return withBarLabels(
+      withPercentShares(
+        [...rows].sort((a, b) => b.minutes - a.minutes || a.service.localeCompare(b.service))
+      ),
+      prevMinutesByKey,
+      sinceLabelForDays(days)
     );
-  }, [displayStats, displayIdeStats, effectivePromptVolumeAiFilters]);
+  }, [displayStats, displayIdeStats, effectivePromptVolumeAiFilters, days]);
 
   const screenTimeByServiceChartHasData = useMemo(
     () => screenTimeByServiceRows.some((row) => row.minutes > 0),
@@ -3195,8 +3261,8 @@ export function StatisticsClient() {
           <div
             ref={filterBarRef}
             data-onboarding-tour="statistics-filters"
-            className={`z-40 mb-4 rounded-xl border border-line bg-cream-dark px-3 py-2.5 shadow-md ${
-              filterBarPinned ? "fixed" : ""
+            className={`z-40 mb-4 rounded-xl border border-black bg-cream-dark px-3 py-2.5 ${
+              filterBarPinned ? "fixed shadow-[0_12px_32px_rgba(0,0,0,0.35)]" : "shadow-md"
             }`}
             style={
               filterBarPinned
@@ -3245,7 +3311,7 @@ export function StatisticsClient() {
                     </label>
                   ) : null}
                 </div>
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 sm:ml-8">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 sm:ml-auto">
                   <label className="flex items-center gap-1.5 text-xs text-faint">
                     Buckets
                     <select
@@ -3261,7 +3327,7 @@ export function StatisticsClient() {
                     type="button"
                     disabled={statsLoading || ideStatsLoading || !user}
                     onClick={refreshAllStats}
-                    className="rounded-md border border-line px-2 py-0.5 text-xs text-muted hover:bg-cream-dark disabled:opacity-50"
+                    className="w-[5.5rem] rounded-md border border-line px-2 py-0.5 text-center text-xs text-muted hover:bg-cream-dark disabled:opacity-50"
                   >
                     {statsLoading || ideStatsLoading ? "Refreshing…" : "Refresh"}
                   </button>
@@ -3463,7 +3529,7 @@ export function StatisticsClient() {
                   </h2>
                   <div className="flex flex-wrap items-center gap-2">
                     {screenTimeView === "instant" ? (
-                      <p className="text-xs font-medium tabular-nums text-muted">Last {days} days</p>
+                      <p className="text-xs font-medium tabular-nums text-muted">{rangeSummaryLabel}</p>
                     ) : null}
                     <StatsChartHorizonToggle value={screenTimeView} onChange={setScreenTimeView} />
                   </div>
@@ -3478,7 +3544,7 @@ export function StatisticsClient() {
                     screenTimeView === "over_time" ? (
                       modelScreenTimeOverTimeHasData ? (
                         <>
-                          <div className="h-72 w-full sm:h-80">
+                          <div key="screen-model-over-time" className="h-72 w-full sm:h-80">
                             <ResponsiveContainer width="100%" height="100%">
                               <BarChart
                                 data={modelScreenTimeOverTimeRows}
@@ -3528,6 +3594,7 @@ export function StatisticsClient() {
                     ) : screenTimeByModelInstantRows.length ? (
                       <>
                         <div
+                          key="screen-model-instant"
                           className="w-full"
                           style={{ height: Math.max(120, screenTimeByModelInstantRows.length * 44 + 24) }}
                         >
@@ -3535,7 +3602,7 @@ export function StatisticsClient() {
                             <BarChart
                               data={screenTimeByModelInstantRows}
                               layout="vertical"
-                              margin={{ top: 4, right: 44, bottom: 4, left: 4 }}
+                              margin={{ top: 4, right: barLabelRightMargin(screenTimeByModelInstantRows), bottom: 4, left: 4 }}
                               barCategoryGap="12%"
                             >
                               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" horizontal={false} />
@@ -3557,12 +3624,11 @@ export function StatisticsClient() {
                                   <Cell key={entry.key} fill={entry.fill} fillOpacity={0.95} />
                                 ))}
                                 <LabelList
-                                  dataKey="percent"
+                                  dataKey="barLabel"
                                   position="right"
                                   fill="#111111"
                                   fontSize={11}
                                   fontWeight={600}
-                                  formatter={(value: number) => `${value}%`}
                                 />
                               </Bar>
                             </BarChart>
@@ -3590,7 +3656,7 @@ export function StatisticsClient() {
                 ) : screenTimeByServiceRows.length ? (
                   screenTimeView === "over_time" ? (
                     screenTimeOverTimeHasData ? (
-                      <div className="h-72 w-full sm:h-80">
+                      <div key="screen-service-over-time" className="h-72 w-full sm:h-80">
                         <ResponsiveContainer width="100%" height="100%">
                           <BarChart
                             data={screenTimeOverTimeChartRows}
@@ -3628,12 +3694,16 @@ export function StatisticsClient() {
                       <p className="text-sm text-muted">No screen time over time for the selected services in this range yet.</p>
                     )
                   ) : screenTimeByServiceChartHasData ? (
-                    <div className="w-full" style={{ height: screenTimeByServiceSectionHeight }}>
+                    <div
+                      key="screen-service-instant"
+                      className="w-full"
+                      style={{ height: screenTimeByServiceSectionHeight }}
+                    >
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart
                           data={screenTimeByServiceRows}
                           layout="vertical"
-                          margin={{ top: 4, right: 44, bottom: 4, left: 4 }}
+                          margin={{ top: 4, right: barLabelRightMargin(screenTimeByServiceRows), bottom: 4, left: 4 }}
                           barCategoryGap="12%"
                         >
                           <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" horizontal={false} />
@@ -3655,12 +3725,11 @@ export function StatisticsClient() {
                               <Cell key={entry.key} fill={entry.fill} fillOpacity={0.95} />
                             ))}
                             <LabelList
-                              dataKey="percent"
+                              dataKey="barLabel"
                               position="right"
                               fill="#111111"
                               fontSize={11}
                               fontWeight={600}
-                              formatter={(value: number) => `${value}%`}
                             />
                           </Bar>
                         </BarChart>
@@ -3676,12 +3745,22 @@ export function StatisticsClient() {
 
               <section className="mb-8 w-full rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                  <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">
-                    How you spend your time
-                  </h2>
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                    <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">
+                      How you spend your time
+                    </h2>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
+                      {ENGAGEMENT_OVER_TIME_SERIES.map((series) => (
+                        <span key={series.dataKey} className="inline-flex items-center gap-1.5">
+                          <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: series.color }} />
+                          {series.name}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
                   <div className="flex flex-wrap items-center gap-2">
                     {engagementView === "instant" ? (
-                      <p className="text-xs font-medium tabular-nums text-muted">Last {days} days</p>
+                      <p className="text-xs font-medium tabular-nums text-muted">{rangeSummaryLabel}</p>
                     ) : null}
                     <StatsChartHorizonToggle value={engagementView} onChange={setEngagementView} />
                   </div>
@@ -3690,14 +3769,6 @@ export function StatisticsClient() {
                   <div key="engagement-over-time">
                   {engagementOverTimeHasData ? (
                     <>
-                      <div className="mb-4 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-muted">
-                        {ENGAGEMENT_OVER_TIME_SERIES.map((series) => (
-                          <span key={series.dataKey} className="inline-flex items-center gap-2">
-                            <span className="h-3 w-3 rounded-full" style={{ backgroundColor: series.color }} />
-                            {series.name}
-                          </span>
-                        ))}
-                      </div>
                       <div className="h-72 w-full sm:h-80">
                         <ResponsiveContainer width="100%" height="100%">
                           <BarChart
@@ -3712,7 +3783,6 @@ export function StatisticsClient() {
                               contentStyle={CHART_TOOLTIP_STYLE}
                               formatter={(value: number, name: string) => [`${formatChartNumber(value)} min`, name]}
                             />
-                            <Legend wrapperStyle={CHART_LEGEND_STYLE} />
                             {ENGAGEMENT_OVER_TIME_SERIES.map((series, index) => (
                               <Bar
                                 key={series.dataKey}
@@ -3739,20 +3809,6 @@ export function StatisticsClient() {
                   </div>
                 ) : engagementInstantPies.length > 0 ? (
                   <div key="engagement-instant">
-                    <div className="mb-5 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-muted">
-                      <span className="inline-flex items-center gap-2">
-                        <span className="h-3 w-3 rounded-full" style={{ backgroundColor: COLOR_DRAFTING }} />
-                        Drafting prompt
-                      </span>
-                      <span className="inline-flex items-center gap-2">
-                        <span className="h-3 w-3 rounded-full" style={{ backgroundColor: COLOR_NATIVE_WEB }} />
-                        Waiting for AI
-                      </span>
-                      <span className="inline-flex items-center gap-2">
-                        <span className="h-3 w-3 rounded-full" style={{ backgroundColor: COLOR_READING_IDLE }} />
-                        Reading output
-                      </span>
-                    </div>
                     {(() => {
                       const pieRows: (typeof engagementPiesVisible)[] = [];
                       for (let i = 0; i < engagementPiesVisible.length; i += ENGAGEMENT_PIES_INITIAL_COUNT) {
@@ -3776,7 +3832,6 @@ export function StatisticsClient() {
                               <ServiceEngagementDonut
                                 key={pie.key}
                                 label={pie.label}
-                                accentColor={pie.accent}
                                 totalMinutes={pie.totalMinutes}
                                 slices={pie.slices}
                               />
@@ -3865,11 +3920,11 @@ export function StatisticsClient() {
             <section className="mb-8 w-full rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">
-                  {statsGroupMode === "model" ? "Avg AI response time by model" : "Avg AI response time"}
+                  {statsGroupMode === "model" ? "Average AI response time by model" : "Average AI response time"}
                 </h2>
                 <div className="flex flex-wrap items-center gap-2">
                   {responseTimeView === "instant" ? (
-                    <p className="text-xs font-medium tabular-nums text-muted">Last {days} days</p>
+                    <p className="text-xs font-medium tabular-nums text-muted">{rangeSummaryLabel}</p>
                   ) : null}
                   <StatsChartHorizonToggle value={responseTimeView} onChange={setResponseTimeView} />
                 </div>
@@ -3878,9 +3933,9 @@ export function StatisticsClient() {
                 responseTimeView === "over_time" ? (
                   modelResponseTimeOverTimeHasData ? (
                     <>
-                      <div className="h-72 w-full sm:h-80">
+                      <div key="response-model-over-time" className="h-72 w-full sm:h-80">
                         <ResponsiveContainer width="100%" height="100%">
-                          <LineChart
+                          <BarChart
                             data={modelResponseTimeOverTimeRows}
                             margin={{ top: 4, right: 8, bottom: 0, left: 0 }}
                           >
@@ -3888,22 +3943,25 @@ export function StatisticsClient() {
                             <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
                             <YAxis stroke="#8A8A8A" width={40} tick={CHART_Y_TICK} unit=" s" allowDecimals />
                             <Tooltip
+                              cursor={{ fill: "rgba(255,255,255,0.04)" }}
                               contentStyle={CHART_TOOLTIP_STYLE}
                               formatter={(value: number, name: string) => [`${formatChartNumber(value)} s`, name]}
                             />
-                            {activeModelChartSeries.map((series) => (
-                              <Line
+                            {activeModelChartSeries.map((series, index, visible) => (
+                              <Bar
                                 key={series.dataKey}
-                                type="monotone"
                                 dataKey={series.dataKey}
                                 name={series.label}
-                                stroke={series.color}
-                                strokeWidth={2}
-                                dot={{ r: 2.5 }}
-                                connectNulls
+                                stackId="model_response_time"
+                                fill={series.color}
+                                radius={
+                                  index === visible.length - 1
+                                    ? ([2, 2, 0, 0] as [number, number, number, number])
+                                    : undefined
+                                }
                               />
                             ))}
-                          </LineChart>
+                          </BarChart>
                         </ResponsiveContainer>
                       </div>
                       <div className="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 border-t border-line pt-3">
@@ -3923,7 +3981,11 @@ export function StatisticsClient() {
                     <p className="text-sm text-muted">No response time over time for the selected models in this range yet.</p>
                   )
                 ) : responseTimeByModelRows.length ? (
-                  <div className="w-full" style={{ height: responseTimeByServiceSectionHeight }}>
+                  <div
+                    key="response-model-instant"
+                    className="w-full"
+                    style={{ height: responseTimeByServiceSectionHeight }}
+                  >
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart
                         data={responseTimeByModelRows}
@@ -3942,9 +4004,9 @@ export function StatisticsClient() {
                         />
                         <Tooltip
                           contentStyle={CHART_TOOLTIP_STYLE}
-                          formatter={(value: number) => [`${formatChartNumber(value)} s`, "Avg response"]}
+                          formatter={(value: number) => [`${formatChartNumber(value)} s`, "Average response"]}
                         />
-                        <Bar dataKey="seconds" name="Avg response" radius={[0, 4, 4, 0]} barSize={16}>
+                        <Bar dataKey="seconds" name="Average response" radius={[0, 4, 4, 0]} barSize={16}>
                           {responseTimeByModelRows.map((entry) => (
                             <Cell key={entry.key} fill={entry.fill} fillOpacity={0.95} />
                           ))}
@@ -3957,39 +4019,46 @@ export function StatisticsClient() {
                 )
               ) : responseTimeView === "over_time" ? (
                 responseTimeOverTimeHasData ? (
-                  <div className="h-72 w-full sm:h-80">
+                  <div key="response-service-over-time" className="h-72 w-full sm:h-80">
                     <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={responseTimeOverTimeRows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                      <BarChart data={responseTimeOverTimeRows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
                         <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
                         <YAxis stroke="#8A8A8A" width={40} tick={CHART_Y_TICK} unit=" s" allowDecimals />
                         <Tooltip
+                          cursor={{ fill: "rgba(255,255,255,0.04)" }}
                           contentStyle={CHART_TOOLTIP_STYLE}
                           formatter={(value: number, name: string) => [`${formatChartNumber(value)} s`, name]}
                         />
                         <Legend wrapperStyle={CHART_LEGEND_STYLE} />
                         {SCREEN_TIME_OVER_TIME_FILTERS.filter((f) => effectivePromptVolumeAiFilters[f.key]).map(
-                          (filter) => (
-                            <Line
+                          (filter, index, visible) => (
+                            <Bar
                               key={filter.key}
-                              type="monotone"
                               dataKey={SCREEN_TIME_TIMELINE_KEY[filter.key]}
                               name={filter.legendName}
-                              stroke={filter.color}
-                              strokeWidth={2}
-                              dot={{ r: 2.5 }}
-                              connectNulls
+                              stackId="response_time"
+                              fill={filter.color}
+                              radius={
+                                index === visible.length - 1
+                                  ? ([2, 2, 0, 0] as [number, number, number, number])
+                                  : undefined
+                              }
                             />
                           )
                         )}
-                      </LineChart>
+                      </BarChart>
                     </ResponsiveContainer>
                   </div>
                 ) : (
                   <p className="text-sm text-muted">No response time over time for the selected services in this range yet.</p>
                 )
               ) : responseTimeByServiceRows.length ? (
-                <div className="w-full" style={{ height: responseTimeByServiceSectionHeight }}>
+                <div
+                  key="response-service-instant"
+                  className="w-full"
+                  style={{ height: responseTimeByServiceSectionHeight }}
+                >
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
                       data={responseTimeByServiceRows}
@@ -4008,9 +4077,9 @@ export function StatisticsClient() {
                       />
                       <Tooltip
                         contentStyle={CHART_TOOLTIP_STYLE}
-                        formatter={(value: number) => [`${formatChartNumber(value)} s`, "Avg response"]}
+                        formatter={(value: number) => [`${formatChartNumber(value)} s`, "Average response"]}
                       />
-                      <Bar dataKey="seconds" name="Avg response" radius={[0, 4, 4, 0]} barSize={16}>
+                      <Bar dataKey="seconds" name="Average response" radius={[0, 4, 4, 0]} barSize={16}>
                         {responseTimeByServiceRows.map((entry) => (
                           <Cell key={entry.key} fill={entry.fill} fillOpacity={0.95} />
                         ))}
@@ -4023,445 +4092,6 @@ export function StatisticsClient() {
               )}
             </section>
           ) : null}
-
-          <section className="mb-8 w-full rounded-2xl border border-violet-200/80 bg-cream p-4 shadow-card sm:p-5">
-            <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-faint">Coding agents</h2>
-                <p className="mt-1 text-xs text-muted">
-                  Claude Code, Cursor, and Codex — also included in the charts above; details below.
-                </p>
-              </div>
-              <Link
-                href="/integrations"
-                className="text-xs font-medium text-violet-700 underline hover:text-violet-900"
-              >
-                Install & connect
-              </Link>
-            </div>
-
-            {ideStatsError ? (
-              <p className="mb-4 text-sm text-red-700">{ideStatsError}</p>
-            ) : null}
-
-            <div className="mb-5 rounded-xl border border-violet-200/80 bg-violet-50/40 p-3">
-              <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-ink">
-                One Promptly account per computer
-              </h3>
-              <p className="mt-1 max-w-2xl text-[11px] text-muted">
-                Pair Claude Code, Cursor, and Codex on{" "}
-                <Link href="/integrations" className="font-medium text-violet-900 underline">
-                  integrations
-                </Link>{" "}
-                while signed into the Promptly account you want here ({user?.email || "sign in above"}). The first
-                agent you pair on a computer becomes the account all agents on that machine send stats to — even if
-                Cursor, Codex, or Claude Code themselves use different login emails.
-              </p>
-              {user?.email ? (
-                <p className="mt-2 text-[10px] text-muted">
-                  Viewing stats as <span className="font-medium text-ink">{user.email}</span>. If coding-agent stats
-                  look                   empty, pair agents with this same account or run the fix command from{" "}
-                  <Link href="/admin/integrations" className="font-medium text-violet-900 underline">
-                    admin integrations
-                  </Link>
-                  .
-                </p>
-              ) : null}
-            </div>
-
-            {ideStatsLoading && !ideStats ? (
-              <p className="text-sm text-muted">Loading coding-agent statistics…</p>
-            ) : null}
-
-            <div className="mb-2">
-              <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-ink">Connected coding agents</h3>
-              <p className="mt-1 text-[11px] text-muted">
-                Pairing status for Claude Code, Cursor, and Codex on your Promptly account.
-              </p>
-            </div>
-
-            <div className="mb-5 grid gap-3 sm:grid-cols-3">
-              {IDE_AGENT_CARDS.map((agent) => {
-                const conn = ideConnectionByTool.get(agent.key);
-                const paired = (conn?.device_count ?? 0) > 0;
-                const prompts = displayIdeStats?.totals.prompts[agent.key] ?? 0;
-                const active = paired || prompts > 0;
-                const latency = displayIdeStats?.response_latency_by_tool?.[agent.key];
-                return (
-                  <div
-                    key={agent.key}
-                    className={`rounded-xl border p-3 ${
-                      active ? "border-emerald-300/80 bg-emerald-50/60" : "border-line bg-white/70"
-                    }`}
-                  >
-                    <p className="text-[11px] font-medium uppercase text-faint">{agent.label}</p>
-                    <p className={`mt-1 text-sm font-semibold ${active ? "text-emerald-900" : "text-muted"}`}>
-                      {paired ? "Paired" : prompts > 0 ? "Receiving prompts" : "Not paired"}
-                    </p>
-                    {paired ? (
-                      <p className="mt-1 text-[10px] text-muted">
-                        Last sync {formatIdeLastSeen(conn?.last_seen_at_ms)}
-                        {conn && conn.device_count > 1 ? ` · ${conn.device_count} devices` : null}
-                      </p>
-                    ) : (
-                      <p className="mt-1 text-[10px] text-faint">
-                        <Link href={`/integrations`} className="underline hover:text-ink">
-                          Set up
-                        </Link>
-                      </p>
-                    )}
-                    <p className="mt-2 text-xs text-muted">
-                      <span className="font-medium tabular-nums text-ink">{prompts.toLocaleString()}</span> prompts in
-                      range
-                    </p>
-                    {latency?.samples ? (
-                      <p className="mt-1 text-[10px] text-muted">
-                        Avg response {formatResponseMs(latency.avg_ms)}
-                        {latency.p50_ms ? ` · median ${formatResponseMs(latency.p50_ms)}` : null}
-                      </p>
-                    ) : null}
-                  </div>
-                );
-              })}
-            </div>
-
-            {IDE_AGENT_CARDS.some((agent) => (ideStats?.agent_emails_by_tool?.[agent.key] ?? []).length > 0) ? (
-              <div className="mb-5">
-                <p className="text-[11px] text-muted">
-                  In-app login emails detected inside each coding agent — click to include or exclude from the charts
-                  below. These are the login emails detected inside each coding agent — separate from your Promptly account above.
-                </p>
-                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
-                  {IDE_AGENT_CARDS.map((agent) => {
-                    const agentEmails = ideStats?.agent_emails_by_tool?.[agent.key] ?? [];
-                    if (!agentEmails.length) return null;
-                    const selectedEmails = selectedEmailsByTool[agent.key];
-                    return (
-                      <div key={agent.key} className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-[10px] font-semibold uppercase tracking-wide text-faint">
-                          {agent.label}
-                        </span>
-                        {agentEmails.map((email) => {
-                          const selected = selectedEmails.has(email);
-                          return (
-                            <button
-                              key={`${agent.key}-${email}`}
-                              type="button"
-                              onClick={() => toggleAgentEmail(agent.key, email)}
-                              className={`rounded-full border px-2.5 py-0.5 text-[10px] transition ${
-                                selected
-                                  ? "border-violet-400 bg-violet-100 font-medium text-violet-900"
-                                  : "border-line bg-white/80 text-muted hover:border-violet-200 hover:text-ink"
-                              }`}
-                              title={selected ? "Included in charts — click to exclude" : "Excluded — click to include"}
-                            >
-                              {email}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : null}
-
-            {IDE_AGENT_CARDS.some(
-              (agent) =>
-                (displayIdeStats?.totals.prompts_without_agent_email?.[agent.key] ?? 0) > 0 &&
-                !(ideStats?.agent_emails_by_tool?.[agent.key] ?? []).length
-            ) ? (
-              <p className="mb-4 text-[11px] text-muted">
-                Some prompts have no detected agent login email yet (common for Claude Code on Mac). They still count
-                toward your Promptly account totals.
-              </p>
-            ) : null}
-
-            {displayIdeStats?.index_missing ? (
-              <p className="mb-4 rounded-lg border border-amber-300/60 bg-amber-50/80 px-3 py-2 text-xs text-amber-950">
-                Statistics indexes are still deploying. Prompt counts may show zero temporarily even after you connect.
-              </p>
-            ) : null}
-
-            {displayIdeStats?.footnotes?.length ? (
-              <ul className="mb-4 list-disc space-y-1 pl-5 text-[11px] text-faint">
-                {displayIdeStats.footnotes.map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-            ) : null}
-
-            {!ideHasActivity ? (
-              <p className="text-sm text-muted">
-                {ideAnyConnected ? (
-                  <>
-                    Your agent is connected but no prompts are recorded in this range yet. Finish the last step on{" "}
-                    <Link href="/integrations" className="underline hover:text-ink">
-                      integrations
-                    </Link>{" "}
-                    (trust hooks / reload the app), then send a prompt and refresh.
-                  </>
-                ) : (
-                  <>
-                    No coding-agent activity yet. Install a connector from{" "}
-                    <Link href="/integrations" className="underline hover:text-ink">
-                      integrations
-                    </Link>
-                    , connect your account, then enable hooks in your coding app.
-                  </>
-                )}
-              </p>
-            ) : (
-              <div className="space-y-6">
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <div className="rounded-xl border border-line bg-white/70 p-3">
-                    <p className="text-[11px] font-medium uppercase text-faint">Claude Code prompts</p>
-                    <p className="mt-1 text-2xl font-bold tabular-nums text-ink">
-                      {displayIdeStats?.totals.prompts.claude_code.toLocaleString() ?? "0"}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-line bg-white/70 p-3">
-                    <p className="text-[11px] font-medium uppercase text-faint">Cursor prompts</p>
-                    <p className="mt-1 text-2xl font-bold tabular-nums text-ink">
-                      {displayIdeStats?.totals.prompts.cursor.toLocaleString() ?? "0"}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-line bg-white/70 p-3">
-                    <p className="text-[11px] font-medium uppercase text-faint">Codex prompts</p>
-                    <p className="mt-1 text-2xl font-bold tabular-nums text-ink">
-                      {displayIdeStats?.totals.prompts.codex.toLocaleString() ?? "0"}
-                    </p>
-                  </div>
-                </div>
-
-                {IDE_AGENT_CARDS.map((agent) => {
-                  const toolRows = ideModelsByTool.get(agent.key) ?? [];
-                  const toolTotal = displayIdeStats?.totals.prompts[agent.key] ?? 0;
-                  if (!toolRows.length || toolTotal <= 0) return null;
-                  return (
-                    <div key={agent.key}>
-                      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">
-                        {agent.label} · models used
-                      </h3>
-                      <div className="overflow-x-auto rounded-xl border border-line">
-                        <table className="min-w-full border-collapse text-left text-sm">
-                          <thead className="border-b border-line bg-cream-dark/80 text-[10px] uppercase tracking-wide text-muted">
-                            <tr>
-                              <th className="px-4 py-2 font-semibold">Model</th>
-                              <th className="px-4 py-2 font-semibold">Prompts</th>
-                              <th className="px-4 py-2 font-semibold">Share</th>
-                              <th className="px-4 py-2 font-semibold">Avg words</th>
-                              <th className="px-4 py-2 font-semibold">Avg response</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {toolRows.map((row) => {
-                              const share = toolTotal > 0 ? Math.round((row.prompts / toolTotal) * 1000) / 10 : 0;
-                              return (
-                                <tr key={`${row.tool}-${row.bucket}`} className="border-b border-line last:border-0">
-                                  <td className="px-4 py-2 font-mono text-xs text-ink">
-                                    {formatIdeModelLabel(row)}
-                                  </td>
-                                  <td className="px-4 py-2 tabular-nums text-ink">{row.prompts.toLocaleString()}</td>
-                                  <td className="px-4 py-2 tabular-nums text-muted">{share}%</td>
-                                  <td className="px-4 py-2 tabular-nums text-muted">
-                                    {row.avg_words != null ? row.avg_words.toLocaleString() : "—"}
-                                  </td>
-                                  <td className="px-4 py-2 tabular-nums text-muted">
-                                    {formatResponseMs(row.avg_response_ms)}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  );
-                })}
-
-                {!ideHasKnownModels && ideHasActivity ? (
-                  <p className="text-xs text-muted">
-                    Model names appear here once your agent reports them on each prompt. Re-download the plugin pack from{" "}
-                    <Link href="/integrations" className="underline hover:text-ink">
-                      integrations
-                    </Link>{" "}
-                    if you connected before this update, then send new prompts in Codex, Claude Code, or Cursor.
-                  </p>
-                ) : null}
-
-                {idePromptTimeline.length ? (
-                  <div>
-                    <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">Prompts over time</h3>
-                    <div className="h-56 w-full statistics-charts sm:h-64">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={idePromptTimeline} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#E0DDD6" />
-                          <XAxis dataKey="label" tick={CHART_X_DATE_TICK} stroke={CHART_X_DATE_STROKE} />
-                          <YAxis tick={CHART_Y_TICK} allowDecimals={false} />
-                          <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
-                          <Legend wrapperStyle={CHART_LEGEND_STYLE} />
-                          <Bar dataKey="claude_code" name="Claude Code" stackId="ide" fill={COLOR_CLAUDE_CODE} />
-                          <Bar dataKey="cursor" name="Cursor" stackId="ide" fill={COLOR_CURSOR_IDE} />
-                          <Bar dataKey="codex" name="Codex" stackId="ide" fill={COLOR_CODEX} radius={[2, 2, 0, 0]} />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-                ) : null}
-
-                {ideScreenTimeline.some(
-                  (r) => r.claude_code_minutes + r.cursor_minutes + r.codex_minutes > 0
-                ) ? (
-                  <div>
-                    <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">Screen time (minutes)</h3>
-                    <div className="h-56 w-full statistics-charts sm:h-64">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={ideScreenTimeline} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#E0DDD6" />
-                          <XAxis dataKey="label" tick={CHART_X_DATE_TICK} stroke={CHART_X_DATE_STROKE} />
-                          <YAxis tick={CHART_Y_TICK} />
-                          <Tooltip
-                            contentStyle={CHART_TOOLTIP_STYLE}
-                            formatter={(value: number, name: string) => [`${formatChartNumber(value)} min`, name]}
-                          />
-                          <Legend wrapperStyle={CHART_LEGEND_STYLE} />
-                          <Bar
-                            dataKey="claude_code_minutes"
-                            name="Claude Code"
-                            stackId="scr"
-                            fill={COLOR_CLAUDE_CODE}
-                          />
-                          <Bar dataKey="cursor_minutes" name="Cursor" stackId="scr" fill={COLOR_CURSOR_IDE} />
-                          <Bar
-                            dataKey="codex_minutes"
-                            name="Codex"
-                            stackId="scr"
-                            fill={COLOR_CODEX}
-                            radius={[2, 2, 0, 0]}
-                          />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-                ) : null}
-
-                {ideEngagementByToolRows.length ||
-                ideAvgWordsChartRows.length ||
-                ideDraftResponseChartRows.length ? (
-                  <div className="space-y-6 rounded-xl border border-line bg-white/60 p-4">
-                    <div>
-                      <h3 className="text-xs font-semibold uppercase tracking-wide text-faint">
-                        Prompt &amp; time insights
-                      </h3>
-                      <p className="mt-1 text-[11px] text-muted">
-                        Draft time is estimated from when the AI finishes until your next prompt. Prompt length is a
-                        word count at submit (metadata only — never the full text).
-                      </p>
-                    </div>
-
-                    {ideEngagementByToolRows.length ? (
-                      <div>
-                        <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">
-                          Time per agent (minutes)
-                        </h4>
-                        <div className="h-56 w-full statistics-charts sm:h-64">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={ideEngagementByToolRows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-                              <CartesianGrid strokeDasharray="3 3" stroke="#E0DDD6" />
-                              <XAxis dataKey="agent" tick={CHART_Y_TICK} />
-                              <YAxis tick={CHART_Y_TICK} allowDecimals />
-                              <Tooltip
-                                contentStyle={CHART_TOOLTIP_STYLE}
-                                formatter={(value: number, name: string) => [`${formatChartNumber(value)} min`, name]}
-                              />
-                              <Legend wrapperStyle={CHART_LEGEND_STYLE} />
-                              <Bar dataKey="drafting" name="Drafting" stackId="time" fill={COLOR_DRAFTING} />
-                              <Bar dataKey="waiting" name="Waiting for AI" stackId="time" fill={COLOR_NATIVE_WEB} />
-                              <Bar
-                                dataKey="reading"
-                                name="Reading / idle"
-                                stackId="time"
-                                fill={COLOR_READING_IDLE}
-                                radius={[2, 2, 0, 0]}
-                              />
-                            </BarChart>
-                          </ResponsiveContainer>
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {ideDraftResponseChartRows.length ? (
-                      <div>
-                        <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">
-                          Average draft vs response time (seconds)
-                        </h4>
-                        <div className="h-52 w-full statistics-charts">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <BarChart
-                              data={ideDraftResponseChartRows}
-                              margin={{ top: 8, right: 8, bottom: 0, left: 0 }}
-                            >
-                              <CartesianGrid strokeDasharray="3 3" stroke="#E0DDD6" />
-                              <XAxis dataKey="agent" tick={CHART_Y_TICK} />
-                              <YAxis tick={CHART_Y_TICK} unit="s" />
-                              <Tooltip
-                                contentStyle={CHART_TOOLTIP_STYLE}
-                                formatter={(value: number, name: string) => [`${formatChartNumber(value)} s`, name]}
-                              />
-                              <Legend wrapperStyle={CHART_LEGEND_STYLE} />
-                              <Bar dataKey="avg_draft_s" name="Avg draft" fill={COLOR_DRAFTING} radius={[4, 4, 0, 0]} />
-                              <Bar
-                                dataKey="avg_response_s"
-                                name="Avg response"
-                                fill={COLOR_NATIVE_WEB}
-                                radius={[4, 4, 0, 0]}
-                              />
-                            </BarChart>
-                          </ResponsiveContainer>
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {ideAvgWordsChartRows.length ? (
-                      <div>
-                        <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">
-                          Average prompt length (words)
-                        </h4>
-                        <div
-                          className="w-full statistics-charts"
-                          style={{ height: Math.max(160, ideAvgWordsChartRows.length * 36 + 48) }}
-                        >
-                          <ResponsiveContainer width="100%" height="100%">
-                            <BarChart
-                              data={ideAvgWordsChartRows}
-                              layout="vertical"
-                              margin={{ top: 4, right: 12, bottom: 4, left: 4 }}
-                              barCategoryGap="20%"
-                            >
-                              <CartesianGrid strokeDasharray="3 3" stroke="#E0DDD6" horizontal={false} />
-                              <XAxis type="number" tick={CHART_Y_TICK} allowDecimals />
-                              <YAxis
-                                type="category"
-                                dataKey="label"
-                                width={120}
-                                tick={{ ...CHART_Y_TICK, fontSize: 9 }}
-                              />
-                              <Tooltip
-                                contentStyle={CHART_TOOLTIP_STYLE}
-                                formatter={(value: number) => [`${formatChartNumber(value)} words`, "Avg length"]}
-                              />
-                              <Bar dataKey="avg_words" name="Avg words" fill="#7c3aed" radius={[0, 4, 4, 0]} barSize={14} />
-                            </BarChart>
-                          </ResponsiveContainer>
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            )}
-          </section>
 
           <div className="my-10 border-t border-line" role="separator" />
 
