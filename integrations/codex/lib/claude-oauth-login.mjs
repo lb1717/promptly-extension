@@ -1,6 +1,6 @@
 /**
  * Claude subscription OAuth — browser login with PKCE, stored in ~/.promptly/claude-auth.json.
- * Same OAuth flow Claude Code uses; no macOS Keychain access.
+ * Matches Claude Code CLI parameters (no macOS Keychain).
  */
 import { createHash, randomBytes } from "crypto";
 import { createServer } from "http";
@@ -9,13 +9,16 @@ import { homedir } from "os";
 import { join, dirname } from "path";
 import { execSync } from "child_process";
 
-const AUTH_URL = "https://claude.ai/oauth/authorize";
-const TOKEN_URL = "https://api.anthropic.com/v1/oauth/token";
+const AUTH_URL = "https://claude.com/cai/oauth/authorize";
+const TOKEN_URLS = [
+  "https://platform.claude.com/v1/oauth/token",
+  "https://api.anthropic.com/v1/oauth/token"
+];
+const SUCCESS_URL = "https://platform.claude.com/oauth/code/success?app=claude-code";
 const CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
-const REDIRECT_PORT = 54545;
-const REDIRECT_URI = `http://localhost:${REDIRECT_PORT}/callback`;
 const OAUTH_SCOPE =
-  "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload";
+  "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload";
+const CLAUDE_CLI_UA = "claude-cli/2.1.9 (external, cli)";
 
 export function claudeAuthJsonPath() {
   return join(homedir(), ".promptly", "claude-auth.json");
@@ -47,6 +50,10 @@ function createPkce() {
   const verifier = base64Url(randomBytes(32));
   const challenge = base64Url(createHash("sha256").update(verifier).digest());
   return { verifier, challenge };
+}
+
+function createOAuthState() {
+  return base64Url(randomBytes(32));
 }
 
 function parseStoredAuth(raw) {
@@ -83,26 +90,37 @@ function savePromptlyClaudeAuth({ accessToken, refreshToken, expiresAt, email })
   return path;
 }
 
-async function exchangeCode(code, state, verifier) {
+async function postTokenJson(body) {
+  let lastError = "Token request failed";
+  for (const url of TOKEN_URLS) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "User-Agent": CLAUDE_CLI_UA
+      },
+      body: JSON.stringify(body)
+    });
+    const parsed = await res.json().catch(() => ({}));
+    if (res.ok) return parsed;
+    lastError = parsed.error_description || parsed.error || `HTTP ${res.status} from ${url}`;
+  }
+  throw new Error(lastError);
+}
+
+async function exchangeCode(code, state, verifier, redirectUri) {
   const parsed = String(code).split("#");
   const authCode = parsed[0];
   const stateFromCode = parsed[1] || state;
-  const res = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({
-      code: authCode,
-      state: stateFromCode,
-      grant_type: "authorization_code",
-      client_id: CLIENT_ID,
-      redirect_uri: REDIRECT_URI,
-      code_verifier: verifier
-    })
+  const body = await postTokenJson({
+    code: authCode,
+    state: stateFromCode,
+    grant_type: "authorization_code",
+    client_id: CLIENT_ID,
+    redirect_uri: redirectUri,
+    code_verifier: verifier
   });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(body.error_description || body.error || `Token exchange HTTP ${res.status}`);
-  }
   const expiresAt = body.expires_in ? Date.now() + Number(body.expires_in) * 1000 : null;
   return {
     accessToken: body.access_token,
@@ -113,19 +131,11 @@ async function exchangeCode(code, state, verifier) {
 }
 
 async function refreshAccessToken(refreshToken) {
-  const res = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({
-      client_id: CLIENT_ID,
-      grant_type: "refresh_token",
-      refresh_token: refreshToken
-    })
+  const body = await postTokenJson({
+    client_id: CLIENT_ID,
+    grant_type: "refresh_token",
+    refresh_token: refreshToken
   });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(body.error_description || body.error || `Token refresh HTTP ${res.status}`);
-  }
   const expiresAt = body.expires_in ? Date.now() + Number(body.expires_in) * 1000 : null;
   return {
     accessToken: body.access_token,
@@ -146,12 +156,12 @@ function openBrowser(url) {
   }
 }
 
-function buildAuthUrl(state, challenge) {
+function buildAuthUrl(state, challenge, redirectUri) {
   const params = new URLSearchParams({
     code: "true",
     client_id: CLIENT_ID,
     response_type: "code",
-    redirect_uri: REDIRECT_URI,
+    redirect_uri: redirectUri,
     scope: OAUTH_SCOPE,
     code_challenge: challenge,
     code_challenge_method: "S256",
@@ -180,14 +190,27 @@ export async function ensureClaudeOAuthLogin({ interactive = true, timeoutMs = 1
     return null;
   }
 
-  const state = base64Url(randomBytes(16));
+  const state = createOAuthState();
   const { verifier, challenge } = createPkce();
-  const authUrl = buildAuthUrl(state, challenge);
 
   const tokens = await new Promise((resolve, reject) => {
+    let settled = false;
+    let redirectUri = "";
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        server.close();
+      } catch {
+        /* ignore */
+      }
+      fn(value);
+    };
+
     const server = createServer(async (req, res) => {
       try {
-        const url = new URL(req.url || "/", REDIRECT_URI);
+        const url = new URL(req.url || "/", redirectUri || "http://127.0.0.1");
         if (url.pathname !== "/callback") {
           res.writeHead(404);
           res.end("Not found");
@@ -198,37 +221,42 @@ export async function ensureClaudeOAuthLogin({ interactive = true, timeoutMs = 1
         if (!code) {
           res.writeHead(400);
           res.end("Missing authorization code");
-          reject(new Error("OAuth callback missing code"));
+          finish(reject, new Error("OAuth callback missing code"));
           return;
         }
         if (returnedState && returnedState !== state) {
           res.writeHead(400);
           res.end("State mismatch");
-          reject(new Error("OAuth state mismatch"));
+          finish(reject, new Error("OAuth state mismatch"));
           return;
         }
-        const exchanged = await exchangeCode(code, state, verifier);
+        const exchanged = await exchangeCode(code, state, verifier, redirectUri);
         savePromptlyClaudeAuth(exchanged);
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-        res.end(
-          "<html><body><h2>Claude connected</h2><p>You can close this tab and return to Promptly.</p></body></html>"
-        );
-        resolve(exchanged);
+        res.writeHead(302, { Location: SUCCESS_URL });
+        res.end();
+        finish(resolve, exchanged);
       } catch (err) {
         res.writeHead(500);
         res.end("Login failed");
-        reject(err);
-      } finally {
-        server.close();
+        finish(reject, err);
       }
     });
-    server.on("error", reject);
-    server.listen(REDIRECT_PORT, "127.0.0.1", () => {
+
+    server.on("error", (err) => finish(reject, err));
+
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        finish(reject, new Error("Could not start OAuth callback server"));
+        return;
+      }
+      redirectUri = `http://127.0.0.1:${address.port}/callback`;
+      const authUrl = buildAuthUrl(state, challenge, redirectUri);
       openBrowser(authUrl);
     });
-    setTimeout(() => {
-      server.close();
-      reject(new Error("OAuth login timed out — complete sign-in in the browser within 2 minutes"));
+
+    const timer = setTimeout(() => {
+      finish(reject, new Error("OAuth login timed out — complete sign-in in the browser within 2 minutes"));
     }, timeoutMs);
   });
 
