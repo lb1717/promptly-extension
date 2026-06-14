@@ -209,6 +209,15 @@ export function ResearchLabsPage({ variant = "research" }: Props) {
                 <Button href="/papers" variant="ghost">
                   Browse papers
                 </Button>
+                {isLabsSection ? (
+                  <Button href="/research" variant="ghost">
+                    Heuristic demo
+                  </Button>
+                ) : (
+                  <Button href="/labs" variant="ghost">
+                    Research overview
+                  </Button>
+                )}
               </div>
             </div>
           </div>
