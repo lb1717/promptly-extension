@@ -7,7 +7,7 @@ import {
   resolveVendorPlanPricing
 } from "@/lib/vendorPlanPricing";
 
-export type VendorUsageProvider = "claude_code" | "codex";
+export type VendorUsageProvider = "claude_code" | "codex" | "cursor";
 
 export type VendorUsageWindow = {
   utilization: number;
@@ -37,6 +37,7 @@ export type VendorUsageProviderSettings = {
 export type VendorUsageSettings = {
   claude_code: VendorUsageProviderSettings;
   codex: VendorUsageProviderSettings;
+  cursor: VendorUsageProviderSettings;
 };
 
 export type VendorUsageProfileView = VendorUsageProfileSnapshot & {
@@ -49,7 +50,8 @@ export type VendorUsageProfileView = VendorUsageProfileSnapshot & {
 
 const DEFAULT_SETTINGS: VendorUsageSettings = {
   claude_code: { enabled: false, extra_profile_dirs: [] },
-  codex: { enabled: false, extra_profile_dirs: [] }
+  codex: { enabled: false, extra_profile_dirs: [] },
+  cursor: { enabled: false, extra_profile_dirs: [] }
 };
 
 function settingsRef(uid: string) {
@@ -84,7 +86,8 @@ function normalizeSettings(raw: unknown): VendorUsageSettings {
   };
   return {
     claude_code: readProvider("claude_code"),
-    codex: readProvider("codex")
+    codex: readProvider("codex"),
+    cursor: readProvider("cursor")
   };
 }
 
@@ -102,7 +105,8 @@ function readWindow(raw: unknown): VendorUsageWindow | null {
 }
 
 function enrichProfile(row: VendorUsageProfileSnapshot): VendorUsageProfileView {
-  const vendor = row.provider === "claude_code" ? "anthropic" : "openai";
+  const vendor =
+    row.provider === "claude_code" ? "anthropic" : row.provider === "codex" ? "openai" : "cursor";
   const pricing = resolveVendorPlanPricing(vendor, row.plan_slug, row.plan_display);
   const monthly = pricing?.monthlyUsd ?? null;
   return {
@@ -137,7 +141,8 @@ export async function updateVendorUsageSettings(
   const current = await getVendorUsageSettings(uid);
   const next: VendorUsageSettings = {
     claude_code: { ...current.claude_code, ...(patch.claude_code ?? {}) },
-    codex: { ...current.codex, ...(patch.codex ?? {}) }
+    codex: { ...current.codex, ...(patch.codex ?? {}) },
+    cursor: { ...current.cursor, ...(patch.cursor ?? {}) }
   };
   await settingsRef(uid).set(
     {
@@ -158,7 +163,7 @@ export async function persistVendorUsageSnapshots(
   const batch = db.batch();
   let written = 0;
   for (const snap of snapshots.slice(0, 24)) {
-    if (snap.provider !== "claude_code" && snap.provider !== "codex") continue;
+    if (snap.provider !== "claude_code" && snap.provider !== "codex" && snap.provider !== "cursor") continue;
     if (!snap.profile_id) continue;
     const docId = vendorUsageProfileDocId(snap.provider, snap.profile_id);
     batch.set(
@@ -184,7 +189,7 @@ export async function listVendorUsageProfiles(uid: string): Promise<VendorUsageP
   for (const doc of snap.docs) {
     const raw = doc.data() as Record<string, unknown>;
     const provider = raw.provider;
-    if (provider !== "claude_code" && provider !== "codex") continue;
+    if (provider !== "claude_code" && provider !== "codex" && provider !== "cursor") continue;
     rows.push({
       provider,
       profile_id: String(raw.profile_id || ""),
@@ -209,6 +214,7 @@ export async function getVendorUsagePayload(uid: string) {
   const [settings, profiles] = await Promise.all([getVendorUsageSettings(uid), listVendorUsageProfiles(uid)]);
   const claudeProfiles = profiles.filter((p) => p.provider === "claude_code");
   const codexProfiles = profiles.filter((p) => p.provider === "codex");
+  const cursorProfiles = profiles.filter((p) => p.provider === "cursor");
   const totalMonthlyUsd = profiles.reduce((sum, p) => sum + (p.plan_monthly_usd ?? 0), 0);
   const totalSecondaryUsed = profiles.reduce((sum, p) => sum + (p.secondary_dollars_used ?? 0), 0);
   const totalSecondaryUnused = profiles.reduce((sum, p) => sum + (p.secondary_dollars_unused ?? 0), 0);
@@ -217,6 +223,7 @@ export async function getVendorUsagePayload(uid: string) {
     profiles,
     claude_profiles: claudeProfiles,
     codex_profiles: codexProfiles,
+    cursor_profiles: cursorProfiles,
     overview: {
       profile_count: profiles.length,
       total_plan_monthly_usd: totalMonthlyUsd,

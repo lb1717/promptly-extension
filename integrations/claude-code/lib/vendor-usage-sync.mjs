@@ -1,9 +1,10 @@
 /**
- * Vendor subscription usage sync (Claude Code + Codex) — local OAuth only.
+ * Vendor subscription usage sync (Claude Code, Codex, Cursor) — local OAuth only.
  */
 import { createHash } from "crypto";
+import { execSync } from "child_process";
 import { existsSync, readFileSync, readdirSync } from "fs";
-import { homedir } from "os";
+import { homedir, platform } from "os";
 import { basename, join } from "path";
 
 const CLAUDE_USAGE_BETA = "oauth-2025-04-20";
@@ -33,11 +34,89 @@ function profileLabelFromDir(configDir) {
   return base || "Profile";
 }
 
-function discoverClaudeProfileDirs(extraDirs = []) {
-  const found = new Set();
+function parseClaudeOAuthToken(raw, depth = 0) {
+  if (raw == null || depth > 8) return null;
+  if (typeof raw === "string") {
+    const text = raw.trim();
+    if (!text) return null;
+    if (text.startsWith("{")) {
+      try {
+        return parseClaudeOAuthToken(JSON.parse(text), depth + 1);
+      } catch {
+        return null;
+      }
+    }
+    if (text.length > 20 && (text.startsWith("sk-ant-") || text.startsWith("eyJ"))) return text;
+    return null;
+  }
+  if (typeof raw !== "object") return null;
+  const oauth = raw.claudeAiOauth || raw.oauth || raw;
+  const direct = oauth?.accessToken || oauth?.access_token;
+  if (typeof direct === "string" && direct.length > 20) return direct;
+  for (const value of Object.values(raw)) {
+    const nested = parseClaudeOAuthToken(value, depth + 1);
+    if (nested) return nested;
+  }
+  return null;
+}
+
+function readClaudeKeychainToken() {
+  if (platform() !== "darwin") return null;
+  for (const service of ["Claude Code-credentials", "Claude Code", "claude-code"]) {
+    try {
+      const raw = execSync(`security find-generic-password -s ${JSON.stringify(service)} -w`, {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"]
+      }).trim();
+      const token = parseClaudeOAuthToken(raw);
+      if (token) return token;
+    } catch {
+      /* try next service name */
+    }
+  }
+  return null;
+}
+
+function readClaudeEnvToken() {
+  return parseClaudeOAuthToken(process.env.CLAUDE_CODE_OAUTH_TOKEN);
+}
+
+function defaultClaudeConfigDir() {
+  return process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
+}
+
+function isDefaultClaudeConfigDir(configDir) {
   const home = homedir();
+  const normalized = configDir.replace(/\\/g, "/");
+  return (
+    normalized === join(home, ".claude").replace(/\\/g, "/") ||
+    normalized.endsWith("/.claude") ||
+    normalized === defaultClaudeConfigDir().replace(/\\/g, "/")
+  );
+}
+
+function readClaudeAccessToken(configDir) {
+  const credPath = join(configDir, ".credentials.json");
+  const fromFile = parseClaudeOAuthToken(readJson(credPath, null));
+  if (fromFile) return fromFile;
+
+  if (isDefaultClaudeConfigDir(configDir)) {
+    const fromState = parseClaudeOAuthToken(readJson(join(homedir(), ".claude.json"), null));
+    if (fromState) return fromState;
+    const fromEnv = readClaudeEnvToken();
+    if (fromEnv) return fromEnv;
+    const fromKeychain = readClaudeKeychainToken();
+    if (fromKeychain) return fromKeychain;
+  }
+  return null;
+}
+
+function discoverClaudeProfileDirs(extraDirs = []) {
+  const home = homedir();
+  const found = new Set();
+  const defaultDir = defaultClaudeConfigDir();
   const candidates = [
-    join(home, ".claude"),
+    defaultDir,
     ...extraDirs.map((d) => d.replace(/^~(?=$|[\\/])/, home)),
     join(home, ".claude-work"),
     join(home, ".claude-personal"),
@@ -64,8 +143,7 @@ function discoverClaudeProfileDirs(extraDirs = []) {
   }
   for (const dir of candidates) {
     if (!dir || found.has(dir)) continue;
-    const credPath = join(dir, ".credentials.json");
-    if (existsSync(credPath) || (dir.endsWith(".claude") && existsSync(join(home, ".claude.json")))) {
+    if (existsSync(join(dir, ".credentials.json")) || readClaudeAccessToken(dir)) {
       found.add(dir);
     }
   }
@@ -82,27 +160,60 @@ function discoverCodexConfigDirs(extraDirs = []) {
   return [...found].filter((dir) => existsSync(join(dir, "auth.json")));
 }
 
-function readClaudeAccessToken(configDir) {
+function cursorGlobalStatePath() {
   const home = homedir();
-  const credPath = join(configDir, ".credentials.json");
-  const creds = readJson(credPath, null);
-  if (creds && typeof creds === "object") {
-    const oauth = creds.claudeAiOauth || creds.oauth || creds;
-    const token = oauth?.accessToken || oauth?.access_token;
-    if (typeof token === "string" && token.length > 20) return token;
-    for (const value of Object.values(creds)) {
-      if (value && typeof value === "object") {
-        const nested = value.accessToken || value.access_token;
-        if (typeof nested === "string" && nested.length > 20) return nested;
-      }
-    }
+  if (platform() === "darwin") {
+    return join(home, "Library", "Application Support", "Cursor", "User", "globalStorage", "state.vscdb");
   }
-  if (configDir === join(home, ".claude") || configDir.endsWith("/.claude")) {
-    const state = readJson(join(home, ".claude.json"), null);
-    const token = state?.claudeAiOauth?.accessToken || state?.oauthAccount?.accessToken;
-    if (typeof token === "string" && token.length > 20) return token;
+  if (platform() === "win32") {
+    const appData = process.env.APPDATA || join(home, "AppData", "Roaming");
+    return join(appData, "Cursor", "User", "globalStorage", "state.vscdb");
+  }
+  return join(home, ".config", "Cursor", "User", "globalStorage", "state.vscdb");
+}
+
+function readSqliteItemValue(dbPath, key) {
+  if (!existsSync(dbPath)) return null;
+  const safeKey = key.replace(/'/g, "''");
+  try {
+    const out = execSync(`sqlite3 ${JSON.stringify(dbPath)} ${JSON.stringify(`SELECT value FROM ItemTable WHERE key='${safeKey}' LIMIT 1;`)}`, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"]
+    }).trim();
+    if (out) return out;
+  } catch {
+    /* fall through */
+  }
+  try {
+    const script =
+      "import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); r=c.execute('SELECT value FROM ItemTable WHERE key=? LIMIT 1', (sys.argv[2],)).fetchone(); print(r[0] if r else '', end='')";
+    const out = execSync(`python3 -c ${JSON.stringify(script)} ${JSON.stringify(dbPath)} ${JSON.stringify(key)}`, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"]
+    }).trim();
+    if (out) return out;
+  } catch {
+    /* ignore */
   }
   return null;
+}
+
+function readCursorAuth() {
+  const envToken = String(process.env.CURSOR_SESSION_TOKEN || process.env.WORKOS_CURSOR_SESSION_TOKEN || "").trim();
+  if (envToken.length > 20) {
+    return { accessToken: envToken, email: null, planSlug: null, configDir: cursorGlobalStatePath() };
+  }
+  const dbPath = cursorGlobalStatePath();
+  const accessToken = readSqliteItemValue(dbPath, "cursorAuth/accessToken");
+  if (!accessToken || accessToken.length < 20) return null;
+  const email = readSqliteItemValue(dbPath, "cursorAuth/cachedEmail");
+  const planSlug = readSqliteItemValue(dbPath, "cursorAuth/stripeMembershipType");
+  return {
+    accessToken,
+    email: typeof email === "string" && email.includes("@") ? email : null,
+    planSlug: typeof planSlug === "string" ? planSlug : null,
+    configDir: dbPath
+  };
 }
 
 function readCodexAuth(configDir) {
@@ -114,6 +225,13 @@ function readCodexAuth(configDir) {
   const accountId = tokens.account_id || tokens.accountId || null;
   if (typeof accessToken !== "string" || accessToken.length < 20) return null;
   return { accessToken, accountId };
+}
+
+function formatCursorPlanDisplay(planSlug) {
+  if (!planSlug) return null;
+  return planSlug
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 async function fetchClaudeProfileUsage(configDir) {
@@ -128,7 +246,11 @@ async function fetchClaudeProfileUsage(configDir) {
   };
   const token = readClaudeAccessToken(configDir);
   if (!token) {
-    return { ...base, sync_error: "No Claude OAuth token in this profile — run claude login in this profile." };
+    return {
+      ...base,
+      sync_error:
+        "No Claude subscription login found — run claude login on this Mac (or set CLAUDE_CODE_OAUTH_TOKEN)."
+    };
   }
   const headers = {
     Authorization: `Bearer ${token}`,
@@ -252,6 +374,66 @@ async function fetchCodexProfileUsage(configDir) {
   }
 }
 
+async function fetchCursorProfileUsage() {
+  const auth = readCursorAuth();
+  const profileId = auth?.configDir ? hashProfileId(auth.configDir) : "default";
+  const base = {
+    provider: "cursor",
+    profile_id: profileId,
+    profile_label: "Default",
+    config_dir: auth?.configDir ?? cursorGlobalStatePath(),
+    synced_at_ms: Date.now()
+  };
+  if (!auth?.accessToken) {
+    return {
+      ...base,
+      sync_error: "No Cursor login found — open Cursor and sign in on this computer."
+    };
+  }
+  try {
+    const res = await fetch("https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${auth.accessToken}`,
+        "Content-Type": "application/json",
+        "Connect-Protocol-Version": "1"
+      },
+      body: "{}"
+    });
+    if (!res.ok) {
+      return { ...base, sync_error: `Cursor usage API HTTP ${res.status}` };
+    }
+    const usage = await res.json();
+    const planUsage = usage?.planUsage || {};
+    const totalPercent = Number(planUsage.totalPercentUsed ?? planUsage.apiPercentUsed ?? 0);
+    const apiPercent = Number(planUsage.apiPercentUsed ?? totalPercent);
+    const cycleEndMs = Number(usage?.billingCycleEnd ?? 0);
+    const cycleStartMs = Number(usage?.billingCycleStart ?? 0);
+    const windowSeconds =
+      cycleEndMs > cycleStartMs ? Math.max(86400, Math.round((cycleEndMs - cycleStartMs) / 1000)) : 30 * 86400;
+    const planDisplay = formatCursorPlanDisplay(auth.planSlug);
+    return {
+      ...base,
+      vendor_email: auth.email,
+      plan_slug: auth.planSlug,
+      plan_display: planDisplay,
+      primary_window: {
+        utilization: Math.max(0, Math.min(100, apiPercent)),
+        resets_at: cycleEndMs > 0 ? new Date(cycleEndMs).toISOString() : null,
+        window_seconds: 5 * 3600
+      },
+      secondary_window: {
+        utilization: Math.max(0, Math.min(100, totalPercent)),
+        resets_at: cycleEndMs > 0 ? new Date(cycleEndMs).toISOString() : null,
+        window_seconds: windowSeconds
+      },
+      sync_error: null
+    };
+  } catch (err) {
+    return { ...base, sync_error: String(err?.message || err) };
+  }
+}
+
 async function fetchVendorUsageSettings(apiUrl, deviceToken, clientHeader) {
   const res = await fetch(`${apiUrl.replace(/\/$/, "")}/api/telemetry/vendor-usage`, {
     headers: {
@@ -289,7 +471,8 @@ export async function runVendorUsageSync({ creds, clientHeader, flags = {} }) {
   const settings =
     (await fetchVendorUsageSettings(apiUrl, creds.device_token, clientHeader)) || {
       claude_code: { enabled: false, extra_profile_dirs: [] },
-      codex: { enabled: false, extra_profile_dirs: [] }
+      codex: { enabled: false, extra_profile_dirs: [] },
+      cursor: { enabled: false, extra_profile_dirs: [] }
     };
   const force = flags.force === true || flags.force === "true";
   const snapshots = [];
@@ -298,12 +481,18 @@ export async function runVendorUsageSync({ creds, clientHeader, flags = {} }) {
     for (const dir of dirs) {
       snapshots.push(await fetchClaudeProfileUsage(dir));
     }
+    if (!dirs.length && (settings.claude_code?.enabled || force)) {
+      snapshots.push(await fetchClaudeProfileUsage(defaultClaudeConfigDir()));
+    }
   }
   if (settings.codex?.enabled || force) {
     const dirs = discoverCodexConfigDirs(settings.codex?.extra_profile_dirs || []);
     for (const dir of dirs) {
       snapshots.push(await fetchCodexProfileUsage(dir));
     }
+  }
+  if (settings.cursor?.enabled || force) {
+    snapshots.push(await fetchCursorProfileUsage());
   }
   if (!snapshots.length) {
     return { ok: true, written: 0, message: "No providers enabled. Turn on sync on the statistics page first." };

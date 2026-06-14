@@ -1,7 +1,7 @@
 /** Public list prices for vendor AI plans (USD / month). Verified manually — not live-scraped. */
 export type VendorPlanPricing = {
   key: string;
-  vendor: "anthropic" | "openai";
+  vendor: "anthropic" | "openai" | "cursor";
   displayName: string;
   monthlyUsd: number;
   aliases: string[];
@@ -15,11 +15,15 @@ export const VENDOR_PLAN_PRICING: VendorPlanPricing[] = [
   { key: "chatgpt_pro", vendor: "openai", displayName: "ChatGPT Pro", monthlyUsd: 200, aliases: ["pro"] },
   { key: "chatgpt_pro_5x", vendor: "openai", displayName: "ChatGPT Pro (5×)", monthlyUsd: 200, aliases: ["pro_5x"] },
   { key: "chatgpt_team", vendor: "openai", displayName: "ChatGPT Team", monthlyUsd: 25, aliases: ["team"] },
-  { key: "chatgpt_go", vendor: "openai", displayName: "ChatGPT Go", monthlyUsd: 8, aliases: ["go"] }
+  { key: "chatgpt_go", vendor: "openai", displayName: "ChatGPT Go", monthlyUsd: 8, aliases: ["go"] },
+  { key: "cursor_pro", vendor: "cursor", displayName: "Cursor Pro", monthlyUsd: 20, aliases: ["pro"] },
+  { key: "cursor_pro_plus", vendor: "cursor", displayName: "Cursor Pro+", monthlyUsd: 60, aliases: ["pro_plus", "pro plus", "pro+"] },
+  { key: "cursor_ultra", vendor: "cursor", displayName: "Cursor Ultra", monthlyUsd: 200, aliases: ["ultra"] },
+  { key: "cursor_business", vendor: "cursor", displayName: "Cursor Business", monthlyUsd: 40, aliases: ["business", "team"] }
 ];
 
 export function resolveVendorPlanPricing(
-  vendor: "anthropic" | "openai",
+  vendor: "anthropic" | "openai" | "cursor",
   planSlug: string | null | undefined,
   planDisplay: string | null | undefined
 ): VendorPlanPricing | null {

@@ -20,7 +20,7 @@ type UsageWindow = {
 };
 
 type VendorProfile = {
-  provider: "claude_code" | "codex";
+  provider: "claude_code" | "codex" | "cursor";
   profile_id: string;
   profile_label: string;
   config_dir: string | null;
@@ -42,6 +42,7 @@ type VendorUsagePayload = {
   settings: {
     claude_code: { enabled: boolean; extra_profile_dirs: string[] };
     codex: { enabled: boolean; extra_profile_dirs: string[] };
+    cursor: { enabled: boolean; extra_profile_dirs: string[] };
   };
   profiles: VendorProfile[];
   overview: {
@@ -97,7 +98,10 @@ function UsageBar({ label, window, dollarsUsed }: { label: string; window: Usage
 }
 
 function ProfileCard({ profile }: { profile: VendorProfile }) {
-  const providerLabel = profile.provider === "claude_code" ? "Claude Code" : "Codex";
+  const providerLabel =
+    profile.provider === "claude_code" ? "Claude Code" : profile.provider === "codex" ? "Codex" : "Cursor";
+  const primaryLabel = profile.provider === "cursor" ? "Included API usage" : "5-hour window";
+  const secondaryLabel = profile.provider === "cursor" ? "Billing cycle total" : "Weekly window";
   return (
     <div className="rounded-xl border border-line bg-white/70 p-4">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
@@ -122,9 +126,9 @@ function ProfileCard({ profile }: { profile: VendorProfile }) {
         </p>
       ) : (
         <div className="space-y-3">
-          <UsageBar label="5-hour window" window={profile.primary_window} dollarsUsed={profile.primary_dollars_used} />
+          <UsageBar label={primaryLabel} window={profile.primary_window} dollarsUsed={profile.primary_dollars_used} />
           <UsageBar
-            label="Weekly window"
+            label={secondaryLabel}
             window={profile.secondary_window}
             dollarsUsed={profile.secondary_dollars_used}
           />
@@ -197,7 +201,8 @@ export default function VendorUsageSection({ user }: { user: User | null }) {
       },
       body: JSON.stringify({
         claude_code: { enabled: true },
-        codex: { enabled: true }
+        codex: { enabled: true },
+        cursor: { enabled: true }
       })
     });
     const body = await res.json().catch(() => ({}));
@@ -265,8 +270,8 @@ export default function VendorUsageSection({ user }: { user: User | null }) {
         <div>
           <h2 className="text-base font-semibold uppercase tracking-[0.22em] text-ink">AI plan usage</h2>
           <p className="mt-1 max-w-xl text-sm text-muted">
-            Claude Code and Codex subscription quotas from this computer. Separate from agent emails in your activity
-            charts.
+            Claude Code, Codex, and Cursor subscription quotas from this computer. Separate from agent emails in your
+            activity charts.
           </p>
           {lastSyncedMs > 0 ? (
             <p className="mt-1 text-xs text-faint">Last synced {formatSyncedAt(lastSyncedMs)}</p>
@@ -309,8 +314,8 @@ export default function VendorUsageSection({ user }: { user: User | null }) {
 
       {syncCopied ? (
         <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50/80 px-3 py-2 text-sm text-emerald-900">
-          Command copied — paste in {syncOs === "mac" ? "Terminal" : "PowerShell"} on the Mac or PC where Claude Code
-          / Codex is logged in, press Enter, then click <span className="font-medium">Refresh</span>.
+          Command copied — paste in {syncOs === "mac" ? "Terminal" : "PowerShell"} on the Mac or PC where Claude Code,
+          Codex, or Cursor is logged in, press Enter, then click <span className="font-medium">Refresh</span>.
         </div>
       ) : null}
 

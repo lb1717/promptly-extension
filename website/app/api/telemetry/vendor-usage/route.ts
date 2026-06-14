@@ -20,7 +20,7 @@ function readSnapshot(raw: unknown): VendorUsageProfileSnapshot | null {
   if (!raw || typeof raw !== "object") return null;
   const row = raw as Record<string, unknown>;
   const provider = row.provider;
-  if (provider !== "claude_code" && provider !== "codex") return null;
+  if (provider !== "claude_code" && provider !== "codex" && provider !== "cursor") return null;
   const profileId = String(row.profile_id || "").trim();
   if (!profileId) return null;
   const readWindow = (value: unknown) => {

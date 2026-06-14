@@ -1240,7 +1240,7 @@ async function flushQueue(tool, clientHeader) {
 const VENDOR_USAGE_SYNC_MIN_MS = 15 * 60 * 1000;
 
 async function maybeSyncVendorUsage(tool, clientHeader) {
-  if (tool !== "claude_code" && tool !== "codex") return;
+  if (tool !== "claude_code" && tool !== "codex" && tool !== "cursor") return;
   const creds = getCredentials(tool);
   if (!creds?.device_token) return;
   const stampPath = join(promptlyStorageDir(), "last-vendor-usage-sync.json");
@@ -2344,7 +2344,7 @@ async function cmdUsageSync(flags) {
       process.exit(1);
     }
   } else {
-    for (const candidate of ["claude_code", "codex"]) {
+    for (const candidate of ["claude_code", "codex", "cursor"]) {
       const row = getCredentials(candidate);
       if (row?.device_token) {
         creds = row;
@@ -2423,7 +2423,7 @@ Commands:
   login --tool <tool> --from-sibling  Pair this agent to the same Promptly account as another agent on this computer
   align-device --set-primary <CODE>  Same as fix-account (legacy alias)
   test-send --tool <tool>     Upload one test prompt (verify stats pipeline)
-  usage-sync [--tool <tool>]  Sync Claude Code + Codex subscription usage (all enabled providers)
+  usage-sync [--tool <tool>]  Sync Claude Code, Codex, and Cursor subscription usage
   diagnostics [--tool <tool>] Simulate hook payloads and show local timing state
   status [--tool <tool>]      Show connection status for one or all tools
   open-login --tool <tool>    Print sign-in URL
