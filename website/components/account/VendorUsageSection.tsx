@@ -3,6 +3,12 @@
 import Link from "next/link";
 import type { User } from "firebase/auth";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { CopyBlock } from "@/components/integrations/integrationCopyBlock";
+import {
+  detectVendorUsageInstallOs,
+  vendorUsageSyncCommand,
+  type VendorUsageInstallOs
+} from "@/lib/vendorUsageSyncCommand";
 
 const VENDOR_USAGE_PASSWORD = "oat123";
 const UNLOCK_KEY = "promptly_vendor_usage_unlocked";
@@ -90,11 +96,6 @@ function UsageBar({ label, window, dollarsUsed }: { label: string; window: Usage
   );
 }
 
-type VendorUsageSettingsPatch = {
-  claude_code?: Partial<VendorUsagePayload["settings"]["claude_code"]>;
-  codex?: Partial<VendorUsagePayload["settings"]["codex"]>;
-};
-
 function ProfileCard({ profile }: { profile: VendorProfile }) {
   const providerLabel = profile.provider === "claude_code" ? "Claude Code" : "Codex";
   return (
@@ -139,21 +140,24 @@ function ProfileCard({ profile }: { profile: VendorProfile }) {
 }
 
 export default function VendorUsageSection({ user }: { user: User | null }) {
-  const userEmail = user?.email ?? null;
   const [unlocked, setUnlocked] = useState(false);
   const [passwordInput, setPasswordInput] = useState("");
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [syncBusy, setSyncBusy] = useState(false);
   const [data, setData] = useState<VendorUsagePayload | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [extraClaudeDir, setExtraClaudeDir] = useState("");
-  const [extraCodexDir, setExtraCodexDir] = useState("");
+  const [syncOs, setSyncOs] = useState<VendorUsageInstallOs>("mac");
+  const [showCommand, setShowCommand] = useState(false);
+  const [syncCopied, setSyncCopied] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     setUnlocked(window.sessionStorage.getItem(UNLOCK_KEY) === "1");
+    setSyncOs(detectVendorUsageInstallOs());
   }, []);
+
+  const syncCommand = useMemo(() => vendorUsageSyncCommand(syncOs), [syncOs]);
 
   const load = useCallback(async () => {
     if (!user) {
@@ -182,47 +186,50 @@ export default function VendorUsageSection({ user }: { user: User | null }) {
     if (unlocked && user) void load();
   }, [unlocked, user, load]);
 
-  const updateSettings = useCallback(
-    async (patch: VendorUsageSettingsPatch) => {
-      if (!user) {
-        setError("Sign in to update vendor usage settings.");
-        return;
-      }
-      setSaving(true);
-      setError(null);
-      try {
-        const token = await user.getIdToken(false);
-        const res = await fetch("/api/account/vendor-usage", {
-          method: "PATCH",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify(patch)
-        });
-        const body = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
-        setData(body as VendorUsagePayload);
-      } catch (e) {
-        setError(String(e instanceof Error ? e.message : e));
-      } finally {
-        setSaving(false);
-      }
-    },
-    [user]
-  );
+  const enableSyncAndPatch = useCallback(async () => {
+    if (!user) throw new Error("Sign in to sync subscriptions.");
+    const token = await user.getIdToken(false);
+    const res = await fetch("/api/account/vendor-usage", {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        claude_code: { enabled: true },
+        codex: { enabled: true }
+      })
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+    setData(body as VendorUsagePayload);
+  }, [user]);
 
-  const claudeProfiles = useMemo(
-    () => (data?.profiles ?? []).filter((p) => p.provider === "claude_code"),
-    [data]
-  );
-  const codexProfiles = useMemo(() => (data?.profiles ?? []).filter((p) => p.provider === "codex"), [data]);
+  const handleSyncClick = useCallback(async () => {
+    setSyncBusy(true);
+    setError(null);
+    setSyncCopied(false);
+    try {
+      await enableSyncAndPatch();
+      await navigator.clipboard.writeText(syncCommand);
+      setShowCommand(true);
+      setSyncCopied(true);
+      window.setTimeout(() => setSyncCopied(false), 3000);
+    } catch (e) {
+      setError(String(e instanceof Error ? e.message : e));
+    } finally {
+      setSyncBusy(false);
+    }
+  }, [enableSyncAndPatch, syncCommand]);
+
+  const profiles = data?.profiles ?? [];
+  const lastSyncedMs = profiles.reduce((max, row) => Math.max(max, row.synced_at_ms || 0), 0);
 
   if (!unlocked) {
     return (
       <section className="mb-8 w-full rounded-2xl border border-line bg-cream p-4 shadow-card sm:p-5">
         <h2 className="text-base font-semibold uppercase tracking-[0.22em] text-ink">AI plan usage</h2>
-        <p className="mt-2 text-sm text-muted">Enter the preview password to configure subscription usage sync.</p>
+        <p className="mt-2 text-sm text-muted">Enter the preview password to view Claude Code and Codex subscription quotas.</p>
         <form
           className="mt-4 flex max-w-sm flex-wrap items-center gap-2"
           onSubmit={(e) => {
@@ -254,13 +261,16 @@ export default function VendorUsageSection({ user }: { user: User | null }) {
 
   return (
     <section className="mb-8 w-full rounded-2xl border border-line bg-cream p-4 shadow-card sm:p-5">
-      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold uppercase tracking-[0.22em] text-ink">AI plan usage</h2>
-          <p className="mt-1 max-w-2xl text-xs text-muted">
-            Real subscription quotas from Claude Code and Codex on the machine that syncs. This is separate from agent
-            login emails in your activity charts — each card is one vendor subscription login.
+          <p className="mt-1 max-w-xl text-sm text-muted">
+            Claude Code and Codex subscription quotas from this computer. Separate from agent emails in your activity
+            charts.
           </p>
+          {lastSyncedMs > 0 ? (
+            <p className="mt-1 text-xs text-faint">Last synced {formatSyncedAt(lastSyncedMs)}</p>
+          ) : null}
         </div>
         <button
           type="button"
@@ -272,16 +282,50 @@ export default function VendorUsageSection({ user }: { user: User | null }) {
         </button>
       </div>
 
-      {error ? <p className="mb-4 text-sm text-red-700">{error}</p> : null}
+      <div className="mb-5 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          disabled={syncBusy || !user}
+          onClick={() => void handleSyncClick()}
+          className="rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:opacity-50"
+        >
+          {syncBusy ? "Preparing…" : syncCopied ? "Command copied" : "Sync subscriptions"}
+        </button>
+        <div className="flex gap-1">
+          {(["mac", "windows"] as const).map((id) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setSyncOs(id)}
+              className={`rounded-md border px-2 py-1 text-[10px] font-medium ${
+                syncOs === id ? "border-ink bg-ink text-cream" : "border-line text-muted hover:text-ink"
+              }`}
+            >
+              {id === "mac" ? "Mac" : "Windows"}
+            </button>
+          ))}
+        </div>
+      </div>
 
-      {data?.overview ? (
-        <div className="mb-5 grid gap-3 sm:grid-cols-3">
+      {syncCopied ? (
+        <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50/80 px-3 py-2 text-sm text-emerald-900">
+          Command copied — paste in {syncOs === "mac" ? "Terminal" : "PowerShell"} on the Mac or PC where Claude Code
+          / Codex is logged in, press Enter, then click <span className="font-medium">Refresh</span>.
+        </div>
+      ) : null}
+
+      {showCommand ? <CopyBlock lines={[syncCommand]} label={syncOs === "mac" ? "Terminal" : "PowerShell"} /> : null}
+
+      {error ? <p className="mb-4 mt-4 text-sm text-red-700">{error}</p> : null}
+
+      {data?.overview && profiles.length > 0 ? (
+        <div className="mb-5 mt-5 grid gap-3 sm:grid-cols-3">
           <div className="rounded-xl border border-line bg-white/70 p-3">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-faint">Subscriptions synced</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-faint">Subscriptions</p>
             <p className="mt-1 text-2xl font-bold tabular-nums text-ink">{data.overview.profile_count}</p>
           </div>
           <div className="rounded-xl border border-line bg-white/70 p-3">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-faint">Catalog plan total</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-faint">Plan total (catalog)</p>
             <p className="mt-1 text-2xl font-bold tabular-nums text-ink">${data.overview.total_plan_monthly_usd}/mo</p>
           </div>
           <div className="rounded-xl border border-line bg-white/70 p-3">
@@ -289,117 +333,26 @@ export default function VendorUsageSection({ user }: { user: User | null }) {
             <p className="mt-1 text-2xl font-bold tabular-nums text-ink">
               ~${data.overview.total_secondary_window_dollars_used.toFixed(0)}
             </p>
-            <p className="text-[10px] text-muted">
-              ~${data.overview.total_secondary_window_dollars_unused.toFixed(0)} unused (catalog est.)
-            </p>
           </div>
         </div>
       ) : null}
 
-      <div className="mb-5 grid gap-4 lg:grid-cols-2">
-        <div className="rounded-xl border border-violet-200/80 bg-violet-50/40 p-4">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-ink">Claude Code sync</h3>
-            <label className="flex items-center gap-2 text-xs text-muted">
-              <input
-                type="checkbox"
-                checked={data?.settings.claude_code.enabled ?? false}
-                disabled={saving}
-                onChange={(e) => void updateSettings({ claude_code: { enabled: e.target.checked } })}
-              />
-              Enabled
-            </label>
-          </div>
-          <p className="mb-3 text-[11px] text-muted">
-            Discovers multiple profiles (~/.claude, ~/.claude-work, etc.) and syncs each Anthropic subscription.
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <input
-              type="text"
-              value={extraClaudeDir}
-              onChange={(e) => setExtraClaudeDir(e.target.value)}
-              placeholder="Extra profile path e.g. ~/.claude-personal"
-              className="min-w-[12rem] flex-1 rounded-md border border-line bg-cream px-2 py-1 text-xs text-ink"
-            />
-            <button
-              type="button"
-              disabled={saving || !extraClaudeDir.trim()}
-              onClick={() => {
-                const dirs = [...(data?.settings.claude_code.extra_profile_dirs ?? []), extraClaudeDir.trim()];
-                void updateSettings({ claude_code: { extra_profile_dirs: dirs } });
-                setExtraClaudeDir("");
-              }}
-              className="rounded-md border border-line px-2 py-1 text-xs font-medium text-ink hover:bg-cream"
-            >
-              Add path
-            </button>
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-violet-200/80 bg-violet-50/40 p-4">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-ink">Codex sync</h3>
-            <label className="flex items-center gap-2 text-xs text-muted">
-              <input
-                type="checkbox"
-                checked={data?.settings.codex.enabled ?? false}
-                disabled={saving}
-                onChange={(e) => void updateSettings({ codex: { enabled: e.target.checked } })}
-              />
-              Enabled
-            </label>
-          </div>
-          <p className="mb-3 text-[11px] text-muted">Uses ChatGPT OAuth from ~/.codex/auth.json (not API-key mode).</p>
-          <div className="flex flex-wrap gap-2">
-            <input
-              type="text"
-              value={extraCodexDir}
-              onChange={(e) => setExtraCodexDir(e.target.value)}
-              placeholder="Extra CODEX_HOME path"
-              className="min-w-[12rem] flex-1 rounded-md border border-line bg-cream px-2 py-1 text-xs text-ink"
-            />
-            <button
-              type="button"
-              disabled={saving || !extraCodexDir.trim()}
-              onClick={() => {
-                const dirs = [...(data?.settings.codex.extra_profile_dirs ?? []), extraCodexDir.trim()];
-                void updateSettings({ codex: { extra_profile_dirs: dirs } });
-                setExtraCodexDir("");
-              }}
-              className="rounded-md border border-line px-2 py-1 text-xs font-medium text-ink hover:bg-cream"
-            >
-              Add path
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="mb-4 rounded-xl border border-line/70 bg-cream-dark/50 px-3 py-2 text-[11px] text-muted">
-        After enabling sync, run{" "}
-        <code className="rounded bg-white/80 px-1 py-0.5 text-ink">promptly-telemetry usage-sync --tool claude_code</code>{" "}
-        or send a prompt — sync runs automatically every ~15 minutes from hooks on this computer
-        {userEmail ? ` (${userEmail})` : ""}.
-      </div>
-
-      {!data?.settings.claude_code.enabled && !data?.settings.codex.enabled ? (
-        <p className="text-sm text-muted">Turn on Claude Code and/or Codex sync above, then run usage-sync locally.</p>
-      ) : null}
-
-      {(claudeProfiles.length || codexProfiles.length) > 0 ? (
+      {profiles.length > 0 ? (
         <div className="grid gap-4 lg:grid-cols-2">
-          {[...claudeProfiles, ...codexProfiles].map((profile) => (
+          {profiles.map((profile) => (
             <ProfileCard key={`${profile.provider}-${profile.profile_id}`} profile={profile} />
           ))}
         </div>
-      ) : data?.settings.claude_code.enabled || data?.settings.codex.enabled ? (
+      ) : (
         <p className="text-sm text-muted">
-          No snapshots yet. Pair agents on{" "}
+          No subscription data yet. Click <span className="font-medium text-ink">Sync subscriptions</span>, run the
+          command on your computer, then Refresh. Need agents paired first?{" "}
           <Link href="/integrations" className="underline hover:text-ink">
-            integrations
-          </Link>{" "}
-          and run <code className="text-ink">promptly-telemetry usage-sync</code>.
+            Integrations
+          </Link>
+          .
         </p>
-      ) : null}
+      )}
     </section>
   );
 }

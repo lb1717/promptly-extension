@@ -2332,17 +2332,35 @@ async function cmdTestSend(flags) {
 }
 
 async function cmdUsageSync(flags) {
-  const tool = normalizeTool(flags.tool) || "claude_code";
-  const creds = getCredentials(tool);
-  if (!creds?.device_token) {
-    console.error(`Not connected for ${tool}. Run login --tool ${tool} first.`);
-    process.exit(1);
+  const syncFlags = { force: flags.force === true || flags.force === "true" };
+  const tool = normalizeTool(flags.tool);
+  let creds = null;
+  let clientHeader = null;
+  if (tool) {
+    creds = getCredentials(tool);
+    clientHeader = flags.client || TOOL_CLIENT[tool];
+    if (!creds?.device_token) {
+      console.error(`Not connected for ${tool}. Run login --tool ${tool} first.`);
+      process.exit(1);
+    }
+  } else {
+    for (const candidate of ["claude_code", "codex"]) {
+      const row = getCredentials(candidate);
+      if (row?.device_token) {
+        creds = row;
+        clientHeader = flags.client || TOOL_CLIENT[candidate];
+        break;
+      }
+    }
+    if (!creds?.device_token) {
+      console.error("Not connected. Pair Claude Code or Codex at https://promptly-labs.com/integrations");
+      process.exit(1);
+    }
   }
-  const clientHeader = flags.client || TOOL_CLIENT[tool];
   const result = await runVendorUsageSync({
     creds,
     clientHeader,
-    flags: { force: flags.force === true || flags.force === "true" }
+    flags: syncFlags
   });
   if (!result.ok) {
     console.error(result.error || "Usage sync failed");
@@ -2405,7 +2423,7 @@ Commands:
   login --tool <tool> --from-sibling  Pair this agent to the same Promptly account as another agent on this computer
   align-device --set-primary <CODE>  Same as fix-account (legacy alias)
   test-send --tool <tool>     Upload one test prompt (verify stats pipeline)
-  usage-sync [--tool <tool>]  Sync Claude Code / Codex subscription usage to Promptly
+  usage-sync [--tool <tool>]  Sync Claude Code + Codex subscription usage (all enabled providers)
   diagnostics [--tool <tool>] Simulate hook payloads and show local timing state
   status [--tool <tool>]      Show connection status for one or all tools
   open-login --tool <tool>    Print sign-in URL
