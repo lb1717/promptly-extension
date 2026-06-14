@@ -227,8 +227,14 @@ export default function VendorUsageSection({ user }: { user: User | null }) {
     }
   }, [enableSyncAndPatch, syncCommand]);
 
-  const profiles = data?.profiles ?? [];
+  const profiles = useMemo(
+    () => (data?.profiles ?? []).filter((p) => !p.sync_error),
+    [data]
+  );
   const lastSyncedMs = profiles.reduce((max, row) => Math.max(max, row.synced_at_ms || 0), 0);
+  const hasCursor = profiles.some((p) => p.provider === "cursor");
+  const hasCodex = profiles.some((p) => p.provider === "codex");
+  const hasClaude = profiles.some((p) => p.provider === "claude_code");
 
   if (!unlocked) {
     return (
@@ -351,13 +357,19 @@ export default function VendorUsageSection({ user }: { user: User | null }) {
       ) : (
         <p className="text-sm text-muted">
           No subscription data yet. Click <span className="font-medium text-ink">Sync subscriptions</span>, run the
-          command on your computer, then Refresh. Need agents paired first?{" "}
-          <Link href="/integrations" className="underline hover:text-ink">
-            Integrations
-          </Link>
-          .
+          command on your computer, then Refresh.
         </p>
       )}
+
+      {profiles.length > 0 && (!hasCursor || !hasCodex || !hasClaude) ? (
+        <p className="mt-4 text-xs text-muted">
+          {!hasClaude
+            ? "Claude Code: skipped — no Anthropic subscription login on the syncing computer (only needed if you use Claude Code in Terminal). "
+            : null}
+          {!hasCursor ? "Cursor: open Cursor and sign in on that Mac, then sync again. " : null}
+          {!hasCodex ? "Codex: sign in with ChatGPT (not API key) in the Codex app, then sync again. " : null}
+        </p>
+      ) : null}
     </section>
   );
 }

@@ -1,3 +1,5 @@
+import { PLUGIN_PACK_URL } from "@/components/integrations/integrationOs";
+
 export type VendorUsageInstallOs = "mac" | "windows";
 
 export function detectVendorUsageInstallOs(): VendorUsageInstallOs {
@@ -7,10 +9,14 @@ export function detectVendorUsageInstallOs(): VendorUsageInstallOs {
   return "mac";
 }
 
-/** One paste in Terminal on the machine with Claude Code / Codex logins. */
+/** One paste in Terminal — refreshes sync tool, then uploads Codex + Cursor + Claude (when signed in). */
 export function vendorUsageSyncCommand(os: VendorUsageInstallOs): string {
-  if (os === "windows") {
-    return 'node "$env:USERPROFILE\\integrations\\packages\\telemetry-cli\\bin\\promptly-telemetry.mjs" usage-sync';
+  const cli =
+    os === "windows"
+      ? 'node "$env:USERPROFILE\\integrations\\packages\\telemetry-cli\\bin\\promptly-telemetry.mjs"'
+      : 'node "$HOME/integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs"';
+  if (os === "mac") {
+    return `curl -fsSL "${PLUGIN_PACK_URL}" -o /tmp/promptly-agents.zip && unzip -qo /tmp/promptly-agents.zip -d "$HOME" && ${cli} usage-sync`;
   }
-  return 'node "$HOME/integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs" usage-sync';
+  return `${cli} usage-sync`;
 }

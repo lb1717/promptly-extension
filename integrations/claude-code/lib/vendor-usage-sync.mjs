@@ -62,16 +62,23 @@ function parseClaudeOAuthToken(raw, depth = 0) {
 
 function readClaudeKeychainToken() {
   if (platform() !== "darwin") return null;
-  for (const service of ["Claude Code-credentials", "Claude Code", "claude-code"]) {
-    try {
-      const raw = execSync(`security find-generic-password -s ${JSON.stringify(service)} -w`, {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"]
-      }).trim();
-      const token = parseClaudeOAuthToken(raw);
-      if (token) return token;
-    } catch {
-      /* try next service name */
+  const account = String(process.env.USER || process.env.LOGNAME || "").trim();
+  const services = ["Claude Code-credentials", "Claude Code", "claude-code", "anthropic-claude"];
+  for (const service of services) {
+    for (const withAccount of account ? [true, false] : [false]) {
+      try {
+        const cmd = withAccount
+          ? `security find-generic-password -a ${JSON.stringify(account)} -s ${JSON.stringify(service)} -w`
+          : `security find-generic-password -s ${JSON.stringify(service)} -w`;
+        const raw = execSync(cmd, {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"]
+        }).trim();
+        const token = parseClaudeOAuthToken(raw);
+        if (token) return token;
+      } catch {
+        /* try next */
+      }
     }
   }
   return null;
@@ -246,11 +253,7 @@ async function fetchClaudeProfileUsage(configDir) {
   };
   const token = readClaudeAccessToken(configDir);
   if (!token) {
-    return {
-      ...base,
-      sync_error:
-        "No Claude subscription login found — run claude login on this Mac (or set CLAUDE_CODE_OAUTH_TOKEN)."
-    };
+    return null;
   }
   const headers = {
     Authorization: `Bearer ${token}`,
@@ -446,7 +449,7 @@ async function fetchVendorUsageSettings(apiUrl, deviceToken, clientHeader) {
   return body?.settings || null;
 }
 
-async function uploadVendorUsageSnapshots(apiUrl, deviceToken, clientHeader, snapshots) {
+async function uploadVendorUsageSnapshots(apiUrl, deviceToken, clientHeader, snapshots, clearProviders = []) {
   const res = await fetch(`${apiUrl.replace(/\/$/, "")}/api/telemetry/vendor-usage`, {
     method: "POST",
     headers: {
@@ -454,7 +457,7 @@ async function uploadVendorUsageSnapshots(apiUrl, deviceToken, clientHeader, sna
       Authorization: `Bearer ${deviceToken}`,
       "x-promptly-client": clientHeader
     },
-    body: JSON.stringify({ snapshots })
+    body: JSON.stringify({ snapshots, clear_providers: clearProviders })
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -474,29 +477,53 @@ export async function runVendorUsageSync({ creds, clientHeader, flags = {} }) {
       codex: { enabled: false, extra_profile_dirs: [] },
       cursor: { enabled: false, extra_profile_dirs: [] }
     };
-  const force = flags.force === true || flags.force === "true";
+  const attempted = new Set();
   const snapshots = [];
-  if (settings.claude_code?.enabled || force) {
-    const dirs = discoverClaudeProfileDirs(settings.claude_code?.extra_profile_dirs || []);
-    for (const dir of dirs) {
-      snapshots.push(await fetchClaudeProfileUsage(dir));
-    }
-    if (!dirs.length && (settings.claude_code?.enabled || force)) {
-      snapshots.push(await fetchClaudeProfileUsage(defaultClaudeConfigDir()));
-    }
+
+  attempted.add("claude_code");
+  const claudeDirs = discoverClaudeProfileDirs(settings.claude_code?.extra_profile_dirs || []);
+  for (const dir of claudeDirs) {
+    const row = await fetchClaudeProfileUsage(dir);
+    if (row) snapshots.push(row);
   }
-  if (settings.codex?.enabled || force) {
-    const dirs = discoverCodexConfigDirs(settings.codex?.extra_profile_dirs || []);
-    for (const dir of dirs) {
-      snapshots.push(await fetchCodexProfileUsage(dir));
-    }
+  if (!claudeDirs.length) {
+    const row = await fetchClaudeProfileUsage(defaultClaudeConfigDir());
+    if (row) snapshots.push(row);
   }
-  if (settings.cursor?.enabled || force) {
-    snapshots.push(await fetchCursorProfileUsage());
+
+  attempted.add("codex");
+  const codexDirs = discoverCodexConfigDirs(settings.codex?.extra_profile_dirs || []);
+  for (const dir of codexDirs) {
+    snapshots.push(await fetchCodexProfileUsage(dir));
   }
-  if (!snapshots.length) {
-    return { ok: true, written: 0, message: "No providers enabled. Turn on sync on the statistics page first." };
+
+  attempted.add("cursor");
+  snapshots.push(await fetchCursorProfileUsage());
+
+  const successful = snapshots.filter((row) => row && !row.sync_error);
+  const succeededProviders = new Set(successful.map((row) => row.provider));
+  const clearProviders = [...attempted].filter((provider) => !succeededProviders.has(provider));
+
+  if (!successful.length && !clearProviders.length) {
+    return { ok: true, written: 0, message: "No subscription data found on this computer." };
   }
-  const result = await uploadVendorUsageSnapshots(apiUrl, creds.device_token, clientHeader, snapshots);
-  return { ...result, snapshots };
+
+  const result = await uploadVendorUsageSnapshots(
+    apiUrl,
+    creds.device_token,
+    clientHeader,
+    successful,
+    clearProviders
+  );
+  return {
+    ...result,
+    snapshots: successful,
+    skipped: clearProviders,
+    message:
+      clearProviders.length && successful.length
+        ? `Synced ${successful.length} subscription(s). Skipped: ${clearProviders.join(", ")} (not signed in on this Mac).`
+        : clearProviders.length
+          ? "No subscription logins found on this computer for Codex, Cursor, or Claude Code."
+          : undefined
+  };
 }

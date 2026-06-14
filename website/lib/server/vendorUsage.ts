@@ -154,17 +154,38 @@ export async function updateVendorUsageSettings(
   return next;
 }
 
+export async function clearVendorUsageProfiles(uid: string, providers: VendorUsageProvider[]): Promise<number> {
+  if (!providers.length) return 0;
+  const allowed = new Set(providers);
+  const snap = await getFirebaseAdminDb().collection("users").doc(uid).collection("vendor_usage_profiles").get();
+  const batch = getFirebaseAdminDb().batch();
+  let deleted = 0;
+  for (const doc of snap.docs) {
+    const provider = doc.data().provider;
+    if (provider === "claude_code" || provider === "codex" || provider === "cursor") {
+      if (allowed.has(provider)) {
+        batch.delete(doc.ref);
+        deleted += 1;
+      }
+    }
+  }
+  if (deleted > 0) await batch.commit();
+  return deleted;
+}
+
 export async function persistVendorUsageSnapshots(
   uid: string,
-  snapshots: VendorUsageProfileSnapshot[]
+  snapshots: VendorUsageProfileSnapshot[],
+  clearProviders: VendorUsageProvider[] = []
 ): Promise<number> {
+  await clearVendorUsageProfiles(uid, clearProviders);
   if (!snapshots.length) return 0;
   const db = getFirebaseAdminDb();
   const batch = db.batch();
   let written = 0;
   for (const snap of snapshots.slice(0, 24)) {
     if (snap.provider !== "claude_code" && snap.provider !== "codex" && snap.provider !== "cursor") continue;
-    if (!snap.profile_id) continue;
+    if (!snap.profile_id || snap.sync_error) continue;
     const docId = vendorUsageProfileDocId(snap.provider, snap.profile_id);
     batch.set(
       profileRef(uid, docId),
@@ -205,7 +226,7 @@ export async function listVendorUsageProfiles(uid: string): Promise<VendorUsageP
     });
   }
   return rows
-    .filter((row) => row.profile_id)
+    .filter((row) => row.profile_id && !row.sync_error)
     .sort((a, b) => b.synced_at_ms - a.synced_at_ms || a.profile_label.localeCompare(b.profile_label))
     .map(enrichProfile);
 }

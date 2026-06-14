@@ -81,7 +81,14 @@ export async function POST(request: Request) {
       );
     }
     const snapshots = rawSnapshots.map(readSnapshot).filter((row): row is VendorUsageProfileSnapshot => row !== null);
-    const written = await persistVendorUsageSnapshots(user.uid, snapshots);
+    const rawClear = (body as { clear_providers?: unknown }).clear_providers;
+    const clearProviders = Array.isArray(rawClear)
+      ? rawClear.filter(
+          (value): value is "claude_code" | "codex" | "cursor" =>
+            value === "claude_code" || value === "codex" || value === "cursor"
+        )
+      : [];
+    const written = await persistVendorUsageSnapshots(user.uid, snapshots, clearProviders);
     return NextResponse.json({ ok: true, written }, { status: 200, headers: buildPromptlyCorsHeaders(origin) });
   } catch (error) {
     return NextResponse.json(
