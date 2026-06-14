@@ -44,6 +44,11 @@ type VendorUsagePayload = {
     cursor: { enabled: boolean; extra_profile_dirs: string[] };
   };
   profiles: VendorProfile[];
+  last_sync_diagnostics?: {
+    at_ms: number;
+    skipped: Array<"claude_code" | "codex" | "cursor">;
+    skip_details?: Partial<Record<"claude_code" | "codex" | "cursor", string>>;
+  } | null;
   overview: {
     profile_count: number;
     total_plan_monthly_usd: number;
@@ -320,8 +325,16 @@ export default function VendorUsageSection({ user }: { user: User | null }) {
       {syncCopied ? (
         <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50/80 px-3 py-2 text-sm text-emerald-900">
           Command copied — paste in {syncOs === "mac" ? "Terminal.app" : "PowerShell"} (not a remote SSH session),
-          press Enter, then click <span className="font-medium">Refresh</span>. macOS may ask once to allow Keychain
-          access for Claude.
+          press Enter, then click <span className="font-medium">Refresh</span>.
+        </div>
+      ) : null}
+
+      {showCommand && !hasClaude ? (
+        <div className="mb-4 rounded-xl border border-line bg-white/70 px-3 py-2 text-xs text-muted">
+          <span className="font-medium text-ink">Claude one-time setup (no Keychain prompts):</span> run{" "}
+          <code className="rounded bg-cream-dark px-1 py-0.5">claude setup-token</code>, save the output to{" "}
+          <code className="rounded bg-cream-dark px-1 py-0.5">~/.promptly/claude-oauth-token</code>, then run the sync
+          command above.
         </div>
       ) : null}
 
@@ -362,13 +375,17 @@ export default function VendorUsageSection({ user }: { user: User | null }) {
       )}
 
       {profiles.length > 0 && (!hasCursor || !hasCodex || !hasClaude) ? (
-        <p className="mt-4 text-xs text-muted">
-          {!hasClaude
-            ? "Claude: open the Claude desktop app or Claude Code on this Mac, then sync again from Terminal.app. "
-            : null}
-          {!hasCursor ? "Cursor: open Cursor and sign in on that Mac, then sync again. " : null}
-          {!hasCodex ? "Codex: sign in with ChatGPT (not API key) in the Codex app, then sync again. " : null}
-        </p>
+        <div className="mt-4 space-y-2 text-xs text-muted">
+          {!hasClaude ? (
+            <p className="rounded-lg border border-amber-300/60 bg-amber-50/80 px-3 py-2 text-amber-950">
+              <span className="font-medium">Claude not synced.</span>{" "}
+              {data?.last_sync_diagnostics?.skip_details?.claude_code ||
+                "Run `claude setup-token`, save the output to ~/.promptly/claude-oauth-token, then sync again. Promptly never reads macOS Keychain."}
+            </p>
+          ) : null}
+          {!hasCursor ? <p>Cursor: open Cursor and sign in on that Mac, then sync again.</p> : null}
+          {!hasCodex ? <p>Codex: sign in with ChatGPT (not API key) in the Codex app, then sync again.</p> : null}
+        </div>
       ) : null}
 
       <p className="mt-4 text-[11px] leading-relaxed text-faint">

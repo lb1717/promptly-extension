@@ -1239,21 +1239,9 @@ async function flushQueue(tool, clientHeader) {
 
 const VENDOR_USAGE_SYNC_MIN_MS = 15 * 60 * 1000;
 
-async function maybeSyncVendorUsage(tool, clientHeader) {
-  if (tool !== "claude_code" && tool !== "codex" && tool !== "cursor") return;
-  const creds = getCredentials(tool);
-  if (!creds?.device_token) return;
-  const stampPath = join(promptlyStorageDir(), "last-vendor-usage-sync.json");
-  const last = readJson(stampPath, { at: 0 });
-  if (Date.now() - (last.at || 0) < VENDOR_USAGE_SYNC_MIN_MS) return;
-  try {
-    const result = await runVendorUsageSync({ creds, clientHeader, flags: {} });
-    if (result.ok) {
-      writeJson(stampPath, { at: Date.now(), written: result.written ?? 0 });
-    }
-  } catch {
-    /* hooks must not fail */
-  }
+async function maybeSyncVendorUsage(_tool, _clientHeader) {
+  // Disabled: auto-sync on hooks triggered macOS Keychain prompts. Run `usage-sync` manually instead.
+  return;
 }
 
 function hookEventName(input) {
@@ -2332,7 +2320,10 @@ async function cmdTestSend(flags) {
 }
 
 async function cmdUsageSync(flags) {
-  const syncFlags = { force: flags.force === true || flags.force === "true" };
+  const syncFlags = {
+    force: flags.force === true || flags.force === "true",
+    debug: flags.debug === true || flags.debug === "true"
+  };
   const tool = normalizeTool(flags.tool);
   let creds = null;
   let clientHeader = null;
@@ -2423,7 +2414,7 @@ Commands:
   login --tool <tool> --from-sibling  Pair this agent to the same Promptly account as another agent on this computer
   align-device --set-primary <CODE>  Same as fix-account (legacy alias)
   test-send --tool <tool>     Upload one test prompt (verify stats pipeline)
-  usage-sync [--tool <tool>]  Sync Claude Code, Codex, and Cursor subscription usage
+  usage-sync [--debug] [--tool <tool>]  Sync Claude Code, Codex, and Cursor subscription usage
   diagnostics [--tool <tool>] Simulate hook payloads and show local timing state
   status [--tool <tool>]      Show connection status for one or all tools
   open-login --tool <tool>    Print sign-in URL

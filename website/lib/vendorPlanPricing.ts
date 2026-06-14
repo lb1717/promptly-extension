@@ -22,18 +22,43 @@ export const VENDOR_PLAN_PRICING: VendorPlanPricing[] = [
   { key: "cursor_business", vendor: "cursor", displayName: "Cursor Business", monthlyUsd: 40, aliases: ["business", "team"] }
 ];
 
+function normalizePlanSlug(value: string | null | undefined): string {
+  return (value || "").trim().toLowerCase().replace(/\s+/g, "_");
+}
+
 export function resolveVendorPlanPricing(
   vendor: "anthropic" | "openai" | "cursor",
   planSlug: string | null | undefined,
   planDisplay: string | null | undefined
 ): VendorPlanPricing | null {
-  const raw = `${planSlug || ""} ${planDisplay || ""}`.trim().toLowerCase();
-  if (!raw) return null;
-  for (const row of VENDOR_PLAN_PRICING) {
-    if (row.vendor !== vendor) continue;
-    if (row.aliases.some((alias) => raw.includes(alias.replace(/_/g, " ")) || raw.includes(alias))) {
+  const slug = normalizePlanSlug(planSlug);
+  const display = (planDisplay || "").trim().toLowerCase();
+  const candidates = VENDOR_PLAN_PRICING.filter((row) => row.vendor === vendor);
+  if (!slug && !display) return null;
+
+  if (slug) {
+    for (const row of candidates) {
+      if (row.aliases.some((alias) => normalizePlanSlug(alias) === slug)) return row;
+      if (row.key === `${vendor}_${slug}` || row.key.endsWith(`_${slug}`)) return row;
+    }
+  }
+
+  const raw = `${slug.replace(/_/g, " ")} ${display}`.trim();
+  const aliasMatches = candidates.flatMap((row) =>
+    row.aliases.map((alias) => ({
+      row,
+      alias,
+      normalized: alias.replace(/_/g, " ")
+    }))
+  );
+  aliasMatches.sort((a, b) => b.alias.length - a.alias.length);
+  for (const { row, alias, normalized } of aliasMatches) {
+    if (slug === normalizePlanSlug(alias) || raw.includes(normalized) || raw.includes(alias)) {
       return row;
     }
+  }
+
+  for (const row of candidates) {
     if (raw.includes(row.key.replace(/_/g, " "))) return row;
   }
   return null;

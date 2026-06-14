@@ -17,6 +17,7 @@ import {
 import { homedir } from "os";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import { runVendorUsageSync } from "../lib/vendor-usage-sync.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -1236,6 +1237,13 @@ async function flushQueue(tool, clientHeader) {
   return { ok: true, written: body.written ?? batch.length };
 }
 
+const VENDOR_USAGE_SYNC_MIN_MS = 15 * 60 * 1000;
+
+async function maybeSyncVendorUsage(_tool, _clientHeader) {
+  // Disabled: auto-sync on hooks triggered macOS Keychain prompts. Run `usage-sync` manually instead.
+  return;
+}
+
 function hookEventName(input) {
   return String(
     input?.hook_event_name || input?.hookEventName || input?.event || input?.hook || ""
@@ -1604,6 +1612,7 @@ async function cmdHook(flags) {
     if (!flushResult.ok) {
       console.error("[promptly]", flushResult.error || "Upload failed");
     }
+    await maybeSyncVendorUsage(tool, clientHeader);
   } catch (err) {
     const message = String(err?.message || err);
     recordFlushResult(tool, { ok: false, error: message });
@@ -2310,6 +2319,47 @@ async function cmdTestSend(flags) {
   console.log(`Test prompt uploaded for ${tool}. Check Statistics → Coding agents on promptly-labs.com.`);
 }
 
+async function cmdUsageSync(flags) {
+  const syncFlags = {
+    force: flags.force === true || flags.force === "true",
+    debug: flags.debug === true || flags.debug === "true"
+  };
+  const tool = normalizeTool(flags.tool);
+  let creds = null;
+  let clientHeader = null;
+  if (tool) {
+    creds = getCredentials(tool);
+    clientHeader = flags.client || TOOL_CLIENT[tool];
+    if (!creds?.device_token) {
+      console.error(`Not connected for ${tool}. Run login --tool ${tool} first.`);
+      process.exit(1);
+    }
+  } else {
+    for (const candidate of ["claude_code", "codex", "cursor"]) {
+      const row = getCredentials(candidate);
+      if (row?.device_token) {
+        creds = row;
+        clientHeader = flags.client || TOOL_CLIENT[candidate];
+        break;
+      }
+    }
+    if (!creds?.device_token) {
+      console.error("Not connected. Pair Claude Code or Codex at https://promptly-labs.com/integrations");
+      process.exit(1);
+    }
+  }
+  const result = await runVendorUsageSync({
+    creds,
+    clientHeader,
+    flags: syncFlags
+  });
+  if (!result.ok) {
+    console.error(result.error || "Usage sync failed");
+    process.exit(1);
+  }
+  console.log(JSON.stringify(result, null, 2));
+}
+
 async function main() {
   const { command, flags } = parseArgs(process.argv.slice(2));
   switch (command) {
@@ -2330,6 +2380,9 @@ async function main() {
       break;
     case "test-send":
       await cmdTestSend(flags);
+      break;
+    case "usage-sync":
+      await cmdUsageSync(flags);
       break;
     case "diagnostics":
       cmdDiagnostics(flags);
@@ -2361,6 +2414,7 @@ Commands:
   login --tool <tool> --from-sibling  Pair this agent to the same Promptly account as another agent on this computer
   align-device --set-primary <CODE>  Same as fix-account (legacy alias)
   test-send --tool <tool>     Upload one test prompt (verify stats pipeline)
+  usage-sync [--debug] [--tool <tool>]  Sync Claude Code, Codex, and Cursor subscription usage
   diagnostics [--tool <tool>] Simulate hook payloads and show local timing state
   status [--tool <tool>]      Show connection status for one or all tools
   open-login --tool <tool>    Print sign-in URL

@@ -7,7 +7,8 @@ import {
 import {
   getVendorUsageSettings,
   persistVendorUsageSnapshots,
-  type VendorUsageProfileSnapshot
+  type VendorUsageProfileSnapshot,
+  type VendorUsageSyncDiagnostics
 } from "@/lib/server/vendorUsage";
 
 export const runtime = "nodejs";
@@ -88,7 +89,12 @@ export async function POST(request: Request) {
             value === "claude_code" || value === "codex" || value === "cursor"
         )
       : [];
-    const written = await persistVendorUsageSnapshots(user.uid, snapshots, clearProviders);
+    const rawDiagnostics = (body as { sync_diagnostics?: unknown }).sync_diagnostics;
+    const syncDiagnostics =
+      rawDiagnostics && typeof rawDiagnostics === "object" && typeof (rawDiagnostics as { at_ms?: unknown }).at_ms === "number"
+        ? (rawDiagnostics as VendorUsageSyncDiagnostics)
+        : null;
+    const written = await persistVendorUsageSnapshots(user.uid, snapshots, clearProviders, syncDiagnostics);
     return NextResponse.json({ ok: true, written }, { status: 200, headers: buildPromptlyCorsHeaders(origin) });
   } catch (error) {
     return NextResponse.json(

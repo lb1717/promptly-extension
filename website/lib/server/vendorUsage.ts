@@ -40,6 +40,17 @@ export type VendorUsageSettings = {
   cursor: VendorUsageProviderSettings;
 };
 
+export type VendorUsageSyncDiagnostics = {
+  at_ms: number;
+  skipped: VendorUsageProvider[];
+  skip_details: Partial<Record<VendorUsageProvider, string>>;
+  claude_auth?: {
+    token_available: boolean;
+    failure: string | null;
+    steps: Array<{ step: string; ok: boolean; detail: string }>;
+  };
+};
+
 export type VendorUsageProfileView = VendorUsageProfileSnapshot & {
   pricing_key: string | null;
   plan_monthly_usd: number | null;
@@ -176,9 +187,19 @@ export async function clearVendorUsageProfiles(uid: string, providers: VendorUsa
 export async function persistVendorUsageSnapshots(
   uid: string,
   snapshots: VendorUsageProfileSnapshot[],
-  clearProviders: VendorUsageProvider[] = []
+  clearProviders: VendorUsageProvider[] = [],
+  syncDiagnostics: VendorUsageSyncDiagnostics | null = null
 ): Promise<number> {
   await clearVendorUsageProfiles(uid, clearProviders);
+  if (syncDiagnostics) {
+    await settingsRef(uid).set(
+      {
+        last_sync_diagnostics: syncDiagnostics,
+        last_sync_diagnostics_at: FieldValue.serverTimestamp()
+      },
+      { merge: true }
+    );
+  }
   if (!snapshots.length) return 0;
   const db = getFirebaseAdminDb();
   const batch = db.batch();
@@ -232,7 +253,18 @@ export async function listVendorUsageProfiles(uid: string): Promise<VendorUsageP
 }
 
 export async function getVendorUsagePayload(uid: string) {
-  const [settings, profiles] = await Promise.all([getVendorUsageSettings(uid), listVendorUsageProfiles(uid)]);
+  const [settingsSnap, profiles] = await Promise.all([
+    settingsRef(uid).get(),
+    listVendorUsageProfiles(uid)
+  ]);
+  const settings = normalizeSettings(settingsSnap.exists ? settingsSnap.data() : null);
+  const rawDiagnostics = settingsSnap.exists ? settingsSnap.data()?.last_sync_diagnostics : null;
+  const lastSyncDiagnostics =
+    rawDiagnostics &&
+    typeof rawDiagnostics === "object" &&
+    typeof (rawDiagnostics as { at_ms?: unknown }).at_ms === "number"
+      ? (rawDiagnostics as VendorUsageSyncDiagnostics)
+      : null;
   const claudeProfiles = profiles.filter((p) => p.provider === "claude_code");
   const codexProfiles = profiles.filter((p) => p.provider === "codex");
   const cursorProfiles = profiles.filter((p) => p.provider === "cursor");
@@ -242,6 +274,7 @@ export async function getVendorUsagePayload(uid: string) {
   return {
     settings,
     profiles,
+    last_sync_diagnostics: lastSyncDiagnostics,
     claude_profiles: claudeProfiles,
     codex_profiles: codexProfiles,
     cursor_profiles: cursorProfiles,
