@@ -331,10 +331,9 @@ export default function VendorUsageSection({ user }: { user: User | null }) {
 
       {showCommand && !hasClaude ? (
         <div className="mb-4 rounded-xl border border-line bg-white/70 px-3 py-2 text-xs text-muted">
-          <span className="font-medium text-ink">Claude one-time setup (no Keychain prompts):</span> run{" "}
-          <code className="rounded bg-cream-dark px-1 py-0.5">claude setup-token</code>, save the output to{" "}
-          <code className="rounded bg-cream-dark px-1 py-0.5">~/.promptly/claude-oauth-token</code>, then run the sync
-          command above.
+          <span className="font-medium text-ink">First-time Claude:</span> the sync command opens your browser once to
+          sign in with claude.ai (same as Codex/Cursor — no Keychain prompts). Already signed in? It completes in one
+          click.
         </div>
       ) : null}
 
@@ -380,7 +379,7 @@ export default function VendorUsageSection({ user }: { user: User | null }) {
             <p className="rounded-lg border border-amber-300/60 bg-amber-50/80 px-3 py-2 text-amber-950">
               <span className="font-medium">Claude not synced.</span>{" "}
               {data?.last_sync_diagnostics?.skip_details?.claude_code ||
-                "Run `claude setup-token`, save the output to ~/.promptly/claude-oauth-token, then sync again. Promptly never reads macOS Keychain."}
+                "Run the sync command from Terminal.app — your browser will open once to connect Claude (no Keychain prompts)."}
             </p>
           ) : null}
           {!hasCursor ? <p>Cursor: open Cursor and sign in on that Mac, then sync again.</p> : null}

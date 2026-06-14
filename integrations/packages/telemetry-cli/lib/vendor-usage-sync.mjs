@@ -7,10 +7,13 @@ import { execSync } from "child_process";
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { homedir, platform } from "os";
 import { basename, join } from "path";
+import {
+  claudeAuthJsonPath,
+  ensureClaudeOAuthLogin,
+  readPromptlyClaudeAuth
+} from "./claude-oauth-login.mjs";
 
 const CLAUDE_USAGE_BETA = "oauth-2025-04-20";
-const CLAUDE_TOKEN_HINT =
-  "Run `claude setup-token`, save the output to ~/.promptly/claude-oauth-token, then sync again.";
 
 function readJson(path, fallback = null) {
   try {
@@ -97,6 +100,11 @@ function isDefaultClaudeConfigDir(configDir) {
 }
 
 function readClaudeAccessToken(configDir) {
+  if (isDefaultClaudeConfigDir(configDir)) {
+    const fromPromptlyAuth = readPromptlyClaudeAuth()?.accessToken;
+    if (fromPromptlyAuth) return fromPromptlyAuth;
+  }
+
   const credPath = join(configDir, ".credentials.json");
   const fromFile = parseClaudeOAuthToken(readJson(credPath, null));
   if (fromFile) return fromFile;
@@ -113,18 +121,14 @@ function readClaudeAccessToken(configDir) {
 }
 
 function hasClaudeUsageAuth() {
-  return Boolean(readClaudeAccessToken(defaultClaudeConfigDir()) || readPromptlyClaudeOAuthTokenFile());
+  return Boolean(readClaudeAccessToken(defaultClaudeConfigDir()));
 }
 
-function describeClaudeAuthFailure() {
-  const credPath = join(defaultClaudeConfigDir(), ".credentials.json");
-  if (existsSync(credPath)) {
-    return `Found ${credPath} but could not read an OAuth token from it. ${CLAUDE_TOKEN_HINT}`;
+function describeClaudeAuthFailure(interactive) {
+  if (interactive) {
+    return "Claude sign-in did not complete. Run usage-sync again — your browser will open for a one-time claude.ai login.";
   }
-  if (readPromptlyClaudeOAuthTokenFile() || readClaudeEnvToken()) {
-    return "Claude OAuth token found but usage sync could not use it.";
-  }
-  return `No Claude OAuth token in plain storage (~/.claude/.credentials.json, CLAUDE_CODE_OAUTH_TOKEN, or ~/.promptly/claude-oauth-token). ${CLAUDE_TOKEN_HINT}`;
+  return "No Claude OAuth token saved yet. Run the sync command from Terminal.app — it opens your browser once to sign in.";
 }
 
 export function diagnoseClaudeAuth() {
@@ -137,21 +141,23 @@ export function diagnoseClaudeAuth() {
     existsSync(credPath),
     existsSync(credPath) ? credPath : `${credPath} not found`
   );
+  const promptlyPath = claudeAuthJsonPath();
+  note("promptly_auth_json", existsSync(promptlyPath), promptlyPath);
   note("claude_code_env", Boolean(readClaudeEnvToken()), "CLAUDE_CODE_OAUTH_TOKEN");
 
-  const promptlyPath = promptlyClaudeOAuthTokenPath();
-  note("promptly_token_file", existsSync(promptlyPath), promptlyPath);
+  const legacyPath = promptlyClaudeOAuthTokenPath();
+  note("promptly_token_file_legacy", existsSync(legacyPath), legacyPath);
 
-  const token = readClaudeAccessToken(defaultClaudeConfigDir()) || readPromptlyClaudeOAuthTokenFile();
+  const token = readClaudeAccessToken(defaultClaudeConfigDir());
   note(
     "resolved_token",
     Boolean(token),
-    token ? "ready for Anthropic usage API (no Keychain access)" : describeClaudeAuthFailure()
+    token ? "ready for Anthropic usage API (no Keychain)" : describeClaudeAuthFailure(Boolean(process.stdin.isTTY))
   );
 
   return {
     token_available: Boolean(token),
-    failure: token ? null : describeClaudeAuthFailure(),
+    failure: token ? null : describeClaudeAuthFailure(Boolean(process.stdin.isTTY)),
     steps
   };
 }
@@ -283,11 +289,12 @@ function formatCursorPlanDisplay(planSlug) {
 }
 
 async function fetchClaudeProfileUsage(configDir) {
-  const fromPromptly = isDefaultClaudeConfigDir(configDir) && readPromptlyClaudeOAuthTokenFile();
+  const fromPromptlyAuth = isDefaultClaudeConfigDir(configDir) && readPromptlyClaudeAuth();
   const token = readClaudeAccessToken(configDir);
-  const profileId = hashProfileId(fromPromptly ? promptlyClaudeOAuthTokenPath() : configDir);
-  const profileLabel = fromPromptly ? "Claude (saved token)" : profileLabelFromDir(configDir);
-  const resolvedConfigDir = fromPromptly ? promptlyClaudeOAuthTokenPath() : configDir;
+  const authPath = claudeAuthJsonPath();
+  const profileId = hashProfileId(fromPromptlyAuth ? authPath : configDir);
+  const profileLabel = fromPromptlyAuth ? "Claude subscription" : profileLabelFromDir(configDir);
+  const resolvedConfigDir = fromPromptlyAuth ? authPath : configDir;
   const base = {
     provider: "claude_code",
     profile_id: profileId,
@@ -296,7 +303,7 @@ async function fetchClaudeProfileUsage(configDir) {
     synced_at_ms: Date.now()
   };
   if (!token) {
-    return { ...base, sync_error: describeClaudeAuthFailure() };
+    return { ...base, sync_error: describeClaudeAuthFailure(Boolean(process.stdin.isTTY)) };
   }
   const headers = {
     Authorization: `Bearer ${token}`,
@@ -535,6 +542,14 @@ export async function runVendorUsageSync({ creds, clientHeader, flags = {} }) {
   const snapshots = [];
 
   attempted.add("claude_code");
+  const interactive = Boolean(process.stdin.isTTY) && flags.no_login !== true && flags.no_login !== "true";
+  if (!readClaudeAccessToken(defaultClaudeConfigDir()) && interactive && !flags.debug) {
+    try {
+      await ensureClaudeOAuthLogin({ interactive: true });
+    } catch {
+      /* diagnose below will explain */
+    }
+  }
   const claudeAuth = diagnoseClaudeAuth();
   const claudeDirs = discoverClaudeProfileDirs(settings.claude_code?.extra_profile_dirs || []);
   let claudeAttempted = false;

@@ -18,6 +18,7 @@ import { homedir } from "os";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { runVendorUsageSync } from "../lib/vendor-usage-sync.mjs";
+import { runClaudeOAuthLoginOnly } from "../lib/claude-oauth-login.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -2319,6 +2320,15 @@ async function cmdTestSend(flags) {
   console.log(`Test prompt uploaded for ${tool}. Check Statistics → Coding agents on promptly-labs.com.`);
 }
 
+async function cmdLoginClaude() {
+  const result = await runClaudeOAuthLoginOnly();
+  if (!result.ok) {
+    console.error("Claude login failed");
+    process.exit(1);
+  }
+  console.log(JSON.stringify(result, null, 2));
+}
+
 async function cmdUsageSync(flags) {
   const syncFlags = {
     force: flags.force === true || flags.force === "true",
@@ -2384,6 +2394,9 @@ async function main() {
     case "usage-sync":
       await cmdUsageSync(flags);
       break;
+    case "login-claude":
+      await cmdLoginClaude();
+      break;
     case "diagnostics":
       cmdDiagnostics(flags);
       break;
@@ -2414,7 +2427,8 @@ Commands:
   login --tool <tool> --from-sibling  Pair this agent to the same Promptly account as another agent on this computer
   align-device --set-primary <CODE>  Same as fix-account (legacy alias)
   test-send --tool <tool>     Upload one test prompt (verify stats pipeline)
-  usage-sync [--debug] [--tool <tool>]  Sync Claude Code, Codex, and Cursor subscription usage
+  usage-sync [--debug] [--no-login] [--tool <tool>]  Sync Claude, Codex, and Cursor subscription usage
+  login-claude                                     One-time browser sign-in for Claude subscription usage
   diagnostics [--tool <tool>] Simulate hook payloads and show local timing state
   status [--tool <tool>]      Show connection status for one or all tools
   open-login --tool <tool>    Print sign-in URL
