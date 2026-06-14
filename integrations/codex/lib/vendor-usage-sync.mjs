@@ -1,13 +1,14 @@
 /**
  * Vendor subscription usage sync (Claude Code, Codex, Cursor) — local OAuth only.
  */
-import { createHash } from "crypto";
+import { createHash, createDecipheriv, pbkdf2Sync } from "crypto";
 import { execSync } from "child_process";
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { homedir, platform } from "os";
 import { basename, join } from "path";
 
 const CLAUDE_USAGE_BETA = "oauth-2025-04-20";
+const KEYCHAIN_TIMEOUT_MS = 8000;
 
 function readJson(path, fallback = null) {
   try {
@@ -72,7 +73,8 @@ function readClaudeKeychainToken() {
           : `security find-generic-password -s ${JSON.stringify(service)} -w`;
         const raw = execSync(cmd, {
           encoding: "utf8",
-          stdio: ["ignore", "pipe", "ignore"]
+          stdio: ["ignore", "pipe", "ignore"],
+          timeout: KEYCHAIN_TIMEOUT_MS
         }).trim();
         const token = parseClaudeOAuthToken(raw);
         if (token) return token;
@@ -86,6 +88,64 @@ function readClaudeKeychainToken() {
 
 function readClaudeEnvToken() {
   return parseClaudeOAuthToken(process.env.CLAUDE_CODE_OAUTH_TOKEN);
+}
+
+function claudeDesktopConfigPath() {
+  const home = homedir();
+  if (platform() === "darwin") {
+    return join(home, "Library", "Application Support", "Claude", "config.json");
+  }
+  if (platform() === "win32") {
+    const appData = process.env.APPDATA || join(home, "AppData", "Roaming");
+    return join(appData, "Claude", "config.json");
+  }
+  return join(home, ".config", "Claude", "config.json");
+}
+
+function readClaudeDesktopSafeStoragePassword() {
+  if (platform() !== "darwin") return null;
+  const attempts = [
+    ["find-generic-password", "-s", "Claude Safe Storage", "-a", "Claude Key", "-w"],
+    ["find-generic-password", "-s", "Claude Safe Storage", "-w"]
+  ];
+  for (const args of attempts) {
+    try {
+      const raw = execSync(`security ${args.map((part) => JSON.stringify(part)).join(" ")}`, {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: KEYCHAIN_TIMEOUT_MS
+      }).trim();
+      if (raw) return raw;
+    } catch {
+      /* try next */
+    }
+  }
+  return null;
+}
+
+function decryptClaudeDesktopTokenCache(encryptedBase64, keychainPassword) {
+  const key = pbkdf2Sync(keychainPassword, "saltysalt", 1003, 16, "sha1");
+  const encrypted = Buffer.from(encryptedBase64, "base64");
+  if (encrypted.length < 4 || encrypted.subarray(0, 3).toString("utf8") !== "v10") return null;
+  const decipher = createDecipheriv("aes-128-cbc", key, Buffer.alloc(16, 0x20));
+  const decrypted = Buffer.concat([decipher.update(encrypted.subarray(3)), decipher.final()]);
+  const padLen = decrypted[decrypted.length - 1];
+  if (!padLen || padLen > 16) return null;
+  const jsonText = decrypted.subarray(0, decrypted.length - padLen).toString("utf8");
+  return parseClaudeOAuthToken(JSON.parse(jsonText));
+}
+
+function readClaudeDesktopOAuthToken() {
+  const config = readJson(claudeDesktopConfigPath(), null);
+  const cache = config?.["oauth:tokenCache"];
+  if (typeof cache !== "string" || !cache.trim()) return null;
+  const password = readClaudeDesktopSafeStoragePassword();
+  if (!password) return null;
+  try {
+    return decryptClaudeDesktopTokenCache(cache, password);
+  } catch {
+    return null;
+  }
 }
 
 function defaultClaudeConfigDir() {
@@ -116,6 +176,10 @@ function readClaudeAccessToken(configDir) {
     if (fromKeychain) return fromKeychain;
   }
   return null;
+}
+
+function hasClaudeUsageAuth() {
+  return Boolean(readClaudeAccessToken(defaultClaudeConfigDir()) || readClaudeDesktopOAuthToken());
 }
 
 function discoverClaudeProfileDirs(extraDirs = []) {
@@ -153,6 +217,9 @@ function discoverClaudeProfileDirs(extraDirs = []) {
     if (existsSync(join(dir, ".credentials.json")) || readClaudeAccessToken(dir)) {
       found.add(dir);
     }
+  }
+  if (hasClaudeUsageAuth()) {
+    found.add(defaultDir);
   }
   return [...found];
 }
@@ -242,19 +309,22 @@ function formatCursorPlanDisplay(planSlug) {
 }
 
 async function fetchClaudeProfileUsage(configDir) {
-  const profileId = hashProfileId(configDir);
-  const profileLabel = profileLabelFromDir(configDir);
+  const desktopPath = claudeDesktopConfigPath();
+  const fromCli = readClaudeAccessToken(configDir);
+  const fromDesktop = isDefaultClaudeConfigDir(configDir) ? readClaudeDesktopOAuthToken() : null;
+  const token = fromCli || fromDesktop;
+  if (!token) return null;
+  const useDesktop = !fromCli && Boolean(fromDesktop);
+  const profileId = hashProfileId(useDesktop ? desktopPath : configDir);
+  const profileLabel = useDesktop ? "Claude desktop app" : profileLabelFromDir(configDir);
+  const resolvedConfigDir = useDesktop ? desktopPath : configDir;
   const base = {
     provider: "claude_code",
     profile_id: profileId,
     profile_label: profileLabel,
-    config_dir: configDir,
+    config_dir: resolvedConfigDir,
     synced_at_ms: Date.now()
   };
-  const token = readClaudeAccessToken(configDir);
-  if (!token) {
-    return null;
-  }
   const headers = {
     Authorization: `Bearer ${token}`,
     "anthropic-beta": CLAUDE_USAGE_BETA,
@@ -486,7 +556,7 @@ export async function runVendorUsageSync({ creds, clientHeader, flags = {} }) {
     const row = await fetchClaudeProfileUsage(dir);
     if (row) snapshots.push(row);
   }
-  if (!claudeDirs.length) {
+  if (!claudeDirs.length || !snapshots.some((row) => row.provider === "claude_code")) {
     const row = await fetchClaudeProfileUsage(defaultClaudeConfigDir());
     if (row) snapshots.push(row);
   }

@@ -319,8 +319,9 @@ export default function VendorUsageSection({ user }: { user: User | null }) {
 
       {syncCopied ? (
         <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50/80 px-3 py-2 text-sm text-emerald-900">
-          Command copied — paste in {syncOs === "mac" ? "Terminal" : "PowerShell"} on the Mac or PC where Claude Code,
-          Codex, or Cursor is logged in, press Enter, then click <span className="font-medium">Refresh</span>.
+          Command copied — paste in {syncOs === "mac" ? "Terminal.app" : "PowerShell"} (not a remote SSH session),
+          press Enter, then click <span className="font-medium">Refresh</span>. macOS may ask once to allow Keychain
+          access for Claude.
         </div>
       ) : null}
 
@@ -363,12 +364,18 @@ export default function VendorUsageSection({ user }: { user: User | null }) {
       {profiles.length > 0 && (!hasCursor || !hasCodex || !hasClaude) ? (
         <p className="mt-4 text-xs text-muted">
           {!hasClaude
-            ? "Claude Code: skipped — no Anthropic subscription login on the syncing computer (only needed if you use Claude Code in Terminal). "
+            ? "Claude: open the Claude desktop app or Claude Code on this Mac, then sync again from Terminal.app. "
             : null}
           {!hasCursor ? "Cursor: open Cursor and sign in on that Mac, then sync again. " : null}
           {!hasCodex ? "Codex: sign in with ChatGPT (not API key) in the Codex app, then sync again. " : null}
         </p>
       ) : null}
+
+      <p className="mt-4 text-[11px] leading-relaxed text-faint">
+        Prompt stats: Promptly hooks track Claude Code prompts from the desktop app and from Terminal when the Promptly
+        plugin is installed — same subscription, different UIs. Plan usage here reads that subscription directly from
+        Anthropic (5h + weekly limits), not from prompt counts.
+      </p>
     </section>
   );
 }
