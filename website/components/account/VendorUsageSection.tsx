@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import type { User } from "firebase/auth";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 const VENDOR_USAGE_PASSWORD = "oat123";
@@ -137,7 +138,8 @@ function ProfileCard({ profile }: { profile: VendorProfile }) {
   );
 }
 
-export default function VendorUsageSection({ userEmail }: { userEmail?: string | null }) {
+export default function VendorUsageSection({ user }: { user: User | null }) {
+  const userEmail = user?.email ?? null;
   const [unlocked, setUnlocked] = useState(false);
   const [passwordInput, setPasswordInput] = useState("");
   const [passwordError, setPasswordError] = useState<string | null>(null);
@@ -154,10 +156,18 @@ export default function VendorUsageSection({ userEmail }: { userEmail?: string |
   }, []);
 
   const load = useCallback(async () => {
+    if (!user) {
+      setData(null);
+      setError("Sign in to load vendor usage.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/account/vendor-usage", { credentials: "include" });
+      const token = await user.getIdToken(false);
+      const res = await fetch("/api/account/vendor-usage", {
+        headers: { Authorization: `Bearer ${token}` }
+      });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
       setData(body as VendorUsagePayload);
@@ -166,21 +176,28 @@ export default function VendorUsageSection({ userEmail }: { userEmail?: string |
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
-    if (unlocked) void load();
-  }, [unlocked, load]);
+    if (unlocked && user) void load();
+  }, [unlocked, user, load]);
 
   const updateSettings = useCallback(
     async (patch: VendorUsageSettingsPatch) => {
+      if (!user) {
+        setError("Sign in to update vendor usage settings.");
+        return;
+      }
       setSaving(true);
       setError(null);
       try {
+        const token = await user.getIdToken(false);
         const res = await fetch("/api/account/vendor-usage", {
           method: "PATCH",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
           body: JSON.stringify(patch)
         });
         const body = await res.json().catch(() => ({}));
@@ -192,7 +209,7 @@ export default function VendorUsageSection({ userEmail }: { userEmail?: string |
         setSaving(false);
       }
     },
-    []
+    [user]
   );
 
   const claudeProfiles = useMemo(

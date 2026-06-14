@@ -4285,7 +4285,7 @@ export function StatisticsClient() {
             </div>
           </section>
 
-          <VendorUsageSection userEmail={user?.email} />
+          <VendorUsageSection user={user} />
         </>
       ) : null}
 
