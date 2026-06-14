@@ -1,5 +1,5 @@
 import type { MetadataRoute } from "next";
-import { absoluteUrl } from "@/lib/seo";
+import { absoluteUrl, getSiteUrl } from "@/lib/seo";
 
 export default function robots(): MetadataRoute.Robots {
   return {
@@ -11,6 +11,6 @@ export default function robots(): MetadataRoute.Robots {
       }
     ],
     sitemap: absoluteUrl("/sitemap.xml"),
-    host: absoluteUrl("/")
+    host: getSiteUrl().replace(/^https?:\/\//, "")
   };
 }
