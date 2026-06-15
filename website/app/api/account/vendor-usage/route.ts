@@ -17,7 +17,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: String(error instanceof Error ? error.message : error) }, { status: 401 });
   }
   try {
-    const payload = await getVendorUsagePayload(user.uid);
+    const payload = await getVendorUsagePayload(user.uid, user.email || null);
     return NextResponse.json({ ok: true, ...payload });
   } catch (error) {
     return NextResponse.json({ error: String(error instanceof Error ? error.message : error) }, { status: 500 });
@@ -38,7 +38,7 @@ export async function PATCH(request: Request) {
     }
     const patch = body as Partial<VendorUsageSettings>;
     await updateVendorUsageSettings(user.uid, patch);
-    const payload = await getVendorUsagePayload(user.uid);
+    const payload = await getVendorUsagePayload(user.uid, user.email || null);
     return NextResponse.json({ ok: true, ...payload });
   } catch (error) {
     return NextResponse.json({ error: String(error instanceof Error ? error.message : error) }, { status: 500 });
@@ -58,18 +58,8 @@ export async function POST(request: Request) {
     let refreshResult: { refreshed: number; error?: string } | null = null;
     if (refresh) {
       refreshResult = await refreshVendorUsageLive(user.uid);
-      if (refreshResult.error === "no_tokens") {
-        return NextResponse.json(
-          {
-            ok: false,
-            error: "no_tokens",
-            message: "Run the sync command once from your computer to connect your subscriptions."
-          },
-          { status: 400 }
-        );
-      }
     }
-    const payload = await getVendorUsagePayload(user.uid);
+    const payload = await getVendorUsagePayload(user.uid, user.email || null);
     return NextResponse.json({
       ok: true,
       ...payload,

@@ -99,11 +99,14 @@ export async function POST(request: Request) {
         ? (rawDiagnostics as VendorUsageSyncDiagnostics)
         : null;
     const rawTokens = (body as { vendor_tokens?: unknown }).vendor_tokens;
+    let tokensStored = false;
     if (rawTokens) {
-      await storeVendorUsageTokens(user.uid, rawTokens);
+      tokensStored = await storeVendorUsageTokens(user.uid, rawTokens, {
+        device_email: user.email || null
+      });
     }
     const written = await persistVendorUsageSnapshots(user.uid, snapshots, clearProviders, syncDiagnostics);
-    return NextResponse.json({ ok: true, written }, { status: 200, headers: buildPromptlyCorsHeaders(origin) });
+    return NextResponse.json({ ok: true, written, tokens_stored: tokensStored }, { status: 200, headers: buildPromptlyCorsHeaders(origin) });
   } catch (error) {
     return NextResponse.json(
       { error: String(error instanceof Error ? error.message : error) },

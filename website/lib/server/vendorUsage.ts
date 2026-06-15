@@ -11,6 +11,7 @@ import { fetchLiveVendorUsageSnapshots } from "@/lib/server/vendorUsageFetch";
 import {
   decryptVendorTokens,
   encryptVendorTokens,
+  hasEncryptedVendorTokens,
   type StoredVendorTokens
 } from "@/lib/server/vendorUsageSecrets";
 
@@ -269,13 +270,13 @@ export async function listVendorUsageProfiles(uid: string): Promise<VendorUsageP
     .map(enrichProfile);
 }
 
-export async function getVendorUsagePayload(uid: string) {
+export async function getVendorUsagePayload(uid: string, viewerEmail: string | null = null) {
   const [settingsSnap, profiles] = await Promise.all([
     settingsRef(uid).get(),
     listVendorUsageProfiles(uid)
   ]);
   const settings = normalizeSettings(settingsSnap.exists ? settingsSnap.data() : null);
-  const canLiveRefresh = Boolean(settingsSnap.exists && settingsSnap.data()?.encrypted_vendor_tokens);
+  const tokenStatus = await getVendorUsageTokenStatus(uid);
   const rawDiagnostics = settingsSnap.exists ? settingsSnap.data()?.last_sync_diagnostics : null;
   const lastSyncDiagnostics =
     rawDiagnostics &&
@@ -289,10 +290,26 @@ export async function getVendorUsagePayload(uid: string) {
   const totalMonthlyUsd = profiles.reduce((sum, p) => sum + (p.plan_monthly_usd ?? 0), 0);
   const totalSecondaryUsed = profiles.reduce((sum, p) => sum + (p.secondary_dollars_used ?? 0), 0);
   const totalSecondaryUnused = profiles.reduce((sum, p) => sum + (p.secondary_dollars_unused ?? 0), 0);
+  const normalizedViewerEmail = (viewerEmail || "").trim().toLowerCase();
+  const tokenDeviceEmail = (tokenStatus.device_email || "").trim().toLowerCase();
+  const account_email_mismatch =
+    Boolean(normalizedViewerEmail && tokenDeviceEmail) && normalizedViewerEmail !== tokenDeviceEmail;
   return {
     settings,
     profiles,
-    can_live_refresh: canLiveRefresh,
+    can_live_refresh: tokenStatus.can_decrypt,
+    vendor_tokens_updated_at_ms: tokenStatus.updated_at_ms || null,
+    vendor_tokens_device_email: tokenStatus.device_email,
+    account_email_mismatch,
+    live_refresh_hint: !tokenStatus.can_decrypt
+      ? tokenStatus.has_blob
+        ? "Live refresh tokens could not be read. Re-run the sync command from Terminal."
+        : profiles.length > 0
+          ? "Re-run the sync command once with plugin v1.5.4+ to enable live Refresh."
+          : "Run the sync command from Terminal to connect subscriptions."
+      : account_email_mismatch
+        ? `Terminal sync used ${tokenStatus.device_email}. Sign in here with that same email, or run fix-account to merge accounts.`
+        : null,
     last_sync_diagnostics: lastSyncDiagnostics,
     claude_profiles: claudeProfiles,
     codex_profiles: codexProfiles,
@@ -347,17 +364,49 @@ function sanitizeStoredVendorTokens(raw: unknown): StoredVendorTokens | null {
   return Object.keys(out).length ? out : null;
 }
 
-export async function storeVendorUsageTokens(uid: string, rawTokens: unknown): Promise<boolean> {
+export async function storeVendorUsageTokens(
+  uid: string,
+  rawTokens: unknown,
+  meta: { device_email?: string | null } = {}
+): Promise<boolean> {
   const tokens = sanitizeStoredVendorTokens(rawTokens);
   if (!tokens) return false;
   await settingsRef(uid).set(
     {
       encrypted_vendor_tokens: encryptVendorTokens(tokens),
-      vendor_tokens_updated_at: FieldValue.serverTimestamp()
+      vendor_tokens_updated_at: FieldValue.serverTimestamp(),
+      vendor_tokens_device_email:
+        typeof meta.device_email === "string" && meta.device_email.includes("@")
+          ? meta.device_email.trim().slice(0, 320)
+          : null
     },
     { merge: true }
   );
   return true;
+}
+
+export async function getVendorUsageTokenStatus(uid: string): Promise<{
+  has_blob: boolean;
+  can_decrypt: boolean;
+  updated_at_ms: number;
+  device_email: string | null;
+}> {
+  const snap = await settingsRef(uid).get();
+  const data = snap.exists ? snap.data() : null;
+  const blob = typeof data?.encrypted_vendor_tokens === "string" ? data.encrypted_vendor_tokens : null;
+  const updatedRaw = data?.vendor_tokens_updated_at;
+  const updated_at_ms =
+    updatedRaw && typeof updatedRaw === "object" && "toMillis" in updatedRaw
+      ? Number((updatedRaw as { toMillis: () => number }).toMillis())
+      : typeof updatedRaw === "number"
+        ? updatedRaw
+        : 0;
+  return {
+    has_blob: hasEncryptedVendorTokens(blob),
+    can_decrypt: Boolean(decryptVendorTokens(blob)),
+    updated_at_ms,
+    device_email: typeof data?.vendor_tokens_device_email === "string" ? data.vendor_tokens_device_email : null
+  };
 }
 
 export async function getVendorUsageTokens(uid: string): Promise<StoredVendorTokens | null> {
@@ -368,9 +417,13 @@ export async function getVendorUsageTokens(uid: string): Promise<StoredVendorTok
 }
 
 export async function refreshVendorUsageLive(uid: string): Promise<{ refreshed: number; error?: string }> {
+  const tokenStatus = await getVendorUsageTokenStatus(uid);
+  if (!tokenStatus.has_blob) {
+    return { refreshed: 0, error: "no_tokens" };
+  }
   const tokens = await getVendorUsageTokens(uid);
   if (!tokens) {
-    return { refreshed: 0, error: "no_tokens" };
+    return { refreshed: 0, error: tokenStatus.has_blob ? "tokens_unreadable" : "no_tokens" };
   }
   const existing = await listVendorUsageProfiles(uid);
   const existingIds = Object.fromEntries(existing.map((row) => [row.provider, row.profile_id])) as Partial<

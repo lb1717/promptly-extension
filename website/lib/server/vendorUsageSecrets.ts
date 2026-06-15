@@ -9,10 +9,13 @@ export type StoredVendorTokens = {
 function encryptionKey(): Buffer {
   const secret =
     process.env.VENDOR_USAGE_TOKEN_SECRET?.trim() ||
-    process.env.FIREBASE_ADMIN_PRIVATE_KEY?.trim() ||
-    process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim() ||
+    String(process.env.FIREBASE_ADMIN_PROJECT_ID || "").trim() ||
     "promptly-vendor-usage-dev-key";
   return createHash("sha256").update(secret).digest();
+}
+
+export function hasEncryptedVendorTokens(blob: string | null | undefined): boolean {
+  return typeof blob === "string" && blob.length > 40;
 }
 
 export function encryptVendorTokens(tokens: StoredVendorTokens): string {

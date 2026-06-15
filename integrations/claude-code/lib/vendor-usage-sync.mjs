@@ -570,7 +570,11 @@ async function uploadVendorUsageSnapshots(
   if (!res.ok) {
     return { ok: false, error: body.error || `HTTP ${res.status}` };
   }
-  return { ok: true, written: body.written ?? snapshots.length };
+  return {
+    ok: true,
+    written: body.written ?? snapshots.length,
+    tokens_stored: body.tokens_stored === true
+  };
 }
 
 function collectVendorTokensForUpload() {
@@ -670,11 +674,13 @@ export async function runVendorUsageSync({ creds, clientHeader, flags = {} }) {
       debug: true,
       claude_auth: claudeAuth,
       skip_details: skipDetails,
-      snapshots
+      snapshots,
+      vendor_tokens_available: Boolean(collectVendorTokensForUpload())
     };
   }
 
-  if (!successful.length && !clearProviders.length) {
+  const vendorTokens = collectVendorTokensForUpload();
+  if (!successful.length && !clearProviders.length && !vendorTokens) {
     return { ok: true, written: 0, message: "No subscription data found on this computer.", sync_diagnostics: syncDiagnostics };
   }
 
@@ -685,10 +691,12 @@ export async function runVendorUsageSync({ creds, clientHeader, flags = {} }) {
     successful,
     clearProviders,
     syncDiagnostics,
-    collectVendorTokensForUpload()
+    vendorTokens
   );
   return {
     ...result,
+    tokens_uploaded: Boolean(vendorTokens),
+    tokens_stored: Boolean(result.tokens_stored),
     snapshots: successful,
     skipped: clearProviders,
     skip_details: skipDetails,
@@ -698,6 +706,12 @@ export async function runVendorUsageSync({ creds, clientHeader, flags = {} }) {
         ? `Synced ${successful.length} subscription(s). Skipped: ${clearProviders.map((p) => `${p} (${skipDetails[p]})`).join("; ")}`
         : clearProviders.length
           ? `No subscription logins found. ${clearProviders.map((p) => `${p}: ${skipDetails[p]}`).join(" ")}`
-          : undefined
+          : undefined,
+    live_refresh:
+      result.tokens_stored === true
+        ? "Live Refresh enabled — use Refresh on the stats page anytime."
+        : vendorTokens
+          ? "Usage synced, but live Refresh was not saved. Update the plugin pack and sync again."
+          : "No subscription tokens found on this Mac for live Refresh."
   };
 }

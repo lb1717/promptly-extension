@@ -56,6 +56,9 @@ type VendorUsagePayload = {
     total_secondary_window_dollars_unused: number;
   };
   can_live_refresh?: boolean;
+  live_refresh_hint?: string | null;
+  account_email_mismatch?: boolean;
+  vendor_tokens_device_email?: string | null;
 };
 
 function formatResetCountdown(resetsAt: string | null): string {
@@ -188,14 +191,19 @@ export default function VendorUsageSection({ user }: { user: User | null }) {
           body: JSON.stringify({ refresh: true })
         });
         const body = await res.json().catch(() => ({}));
-        if (res.status === 400 && body.error === "no_tokens") {
-          setError("Run the sync command once from your computer, then Refresh will fetch live usage.");
-        } else if (!res.ok) {
+        if (!res.ok) {
           throw new Error(body.error || body.message || `HTTP ${res.status}`);
-        } else {
-          setData(body as VendorUsagePayload);
-          return;
         }
+        setData(body as VendorUsagePayload);
+        const refreshError = (body as { live_refresh?: { error?: string } }).live_refresh?.error;
+        if (refreshError === "no_tokens" || refreshError === "tokens_unreadable") {
+          setError(body.live_refresh_hint || "Re-run the sync command from Terminal to enable live Refresh.");
+        } else if (body.live_refresh_hint) {
+          setError(body.live_refresh_hint);
+        } else {
+          setError(null);
+        }
+        return;
       }
       const res = await fetch("/api/account/vendor-usage", {
         headers: { Authorization: `Bearer ${token}` }
@@ -306,8 +314,14 @@ export default function VendorUsageSection({ user }: { user: User | null }) {
           {lastSyncedMs > 0 ? (
             <p className="mt-1 text-xs text-faint">
               Last synced {formatSyncedAt(lastSyncedMs)}
-              {data?.can_live_refresh ? " · Refresh fetches live usage from your connected subscriptions" : null}
+              {data?.can_live_refresh
+                ? " · Refresh fetches live usage from your connected subscriptions"
+                : data?.live_refresh_hint
+                  ? ` · ${data.live_refresh_hint}`
+                  : null}
             </p>
+          ) : data?.live_refresh_hint ? (
+            <p className="mt-1 text-xs text-amber-800">{data.live_refresh_hint}</p>
           ) : null}
         </div>
         <button
