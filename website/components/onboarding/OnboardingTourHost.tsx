@@ -32,7 +32,7 @@ export function OnboardingTourHost() {
   useEffect(() => {
     const current = readOnboardingTour();
     if (current?.active && current.step === "account-nav" && isOnboardingTourAccountPage(pathname)) {
-      advanceOnboardingTour("account-section");
+      advanceOnboardingTour("statistics-filters");
       refresh();
     }
   }, [pathname, refresh]);

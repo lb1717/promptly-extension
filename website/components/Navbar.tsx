@@ -43,7 +43,7 @@ export function Navbar() {
             className={
               onAccountPage
                 ? "rounded-lg border border-line px-2.5 py-1 text-xs text-ink hover:bg-cream-dark sm:px-3 sm:py-1.5 sm:text-sm"
-                : "rounded-lg bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-700 sm:px-3 sm:py-1.5 sm:text-sm"
+                : "rounded-lg border border-ink bg-blue-800 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-900 sm:px-3 sm:py-1.5 sm:text-sm"
             }
           >
             Account

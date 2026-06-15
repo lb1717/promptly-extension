@@ -31,6 +31,14 @@ function measureTarget(step: OnboardingTourStep): Rect | null {
   return { top: rect.top, left: rect.left, width: rect.width, height: rect.height };
 }
 
+function measureCompleteTarget(): Rect | null {
+  const el = document.querySelector(ONBOARDING_TOUR_TARGETS["statistics-filters"]);
+  if (!el) return null;
+  const rect = el.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return null;
+  return { top: rect.top, left: rect.left, width: rect.width, height: rect.height };
+}
+
 function Spotlight({ rect }: { rect: Rect }) {
   const pad = 8;
   return (
@@ -122,23 +130,29 @@ export function OnboardingTourOverlay({
   const [targetRect, setTargetRect] = useState<Rect | null>(null);
 
   const updateRect = useCallback(() => {
-    setTargetRect(measureTarget(step));
+    setTargetRect(step === "complete" ? measureCompleteTarget() : measureTarget(step));
   }, [step]);
 
   const goToAccount = useCallback(() => {
+    advanceOnboardingTour("statistics-filters");
+    router.push("/account");
+  }, [router]);
+
+  const openAccountSettings = useCallback(() => {
     advanceOnboardingTour("account-section");
     router.push("/account?tab=settings");
   }, [router]);
 
-  const openStatistics = useCallback(() => {
-    advanceOnboardingTour("statistics-filters");
+  const returnToStatistics = useCallback(() => {
+    advanceOnboardingTour("complete");
     router.push("/account");
   }, [router]);
 
   useLayoutEffect(() => {
     updateRect();
-    if (step === "complete") return;
-    const target = document.querySelector(ONBOARDING_TOUR_TARGETS[step]);
+    const targetSelector =
+      step === "complete" ? ONBOARDING_TOUR_TARGETS["statistics-filters"] : ONBOARDING_TOUR_TARGETS[step];
+    const target = document.querySelector(targetSelector);
     target?.scrollIntoView({ block: "center", behavior: "smooth" });
     const timer = window.setTimeout(updateRect, 350);
     return () => window.clearTimeout(timer);
@@ -155,19 +169,20 @@ export function OnboardingTourOverlay({
   }, [updateRect]);
 
   useEffect(() => {
-    if (step === "complete") return;
     let attempts = 0;
     const id = window.setInterval(() => {
       attempts += 1;
       updateRect();
-      if (measureTarget(step) || attempts > 50) window.clearInterval(id);
+      const found = step === "complete" ? measureCompleteTarget() : measureTarget(step);
+      if (found || attempts > 50) window.clearInterval(id);
     }, 150);
     return () => window.clearInterval(id);
   }, [step, updateRect, pathname]);
 
   useEffect(() => {
-    if (step === "complete") return;
-    const el = document.querySelector(ONBOARDING_TOUR_TARGETS[step]);
+    const selector =
+      step === "complete" ? ONBOARDING_TOUR_TARGETS["statistics-filters"] : ONBOARDING_TOUR_TARGETS[step];
+    const el = document.querySelector(selector);
     if (!el) return;
     el.classList.add(SPOTLIGHT_TARGET_CLASS);
     return () => {
@@ -176,11 +191,22 @@ export function OnboardingTourOverlay({
   }, [step, targetRect, pathname]);
 
   useEffect(() => {
-    if (step !== "statistics-link") return;
-    const el = document.querySelector(ONBOARDING_TOUR_TARGETS["statistics-link"]);
+    if (step !== "account-settings-tab") return;
+    const el = document.querySelector(ONBOARDING_TOUR_TARGETS["account-settings-tab"]);
     if (!el) return;
     const onNavigate = () => {
-      advanceOnboardingTour("statistics-filters");
+      advanceOnboardingTour("account-section");
+    };
+    el.addEventListener("click", onNavigate, true);
+    return () => el.removeEventListener("click", onNavigate, true);
+  }, [step, targetRect, pathname]);
+
+  useEffect(() => {
+    if (step !== "statistics-tab") return;
+    const el = document.querySelector(ONBOARDING_TOUR_TARGETS["statistics-tab"]);
+    if (!el) return;
+    const onNavigate = () => {
+      advanceOnboardingTour("complete");
     };
     el.addEventListener("click", onNavigate, true);
     return () => el.removeEventListener("click", onNavigate, true);
@@ -204,30 +230,6 @@ export function OnboardingTourOverlay({
 
   const promptTarget = onboardingTourPromptTarget(setup);
 
-  if (step === "complete") {
-    return (
-      <>
-        <div className="fixed inset-0 z-[200] bg-neutral-900/45" aria-hidden />
-        <TourCard
-          body={`Guide completed. Now try it out on ${promptTarget}.`}
-          style={{
-            top: "50%",
-            left: "50%",
-            transform: "translate(-50%, -50%)"
-          }}
-        >
-          <button
-            type="button"
-            onClick={finishTour}
-            className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800"
-          >
-            Done
-          </button>
-        </TourCard>
-      </>
-    );
-  }
-
   const cardStyle: CSSProperties = (() => {
     if (!targetRect) {
       return { top: "50%", left: "50%", transform: "translate(-50%, -50%)" };
@@ -246,6 +248,29 @@ export function OnboardingTourOverlay({
 
   const waitingForTarget = !targetRect;
 
+  if (step === "complete") {
+    return (
+      <>
+        {waitingForTarget ? (
+          <div className="fixed inset-0 z-[200] bg-neutral-900/45" aria-hidden />
+        ) : null}
+        {targetRect ? <Spotlight rect={targetRect} /> : null}
+        <TourCard
+          body={`You're all set. This is your statistics home — filter by range and service anytime. Now try Promptly on ${promptTarget}.`}
+          style={cardStyle}
+        >
+          <button
+            type="button"
+            onClick={finishTour}
+            className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800"
+          >
+            Done
+          </button>
+        </TourCard>
+      </>
+    );
+  }
+
   return (
     <>
       {waitingForTarget ? (
@@ -254,8 +279,12 @@ export function OnboardingTourOverlay({
 
       {targetRect ? <Spotlight rect={targetRect} /> : null}
 
-      {step === "statistics-link" && targetRect ? (
-        <TourClickTarget rect={targetRect} label="Open statistics" onClick={openStatistics} />
+      {step === "account-settings-tab" && targetRect ? (
+        <TourClickTarget rect={targetRect} label="Open account settings" onClick={openAccountSettings} />
+      ) : null}
+
+      {step === "statistics-tab" && targetRect ? (
+        <TourClickTarget rect={targetRect} label="Return to statistics" onClick={returnToStatistics} />
       ) : null}
 
       {step === "account-nav" && targetRect ? (
@@ -263,7 +292,7 @@ export function OnboardingTourOverlay({
       ) : null}
 
       {step === "account-nav" ? (
-        <TourCard body="Go to my account page" style={cardStyle}>
+        <TourCard body="Open Account to view your statistics dashboard." style={cardStyle}>
           <div className="flex flex-col items-center gap-2">
             <ArrowUp />
             <button
@@ -271,8 +300,44 @@ export function OnboardingTourOverlay({
               onClick={goToAccount}
               className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800"
             >
-              Go to my account page
+              Go to statistics
             </button>
+          </div>
+        </TourCard>
+      ) : null}
+
+      {step === "statistics-filters" ? (
+        <TourCard
+          body={
+            waitingForTarget
+              ? "Loading statistics…"
+              : "Use these filters to change the date range, time bucket, and which services appear in your charts."
+          }
+          style={cardStyle}
+        >
+          <button
+            type="button"
+            disabled={waitingForTarget}
+            onClick={() => advanceOnboardingTour("account-settings-tab")}
+            className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:opacity-50"
+          >
+            Next
+          </button>
+        </TourCard>
+      ) : null}
+
+      {step === "account-settings-tab" ? (
+        <TourCard
+          body={
+            waitingForTarget
+              ? "Loading…"
+              : "Switch to Account Settings to manage your profile, plan, and integrations."
+          }
+          style={cardStyle}
+        >
+          <div className="flex flex-col items-center gap-2">
+            <ArrowUp />
+            <p className="text-center text-xs text-faint">Tap Account Settings above.</p>
           </div>
         </TourCard>
       ) : null}
@@ -281,8 +346,8 @@ export function OnboardingTourOverlay({
         <TourCard
           body={
             waitingForTarget
-              ? "Loading your account overview…"
-              : "This is your account overview."
+              ? "Loading account settings…"
+              : "Your account overview — profile, plan, and integration shortcuts live here."
           }
           style={cardStyle}
         >
@@ -302,14 +367,14 @@ export function OnboardingTourOverlay({
           body={
             waitingForTarget
               ? "Loading token usage…"
-              : "This is where you see your token usage."
+              : "Track your weekly Promptly token usage here so you know when you are approaching your plan limit."
           }
           style={cardStyle}
         >
           <button
             type="button"
             disabled={waitingForTarget}
-            onClick={() => advanceOnboardingTour("statistics-link")}
+            onClick={() => advanceOnboardingTour("statistics-tab")}
             className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:opacity-50"
           >
             Next
@@ -317,39 +382,19 @@ export function OnboardingTourOverlay({
         </TourCard>
       ) : null}
 
-      {step === "statistics-link" ? (
+      {step === "statistics-tab" ? (
         <TourCard
           body={
             waitingForTarget
               ? "Loading…"
-              : "Press Statistics to view all of your AI usage and prompting stats."
+              : "Head back to Statistics — that is where you will track AI usage day to day."
           }
           style={cardStyle}
         >
           <div className="flex flex-col items-center gap-2">
             <ArrowUp />
-            <p className="text-center text-xs text-faint">Tap the highlighted tab above.</p>
+            <p className="text-center text-xs text-faint">Tap Statistics above.</p>
           </div>
-        </TourCard>
-      ) : null}
-
-      {step === "statistics-filters" ? (
-        <TourCard
-          body={
-            waitingForTarget
-              ? "Loading statistics…"
-              : "Filter and see full statistics."
-          }
-          style={cardStyle}
-        >
-          <button
-            type="button"
-            disabled={waitingForTarget}
-            onClick={() => advanceOnboardingTour("complete")}
-            className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:opacity-50"
-          >
-            Next
-          </button>
         </TourCard>
       ) : null}
     </>

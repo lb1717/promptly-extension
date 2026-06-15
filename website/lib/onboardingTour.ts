@@ -3,10 +3,11 @@ import type { IdeToolId } from "@/components/integrations/integrationOs";
 
 export type OnboardingTourStep =
   | "account-nav"
+  | "statistics-filters"
+  | "account-settings-tab"
   | "account-section"
   | "account-token-usage"
-  | "statistics-link"
-  | "statistics-filters"
+  | "statistics-tab"
   | "complete";
 
 export type OnboardingTourSetup = {
@@ -27,19 +28,23 @@ export const ONBOARDING_TOUR_EVENT = "promptly-onboarding-tour";
 
 export const ONBOARDING_TOUR_TARGETS: Record<Exclude<OnboardingTourStep, "complete">, string> = {
   "account-nav": '[data-onboarding-tour="account-nav"]',
+  "statistics-filters": '[data-onboarding-tour="statistics-filters"]',
+  "account-settings-tab": '[data-onboarding-tour="account-settings-tab"]',
   "account-section": '[data-onboarding-tour="account-section"]',
   "account-token-usage": '[data-onboarding-tour="account-token-usage"]',
-  "statistics-link": '[data-onboarding-tour="statistics-link"]',
-  "statistics-filters": '[data-onboarding-tour="statistics-filters"]'
+  "statistics-tab": '[data-onboarding-tour="statistics-tab"]'
 };
 
+/** Steps while the Account Settings tab should be visible. */
 export const ONBOARDING_TOUR_ACCOUNT_STEPS: OnboardingTourStep[] = [
+  "account-settings-tab",
   "account-section",
   "account-token-usage",
-  "statistics-link"
+  "statistics-tab"
 ];
 
-export const ONBOARDING_TOUR_STATISTICS_STEPS: OnboardingTourStep[] = ["statistics-filters"];
+/** Steps while the Statistics tab should be visible. */
+export const ONBOARDING_TOUR_STATISTICS_STEPS: OnboardingTourStep[] = ["statistics-filters", "complete"];
 
 export function isOnboardingTourAccountPage(pathname: string): boolean {
   return pathname === "/account" || pathname === "/account/";

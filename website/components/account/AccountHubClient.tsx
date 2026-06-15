@@ -3,9 +3,7 @@
 import { AccountClient } from "@/components/account/AccountClient";
 import { StatisticsClient } from "@/components/account/StatisticsClient";
 import {
-  ONBOARDING_TOUR_ACCOUNT_STEPS,
   ONBOARDING_TOUR_EVENT,
-  ONBOARDING_TOUR_STATISTICS_STEPS,
   readOnboardingTour,
   type OnboardingTourStep
 } from "@/lib/onboardingTour";
@@ -19,8 +17,12 @@ function parseTab(raw: string | null): AccountHubTab {
 }
 
 function tabForTourStep(step: OnboardingTourStep): AccountHubTab | null {
-  if (ONBOARDING_TOUR_ACCOUNT_STEPS.includes(step)) return "settings";
-  if (ONBOARDING_TOUR_STATISTICS_STEPS.includes(step)) return "statistics";
+  if (step === "statistics-filters" || step === "account-settings-tab" || step === "complete") {
+    return "statistics";
+  }
+  if (step === "account-section" || step === "account-token-usage" || step === "statistics-tab") {
+    return "settings";
+  }
   return null;
 }
 
@@ -76,7 +78,13 @@ export function AccountHubClient() {
               type="button"
               role="tab"
               aria-selected={active}
-              data-onboarding-tour={item.id === "statistics" ? "statistics-link" : undefined}
+              data-onboarding-tour={
+                item.id === "statistics"
+                  ? "statistics-tab"
+                  : item.id === "settings"
+                    ? "account-settings-tab"
+                    : undefined
+              }
               onClick={() => setTab(item.id)}
               className={
                 active
