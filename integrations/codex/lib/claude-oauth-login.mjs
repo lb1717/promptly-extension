@@ -4,15 +4,16 @@
  */
 import { createHash, randomBytes } from "crypto";
 import { createServer } from "http";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { join, dirname } from "path";
 import { execSync } from "child_process";
 
 const AUTH_URL = "https://claude.com/cai/oauth/authorize";
 const TOKEN_URLS = [
+  "https://api.anthropic.com/v1/oauth/token",
   "https://platform.claude.com/v1/oauth/token",
-  "https://api.anthropic.com/v1/oauth/token"
+  "https://console.anthropic.com/v1/oauth/token"
 ];
 const SUCCESS_URL = "https://platform.claude.com/oauth/code/success?app=claude-code";
 const CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
@@ -22,6 +23,10 @@ const CLAUDE_CLI_UA = "claude-cli/2.1.9 (external, cli)";
 
 export function claudeAuthJsonPath() {
   return join(homedir(), ".promptly", "claude-auth.json");
+}
+
+function pendingOAuthPath() {
+  return join(homedir(), ".promptly", "claude-oauth-pending.json");
 }
 
 function readJson(path, fallback = null) {
@@ -36,6 +41,28 @@ function readJson(path, fallback = null) {
 function writeJson(path, data) {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(data, null, 2), { mode: 0o600 });
+}
+
+function clearPendingOAuth() {
+  try {
+    if (existsSync(pendingOAuthPath())) unlinkSync(pendingOAuthPath());
+  } catch {
+    /* ignore */
+  }
+}
+
+function savePendingOAuth(data) {
+  writeJson(pendingOAuthPath(), { ...data, started_at_ms: Date.now() });
+}
+
+function readPendingOAuth() {
+  const row = readJson(pendingOAuthPath(), null);
+  if (!row || typeof row !== "object") return null;
+  if (Date.now() - (row.started_at_ms || 0) > 10 * 60 * 1000) {
+    clearPendingOAuth();
+    return null;
+  }
+  return row;
 }
 
 function base64Url(buffer) {
@@ -54,6 +81,17 @@ function createPkce() {
 
 function createOAuthState() {
   return base64Url(randomBytes(32));
+}
+
+function normalizeRedirectUri(uri) {
+  if (!uri) return uri;
+  try {
+    const url = new URL(uri);
+    url.hostname = "localhost";
+    return url.toString().replace(/\/$/, "") || uri;
+  } catch {
+    return uri;
+  }
 }
 
 function parseStoredAuth(raw) {
@@ -87,11 +125,12 @@ function savePromptlyClaudeAuth({ accessToken, refreshToken, expiresAt, email })
     },
     updated_at_ms: Date.now()
   });
+  clearPendingOAuth();
   return path;
 }
 
 async function postTokenJson(body) {
-  let lastError = "Token request failed";
+  const errors = [];
   for (const url of TOKEN_URLS) {
     const res = await fetch(url, {
       method: "POST",
@@ -102,23 +141,27 @@ async function postTokenJson(body) {
       },
       body: JSON.stringify(body)
     });
-    const parsed = await res.json().catch(() => ({}));
+    const text = await res.text();
+    let parsed = {};
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = { error: text.slice(0, 200) };
+    }
     if (res.ok) return parsed;
-    lastError = parsed.error_description || parsed.error || `HTTP ${res.status} from ${url}`;
+    errors.push(`${url}: ${parsed.error_description || parsed.error || `HTTP ${res.status}`}`);
   }
-  throw new Error(lastError);
+  throw new Error(errors.join(" | "));
 }
 
-async function exchangeCode(code, state, verifier, redirectUri) {
-  const parsed = String(code).split("#");
-  const authCode = parsed[0];
-  const stateFromCode = parsed[1] || state;
+async function exchangeCode({ code, state, verifier, redirectUri }) {
+  const authCode = String(code).split("#")[0];
   const body = await postTokenJson({
     code: authCode,
-    state: stateFromCode,
+    state,
     grant_type: "authorization_code",
     client_id: CLIENT_ID,
-    redirect_uri: redirectUri,
+    redirect_uri: normalizeRedirectUri(redirectUri),
     code_verifier: verifier
   });
   const expiresAt = body.expires_in ? Date.now() + Number(body.expires_in) * 1000 : null;
@@ -161,7 +204,7 @@ function buildAuthUrl(state, challenge, redirectUri) {
     code: "true",
     client_id: CLIENT_ID,
     response_type: "code",
-    redirect_uri: redirectUri,
+    redirect_uri: normalizeRedirectUri(redirectUri),
     scope: OAUTH_SCOPE,
     code_challenge: challenge,
     code_challenge_method: "S256",
@@ -170,9 +213,32 @@ function buildAuthUrl(state, challenge, redirectUri) {
   return `${AUTH_URL}?${params.toString()}`;
 }
 
-export async function ensureClaudeOAuthLogin({ interactive = true, timeoutMs = 120000 } = {}) {
+function htmlError(message) {
+  const safe = String(message).replace(/[<>&"]/g, (ch) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" })[ch]);
+  return `<html><body style="font-family:system-ui;padding:2rem"><h2>Login failed</h2><p>${safe}</p><p style="color:#666">Close this tab and run sync again from Promptly.</p></body></html>`;
+}
+
+async function completeFromCallbackUrl(callbackUrl) {
+  const pending = readPendingOAuth();
+  if (!pending?.verifier || !pending?.redirect_uri) {
+    throw new Error("No pending Claude login session. Run usage-sync again to start a fresh login.");
+  }
+  const url = new URL(callbackUrl);
+  const code = url.searchParams.get("code");
+  const state = url.searchParams.get("state");
+  if (!code) throw new Error("Callback URL is missing ?code=");
+  if (state && state !== pending.state) throw new Error("Callback state does not match the pending login session.");
+  return exchangeCode({
+    code,
+    state: state || pending.state,
+    verifier: pending.verifier,
+    redirectUri: pending.redirect_uri
+  });
+}
+
+export async function ensureClaudeOAuthLogin({ interactive = true, timeoutMs = 120000, callbackUrl = null } = {}) {
   const existing = readPromptlyClaudeAuth();
-  if (existing?.accessToken) {
+  if (existing?.accessToken && !callbackUrl) {
     const expiresSoon = existing.expiresAt && existing.expiresAt - Date.now() < 5 * 60 * 1000;
     if (!expiresSoon) return existing;
     if (existing.refreshToken) {
@@ -184,6 +250,12 @@ export async function ensureClaudeOAuthLogin({ interactive = true, timeoutMs = 1
         /* fall through to browser login */
       }
     }
+  }
+
+  if (callbackUrl) {
+    const tokens = await completeFromCallbackUrl(callbackUrl);
+    savePromptlyClaudeAuth(tokens);
+    return tokens;
   }
 
   if (!interactive) {
@@ -210,7 +282,8 @@ export async function ensureClaudeOAuthLogin({ interactive = true, timeoutMs = 1
 
     const server = createServer(async (req, res) => {
       try {
-        const url = new URL(req.url || "/", redirectUri || "http://127.0.0.1");
+        const host = req.headers.host || "localhost";
+        const url = new URL(req.url || "/", `http://${host}`);
         if (url.pathname !== "/callback") {
           res.writeHead(404);
           res.end("Not found");
@@ -230,15 +303,22 @@ export async function ensureClaudeOAuthLogin({ interactive = true, timeoutMs = 1
           finish(reject, new Error("OAuth state mismatch"));
           return;
         }
-        const exchanged = await exchangeCode(code, state, verifier, redirectUri);
+        const callbackForExchange = `http://${host}${url.pathname}${url.search}`;
+        const exchanged = await exchangeCode({
+          code,
+          state: returnedState || state,
+          verifier,
+          redirectUri: callbackForExchange.split("?")[0]
+        });
         savePromptlyClaudeAuth(exchanged);
         res.writeHead(302, { Location: SUCCESS_URL });
         res.end();
         finish(resolve, exchanged);
       } catch (err) {
-        res.writeHead(500);
-        res.end("Login failed");
-        finish(reject, err);
+        const message = String(err?.message || err);
+        res.writeHead(500, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(htmlError(message));
+        finish(reject, new Error(message));
       }
     });
 
@@ -250,7 +330,8 @@ export async function ensureClaudeOAuthLogin({ interactive = true, timeoutMs = 1
         finish(reject, new Error("Could not start OAuth callback server"));
         return;
       }
-      redirectUri = `http://127.0.0.1:${address.port}/callback`;
+      redirectUri = `http://localhost:${address.port}/callback`;
+      savePendingOAuth({ state, verifier, redirect_uri: redirectUri });
       const authUrl = buildAuthUrl(state, challenge, redirectUri);
       openBrowser(authUrl);
     });
@@ -263,8 +344,8 @@ export async function ensureClaudeOAuthLogin({ interactive = true, timeoutMs = 1
   return tokens;
 }
 
-export async function runClaudeOAuthLoginOnly() {
-  const tokens = await ensureClaudeOAuthLogin({ interactive: true });
+export async function runClaudeOAuthLoginOnly({ callbackUrl = null } = {}) {
+  const tokens = await ensureClaudeOAuthLogin({ interactive: true, callbackUrl });
   return {
     ok: Boolean(tokens?.accessToken),
     auth_path: claudeAuthJsonPath(),

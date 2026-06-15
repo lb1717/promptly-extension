@@ -2320,8 +2320,9 @@ async function cmdTestSend(flags) {
   console.log(`Test prompt uploaded for ${tool}. Check Statistics → Coding agents on promptly-labs.com.`);
 }
 
-async function cmdLoginClaude() {
-  const result = await runClaudeOAuthLoginOnly();
+async function cmdLoginClaude(flags) {
+  const callbackUrl = flags.callback || flags._rest?.[0] || null;
+  const result = await runClaudeOAuthLoginOnly({ callbackUrl });
   if (!result.ok) {
     console.error("Claude login failed");
     process.exit(1);
@@ -2395,7 +2396,7 @@ async function main() {
       await cmdUsageSync(flags);
       break;
     case "login-claude":
-      await cmdLoginClaude();
+      await cmdLoginClaude(flags);
       break;
     case "diagnostics":
       cmdDiagnostics(flags);
@@ -2428,7 +2429,7 @@ Commands:
   align-device --set-primary <CODE>  Same as fix-account (legacy alias)
   test-send --tool <tool>     Upload one test prompt (verify stats pipeline)
   usage-sync [--debug] [--no-login] [--tool <tool>]  Sync Claude, Codex, and Cursor subscription usage
-  login-claude                                     One-time browser sign-in for Claude subscription usage
+  login-claude [--callback <url>]                  Browser sign-in for Claude subscription usage
   diagnostics [--tool <tool>] Simulate hook payloads and show local timing state
   status [--tool <tool>]      Show connection status for one or all tools
   open-login --tool <tool>    Print sign-in URL
