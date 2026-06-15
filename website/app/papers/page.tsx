@@ -24,8 +24,8 @@ export default function PapersPage() {
         <section className="px-4 pb-16 pt-10 sm:pb-20 sm:pt-14">
           <div className="mx-auto max-w-5xl">
             <p className="text-sm text-faint">
-              <Link href="/labs" className="text-muted hover:text-ink">
-                Promptly Research Labs
+              <Link href="/research" className="text-muted hover:text-ink">
+                Research
               </Link>
               <span className="mx-2 opacity-60">/</span>
               Papers
