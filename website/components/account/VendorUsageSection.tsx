@@ -3,6 +3,7 @@
 import type { User } from "firebase/auth";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  CartesianGrid,
   Line,
   LineChart,
   ReferenceLine,
@@ -20,6 +21,29 @@ import {
 
 const VENDOR_USAGE_PASSWORD = "oat123";
 const UNLOCK_KEY = "promptly_vendor_usage_unlocked";
+const MIN_PERIODS_WHEN_RANGE_SHORT = 5;
+
+const CHART_FONT_FAMILY = "var(--font-roboto-chart), Roboto, sans-serif";
+const CHART_Y_TICK = { fill: "#5C5C5C", fontSize: 10, fontFamily: CHART_FONT_FAMILY };
+const CHART_X_DATE_TICK = {
+  fill: "#2a2a2a",
+  fontSize: 11,
+  fontWeight: 600 as const,
+  fontFamily: CHART_FONT_FAMILY
+};
+const CHART_X_DATE_STROKE = "#525252";
+const CHART_GRID_STROKE = "rgba(0,0,0,0.06)";
+const CHART_TOOLTIP_STYLE = {
+  background: "#ffffff",
+  border: "1px solid #e8e8e8",
+  borderRadius: 6,
+  padding: "5px 7px",
+  fontSize: 10,
+  lineHeight: 1.3,
+  color: "#111111",
+  fontFamily: CHART_FONT_FAMILY,
+  boxShadow: "0 2px 8px rgba(17, 17, 17, 0.08)"
+};
 
 type UsageWindow = {
   utilization: number;
@@ -105,6 +129,41 @@ function formatChartTime(atMs: number): string {
   });
 }
 
+function windowCycleMs(windowSeconds: number | null): number {
+  if (windowSeconds && windowSeconds > 0) return windowSeconds * 1000;
+  return 7 * 86400 * 1000;
+}
+
+function resolveChartLookbackMs(rangeDays: number, windowSeconds: number | null): number {
+  const cycleMs = windowCycleMs(windowSeconds);
+  const rangeMs = rangeDays * 86400 * 1000;
+  if (rangeMs <= cycleMs) {
+    return MIN_PERIODS_WHEN_RANGE_SHORT * cycleMs;
+  }
+  return rangeMs;
+}
+
+function formatChartXLabel(atMs: number, spanMs: number, windowSeconds: number | null): string {
+  const date = new Date(atMs);
+  const cycleMs = windowCycleMs(windowSeconds);
+  if (cycleMs <= 6 * 3600 * 1000 || spanMs <= 3 * 86400 * 1000) {
+    return date.toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit"
+    });
+  }
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+type ChartRow = {
+  at_ms: number;
+  label: string;
+  utilization: number;
+  isReading: boolean;
+};
+
 function windowLabels(provider: VendorProfile["provider"]): { primary: string; secondary: string } {
   if (provider === "cursor") {
     return { primary: "5-hour", secondary: "Billing cycle" };
@@ -115,30 +174,55 @@ function windowLabels(provider: VendorProfile["provider"]): { primary: string; s
 function buildChartRows(
   history: UsageHistoryPoint[],
   currentWindow: UsageWindow | null,
-  syncedAtMs: number
-): Array<{ at_ms: number; label: string; utilization: number }> {
-  const rows = history.map((point) => ({
-    at_ms: point.at_ms,
-    label: formatChartTime(point.at_ms),
-    utilization: Math.max(0, Math.min(100, point.utilization))
-  }));
+  syncedAtMs: number,
+  rangeDays: number,
+  windowSeconds: number | null
+): ChartRow[] {
+  const nowMs = syncedAtMs || Date.now();
+  const lookbackMs = resolveChartLookbackMs(rangeDays, windowSeconds);
+  const startMs = nowMs - lookbackMs;
+
+  const rows: ChartRow[] = history
+    .filter((point) => point.at_ms >= startMs && point.at_ms <= nowMs + 60_000)
+    .map((point) => ({
+      at_ms: point.at_ms,
+      label: formatChartXLabel(point.at_ms, lookbackMs, windowSeconds),
+      utilization: Math.max(0, Math.min(100, point.utilization)),
+      isReading: true
+    }));
+
   if (rows.length === 0 && currentWindow) {
-    const at_ms = syncedAtMs || Date.now();
     rows.push({
-      at_ms,
-      label: formatChartTime(at_ms),
-      utilization: Math.max(0, Math.min(100, currentWindow.utilization))
+      at_ms: nowMs,
+      label: formatChartXLabel(nowMs, lookbackMs, windowSeconds),
+      utilization: Math.max(0, Math.min(100, currentWindow.utilization)),
+      isReading: true
     });
+  } else if (currentWindow) {
+    const latest = rows[rows.length - 1];
+    if (!latest || nowMs - latest.at_ms > 60_000) {
+      rows.push({
+        at_ms: nowMs,
+        label: formatChartXLabel(nowMs, lookbackMs, windowSeconds),
+        utilization: Math.max(0, Math.min(100, currentWindow.utilization)),
+        isReading: true
+      });
+    } else {
+      latest.utilization = Math.max(0, Math.min(100, currentWindow.utilization));
+      latest.label = formatChartXLabel(latest.at_ms, lookbackMs, windowSeconds);
+    }
   }
+
   const sorted = rows.sort((a, b) => a.at_ms - b.at_ms);
   if (sorted.length === 1) {
     const point = sorted[0];
-    const startMs = point.at_ms - 12 * 3600 * 1000;
+    const padMs = Math.min(Math.max(windowCycleMs(windowSeconds) * 0.35, 2 * 3600 * 1000), lookbackMs * 0.2);
     return [
       {
-        at_ms: startMs,
-        label: formatChartTime(startMs),
-        utilization: point.utilization
+        at_ms: point.at_ms - padMs,
+        label: formatChartXLabel(point.at_ms - padMs, lookbackMs, windowSeconds),
+        utilization: point.utilization,
+        isReading: false
       },
       point
     ];
@@ -148,29 +232,48 @@ function buildChartRows(
 
 function UsageTrendChart({
   rows,
-  currentUtil
+  currentUtil,
+  windowSeconds
 }: {
-  rows: Array<{ at_ms: number; label: string; utilization: number }>;
+  rows: ChartRow[];
   currentUtil: number;
+  windowSeconds: number | null;
 }) {
   const lineColor =
     currentUtil >= 75 ? "#059669" : currentUtil >= 40 ? "#d97706" : currentUtil >= 15 ? "#ea580c" : "#dc2626";
+  const spanMs =
+    rows.length >= 2 ? Math.max(rows[rows.length - 1].at_ms - rows[0].at_ms, windowCycleMs(windowSeconds)) : windowCycleMs(windowSeconds);
 
   return (
-    <div className="h-44 w-full">
+    <div className="h-52 w-full sm:h-56">
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={rows} margin={{ top: 8, right: 8, bottom: 0, left: -8 }}>
-          <XAxis dataKey="label" hide />
-          <YAxis domain={[0, 100]} hide />
+        <LineChart data={rows} margin={{ top: 8, right: 12, bottom: 4, left: 4 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
+          <XAxis
+            dataKey="at_ms"
+            type="number"
+            domain={["dataMin", "dataMax"]}
+            stroke={CHART_X_DATE_STROKE}
+            tick={CHART_X_DATE_TICK}
+            minTickGap={28}
+            tickFormatter={(value) => formatChartXLabel(Number(value), spanMs, windowSeconds)}
+          />
+          <YAxis
+            domain={[0, 100]}
+            stroke="#8A8A8A"
+            allowDecimals={false}
+            width={36}
+            tick={CHART_Y_TICK}
+            ticks={[0, 25, 50, 75, 100]}
+            unit="%"
+          />
           <Tooltip
-            contentStyle={{
-              background: "#ffffff",
-              border: "1px solid #e8e8e8",
-              borderRadius: 6,
-              fontSize: 11
-            }}
+            contentStyle={CHART_TOOLTIP_STYLE}
             formatter={(value: number) => [`${Math.round(value)}% used`, "Usage"]}
-            labelFormatter={(label) => String(label)}
+            labelFormatter={(_, payload) => {
+              const atMs = payload?.[0]?.payload?.at_ms;
+              return typeof atMs === "number" ? formatChartTime(atMs) : "";
+            }}
           />
           <ReferenceLine y={100} stroke="#16a34a" strokeDasharray="4 4" strokeOpacity={0.75} />
           <ReferenceLine y={75} stroke="#86efac" strokeDasharray="3 6" strokeOpacity={0.35} />
@@ -182,8 +285,23 @@ function UsageTrendChart({
             dataKey="utilization"
             stroke={lineColor}
             strokeWidth={2.75}
-            dot={false}
-            activeDot={{ r: 4, fill: lineColor, strokeWidth: 0 }}
+            dot={({ cx, cy, index }) => {
+              const row = rows[index];
+              if (!row?.isReading || cx == null || cy == null) {
+                return <circle cx={cx ?? 0} cy={cy ?? 0} r={0} fill="transparent" />;
+              }
+              return (
+                <circle
+                  cx={cx}
+                  cy={cy}
+                  r={3.5}
+                  fill={lineColor}
+                  stroke="#ffffff"
+                  strokeWidth={1.5}
+                />
+              );
+            }}
+            activeDot={{ r: 5, fill: lineColor, stroke: "#ffffff", strokeWidth: 1.5 }}
             isAnimationActive={false}
           />
         </LineChart>
@@ -192,7 +310,13 @@ function UsageTrendChart({
   );
 }
 
-function SubscriptionUsageRow({ profile }: { profile: VendorProfile }) {
+function SubscriptionUsageRow({
+  profile,
+  rangeDays
+}: {
+  profile: VendorProfile;
+  rangeDays: number;
+}) {
   const labels = windowLabels(profile.provider);
   const hasPrimary = Boolean(profile.primary_window);
   const hasSecondary = Boolean(profile.secondary_window);
@@ -206,8 +330,15 @@ function SubscriptionUsageRow({ profile }: { profile: VendorProfile }) {
   const dollarsUsed =
     windowKind === "primary" ? profile.primary_dollars_used : profile.secondary_dollars_used;
   const chartRows = useMemo(
-    () => buildChartRows(activeHistory, activeWindow, profile.synced_at_ms),
-    [activeHistory, activeWindow, profile.synced_at_ms]
+    () =>
+      buildChartRows(
+        activeHistory,
+        activeWindow,
+        profile.synced_at_ms,
+        rangeDays,
+        activeWindow?.window_seconds ?? null
+      ),
+    [activeHistory, activeWindow, profile.synced_at_ms, rangeDays]
   );
   const currentUtil = activeWindow?.utilization ?? 0;
   const windowLabel = windowKind === "primary" ? labels.primary : labels.secondary;
@@ -268,7 +399,11 @@ function SubscriptionUsageRow({ profile }: { profile: VendorProfile }) {
             {" · resets in "}
             {formatResetCountdown(activeWindow.resets_at)}
           </p>
-          <UsageTrendChart rows={chartRows} currentUtil={currentUtil} />
+          <UsageTrendChart
+            rows={chartRows}
+            currentUtil={currentUtil}
+            windowSeconds={activeWindow.window_seconds}
+          />
         </>
       ) : (
         <p className="text-sm text-muted">No usage window available for this subscription yet.</p>
@@ -277,7 +412,13 @@ function SubscriptionUsageRow({ profile }: { profile: VendorProfile }) {
   );
 }
 
-export default function VendorUsageSection({ user }: { user: User | null }) {
+export default function VendorUsageSection({
+  user,
+  rangeDays = 30
+}: {
+  user: User | null;
+  rangeDays?: number;
+}) {
   const [unlocked, setUnlocked] = useState(false);
   const [passwordInput, setPasswordInput] = useState("");
   const [passwordError, setPasswordError] = useState<string | null>(null);
@@ -490,7 +631,11 @@ export default function VendorUsageSection({ user }: { user: User | null }) {
       {profiles.length > 0 ? (
         <div className="mt-5 space-y-4">
           {profiles.map((profile) => (
-            <SubscriptionUsageRow key={`${profile.provider}-${profile.profile_id}`} profile={profile} />
+            <SubscriptionUsageRow
+              key={`${profile.provider}-${profile.profile_id}`}
+              profile={profile}
+              rangeDays={rangeDays}
+            />
           ))}
         </div>
       ) : (

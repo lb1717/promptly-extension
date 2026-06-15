@@ -4173,7 +4173,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
 
           <div className="my-10 border-t border-line" role="separator" />
 
-          <VendorUsageSection user={user} />
+          <VendorUsageSection user={user} rangeDays={days} />
 
           <h2 className="mb-6 text-base font-semibold uppercase tracking-[0.22em] text-ink">Promptly Labs Diagnostics</h2>
 
