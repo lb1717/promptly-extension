@@ -1,7 +1,9 @@
 "use client";
 
+import { OnboardingAwaitingTutorialGate } from "@/components/onboarding/OnboardingAwaitingTutorialGate";
 import { OnboardingTourOverlay } from "@/components/onboarding/OnboardingTourOverlay";
 import {
+  advanceOnboardingTour,
   isOnboardingTourAccountPage,
   isOnboardingTourStatisticsPage,
   ONBOARDING_TOUR_ACCOUNT_STEPS,
@@ -27,25 +29,36 @@ export function OnboardingTourHost() {
     return () => window.removeEventListener(ONBOARDING_TOUR_EVENT, refresh);
   }, [refresh, pathname]);
 
-  if (!tour?.active) return null;
+  useEffect(() => {
+    const current = readOnboardingTour();
+    if (current?.active && current.step === "account-nav" && isOnboardingTourAccountPage(pathname)) {
+      advanceOnboardingTour("account-section");
+      refresh();
+    }
+  }, [pathname, refresh]);
 
-  if (tour.step === "account-nav" && isOnboardingTourAccountPage(pathname)) {
-    return null;
+  if (!tour?.active) {
+    return <OnboardingAwaitingTutorialGate />;
   }
 
   if (
     ONBOARDING_TOUR_ACCOUNT_STEPS.includes(tour.step) &&
     !isOnboardingTourAccountPage(pathname)
   ) {
-    return null;
+    return <OnboardingAwaitingTutorialGate />;
   }
 
   if (
     ONBOARDING_TOUR_STATISTICS_STEPS.includes(tour.step) &&
     !isOnboardingTourStatisticsPage(pathname)
   ) {
-    return null;
+    return <OnboardingAwaitingTutorialGate />;
   }
 
-  return <OnboardingTourOverlay step={tour.step} setup={tour.setup} pathname={pathname} />;
+  return (
+    <>
+      <OnboardingAwaitingTutorialGate />
+      <OnboardingTourOverlay step={tour.step} setup={tour.setup} pathname={pathname} />
+    </>
+  );
 }

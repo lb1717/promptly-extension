@@ -125,6 +125,16 @@ export function OnboardingTourOverlay({
     setTargetRect(measureTarget(step));
   }, [step]);
 
+  const goToAccount = useCallback(() => {
+    advanceOnboardingTour("account-section");
+    router.push("/account");
+  }, [router]);
+
+  const openStatistics = useCallback(() => {
+    advanceOnboardingTour("statistics-filters");
+    router.push("/account/statistics");
+  }, [router]);
+
   useLayoutEffect(() => {
     updateRect();
     if (step === "complete") return;
@@ -176,15 +186,17 @@ export function OnboardingTourOverlay({
     return () => el.removeEventListener("click", onNavigate, true);
   }, [step, targetRect, pathname]);
 
-  function openStatistics() {
-    advanceOnboardingTour("statistics-filters");
-    router.push("/account/statistics");
-  }
-
-  function goToAccount() {
-    advanceOnboardingTour("account-section");
-    router.push("/account");
-  }
+  useEffect(() => {
+    if (step !== "account-nav") return;
+    const el = document.querySelector(ONBOARDING_TOUR_TARGETS["account-nav"]);
+    if (!el) return;
+    const onNavigate = (event: Event) => {
+      event.preventDefault();
+      goToAccount();
+    };
+    el.addEventListener("click", onNavigate, true);
+    return () => el.removeEventListener("click", onNavigate, true);
+  }, [step, targetRect, pathname, goToAccount]);
 
   function finishTour() {
     endOnboardingTour();
@@ -244,6 +256,10 @@ export function OnboardingTourOverlay({
 
       {step === "statistics-link" && targetRect ? (
         <TourClickTarget rect={targetRect} label="See full statistics" onClick={openStatistics} />
+      ) : null}
+
+      {step === "account-nav" && targetRect ? (
+        <TourClickTarget rect={targetRect} label="Go to my account page" onClick={goToAccount} />
       ) : null}
 
       {step === "account-nav" ? (

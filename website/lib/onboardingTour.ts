@@ -22,6 +22,7 @@ export type OnboardingTourState = {
 };
 
 export const ONBOARDING_TOUR_STORAGE_KEY = "promptly_onboarding_tour";
+export const ONBOARDING_AWAITING_TUTORIAL_KEY = "promptly_onboarding_awaiting_tutorial";
 export const ONBOARDING_TOUR_EVENT = "promptly-onboarding-tour";
 
 export const ONBOARDING_TOUR_TARGETS: Record<Exclude<OnboardingTourStep, "complete">, string> = {
@@ -72,7 +73,37 @@ export function writeOnboardingTour(state: OnboardingTourState | null) {
 }
 
 export function startOnboardingTour(setup: OnboardingTourSetup) {
+  clearAwaitingTutorial();
   writeOnboardingTour({ active: true, step: "account-nav", setup });
+}
+
+export function setAwaitingTutorial(setup: OnboardingTourSetup) {
+  if (typeof window === "undefined") return;
+  sessionStorage.setItem(ONBOARDING_AWAITING_TUTORIAL_KEY, JSON.stringify(setup));
+  window.dispatchEvent(new CustomEvent(ONBOARDING_TOUR_EVENT));
+}
+
+export function readAwaitingTutorial(): OnboardingTourSetup | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(ONBOARDING_AWAITING_TUTORIAL_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as OnboardingTourSetup;
+    if (typeof parsed?.web !== "boolean" || typeof parsed?.codingAgents !== "boolean") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function clearAwaitingTutorial() {
+  if (typeof window === "undefined") return;
+  sessionStorage.removeItem(ONBOARDING_AWAITING_TUTORIAL_KEY);
+  window.dispatchEvent(new CustomEvent(ONBOARDING_TOUR_EVENT));
+}
+
+export function beginOnboardingTutorial(setup: OnboardingTourSetup) {
+  startOnboardingTour(setup);
 }
 
 export function advanceOnboardingTour(step: OnboardingTourStep) {
