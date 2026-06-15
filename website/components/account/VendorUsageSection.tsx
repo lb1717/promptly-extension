@@ -82,7 +82,7 @@ function formatSyncedAt(ms: number): string {
 
 function UsageBar({ label, window, dollarsUsed }: { label: string; window: UsageWindow | null; dollarsUsed: number | null }) {
   if (!window) return null;
-  const util = Math.max(0, Math.min(100, window.utilization));
+  const util = Math.round(Math.max(0, Math.min(100, window.utilization)));
   return (
     <div className="space-y-1">
       <div className="flex items-baseline justify-between gap-2 text-xs">

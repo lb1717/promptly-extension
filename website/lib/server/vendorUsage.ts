@@ -4,6 +4,7 @@ import { getFirebaseAdminDb } from "@/lib/server/firebaseAdmin";
 import {
   dollarsUnusedFromUtilization,
   dollarsUsedFromUtilization,
+  normalizeUtilizationPercent,
   resolveVendorPlanPricing
 } from "@/lib/vendorPlanPricing";
 
@@ -108,7 +109,7 @@ function readWindow(raw: unknown): VendorUsageWindow | null {
   const utilization = typeof row.utilization === "number" && Number.isFinite(row.utilization) ? row.utilization : null;
   if (utilization === null) return null;
   return {
-    utilization: Math.max(0, Math.min(100, utilization)),
+    utilization: normalizeUtilizationPercent(utilization),
     resets_at: typeof row.resets_at === "string" ? row.resets_at : null,
     window_seconds:
       typeof row.window_seconds === "number" && Number.isFinite(row.window_seconds) ? row.window_seconds : null

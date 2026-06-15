@@ -10,6 +10,7 @@ import {
   type VendorUsageProfileSnapshot,
   type VendorUsageSyncDiagnostics
 } from "@/lib/server/vendorUsage";
+import { normalizeUtilizationPercent } from "@/lib/vendorPlanPricing";
 
 export const runtime = "nodejs";
 
@@ -29,7 +30,7 @@ function readSnapshot(raw: unknown): VendorUsageProfileSnapshot | null {
     const w = value as Record<string, unknown>;
     if (typeof w.utilization !== "number" || !Number.isFinite(w.utilization)) return null;
     return {
-      utilization: Math.max(0, Math.min(100, w.utilization)),
+      utilization: normalizeUtilizationPercent(w.utilization),
       resets_at: typeof w.resets_at === "string" ? w.resets_at : null,
       window_seconds: typeof w.window_seconds === "number" ? w.window_seconds : null
     };

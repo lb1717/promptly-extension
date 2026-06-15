@@ -8,8 +8,8 @@ export type VendorPlanPricing = {
 };
 
 export const VENDOR_PLAN_PRICING: VendorPlanPricing[] = [
-  { key: "claude_pro", vendor: "anthropic", displayName: "Claude Pro", monthlyUsd: 20, aliases: ["pro"] },
-  { key: "claude_max_5x", vendor: "anthropic", displayName: "Claude Max (5×)", monthlyUsd: 100, aliases: ["max", "max_5x", "max-5x"] },
+  { key: "claude_pro", vendor: "anthropic", displayName: "Claude Pro", monthlyUsd: 20, aliases: ["pro", "claude_pro"] },
+  { key: "claude_max_5x", vendor: "anthropic", displayName: "Claude Max (5×)", monthlyUsd: 100, aliases: ["max", "max_5x", "max-5x", "claude_max"] },
   { key: "claude_max_20x", vendor: "anthropic", displayName: "Claude Max (20×)", monthlyUsd: 200, aliases: ["max_20x", "max-20x", "max 20x"] },
   { key: "chatgpt_plus", vendor: "openai", displayName: "ChatGPT Plus", monthlyUsd: 20, aliases: ["plus"] },
   { key: "chatgpt_pro", vendor: "openai", displayName: "ChatGPT Pro", monthlyUsd: 200, aliases: ["pro"] },
@@ -64,8 +64,15 @@ export function resolveVendorPlanPricing(
   return null;
 }
 
+export function normalizeUtilizationPercent(value: unknown): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return 0;
+  const pct = n > 0 && n <= 1 ? n * 100 : n;
+  return Math.round(Math.max(0, Math.min(100, pct)));
+}
+
 export function dollarsUsedFromUtilization(monthlyUsd: number, utilizationPercent: number, windowSeconds: number | null): number {
-  const util = Math.max(0, Math.min(100, utilizationPercent));
+  const util = normalizeUtilizationPercent(utilizationPercent);
   const monthSeconds = 30 * 86400;
   const window = windowSeconds && windowSeconds > 0 ? windowSeconds : 7 * 86400;
   const proratedPlan = monthlyUsd * (window / monthSeconds);
@@ -73,7 +80,7 @@ export function dollarsUsedFromUtilization(monthlyUsd: number, utilizationPercen
 }
 
 export function dollarsUnusedFromUtilization(monthlyUsd: number, utilizationPercent: number, windowSeconds: number | null): number {
-  const util = Math.max(0, Math.min(100, utilizationPercent));
+  const util = normalizeUtilizationPercent(utilizationPercent);
   const monthSeconds = 30 * 86400;
   const window = windowSeconds && windowSeconds > 0 ? windowSeconds : 7 * 86400;
   const proratedPlan = monthlyUsd * (window / monthSeconds);

@@ -288,6 +288,51 @@ function formatCursorPlanDisplay(planSlug) {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+function normalizeUtilizationPercent(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  const pct = n > 0 && n <= 1 ? n * 100 : n;
+  return Math.round(Math.max(0, Math.min(100, pct)));
+}
+
+function parseClaudePlanFromProfile(profile) {
+  if (!profile || typeof profile !== "object") {
+    return { plan_slug: null, plan_display: null };
+  }
+  const org = profile.organization;
+  const account = profile.account;
+  const orgType =
+    org && typeof org.organization_type === "string" ? org.organization_type.toLowerCase() : "";
+  const seatTier = org && typeof org.seat_tier === "string" ? org.seat_tier.toLowerCase() : "";
+  const rateTier =
+    org && typeof org.rate_limit_tier === "string" ? org.rate_limit_tier.toLowerCase() : "";
+  const tierBlob = `${seatTier} ${rateTier} ${orgType}`;
+  const isMax = orgType === "claude_max" || account?.has_claude_max === true;
+  const isPro = orgType === "claude_pro" || account?.has_claude_pro === true;
+
+  if (isMax) {
+    if (tierBlob.includes("20")) {
+      return { plan_slug: "max_20x", plan_display: "Claude Max (20×)" };
+    }
+    if (tierBlob.includes("5")) {
+      return { plan_slug: "max_5x", plan_display: "Claude Max (5×)" };
+    }
+    return { plan_slug: "max", plan_display: "Claude Max" };
+  }
+  if (isPro || orgType.includes("pro")) {
+    return { plan_slug: "pro", plan_display: "Claude Pro" };
+  }
+  if (orgType.startsWith("claude_")) {
+    const slug = orgType.replace(/^claude_/, "");
+    const label = slug.replace(/_/g, " ");
+    return {
+      plan_slug: slug,
+      plan_display: `Claude ${label.charAt(0).toUpperCase()}${label.slice(1)}`
+    };
+  }
+  return { plan_slug: null, plan_display: null };
+}
+
 async function fetchClaudeProfileUsage(configDir) {
   const fromPromptlyAuth = isDefaultClaudeConfigDir(configDir) && readPromptlyClaudeAuth();
   const token = readClaudeAccessToken(configDir);
@@ -308,7 +353,8 @@ async function fetchClaudeProfileUsage(configDir) {
   const headers = {
     Authorization: `Bearer ${token}`,
     "anthropic-beta": CLAUDE_USAGE_BETA,
-    Accept: "application/json"
+    Accept: "application/json",
+    "User-Agent": "claude-cli/2.1.9 (external, cli)"
   };
   try {
     const [usageRes, profileRes] = await Promise.all([
@@ -323,32 +369,27 @@ async function fetchClaudeProfileUsage(configDir) {
     const five = usage?.five_hour || usage?.fiveHour;
     const seven = usage?.seven_day || usage?.sevenDay;
     const email =
+      profile?.account?.email ||
       profile?.email ||
       profile?.email_address ||
-      profile?.account?.email ||
       profile?.account?.emailAddress ||
       null;
-    const planDisplay =
-      profile?.plan?.name ||
-      profile?.plan_type ||
-      profile?.subscription?.plan ||
-      profile?.account?.plan ||
-      null;
+    const { plan_slug: planSlug, plan_display: planDisplay } = parseClaudePlanFromProfile(profile);
     return {
       ...base,
       vendor_email: typeof email === "string" ? email : null,
-      plan_slug: typeof planDisplay === "string" ? planDisplay.toLowerCase().replace(/\s+/g, "_") : null,
-      plan_display: typeof planDisplay === "string" ? planDisplay : null,
+      plan_slug: planSlug,
+      plan_display: planDisplay,
       primary_window: five
         ? {
-            utilization: Number(five.utilization ?? five.used_percent ?? 0),
+            utilization: normalizeUtilizationPercent(five.utilization ?? five.used_percent ?? 0),
             resets_at: five.resets_at || five.resetsAt || null,
             window_seconds: 5 * 3600
           }
         : null,
       secondary_window: seven
         ? {
-            utilization: Number(seven.utilization ?? seven.used_percent ?? 0),
+            utilization: normalizeUtilizationPercent(seven.utilization ?? seven.used_percent ?? 0),
             resets_at: seven.resets_at || seven.resetsAt || null,
             window_seconds: 7 * 86400
           }
@@ -408,14 +449,14 @@ async function fetchCodexProfileUsage(configDir) {
       plan_display: typeof planType === "string" ? planType.charAt(0).toUpperCase() + planType.slice(1) : null,
       primary_window: primary
         ? {
-            utilization: Number(primary.used_percent ?? primary.utilization ?? 0),
+            utilization: normalizeUtilizationPercent(primary.used_percent ?? primary.utilization ?? 0),
             resets_at: primary.reset_at ? new Date(Number(primary.reset_at) * 1000).toISOString() : null,
             window_seconds: Number(primary.limit_window_seconds ?? 5 * 3600)
           }
         : null,
       secondary_window: secondary
         ? {
-            utilization: Number(secondary.used_percent ?? secondary.utilization ?? 0),
+            utilization: normalizeUtilizationPercent(secondary.used_percent ?? secondary.utilization ?? 0),
             resets_at: secondary.reset_at ? new Date(Number(secondary.reset_at) * 1000).toISOString() : null,
             window_seconds: Number(secondary.limit_window_seconds ?? 7 * 86400)
           }
@@ -471,12 +512,12 @@ async function fetchCursorProfileUsage() {
       plan_slug: auth.planSlug,
       plan_display: planDisplay,
       primary_window: {
-        utilization: Math.max(0, Math.min(100, apiPercent)),
+        utilization: normalizeUtilizationPercent(apiPercent),
         resets_at: cycleEndMs > 0 ? new Date(cycleEndMs).toISOString() : null,
         window_seconds: 5 * 3600
       },
       secondary_window: {
-        utilization: Math.max(0, Math.min(100, totalPercent)),
+        utilization: normalizeUtilizationPercent(totalPercent),
         resets_at: cycleEndMs > 0 ? new Date(cycleEndMs).toISOString() : null,
         window_seconds: windowSeconds
       },
