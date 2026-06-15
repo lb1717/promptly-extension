@@ -24,6 +24,16 @@ export type VendorUsageWindow = {
   window_seconds: number | null;
 };
 
+export type VendorUsageHistoryPoint = {
+  at_ms: number;
+  utilization: number;
+};
+
+export type VendorUsageWindowHistory = {
+  primary: VendorUsageHistoryPoint[];
+  secondary: VendorUsageHistoryPoint[];
+};
+
 export type VendorUsageProfileSnapshot = {
   provider: VendorUsageProvider;
   profile_id: string;
@@ -67,7 +77,11 @@ export type VendorUsageProfileView = VendorUsageProfileSnapshot & {
   primary_dollars_used: number | null;
   secondary_dollars_used: number | null;
   secondary_dollars_unused: number | null;
+  usage_history: VendorUsageWindowHistory;
 };
+
+const USAGE_HISTORY_CAP = 240;
+const USAGE_HISTORY_MIN_GAP_MS = 5 * 60 * 1000;
 
 const DEFAULT_SETTINGS: VendorUsageSettings = {
   claude_code: { enabled: false, extra_profile_dirs: [] },
@@ -112,6 +126,62 @@ function normalizeSettings(raw: unknown): VendorUsageSettings {
   };
 }
 
+function readHistoryPoint(raw: unknown): VendorUsageHistoryPoint | null {
+  if (!raw || typeof raw !== "object") return null;
+  const row = raw as Record<string, unknown>;
+  const at_ms = typeof row.at_ms === "number" && Number.isFinite(row.at_ms) ? row.at_ms : null;
+  const utilization =
+    typeof row.utilization === "number" && Number.isFinite(row.utilization) ? row.utilization : null;
+  if (at_ms == null || utilization == null) return null;
+  return { at_ms, utilization: normalizeUtilizationPercent(utilization) };
+}
+
+function readUsageHistory(raw: unknown): VendorUsageWindowHistory {
+  if (!raw || typeof raw !== "object") {
+    return { primary: [], secondary: [] };
+  }
+  const row = raw as Record<string, unknown>;
+  const readSeries = (value: unknown): VendorUsageHistoryPoint[] => {
+    if (!Array.isArray(value)) return [];
+    return value.map(readHistoryPoint).filter((point): point is VendorUsageHistoryPoint => point !== null);
+  };
+  return {
+    primary: readSeries(row.primary).slice(-USAGE_HISTORY_CAP),
+    secondary: readSeries(row.secondary).slice(-USAGE_HISTORY_CAP)
+  };
+}
+
+function appendHistoryPoint(
+  series: VendorUsageHistoryPoint[],
+  utilization: number,
+  at_ms: number
+): VendorUsageHistoryPoint[] {
+  const util = normalizeUtilizationPercent(utilization);
+  const next = [...series];
+  const last = next[next.length - 1];
+  if (last && at_ms - last.at_ms < USAGE_HISTORY_MIN_GAP_MS && Math.abs(last.utilization - util) < 0.5) {
+    next[next.length - 1] = { at_ms, utilization: util };
+  } else {
+    next.push({ at_ms, utilization: util });
+  }
+  return next.slice(-USAGE_HISTORY_CAP);
+}
+
+function mergeUsageHistory(
+  existing: VendorUsageWindowHistory,
+  snapshot: VendorUsageProfileSnapshot
+): VendorUsageWindowHistory {
+  const at_ms = snapshot.synced_at_ms || Date.now();
+  return {
+    primary: snapshot.primary_window
+      ? appendHistoryPoint(existing.primary, snapshot.primary_window.utilization, at_ms)
+      : existing.primary,
+    secondary: snapshot.secondary_window
+      ? appendHistoryPoint(existing.secondary, snapshot.secondary_window.utilization, at_ms)
+      : existing.secondary
+  };
+}
+
 function readWindow(raw: unknown): VendorUsageWindow | null {
   if (!raw || typeof raw !== "object") return null;
   const row = raw as Record<string, unknown>;
@@ -125,7 +195,10 @@ function readWindow(raw: unknown): VendorUsageWindow | null {
   };
 }
 
-function enrichProfile(row: VendorUsageProfileSnapshot): VendorUsageProfileView {
+function enrichProfile(
+  row: VendorUsageProfileSnapshot,
+  usage_history: VendorUsageWindowHistory = { primary: [], secondary: [] }
+): VendorUsageProfileView {
   const vendor =
     row.provider === "claude_code" ? "anthropic" : row.provider === "codex" ? "openai" : "cursor";
   const orgType = row.plan_organization_type?.replace(/^claude_/, "") ?? null;
@@ -152,7 +225,8 @@ function enrichProfile(row: VendorUsageProfileSnapshot): VendorUsageProfileView 
     secondary_dollars_unused:
       monthly != null && row.secondary_window
         ? dollarsUnusedFromUtilization(monthly, row.secondary_window.utilization, row.secondary_window.window_seconds)
-        : null
+        : null,
+    usage_history
   };
 }
 
@@ -218,17 +292,18 @@ export async function persistVendorUsageSnapshots(
     );
   }
   if (!snapshots.length) return 0;
-  const db = getFirebaseAdminDb();
-  const batch = db.batch();
   let written = 0;
   for (const snap of snapshots.slice(0, 24)) {
     if (snap.provider !== "claude_code" && snap.provider !== "codex" && snap.provider !== "cursor") continue;
     if (!snap.profile_id || snap.sync_error) continue;
     const docId = vendorUsageProfileDocId(snap.provider, snap.profile_id);
-    batch.set(
-      profileRef(uid, docId),
+    const existingSnap = await profileRef(uid, docId).get();
+    const existingHistory = readUsageHistory(existingSnap.exists ? existingSnap.data()?.usage_history : null);
+    const usage_history = mergeUsageHistory(existingHistory, snap);
+    await profileRef(uid, docId).set(
       {
         ...snap,
+        usage_history,
         uid,
         updated_at: FieldValue.serverTimestamp()
       },
@@ -236,39 +311,40 @@ export async function persistVendorUsageSnapshots(
     );
     written += 1;
   }
-  if (written > 0) {
-    await batch.commit();
-  }
   return written;
 }
 
 export async function listVendorUsageProfiles(uid: string): Promise<VendorUsageProfileView[]> {
   const snap = await getFirebaseAdminDb().collection("users").doc(uid).collection("vendor_usage_profiles").get();
-  const rows: VendorUsageProfileSnapshot[] = [];
+  const views: VendorUsageProfileView[] = [];
   for (const doc of snap.docs) {
     const raw = doc.data() as Record<string, unknown>;
     const provider = raw.provider;
     if (provider !== "claude_code" && provider !== "codex" && provider !== "cursor") continue;
-    rows.push({
-      provider,
-      profile_id: String(raw.profile_id || ""),
-      profile_label: String(raw.profile_label || "Profile"),
-      config_dir: typeof raw.config_dir === "string" ? raw.config_dir : null,
-      vendor_email: typeof raw.vendor_email === "string" ? raw.vendor_email : null,
-      plan_slug: typeof raw.plan_slug === "string" ? raw.plan_slug : null,
-      plan_display: typeof raw.plan_display === "string" ? raw.plan_display : null,
-      plan_organization_type:
-        typeof raw.plan_organization_type === "string" ? raw.plan_organization_type : null,
-      primary_window: readWindow(raw.primary_window),
-      secondary_window: readWindow(raw.secondary_window),
-      sync_error: typeof raw.sync_error === "string" ? raw.sync_error : null,
-      synced_at_ms: typeof raw.synced_at_ms === "number" ? raw.synced_at_ms : 0
-    });
+    if (!raw.profile_id || raw.sync_error) continue;
+    const usage_history = readUsageHistory(raw.usage_history);
+    views.push(
+      enrichProfile(
+        {
+          provider,
+          profile_id: String(raw.profile_id || ""),
+          profile_label: String(raw.profile_label || "Profile"),
+          config_dir: typeof raw.config_dir === "string" ? raw.config_dir : null,
+          vendor_email: typeof raw.vendor_email === "string" ? raw.vendor_email : null,
+          plan_slug: typeof raw.plan_slug === "string" ? raw.plan_slug : null,
+          plan_display: typeof raw.plan_display === "string" ? raw.plan_display : null,
+          plan_organization_type:
+            typeof raw.plan_organization_type === "string" ? raw.plan_organization_type : null,
+          primary_window: readWindow(raw.primary_window),
+          secondary_window: readWindow(raw.secondary_window),
+          sync_error: typeof raw.sync_error === "string" ? raw.sync_error : null,
+          synced_at_ms: typeof raw.synced_at_ms === "number" ? raw.synced_at_ms : 0
+        },
+        usage_history
+      )
+    );
   }
-  return rows
-    .filter((row) => row.profile_id && !row.sync_error)
-    .sort((a, b) => b.synced_at_ms - a.synced_at_ms || a.profile_label.localeCompare(b.profile_label))
-    .map(enrichProfile);
+  return views.sort((a, b) => b.synced_at_ms - a.synced_at_ms || a.profile_label.localeCompare(b.profile_label));
 }
 
 export async function getVendorUsagePayload(uid: string, viewerEmail: string | null = null) {

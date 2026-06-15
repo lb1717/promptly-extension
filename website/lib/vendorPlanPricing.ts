@@ -71,17 +71,47 @@ export function normalizeUtilizationPercent(value: unknown): number {
   return Math.round(Math.max(0, Math.min(100, pct)));
 }
 
-export type CodexWindowUsedPercentContext = {
+export type VendorWindowUsedPercentContext = {
   limitReached?: boolean;
   previousUtilization?: number | null;
   previousResetsAt?: string | null;
   resetsAt?: string | null;
+  windowSeconds?: number | null;
 };
 
-/** Normalize Codex / ChatGPT wham/usage window fields to percent used (not remaining). */
-export function resolveCodexWindowUsedPercent(
+/** @deprecated use VendorWindowUsedPercentContext */
+export type CodexWindowUsedPercentContext = VendorWindowUsedPercentContext;
+
+function windowElapsedRatio(
+  window: Record<string, unknown>,
+  windowSecondsFallback: number
+): number | null {
+  const windowSeconds = Number(window.limit_window_seconds ?? windowSecondsFallback) || windowSecondsFallback;
+  if (windowSeconds <= 0) return null;
+
+  const resetAfter = Number(window.reset_after_seconds ?? 0);
+  if (resetAfter > 0) {
+    return Math.max(0, Math.min(1, 1 - resetAfter / windowSeconds));
+  }
+
+  const resetsAtRaw = window.resets_at ?? window.resetsAt;
+  if (typeof resetsAtRaw === "string") {
+    const resetMs = Date.parse(resetsAtRaw);
+    if (Number.isFinite(resetMs)) {
+      const remainingMs = resetMs - Date.now();
+      if (remainingMs >= 0) {
+        return Math.max(0, Math.min(1, 1 - remainingMs / (windowSeconds * 1000)));
+      }
+    }
+  }
+
+  return null;
+}
+
+/** Normalize vendor quota windows (Claude, Codex, Cursor) to percent used — not remaining. */
+export function resolveVendorWindowUsedPercent(
   window: Record<string, unknown> | null | undefined,
-  context: CodexWindowUsedPercentContext = {}
+  context: VendorWindowUsedPercentContext = {}
 ): number {
   if (!window || typeof window !== "object") return 0;
 
@@ -91,22 +121,17 @@ export function resolveCodexWindowUsedPercent(
     return normalizeUtilizationPercent(100 - Number(remainingRaw));
   }
 
-  const usedRaw = window.used_percent ?? window.utilization;
+  const usedRaw = window.used_percent ?? window.utilization ?? window.apiPercentUsed ?? window.totalPercentUsed;
   if (usedRaw == null || !Number.isFinite(Number(usedRaw))) return 0;
 
   let pct = Number(usedRaw);
   if (pct > 0 && pct <= 1) pct *= 100;
   pct = Math.max(0, Math.min(100, pct));
 
-  const windowSeconds = Number(window.limit_window_seconds ?? 0);
-  const resetAfter = Number(window.reset_after_seconds ?? 0);
-
-  // Near the start of a rolling window, used should be low and remaining should be high.
-  if (windowSeconds > 3600 && resetAfter > 0) {
-    const elapsedRatio = 1 - resetAfter / windowSeconds;
-    if (elapsedRatio <= 0.12 && pct >= 80) {
-      return normalizeUtilizationPercent(100 - pct);
-    }
+  const windowSeconds = Number(window.limit_window_seconds ?? context.windowSeconds ?? 0);
+  const elapsed = windowElapsedRatio(window, windowSeconds || Number(context.windowSeconds ?? 0));
+  if (elapsed != null && elapsed <= 0.12 && pct >= 80) {
+    return normalizeUtilizationPercent(100 - pct);
   }
 
   const asUsed = normalizeUtilizationPercent(pct);
@@ -127,6 +152,14 @@ export function resolveCodexWindowUsedPercent(
   }
 
   return asUsed;
+}
+
+/** @deprecated use resolveVendorWindowUsedPercent */
+export function resolveCodexWindowUsedPercent(
+  window: Record<string, unknown> | null | undefined,
+  context: CodexWindowUsedPercentContext = {}
+): number {
+  return resolveVendorWindowUsedPercent(window, context);
 }
 
 export function dollarsUsedFromUtilization(monthlyUsd: number, utilizationPercent: number, windowSeconds: number | null): number {

@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
 import type { VendorUsageProfileSnapshot, VendorUsageProvider, VendorUsageWindow } from "@/lib/server/vendorUsage";
-import { normalizeUtilizationPercent, resolveCodexWindowUsedPercent } from "@/lib/vendorPlanPricing";
+import { normalizeUtilizationPercent, resolveVendorWindowUsedPercent } from "@/lib/vendorPlanPricing";
 import type { StoredVendorTokens } from "@/lib/server/vendorUsageSecrets";
 
 const CLAUDE_USAGE_BETA = "oauth-2025-04-20";
@@ -76,7 +76,11 @@ async function refreshClaudeAccessToken(refreshToken: string): Promise<string | 
 
 async function fetchClaudeSnapshot(
   tokenRow: NonNullable<StoredVendorTokens["claude_code"]>,
-  profileId: string | undefined
+  profileId: string | undefined,
+  existingWindows: { primary: VendorUsageWindow | null; secondary: VendorUsageWindow | null } = {
+    primary: null,
+    secondary: null
+  }
 ): Promise<VendorUsageProfileSnapshot | null> {
   let accessToken = tokenRow.access_token;
   const headers = {
@@ -110,6 +114,14 @@ async function fetchClaudeSnapshot(
   const plan = parseClaudePlanFromProfile(profile);
   const fiveRow = five as Record<string, unknown> | undefined;
   const sevenRow = seven as Record<string, unknown> | undefined;
+  const fiveResetsAt =
+    (typeof fiveRow?.resets_at === "string" && fiveRow.resets_at) ||
+    (typeof fiveRow?.resetsAt === "string" && fiveRow.resetsAt) ||
+    null;
+  const sevenResetsAt =
+    (typeof sevenRow?.resets_at === "string" && sevenRow.resets_at) ||
+    (typeof sevenRow?.resetsAt === "string" && sevenRow.resetsAt) ||
+    null;
   return {
     provider: "claude_code",
     profile_id: profileId || hashProfileId("claude_subscription"),
@@ -121,21 +133,25 @@ async function fetchClaudeSnapshot(
     plan_organization_type: plan.plan_organization_type,
     primary_window: fiveRow
       ? {
-          utilization: normalizeUtilizationPercent(fiveRow.utilization ?? fiveRow.used_percent ?? 0),
-          resets_at:
-            (typeof fiveRow.resets_at === "string" && fiveRow.resets_at) ||
-            (typeof fiveRow.resetsAt === "string" && fiveRow.resetsAt) ||
-            null,
+          utilization: resolveVendorWindowUsedPercent(fiveRow, {
+            previousUtilization: existingWindows.primary?.utilization ?? null,
+            previousResetsAt: existingWindows.primary?.resets_at ?? null,
+            resetsAt: fiveResetsAt,
+            windowSeconds: 5 * 3600
+          }),
+          resets_at: fiveResetsAt,
           window_seconds: 5 * 3600
         }
       : null,
     secondary_window: sevenRow
       ? {
-          utilization: normalizeUtilizationPercent(sevenRow.utilization ?? sevenRow.used_percent ?? 0),
-          resets_at:
-            (typeof sevenRow.resets_at === "string" && sevenRow.resets_at) ||
-            (typeof sevenRow.resetsAt === "string" && sevenRow.resetsAt) ||
-            null,
+          utilization: resolveVendorWindowUsedPercent(sevenRow, {
+            previousUtilization: existingWindows.secondary?.utilization ?? null,
+            previousResetsAt: existingWindows.secondary?.resets_at ?? null,
+            resetsAt: sevenResetsAt,
+            windowSeconds: 7 * 86400
+          }),
+          resets_at: sevenResetsAt,
           window_seconds: 7 * 86400
         }
       : null,
@@ -196,7 +212,7 @@ async function fetchCodexSnapshot(
     plan_organization_type: null,
     primary_window: primary
       ? {
-          utilization: resolveCodexWindowUsedPercent(primary, {
+          utilization: resolveVendorWindowUsedPercent(primary, {
             limitReached,
             previousUtilization: existingWindows.primary?.utilization ?? null,
             previousResetsAt: existingWindows.primary?.resets_at ?? null,
@@ -208,7 +224,7 @@ async function fetchCodexSnapshot(
       : null,
     secondary_window: secondary
       ? {
-          utilization: resolveCodexWindowUsedPercent(secondary, {
+          utilization: resolveVendorWindowUsedPercent(secondary, {
             limitReached,
             previousUtilization: existingWindows.secondary?.utilization ?? null,
             previousResetsAt: existingWindows.secondary?.resets_at ?? null,
@@ -230,7 +246,11 @@ function formatCursorPlanDisplay(planSlug: string | null | undefined): string | 
 
 async function fetchCursorSnapshot(
   tokenRow: NonNullable<StoredVendorTokens["cursor"]>,
-  profileId: string | undefined
+  profileId: string | undefined,
+  existingWindows: { primary: VendorUsageWindow | null; secondary: VendorUsageWindow | null } = {
+    primary: null,
+    secondary: null
+  }
 ): Promise<VendorUsageProfileSnapshot | null> {
   const res = await fetch("https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage", {
     method: "POST",
@@ -250,6 +270,7 @@ async function fetchCursorSnapshot(
   const cycleStartMs = Number(usage.billingCycleStart ?? 0);
   const windowSeconds =
     cycleEndMs > cycleStartMs ? Math.max(86400, Math.round((cycleEndMs - cycleStartMs) / 1000)) : 30 * 86400;
+  const cycleEndIso = cycleEndMs > 0 ? new Date(cycleEndMs).toISOString() : null;
   const planSlug = tokenRow.plan_slug || null;
   return {
     provider: "cursor",
@@ -261,13 +282,40 @@ async function fetchCursorSnapshot(
     plan_display: formatCursorPlanDisplay(planSlug),
     plan_organization_type: null,
     primary_window: {
-      utilization: normalizeUtilizationPercent(apiPercent),
-      resets_at: cycleEndMs > 0 ? new Date(cycleEndMs).toISOString() : null,
+      utilization: resolveVendorWindowUsedPercent(
+        {
+          used_percent: apiPercent,
+          utilization: apiPercent,
+          resets_at: cycleEndIso,
+          limit_window_seconds: 5 * 3600
+        },
+        {
+          previousUtilization: existingWindows.primary?.utilization ?? null,
+          previousResetsAt: existingWindows.primary?.resets_at ?? null,
+          resetsAt: cycleEndIso,
+          windowSeconds: 5 * 3600
+        }
+      ),
+      resets_at: cycleEndIso,
       window_seconds: 5 * 3600
     },
     secondary_window: {
-      utilization: normalizeUtilizationPercent(totalPercent),
-      resets_at: cycleEndMs > 0 ? new Date(cycleEndMs).toISOString() : null,
+      utilization: resolveVendorWindowUsedPercent(
+        {
+          used_percent: totalPercent,
+          utilization: totalPercent,
+          totalPercentUsed: totalPercent,
+          resets_at: cycleEndIso,
+          limit_window_seconds: windowSeconds
+        },
+        {
+          previousUtilization: existingWindows.secondary?.utilization ?? null,
+          previousResetsAt: existingWindows.secondary?.resets_at ?? null,
+          resetsAt: cycleEndIso,
+          windowSeconds
+        }
+      ),
+      resets_at: cycleEndIso,
       window_seconds: windowSeconds
     },
     sync_error: null,
@@ -282,7 +330,11 @@ export async function fetchLiveVendorUsageSnapshots(
 ): Promise<VendorUsageProfileSnapshot[]> {
   const snapshots: VendorUsageProfileSnapshot[] = [];
   if (tokens.claude_code?.access_token) {
-    const row = await fetchClaudeSnapshot(tokens.claude_code, existingProfileIds.claude_code);
+    const existing = existingProfiles.claude_code;
+    const row = await fetchClaudeSnapshot(tokens.claude_code, existingProfileIds.claude_code, {
+      primary: existing?.primary_window ?? null,
+      secondary: existing?.secondary_window ?? null
+    });
     if (row) snapshots.push(row);
   }
   if (tokens.codex?.access_token) {
@@ -294,7 +346,11 @@ export async function fetchLiveVendorUsageSnapshots(
     if (row) snapshots.push(row);
   }
   if (tokens.cursor?.access_token) {
-    const row = await fetchCursorSnapshot(tokens.cursor, existingProfileIds.cursor);
+    const existing = existingProfiles.cursor;
+    const row = await fetchCursorSnapshot(tokens.cursor, existingProfileIds.cursor, {
+      primary: existing?.primary_window ?? null,
+      secondary: existing?.secondary_window ?? null
+    });
     if (row) snapshots.push(row);
   }
   return snapshots;

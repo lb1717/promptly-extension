@@ -300,8 +300,8 @@ function codexWindowResetsAt(window) {
   return window.reset_at ? new Date(Number(window.reset_at) * 1000).toISOString() : null;
 }
 
-/** Normalize Codex wham/usage window fields to percent used (not remaining). */
-function resolveCodexWindowUsedPercent(window, context = {}) {
+/** Normalize vendor quota windows to percent used (not remaining). */
+function resolveVendorWindowUsedPercent(window, context = {}) {
   if (!window || typeof window !== "object") return 0;
 
   const remainingRaw =
@@ -310,21 +310,34 @@ function resolveCodexWindowUsedPercent(window, context = {}) {
     return normalizeUtilizationPercent(100 - Number(remainingRaw));
   }
 
-  const usedRaw = window.used_percent ?? window.utilization;
+  const usedRaw = window.used_percent ?? window.utilization ?? window.apiPercentUsed ?? window.totalPercentUsed;
   if (usedRaw == null || !Number.isFinite(Number(usedRaw))) return 0;
 
   let pct = Number(usedRaw);
   if (pct > 0 && pct <= 1) pct *= 100;
   pct = Math.max(0, Math.min(100, pct));
 
-  const windowSeconds = Number(window.limit_window_seconds ?? 0);
-  const resetAfter = Number(window.reset_after_seconds ?? 0);
-
-  if (windowSeconds > 3600 && resetAfter > 0) {
-    const elapsedRatio = 1 - resetAfter / windowSeconds;
-    if (elapsedRatio <= 0.12 && pct >= 80) {
-      return normalizeUtilizationPercent(100 - pct);
+  const windowSeconds = Number(window.limit_window_seconds ?? context.windowSeconds ?? 0);
+  let elapsed = null;
+  if (windowSeconds > 0) {
+    const resetAfter = Number(window.reset_after_seconds ?? 0);
+    if (resetAfter > 0) {
+      elapsed = Math.max(0, Math.min(1, 1 - resetAfter / windowSeconds));
+    } else {
+      const resetsAtRaw = window.resets_at ?? window.resetsAt;
+      if (typeof resetsAtRaw === "string") {
+        const resetMs = Date.parse(resetsAtRaw);
+        if (Number.isFinite(resetMs)) {
+          const remainingMs = resetMs - Date.now();
+          if (remainingMs >= 0) {
+            elapsed = Math.max(0, Math.min(1, 1 - remainingMs / (windowSeconds * 1000)));
+          }
+        }
+      }
     }
+  }
+  if (elapsed != null && elapsed <= 0.12 && pct >= 80) {
+    return normalizeUtilizationPercent(100 - pct);
   }
 
   const asUsed = normalizeUtilizationPercent(pct);
@@ -346,6 +359,8 @@ function resolveCodexWindowUsedPercent(window, context = {}) {
 
   return asUsed;
 }
+
+const resolveCodexWindowUsedPercent = resolveVendorWindowUsedPercent;
 
 function parseClaudePlanFromProfile(profile) {
   if (!profile || typeof profile !== "object") {
@@ -429,6 +444,8 @@ async function fetchClaudeProfileUsage(configDir) {
       null;
     const { plan_slug: planSlug, plan_display: planDisplay, plan_organization_type: planOrgType } =
       parseClaudePlanFromProfile(profile);
+    const fiveResetsAt = five?.resets_at || five?.resetsAt || null;
+    const sevenResetsAt = seven?.resets_at || seven?.resetsAt || null;
     return {
       ...base,
       vendor_email: typeof email === "string" ? email : null,
@@ -437,15 +454,21 @@ async function fetchClaudeProfileUsage(configDir) {
       plan_organization_type: planOrgType,
       primary_window: five
         ? {
-            utilization: normalizeUtilizationPercent(five.utilization ?? five.used_percent ?? 0),
-            resets_at: five.resets_at || five.resetsAt || null,
+            utilization: resolveVendorWindowUsedPercent(five, {
+              resetsAt: fiveResetsAt,
+              windowSeconds: 5 * 3600
+            }),
+            resets_at: fiveResetsAt,
             window_seconds: 5 * 3600
           }
         : null,
       secondary_window: seven
         ? {
-            utilization: normalizeUtilizationPercent(seven.utilization ?? seven.used_percent ?? 0),
-            resets_at: seven.resets_at || seven.resetsAt || null,
+            utilization: resolveVendorWindowUsedPercent(seven, {
+              resetsAt: sevenResetsAt,
+              windowSeconds: 7 * 86400
+            }),
+            resets_at: sevenResetsAt,
             window_seconds: 7 * 86400
           }
         : null,
@@ -567,6 +590,7 @@ async function fetchCursorProfileUsage() {
     const cycleStartMs = Number(usage?.billingCycleStart ?? 0);
     const windowSeconds =
       cycleEndMs > cycleStartMs ? Math.max(86400, Math.round((cycleEndMs - cycleStartMs) / 1000)) : 30 * 86400;
+    const cycleEndIso = cycleEndMs > 0 ? new Date(cycleEndMs).toISOString() : null;
     const planDisplay = formatCursorPlanDisplay(auth.planSlug);
     return {
       ...base,
@@ -574,13 +598,30 @@ async function fetchCursorProfileUsage() {
       plan_slug: auth.planSlug,
       plan_display: planDisplay,
       primary_window: {
-        utilization: normalizeUtilizationPercent(apiPercent),
-        resets_at: cycleEndMs > 0 ? new Date(cycleEndMs).toISOString() : null,
+        utilization: resolveVendorWindowUsedPercent(
+          {
+            used_percent: apiPercent,
+            utilization: apiPercent,
+            resets_at: cycleEndIso,
+            limit_window_seconds: 5 * 3600
+          },
+          { resetsAt: cycleEndIso, windowSeconds: 5 * 3600 }
+        ),
+        resets_at: cycleEndIso,
         window_seconds: 5 * 3600
       },
       secondary_window: {
-        utilization: normalizeUtilizationPercent(totalPercent),
-        resets_at: cycleEndMs > 0 ? new Date(cycleEndMs).toISOString() : null,
+        utilization: resolveVendorWindowUsedPercent(
+          {
+            used_percent: totalPercent,
+            utilization: totalPercent,
+            totalPercentUsed: totalPercent,
+            resets_at: cycleEndIso,
+            limit_window_seconds: windowSeconds
+          },
+          { resetsAt: cycleEndIso, windowSeconds }
+        ),
+        resets_at: cycleEndIso,
         window_seconds: windowSeconds
       },
       sync_error: null

@@ -2,6 +2,15 @@
 
 import type { User } from "firebase/auth";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Line,
+  LineChart,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis
+} from "recharts";
 import { CopyBlock } from "@/components/integrations/integrationCopyBlock";
 import {
   detectVendorUsageInstallOs,
@@ -16,6 +25,11 @@ type UsageWindow = {
   utilization: number;
   resets_at: string | null;
   window_seconds: number | null;
+};
+
+type UsageHistoryPoint = {
+  at_ms: number;
+  utilization: number;
 };
 
 type VendorProfile = {
@@ -33,7 +47,10 @@ type VendorProfile = {
   plan_monthly_usd: number | null;
   primary_dollars_used: number | null;
   secondary_dollars_used: number | null;
-  secondary_dollars_unused: number | null;
+  usage_history?: {
+    primary: UsageHistoryPoint[];
+    secondary: UsageHistoryPoint[];
+  };
 };
 
 type VendorUsagePayload = {
@@ -49,16 +66,20 @@ type VendorUsagePayload = {
     skipped: Array<"claude_code" | "codex" | "cursor">;
     skip_details?: Partial<Record<"claude_code" | "codex" | "cursor", string>>;
   } | null;
-  overview: {
-    profile_count: number;
-    total_plan_monthly_usd: number;
-    total_secondary_window_dollars_used: number;
-    total_secondary_window_dollars_unused: number;
-  };
   can_live_refresh?: boolean;
   live_refresh_hint?: string | null;
   account_email_mismatch?: boolean;
   vendor_tokens_device_email?: string | null;
+};
+
+type WindowKind = "primary" | "secondary";
+
+const PROVIDER_ORDER: VendorProfile["provider"][] = ["claude_code", "codex", "cursor"];
+
+const PROVIDER_LABEL: Record<VendorProfile["provider"], string> = {
+  claude_code: "Claude Code",
+  codex: "Codex",
+  cursor: "Cursor"
 };
 
 function formatResetCountdown(resetsAt: string | null): string {
@@ -75,79 +96,174 @@ function formatResetCountdown(resetsAt: string | null): string {
   return `${mins}m`;
 }
 
-function formatSyncedAt(ms: number): string {
-  if (!ms) return "Never";
-  const diff = Date.now() - ms;
-  if (diff < 60_000) return "Just now";
-  if (diff < 3600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86400_000) return `${Math.floor(diff / 3600_000)}h ago`;
-  return new Date(ms).toLocaleString();
+function formatChartTime(atMs: number): string {
+  return new Date(atMs).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  });
 }
 
-function UsageBar({ label, window, dollarsUsed }: { label: string; window: UsageWindow | null; dollarsUsed: number | null }) {
-  if (!window) return null;
-  const util = Math.round(Math.max(0, Math.min(100, window.utilization)));
+function windowLabels(provider: VendorProfile["provider"]): { primary: string; secondary: string } {
+  if (provider === "cursor") {
+    return { primary: "5-hour", secondary: "Billing cycle" };
+  }
+  return { primary: "5-hour", secondary: "Weekly" };
+}
+
+function buildChartRows(
+  history: UsageHistoryPoint[],
+  currentWindow: UsageWindow | null,
+  syncedAtMs: number
+): Array<{ at_ms: number; label: string; utilization: number }> {
+  const rows = history.map((point) => ({
+    at_ms: point.at_ms,
+    label: formatChartTime(point.at_ms),
+    utilization: Math.max(0, Math.min(100, point.utilization))
+  }));
+  if (rows.length === 0 && currentWindow) {
+    const at_ms = syncedAtMs || Date.now();
+    rows.push({
+      at_ms,
+      label: formatChartTime(at_ms),
+      utilization: Math.max(0, Math.min(100, currentWindow.utilization))
+    });
+  }
+  return rows.sort((a, b) => a.at_ms - b.at_ms);
+}
+
+function UsageTrendChart({
+  rows,
+  currentUtil
+}: {
+  rows: Array<{ at_ms: number; label: string; utilization: number }>;
+  currentUtil: number;
+}) {
+  const lineColor =
+    currentUtil >= 75 ? "#059669" : currentUtil >= 40 ? "#d97706" : currentUtil >= 15 ? "#ea580c" : "#dc2626";
+
   return (
-    <div className="space-y-1">
-      <div className="flex items-baseline justify-between gap-2 text-xs">
-        <span className="font-medium text-ink">{label}</span>
-        <span className="tabular-nums text-muted">
-          {util}% used
-          {dollarsUsed != null ? ` · ~$${dollarsUsed.toFixed(2)} of allowance` : null}
-          {" · resets in "}
-          {formatResetCountdown(window.resets_at)}
-        </span>
-      </div>
-      <div className="h-2.5 overflow-hidden rounded-full bg-cream-dark">
-        <div className="h-full rounded-full bg-ink transition-all" style={{ width: `${util}%` }} />
-      </div>
+    <div className="h-44 w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={rows} margin={{ top: 8, right: 8, bottom: 0, left: -8 }}>
+          <XAxis dataKey="label" hide />
+          <YAxis domain={[0, 100]} hide />
+          <Tooltip
+            contentStyle={{
+              background: "#ffffff",
+              border: "1px solid #e8e8e8",
+              borderRadius: 6,
+              fontSize: 11
+            }}
+            formatter={(value: number) => [`${Math.round(value)}% used`, "Usage"]}
+            labelFormatter={(label) => String(label)}
+          />
+          <ReferenceLine y={100} stroke="#16a34a" strokeDasharray="4 4" strokeOpacity={0.75} />
+          <ReferenceLine y={75} stroke="#86efac" strokeDasharray="3 6" strokeOpacity={0.35} />
+          <ReferenceLine y={50} stroke="#d1d5db" strokeDasharray="3 6" strokeOpacity={0.35} />
+          <ReferenceLine y={25} stroke="#fca5a5" strokeDasharray="3 6" strokeOpacity={0.35} />
+          <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="4 4" strokeOpacity={0.55} />
+          <Line
+            type="monotone"
+            dataKey="utilization"
+            stroke={lineColor}
+            strokeWidth={2.75}
+            dot={rows.length <= 1 ? { r: 3, fill: lineColor, strokeWidth: 0 } : false}
+            activeDot={{ r: 4, fill: lineColor, strokeWidth: 0 }}
+            isAnimationActive={false}
+          />
+        </LineChart>
+      </ResponsiveContainer>
     </div>
   );
 }
 
-function ProfileCard({ profile }: { profile: VendorProfile }) {
-  const providerLabel =
-    profile.provider === "claude_code" ? "Claude Code" : profile.provider === "codex" ? "Codex" : "Cursor";
-  const primaryLabel = profile.provider === "cursor" ? "Included API usage" : "5-hour window";
-  const secondaryLabel = profile.provider === "cursor" ? "Billing cycle total" : "Weekly window";
+function SubscriptionUsageRow({ profile }: { profile: VendorProfile }) {
+  const labels = windowLabels(profile.provider);
+  const hasPrimary = Boolean(profile.primary_window);
+  const hasSecondary = Boolean(profile.secondary_window);
+  const [windowKind, setWindowKind] = useState<WindowKind>(hasPrimary ? "primary" : "secondary");
+
+  const activeWindow = windowKind === "primary" ? profile.primary_window : profile.secondary_window;
+  const activeHistory =
+    windowKind === "primary"
+      ? profile.usage_history?.primary ?? []
+      : profile.usage_history?.secondary ?? [];
+  const dollarsUsed =
+    windowKind === "primary" ? profile.primary_dollars_used : profile.secondary_dollars_used;
+  const chartRows = useMemo(
+    () => buildChartRows(activeHistory, activeWindow, profile.synced_at_ms),
+    [activeHistory, activeWindow, profile.synced_at_ms]
+  );
+  const currentUtil = activeWindow?.utilization ?? 0;
+  const windowLabel = windowKind === "primary" ? labels.primary : labels.secondary;
+
   return (
-    <div className="rounded-xl border border-line bg-white/70 p-4">
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-faint">{providerLabel}</p>
-          <p className="text-sm font-semibold text-ink">
+    <article className="rounded-xl border border-line bg-white p-4 sm:p-5">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-ink">{PROVIDER_LABEL[profile.provider]}</p>
+          <p className="mt-0.5 text-sm text-muted">
             {profile.plan_display || "Unknown plan"}
             {profile.plan_monthly_usd != null ? (
-              <span className="ml-1 text-xs font-medium text-muted">(${profile.plan_monthly_usd}/mo catalog)</span>
+              <span className="text-faint"> · ${profile.plan_monthly_usd}/mo</span>
             ) : null}
           </p>
-          <p className="text-xs text-muted">
-            {profile.profile_label}
-            {profile.vendor_email ? ` · ${profile.vendor_email}` : null}
-          </p>
-        </div>
-        <p className="text-[10px] text-faint">Synced {formatSyncedAt(profile.synced_at_ms)}</p>
-      </div>
-      {profile.sync_error ? (
-        <p className="mb-3 rounded-lg border border-amber-300/60 bg-amber-50/80 px-3 py-2 text-xs text-amber-950">
-          {profile.sync_error}
-        </p>
-      ) : (
-        <div className="space-y-3">
-          <UsageBar label={primaryLabel} window={profile.primary_window} dollarsUsed={profile.primary_dollars_used} />
-          <UsageBar
-            label={secondaryLabel}
-            window={profile.secondary_window}
-            dollarsUsed={profile.secondary_dollars_used}
-          />
-          {profile.secondary_dollars_unused != null && profile.secondary_dollars_unused > 0 ? (
-            <p className="text-[11px] text-muted">
-              ~${profile.secondary_dollars_unused.toFixed(2)} of this week&apos;s included allowance unused so far.
-            </p>
+          {profile.vendor_email ? (
+            <p className="mt-1 truncate text-xs text-faint">{profile.vendor_email}</p>
           ) : null}
         </div>
+        {hasPrimary && hasSecondary ? (
+          <div className="inline-flex shrink-0 rounded-lg border border-line bg-cream-dark p-0.5">
+            <button
+              type="button"
+              onClick={() => setWindowKind("primary")}
+              className={`rounded-md px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${
+                windowKind === "primary" ? "bg-ink text-cream" : "text-faint hover:text-ink"
+              }`}
+            >
+              {labels.primary}
+            </button>
+            <button
+              type="button"
+              onClick={() => setWindowKind("secondary")}
+              className={`rounded-md px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${
+                windowKind === "secondary" ? "bg-ink text-cream" : "text-faint hover:text-ink"
+              }`}
+            >
+              {labels.secondary}
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      {activeWindow ? (
+        <>
+          <p className="mb-3 text-sm text-muted">
+            {dollarsUsed != null ? (
+              <>
+                About <span className="font-semibold tabular-nums text-ink">${dollarsUsed.toFixed(2)}</span> of your{" "}
+                {windowLabel.toLowerCase()} plan value used
+              </>
+            ) : (
+              <>
+                <span className="font-semibold tabular-nums text-ink">{Math.round(currentUtil)}%</span> of your{" "}
+                {windowLabel.toLowerCase()} limit used
+              </>
+            )}
+            {" · resets in "}
+            {formatResetCountdown(activeWindow.resets_at)}
+          </p>
+          <UsageTrendChart rows={chartRows} currentUtil={currentUtil} />
+          {chartRows.length <= 1 ? (
+            <p className="mt-2 text-[11px] text-faint">Refresh over time to build a usage trend for this window.</p>
+          ) : null}
+        </>
+      ) : (
+        <p className="text-sm text-muted">No usage window available for this subscription yet.</p>
       )}
-    </div>
+    </article>
   );
 }
 
@@ -259,11 +375,14 @@ export default function VendorUsageSection({ user }: { user: User | null }) {
     }
   }, [enableSyncAndPatch, syncCommand]);
 
-  const profiles = useMemo(
-    () => (data?.profiles ?? []).filter((p) => !p.sync_error),
-    [data]
-  );
-  const lastSyncedMs = profiles.reduce((max, row) => Math.max(max, row.synced_at_ms || 0), 0);
+  const profiles = useMemo(() => {
+    const rows = (data?.profiles ?? []).filter((p) => !p.sync_error);
+    return [...rows].sort(
+      (a, b) => PROVIDER_ORDER.indexOf(a.provider) - PROVIDER_ORDER.indexOf(b.provider)
+    );
+  }, [data]);
+
+  const errorProfiles = useMemo(() => (data?.profiles ?? []).filter((p) => p.sync_error), [data]);
   const hasCursor = profiles.some((p) => p.provider === "cursor");
   const hasCodex = profiles.some((p) => p.provider === "codex");
   const hasClaude = profiles.some((p) => p.provider === "claude_code");
@@ -272,7 +391,7 @@ export default function VendorUsageSection({ user }: { user: User | null }) {
     return (
       <section className="mb-8 w-full rounded-2xl border border-line bg-white p-4 shadow-card sm:p-5">
         <h2 className="text-base font-semibold uppercase tracking-[0.22em] text-ink">AI plan usage</h2>
-        <p className="mt-2 text-sm text-muted">Enter the preview password to view Claude Code and Codex subscription quotas.</p>
+        <p className="mt-2 text-sm text-muted">Enter the preview password to view subscription usage.</p>
         <form
           className="mt-4 flex max-w-sm flex-wrap items-center gap-2"
           onSubmit={(e) => {
@@ -304,26 +423,8 @@ export default function VendorUsageSection({ user }: { user: User | null }) {
 
   return (
     <section className="mb-8 w-full rounded-2xl border border-line bg-white p-4 shadow-card sm:p-5">
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-base font-semibold uppercase tracking-[0.22em] text-ink">AI plan usage</h2>
-          <p className="mt-1 max-w-xl text-sm text-muted">
-            Claude Code, Codex, and Cursor subscription quotas from this computer. Separate from agent emails in your
-            activity charts.
-          </p>
-          {lastSyncedMs > 0 ? (
-            <p className="mt-1 text-xs text-faint">
-              Last synced {formatSyncedAt(lastSyncedMs)}
-              {data?.can_live_refresh
-                ? " · Refresh fetches live usage from your connected subscriptions"
-                : data?.live_refresh_hint
-                  ? ` · ${data.live_refresh_hint}`
-                  : null}
-            </p>
-          ) : data?.live_refresh_hint ? (
-            <p className="mt-1 text-xs text-amber-800">{data.live_refresh_hint}</p>
-          ) : null}
-        </div>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-base font-semibold uppercase tracking-[0.22em] text-ink">AI plan usage</h2>
         <button
           type="button"
           disabled={loading}
@@ -361,17 +462,14 @@ export default function VendorUsageSection({ user }: { user: User | null }) {
 
       {syncCopied ? (
         <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50/80 px-3 py-2 text-sm text-emerald-900">
-          Command copied — paste in {syncOs === "mac" ? "Terminal.app" : "PowerShell"} (not a remote SSH session),
-          press Enter once to connect. After that, use <span className="font-medium">Refresh</span> anytime for live
-          usage — no need to run the command again.
+          Command copied — paste in {syncOs === "mac" ? "Terminal.app" : "PowerShell"}, press Enter once, then use{" "}
+          <span className="font-medium">Refresh</span> to update live usage.
         </div>
       ) : null}
 
       {showCommand && !hasClaude ? (
         <div className="mb-4 rounded-xl border border-line bg-white/70 px-3 py-2 text-xs text-muted">
-          <span className="font-medium text-ink">First-time Claude:</span> the sync command opens your browser once to
-          sign in with claude.ai (same as Codex/Cursor — no Keychain prompts). Already signed in? It completes in one
-          click.
+          First-time Claude sync opens your browser once to connect claude.ai.
         </div>
       ) : null}
 
@@ -379,29 +477,10 @@ export default function VendorUsageSection({ user }: { user: User | null }) {
 
       {error ? <p className="mb-4 mt-4 text-sm text-red-700">{error}</p> : null}
 
-      {data?.overview && profiles.length > 0 ? (
-        <div className="mb-5 mt-5 grid gap-3 sm:grid-cols-3">
-          <div className="rounded-xl border border-line bg-white/70 p-3">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-faint">Subscriptions</p>
-            <p className="mt-1 text-2xl font-bold tabular-nums text-ink">{data.overview.profile_count}</p>
-          </div>
-          <div className="rounded-xl border border-line bg-white/70 p-3">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-faint">Plan total (catalog)</p>
-            <p className="mt-1 text-2xl font-bold tabular-nums text-ink">${data.overview.total_plan_monthly_usd}/mo</p>
-          </div>
-          <div className="rounded-xl border border-line bg-white/70 p-3">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-faint">Weekly allowance used</p>
-            <p className="mt-1 text-2xl font-bold tabular-nums text-ink">
-              ~${data.overview.total_secondary_window_dollars_used.toFixed(0)}
-            </p>
-          </div>
-        </div>
-      ) : null}
-
       {profiles.length > 0 ? (
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="mt-5 space-y-4">
           {profiles.map((profile) => (
-            <ProfileCard key={`${profile.provider}-${profile.profile_id}`} profile={profile} />
+            <SubscriptionUsageRow key={`${profile.provider}-${profile.profile_id}`} profile={profile} />
           ))}
         </div>
       ) : (
@@ -411,25 +490,28 @@ export default function VendorUsageSection({ user }: { user: User | null }) {
         </p>
       )}
 
+      {errorProfiles.map((profile) => (
+        <p
+          key={`err-${profile.provider}-${profile.profile_id}`}
+          className="mt-4 rounded-lg border border-amber-300/60 bg-amber-50/80 px-3 py-2 text-xs text-amber-950"
+        >
+          {PROVIDER_LABEL[profile.provider]}: {profile.sync_error}
+        </p>
+      ))}
+
       {profiles.length > 0 && (!hasCursor || !hasCodex || !hasClaude) ? (
         <div className="mt-4 space-y-2 text-xs text-muted">
           {!hasClaude ? (
-            <p className="rounded-lg border border-amber-300/60 bg-amber-50/80 px-3 py-2 text-amber-950">
-              <span className="font-medium">Claude not synced.</span>{" "}
+            <p>
+              Claude not synced —{" "}
               {data?.last_sync_diagnostics?.skip_details?.claude_code ||
-                "Run the sync command from Terminal.app — your browser will open once to connect Claude (no Keychain prompts)."}
+                "run the sync command and complete browser sign-in."}
             </p>
           ) : null}
-          {!hasCursor ? <p>Cursor: open Cursor and sign in on that Mac, then sync again.</p> : null}
-          {!hasCodex ? <p>Codex: sign in with ChatGPT (not API key) in the Codex app, then sync again.</p> : null}
+          {!hasCursor ? <p>Cursor not synced — open Cursor, sign in, then sync again.</p> : null}
+          {!hasCodex ? <p>Codex not synced — sign in with ChatGPT in the Codex app, then sync again.</p> : null}
         </div>
       ) : null}
-
-      <p className="mt-4 text-[11px] leading-relaxed text-faint">
-        Prompt stats: Promptly hooks track Claude Code prompts from the desktop app and from Terminal when the Promptly
-        plugin is installed — same subscription, different UIs. Plan usage here reads that subscription directly from
-        Anthropic (5h + weekly limits), not from prompt counts.
-      </p>
     </section>
   );
 }
