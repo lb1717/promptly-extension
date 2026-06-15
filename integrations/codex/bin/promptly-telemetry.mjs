@@ -279,6 +279,7 @@ function draftTimingPath(tool) {
 const DRAFT_MIN_MS = 500;
 const ENGAGEMENT_MIN_MS = 500;
 const RESPONSE_LATENCY_MIN_MS = 500;
+const READING_IDLE_HEARTBEAT_MS = 60_000;
 const HOOK_TRACE_MAX_LINES = 200;
 const DRAFT_MAX_MS = 1_800_000;
 
@@ -311,6 +312,73 @@ function markSessionStarted(tool, sessionId, atMs = Date.now()) {
   const sessions = loadDraftTimingSessions(tool);
   sessions[sid] = { draft_window_start_ms: atMs, session_started_ms: atMs, updated_at: atMs };
   saveDraftTimingSessions(tool, sessions);
+}
+
+function markReadingIdleStart(tool, sessionId, atMs = Date.now()) {
+  const sid = String(sessionId || "").trim();
+  if (!sid) return;
+  const sessions = loadDraftTimingSessions(tool);
+  const prev = sessions[sid] && typeof sessions[sid] === "object" ? sessions[sid] : {};
+  sessions[sid] = {
+    ...prev,
+    reading_idle_start_ms: atMs,
+    draft_window_start_ms: null,
+    updated_at: atMs
+  };
+  saveDraftTimingSessions(tool, sessions);
+}
+
+function buildReadingIdleSegment(tool, durationMs, agentAccountEmail, modelMeta) {
+  return {
+    tool,
+    interaction_kind: "engagement_segment",
+    engagement_category: "reading_idle",
+    duration_ms: durationMs,
+    client_occurred_ms: Date.now(),
+    agent_account_email: agentAccountEmail || null,
+    model_label: modelMeta?.model_label || null,
+    model_bucket: modelMeta?.model_bucket || "unknown"
+  };
+}
+
+function flushReadingIdleSegment(tool, sessionId, agentAccountEmail, modelMeta, atMs = Date.now(), opts = {}) {
+  const sid = String(sessionId || "").trim();
+  if (!sid) return null;
+  const sessions = loadDraftTimingSessions(tool);
+  const entry = sessions[sid];
+  const start = entry?.reading_idle_start_ms;
+  if (!start) return null;
+  const rawMs = atMs - start;
+  sessions[sid] = {
+    ...entry,
+    reading_idle_start_ms: opts.keepAlive ? atMs : null,
+    updated_at: atMs
+  };
+  saveDraftTimingSessions(tool, sessions);
+  if (rawMs < ENGAGEMENT_MIN_MS) return null;
+  return buildReadingIdleSegment(
+    tool,
+    Math.min(1_800_000, Math.floor(rawMs)),
+    agentAccountEmail,
+    modelMeta
+  );
+}
+
+function maybeFlushStaleReadingIdle(tool, sessionId, agentAccountEmail, modelMeta, atMs = Date.now()) {
+  const sid = String(sessionId || "").trim();
+  if (!sid) return null;
+  const sessions = loadDraftTimingSessions(tool);
+  const start = sessions[sid]?.reading_idle_start_ms;
+  if (!start || atMs - start < READING_IDLE_HEARTBEAT_MS) return null;
+  return flushReadingIdleSegment(tool, sessionId, agentAccountEmail, modelMeta, atMs, { keepAlive: true });
+}
+
+function resolveSessionEndDurationMs(input) {
+  const hostDur = Number(input?.duration_ms ?? input?.durationMs ?? 0);
+  if (Number.isFinite(hostDur) && hostDur >= ENGAGEMENT_MIN_MS) {
+    return Math.min(1_800_000, Math.floor(hostDur));
+  }
+  return null;
 }
 
 function consumeDraftDurationMs(tool, sessionId, atMs = Date.now()) {
@@ -1451,7 +1519,7 @@ function emitResponseEndEvents(tool, input, agentAccountEmail, modelMeta, now = 
   const sessionId = primarySessionId(input, tool);
   const lookupIds = hookSessionLookupIds(input, tool);
   if (sessionId) {
-    markDraftWindowStart(tool, sessionId, now);
+    markReadingIdleStart(tool, sessionId, now);
   }
   const event = buildStopTelemetryEvent(tool, input, agentAccountEmail, modelMeta, now);
   if (!event) {
@@ -1521,15 +1589,16 @@ function hookEventToTelemetry(input, tool) {
   }
 
   if (eventName.includes("sessionend") || (hasSessionEnd && !hasPrompt)) {
-    const dur = Number(input.duration_ms ?? input.durationMs ?? 0);
-    if (Number.isFinite(dur) && dur >= ENGAGEMENT_MIN_MS) {
+    const dur = resolveSessionEndDurationMs(input);
+    if (dur !== null) {
       return {
         tool,
         interaction_kind: "engagement_segment",
         engagement_category: "reading_idle",
-        duration_ms: Math.min(1_800_000, Math.floor(dur)),
+        duration_ms: dur,
         client_occurred_ms: now,
-        agent_account_email: agentAccountEmail
+        agent_account_email: agentAccountEmail,
+        ...modelMeta
       };
     }
     return null;
@@ -1583,12 +1652,24 @@ async function cmdHook(flags) {
   }
   const sessionId = primarySessionId(input, tool);
   const hookName = resolveHookEventName(input);
+  const agentAccountEmail = resolveAgentAccountEmail(input, tool);
+  const modelMeta = buildModelMeta(input, tool);
+  if (sessionId) {
+    const staleIdle = maybeFlushStaleReadingIdle(tool, sessionId, agentAccountEmail, modelMeta);
+    if (staleIdle) {
+      enqueueEvent(tool, staleIdle);
+    }
+  }
   if (hookName.includes("sessionstart") && sessionId) {
     markSessionStarted(tool, sessionId);
   }
+  if (hookName.includes("sessionend") && sessionId) {
+    const sessionIdle = flushReadingIdleSegment(tool, sessionId, agentAccountEmail, modelMeta);
+    if (sessionIdle) {
+      enqueueEvent(tool, sessionIdle);
+    }
+  }
   if (isResponseEndPayload(input, hookName)) {
-    const agentAccountEmail = resolveAgentAccountEmail(input, tool);
-    const modelMeta = buildModelMeta(input, tool);
     const response = emitResponseEndEvents(tool, input, agentAccountEmail, modelMeta);
     if (response.event) {
       event = response.event;
@@ -1601,6 +1682,18 @@ async function cmdHook(flags) {
   }
   if (event) {
     if (event.interaction_kind === "send" && sessionId) {
+      const readingIdle = flushReadingIdleSegment(
+        tool,
+        sessionId,
+        event.agent_account_email,
+        {
+          model_label: event.model_label,
+          model_bucket: event.model_bucket
+        }
+      );
+      if (readingIdle) {
+        enqueueEvent(tool, readingIdle);
+      }
       const draftMs = consumeDraftDurationMs(tool, sessionId);
       if (draftMs) {
         enqueueEvent(
@@ -1623,13 +1716,8 @@ async function cmdHook(flags) {
         model_bucket: event.model_bucket || "unknown"
       });
     }
-    if (
-      sessionId &&
-      (event.interaction_kind === "response_latency" ||
-        (event.interaction_kind === "engagement_segment" &&
-          (event.engagement_category === "waiting" || event.engagement_category === "reading_idle")))
-    ) {
-      markDraftWindowStart(tool, sessionId);
+    if (sessionId && event.interaction_kind === "engagement_segment" && event.engagement_category === "reading_idle") {
+      markReadingIdleStart(tool, sessionId);
     }
     enqueueEvent(tool, event);
   }

@@ -1,5 +1,5 @@
 (() => {
-  const MIN_SEGMENT_MS = 2000;
+  const MIN_SEGMENT_MS = 500;
   const MAX_SEGMENT_MS = 1_800_000;
   const HEARTBEAT_FLUSH_MS = 60_000;
 
@@ -150,7 +150,12 @@
   }
 
   function noteSendRecorded() {
-    setPhase("waiting");
+    flushCurrentSegment();
+    pendingWaiting = true;
+    // Waiting screen time comes from host_response_latency_ms on the send row (avoids double-counting).
+    phase = "reading_idle";
+    phaseStartedMs = 0;
+    stopHeartbeat();
   }
 
   function noteResponseComplete() {

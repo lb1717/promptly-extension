@@ -356,9 +356,6 @@ const STATS_RANGE_OPTIONS: Array<{ label: string; days: number; since: string | 
   { label: "MAX", days: 400, since: null }
 ];
 
-/** Poll for new telemetry while the stats page is visible (bypasses server cache). */
-const STATS_LIVE_POLL_MS = 45_000;
-
 function sinceLabelForDays(days: number): string | null {
   return STATS_RANGE_OPTIONS.find((option) => option.days === days)?.since ?? null;
 }
@@ -1817,17 +1814,14 @@ export function StatisticsClient() {
       g: "day" | "week",
       scopeParams?: URLSearchParams,
       refresh = false,
-      captureCatalog = false,
-      silent = false
+      captureCatalog = false
     ) => {
     if (!current) {
       setStats(null);
       return;
     }
-    if (!silent) {
-      setStatsLoading(true);
-      setStatsError("");
-    }
+    setStatsLoading(true);
+    setStatsError("");
     try {
       const token = await current.getIdToken(false);
       const params = new URLSearchParams({
@@ -1850,7 +1844,6 @@ export function StatisticsClient() {
         setModelCatalogWeb(data.model_catalog);
       }
     } catch (e) {
-      if (silent) return;
       const raw = String(e instanceof Error ? e.message : e);
       setStatsError(
         /RESOURCE_EXHAUSTED|Quota exceeded/i.test(raw)
@@ -1858,9 +1851,7 @@ export function StatisticsClient() {
           : raw
       );
     } finally {
-      if (!silent) {
-        setStatsLoading(false);
-      }
+      setStatsLoading(false);
     }
   },
     []
@@ -1875,17 +1866,14 @@ export function StatisticsClient() {
       availableByTool?: Record<IdeToolKey, string[]>,
       scopeParams?: URLSearchParams,
       refresh = false,
-      captureCatalog = false,
-      silent = false
+      captureCatalog = false
     ) => {
     if (!current) {
       setIdeStats(null);
       return;
     }
-    if (!silent) {
-      setIdeStatsLoading(true);
-      setIdeStatsError("");
-    }
+    setIdeStatsLoading(true);
+    setIdeStatsError("");
     try {
       const token = await current.getIdToken(false);
       const params = new URLSearchParams({
@@ -1909,7 +1897,6 @@ export function StatisticsClient() {
         setModelCatalogIde(data.model_buckets);
       }
     } catch (e) {
-      if (silent) return;
       const raw = String(e instanceof Error ? e.message : e);
       setIdeStatsError(
         /RESOURCE_EXHAUSTED|Quota exceeded/i.test(raw)
@@ -1917,9 +1904,7 @@ export function StatisticsClient() {
           : raw
       );
     } finally {
-      if (!silent) {
-        setIdeStatsLoading(false);
-      }
+      setIdeStatsLoading(false);
     }
   },
     []
@@ -2229,46 +2214,31 @@ export function StatisticsClient() {
     [scheduleIdeStatsReload, ideStats?.agent_emails_by_tool, statsScopeParams]
   );
 
-  const refreshAllStats = useCallback(
-    (opts?: { silent?: boolean }) => {
-      if (!user) return;
-      const silent = opts?.silent === true;
-      const captureCatalog = statsGroupMode !== "model";
-      void loadExtended(user, days, granularity, statsScopeParams, true, captureCatalog, silent);
-      void loadIdeStats(
-        user,
-        days,
-        granularity,
-        selectedEmailsByTool,
-        ideStats?.agent_emails_by_tool,
-        statsScopeParams,
-        true,
-        captureCatalog,
-        silent
-      );
-    },
-    [
+  const refreshAllStats = useCallback(() => {
+    if (!user) return;
+    const captureCatalog = statsGroupMode !== "model";
+    void loadExtended(user, days, granularity, statsScopeParams, true, captureCatalog);
+    void loadIdeStats(
       user,
       days,
       granularity,
       selectedEmailsByTool,
       ideStats?.agent_emails_by_tool,
-      loadExtended,
-      loadIdeStats,
       statsScopeParams,
-      statsGroupMode
-    ]
-  );
-
-  useEffect(() => {
-    if (!user || loading) return;
-    const tick = () => {
-      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
-      refreshAllStats({ silent: true });
-    };
-    const id = window.setInterval(tick, STATS_LIVE_POLL_MS);
-    return () => window.clearInterval(id);
-  }, [user, loading, refreshAllStats]);
+      true,
+      captureCatalog
+    );
+  }, [
+    user,
+    days,
+    granularity,
+    selectedEmailsByTool,
+    ideStats?.agent_emails_by_tool,
+    loadExtended,
+    loadIdeStats,
+    statsScopeParams,
+    statsGroupMode
+  ]);
 
   useEffect(() => {
     setSelectedEmailsByTool({
@@ -3323,14 +3293,11 @@ export function StatisticsClient() {
                   <button
                     type="button"
                     disabled={statsLoading || ideStatsLoading || !user}
-                    onClick={() => refreshAllStats()}
+                    onClick={refreshAllStats}
                     className="w-[5.5rem] rounded-md border border-line px-2 py-0.5 text-center text-xs text-muted hover:bg-cream-dark disabled:opacity-50"
                   >
                     {statsLoading || ideStatsLoading ? "Refreshing…" : "Refresh"}
                   </button>
-                  <span className="text-[10px] text-faint" title="Stats auto-refresh while this tab is open">
-                    Live · every 45s
-                  </span>
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-x-2 gap-y-2 border-t border-line/70 pt-2">

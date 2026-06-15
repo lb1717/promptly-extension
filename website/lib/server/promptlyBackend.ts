@@ -59,6 +59,8 @@ export const OPTIMIZE_EVENTS_QUERY_LIMIT = 5000;
 /** Passive listener sends on ChatGPT / Claude / Gemini (no Promptly optimize required). Indexed by uid + utcDay like optimize events. */
 const HOST_LLM_EVENTS_COLLECTION = "promptly_host_llm_events";
 export const HOST_LLM_EVENTS_QUERY_LIMIT = 5000;
+/** Minimum foreground segment length for web extension engagement rows (align with IDE hooks). */
+const HOST_ENGAGEMENT_MIN_SEGMENT_MS = 500;
 /** IDE / CLI agent telemetry (Claude Code, Cursor, Codex) — separate from web extension stats. */
 const IDE_EVENTS_COLLECTION = "promptly_ide_events";
 export const IDE_EVENTS_QUERY_LIMIT = 5000;
@@ -663,7 +665,7 @@ export function normalizeHostLlmActivityEventInput(raw: Record<string, unknown>)
     const durRaw = raw.duration_ms ?? raw.durationMs ?? raw.engagementDurationMs ?? raw.engagement_duration_ms;
     if (typeof durRaw === "number" && Number.isFinite(durRaw)) {
       const v = Math.max(0, Math.floor(durRaw));
-      if (v >= 2000 && v <= 1_800_000) {
+      if (v >= HOST_ENGAGEMENT_MIN_SEGMENT_MS && v <= 1_800_000) {
         engagementDurationMs = v;
       }
     }
@@ -3389,7 +3391,7 @@ export async function getAccountUsageStatsExtended(
       const cat = typeof catRaw === "string" ? catRaw.trim().toLowerCase() : "";
       const durRaw = raw.engagementDurationMs ?? raw.engagement_duration_ms ?? raw.duration_ms ?? raw.durationMs;
       const durMs = typeof durRaw === "number" && Number.isFinite(durRaw) ? Math.floor(durRaw) : null;
-      if ((cat === "drafting" || cat === "waiting" || cat === "reading_idle") && durMs !== null && durMs >= 2000) {
+      if ((cat === "drafting" || cat === "waiting" || cat === "reading_idle") && durMs !== null && durMs >= HOST_ENGAGEMENT_MIN_SEGMENT_MS) {
         prevScreenMsBySvc[svc] += durMs;
         if (trackWebModelSeries && svc === webModelService) {
           const mb = readTelemetryModelBucket(raw);
@@ -3399,9 +3401,7 @@ export async function getAccountUsageStatsExtended(
       return;
     }
     if (ik === "composer_input" || ik === "compose" || ik === "typing") return;
-    // Native sends: host response latency counts toward model screen time (waiting), as in-range.
-    if (!trackWebModelSeries || svc !== webModelService) return;
-    if (!passesWebScopeFilter(svc, raw, scopeFilter)) return;
+    if (!passesWebScopeFilter(svc, raw, scopeFilter, { requireModelMatch: false })) return;
     const sourceRaw = String(raw.source ?? raw.ingest_source ?? "passive_listener");
     if (sourceRaw === "optimize_api") return;
     const telemetrySourceRaw = raw.telemetrySource ?? raw.telemetry_source;
@@ -3410,6 +3410,27 @@ export async function getAccountUsageStatsExtended(
     if (/^auto_adjust_/.test(telemetrySource)) return;
     const hlRaw = raw.hostResponseLatencyMs ?? raw.host_response_latency_ms;
     const hlMs = typeof hlRaw === "number" && Number.isFinite(hlRaw) ? Math.floor(hlRaw) : null;
+    const draftWallRaw = raw.draftDurationMs ?? raw.draft_duration_ms;
+    const draftWallMs =
+      typeof draftWallRaw === "number" && Number.isFinite(draftWallRaw) ? Math.floor(draftWallRaw) : null;
+    const draftActiveRaw = raw.draftActiveMs ?? raw.draft_active_ms;
+    const draftActiveMs =
+      typeof draftActiveRaw === "number" && Number.isFinite(draftActiveRaw) ? Math.floor(draftActiveRaw) : null;
+    const draftMs =
+      draftActiveMs !== null && draftActiveMs > 0
+        ? draftActiveMs
+        : draftWallMs !== null && draftWallMs > 0
+          ? draftWallMs
+          : null;
+    if (hlMs !== null && hlMs >= HOST_ENGAGEMENT_MIN_SEGMENT_MS) {
+      prevScreenMsBySvc[svc] += hlMs;
+    }
+    if (draftMs !== null && draftMs >= HOST_ENGAGEMENT_MIN_SEGMENT_MS) {
+      prevScreenMsBySvc[svc] += draftMs;
+    }
+    // Native sends: host response latency counts toward model screen time (waiting), as in-range.
+    if (!trackWebModelSeries || svc !== webModelService) return;
+    if (!passesWebScopeFilter(svc, raw, scopeFilter)) return;
     if (hlMs !== null && hlMs > 0) {
       const mb = readTelemetryModelBucket(raw);
       prevWebModelScreenMsByModel.set(mb, (prevWebModelScreenMsByModel.get(mb) ?? 0) + hlMs);
@@ -3476,7 +3497,7 @@ export async function getAccountUsageStatsExtended(
       const durRaw = raw.engagementDurationMs ?? raw.engagement_duration_ms ?? raw.duration_ms ?? raw.durationMs;
       const durMs =
         typeof durRaw === "number" && Number.isFinite(durRaw) ? Math.floor(durRaw) : null;
-      if (engagementCategory && durMs !== null && durMs >= 2000) {
+      if (engagementCategory && durMs !== null && durMs >= HOST_ENGAGEMENT_MIN_SEGMENT_MS) {
         row.engagement_ms_by_category[engagementCategory][svc] += durMs;
         row.screen_time_ms_svc[svc] += durMs;
         row.engagement_segment_count += 1;
@@ -3565,6 +3586,10 @@ export async function getAccountUsageStatsExtended(
           row.host_latency_sum_ms += hlMs;
           row.waiting_sum_ms += hlMs;
           row.waiting_samples += 1;
+          if (hlMs >= HOST_ENGAGEMENT_MIN_SEGMENT_MS) {
+            row.screen_time_ms_svc[svc] += hlMs;
+            row.engagement_ms_by_category.waiting[svc] += hlMs;
+          }
           if (trackWebModelSeries && svc === webModelService) {
             addWebModelEngagementMs(bucketKeyForDay(utcDay), mb, hostLabel, "waiting", hlMs);
             bumpNestedMetric(webModelLatencySumMsByDay, bucketKeyForDay(utcDay), mb, hlMs);
@@ -3573,6 +3598,13 @@ export async function getAccountUsageStatsExtended(
             latencyPrev.sum += hlMs;
             latencyPrev.samples += 1;
             webModelLatencyAgg.set(mb, latencyPrev);
+          }
+        }
+        if (draftMs !== null && draftMs >= HOST_ENGAGEMENT_MIN_SEGMENT_MS) {
+          row.screen_time_ms_svc[svc] += draftMs;
+          row.engagement_ms_by_category.drafting[svc] += draftMs;
+          if (trackWebModelSeries && svc === webModelService) {
+            addWebModelEngagementMs(bucketKeyForDay(utcDay), mb, hostLabel, "drafting", draftMs);
           }
         }
         if (draftWallMs !== null && draftWallMs > 0) {
