@@ -310,6 +310,60 @@ function readAnalyticsUtcDay(raw: Record<string, unknown>): string | null {
   return null;
 }
 
+function readEventClientOccurredMs(raw: Record<string, unknown>): number {
+  const com = raw.clientOccurredMs ?? raw.client_occurred_ms;
+  if (typeof com === "number" && Number.isFinite(com)) {
+    return Math.max(0, Math.floor(com));
+  }
+  return 0;
+}
+
+function parseHostModelFieldsFromRaw(raw: Record<string, unknown>): {
+  hostModelLabelSanitized: string | null;
+  hostModelBucket: string;
+} {
+  let hostModelLabelSanitized: string | null = null;
+  const labelRaw =
+    typeof raw.host_model_label === "string"
+      ? raw.host_model_label
+      : typeof raw.hostModelLabel === "string"
+        ? raw.hostModelLabel
+        : typeof raw.hostModelLabelSanitized === "string"
+          ? raw.hostModelLabelSanitized
+          : typeof raw.host_model_label_sanitized === "string"
+            ? raw.host_model_label_sanitized
+            : null;
+  if (typeof labelRaw === "string") {
+    let label = String(labelRaw)
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, TELEMETRY_HOST_MODEL_MAX_CHARS);
+    if (/https?:\/\//i.test(label)) label = "";
+    if (label) hostModelLabelSanitized = label;
+  }
+
+  let hostModelBucket = "unknown";
+  const bucketRaw =
+    typeof raw.host_model_bucket === "string"
+      ? raw.host_model_bucket
+      : typeof raw.hostModelBucket === "string"
+        ? raw.hostModelBucket
+        : typeof raw.host_model_bucket_sanitized === "string"
+          ? raw.host_model_bucket_sanitized
+          : "";
+  if (String(bucketRaw).trim()) {
+    const b = slugHostModelBucketFromLabel(String(bucketRaw).trim());
+    if (b && b !== "unknown") {
+      hostModelBucket = b.slice(0, 48);
+    }
+  }
+  if (hostModelBucket === "unknown" && hostModelLabelSanitized) {
+    hostModelBucket = slugHostModelBucketFromLabel(hostModelLabelSanitized);
+  }
+  hostModelBucket = hostModelBucket.slice(0, 48) || "unknown";
+  return { hostModelLabelSanitized, hostModelBucket };
+}
+
 export type OptimizeTelemetryNormalized = {
   composerCharEstimate: number | null;
   composerWordEstimate: number | null;
@@ -679,12 +733,14 @@ export function normalizeHostLlmActivityEventInput(raw: Record<string, unknown>)
       clientOccurredMs = Math.max(0, Math.floor(com));
     }
 
+    const { hostModelLabelSanitized, hostModelBucket } = parseHostModelFieldsFromRaw(raw);
+
     return {
       service: svc,
       composerCharEstimate: null,
       composerWordEstimate: null,
-      hostModelLabelSanitized: null,
-      hostModelBucket: "unknown",
+      hostModelLabelSanitized,
+      hostModelBucket,
       hostResponseLatencyMs: null,
       interactionKind: "engagement_segment",
       assistantOutputCharEstimate: null,
@@ -2325,6 +2381,26 @@ export async function getAccountIdeUsageStats(
   const trackModelSeries = Boolean(scopeFilter?.ideTool);
   const prevScreenMsByTool: IdeToolCounts = emptyIdeToolCounts();
   const prevModelScreenMsByModel = new Map<string, number>();
+  const lastIdeModelByTool: Record<
+    PromptlyIdeTool,
+    { mb: string; label: string | null }
+  > = {
+    claude_code: { mb: "unknown", label: null },
+    cursor: { mb: "unknown", label: null },
+    codex: { mb: "unknown", label: null }
+  };
+  const rememberIdeEventModel = (tool: PromptlyIdeTool, mb: string, label: string | null) => {
+    if (!mb || mb === "unknown") return;
+    lastIdeModelByTool[tool] = { mb, label };
+  };
+  const readEffectiveIdeEventModel = (tool: PromptlyIdeTool, raw: Record<string, unknown>) => {
+    const direct = readIdeEventModel(raw);
+    if (direct.mb !== "unknown") {
+      rememberIdeEventModel(tool, direct.mb, direct.label);
+      return direct;
+    }
+    return lastIdeModelByTool[tool];
+  };
   const modelPromptsByDay = new Map<string, Map<string, number>>();
   const modelScreenMsByDay = new Map<string, Map<string, number>>();
   const modelLatencySumMsByDay = new Map<string, Map<string, number>>();
@@ -2428,7 +2504,7 @@ export async function getAccountIdeUsageStats(
     if (screenMs <= 0) return;
     prevScreenMsByTool[tool] += screenMs;
     if (trackModelSeries) {
-      const { mb } = readIdeEventModel(raw);
+      const { mb } = readEffectiveIdeEventModel(tool, raw);
       prevModelScreenMsByModel.set(mb, (prevModelScreenMsByModel.get(mb) ?? 0) + screenMs);
     }
   };
@@ -2437,7 +2513,13 @@ export async function getAccountIdeUsageStats(
     accumulatePrevWindowEvent(doc.data() as Record<string, unknown>);
   }
 
-  for (const doc of eventsResult.docs) {
+  const ideDocsChronological = [...eventsResult.docs].sort(
+    (a, b) =>
+      readEventClientOccurredMs(a.data() as Record<string, unknown>) -
+      readEventClientOccurredMs(b.data() as Record<string, unknown>)
+  );
+
+  for (const doc of ideDocsChronological) {
     const raw = doc.data() as Record<string, unknown>;
     const utcDay = readAnalyticsUtcDay(raw);
     if (!utcDay) continue;
@@ -2458,6 +2540,13 @@ export async function getAccountIdeUsageStats(
     const isEngagement = ik === "engagement_segment" || ik === "engagement";
     const isResponseLatency = ik === "response_latency";
 
+    if (isResponseLatency || isEngagement || ik === "send") {
+      const { mb, label } = readEffectiveIdeEventModel(tool, raw);
+      if (mb !== "unknown") {
+        rememberIdeEventModel(tool, mb, label);
+      }
+    }
+
     if (isResponseLatency) {
       const hlRaw = raw.hostResponseLatencyMs ?? raw.host_response_latency_ms;
       const hlMs =
@@ -2472,14 +2561,7 @@ export async function getAccountIdeUsageStats(
         engagementMsByTool[tool].waiting += hlMs;
         responseLatencyByTool[tool].push(hlMs);
 
-        const mb = String(raw.modelBucket ?? raw.model_bucket ?? "unknown")
-          .trim()
-          .slice(0, 48) || "unknown";
-        const labelRaw = raw.modelLabelSanitized ?? raw.model_label ?? raw.modelLabel;
-        const label =
-          typeof labelRaw === "string" && labelRaw.trim() && !/https?:\/\//i.test(labelRaw)
-            ? String(labelRaw).replace(/\s+/g, " ").trim().slice(0, 120)
-            : null;
+        const { mb, label } = readEffectiveIdeEventModel(tool, raw);
         addModelEngagementMs(bucket, mb, label, "waiting", hlMs);
         if (trackModelSeries) {
           bumpNestedMetric(modelLatencySumMsByDay, bucket, mb, hlMs);
@@ -2526,7 +2608,7 @@ export async function getAccountIdeUsageStats(
         screenTotals[tool] += durMs;
         engagementTotalsMs[cat] += durMs;
         engagementMsByTool[tool][cat] += durMs;
-        const { mb, label } = readIdeEventModel(raw);
+        const { mb, label } = readEffectiveIdeEventModel(tool, raw);
         addModelEngagementMs(bucket, mb, label, cat, durMs);
         if (cat === "drafting") {
           draftSegmentCountByTool[tool] += 1;
@@ -2571,7 +2653,7 @@ export async function getAccountIdeUsageStats(
       promptsWithoutAgentEmail[tool] += 1;
     }
 
-    const { mb, label } = readIdeEventModel(raw);
+    const { mb, label } = readEffectiveIdeEventModel(tool, raw);
     if (trackModelSeries) {
       bumpNestedMetric(modelPromptsByDay, bucket, mb, 1);
       rememberModelLabel(mb, label);
@@ -3237,6 +3319,32 @@ export async function getAccountUsageStatsExtended(
     }
   >();
   const webModelSeriesLabels = new Map<string, string | null>();
+  const lastWebModelByService: Record<
+    PromptlyService,
+    { mb: string; label: string | null }
+  > = {
+    chatgpt: { mb: "unknown", label: null },
+    claude: { mb: "unknown", label: null },
+    gemini: { mb: "unknown", label: null },
+    unknown: { mb: "unknown", label: null }
+  };
+  const rememberWebEventModel = (svc: PromptlyService, mb: string, label: string | null) => {
+    if (!mb || mb === "unknown") return;
+    lastWebModelByService[svc] = { mb, label };
+  };
+  const readEffectiveWebEventModel = (svc: PromptlyService, raw: Record<string, unknown>) => {
+    const mb = readTelemetryModelBucket(raw);
+    const hostLabelRaw = raw.hostModelLabelSanitized ?? raw.host_model_label_sanitized ?? raw.host_model_label;
+    const label =
+      typeof hostLabelRaw === "string" && hostLabelRaw.trim()
+        ? String(hostLabelRaw).trim().slice(0, TELEMETRY_HOST_MODEL_MAX_CHARS)
+        : null;
+    if (mb !== "unknown") {
+      rememberWebEventModel(svc, mb, label);
+      return { mb, label };
+    }
+    return lastWebModelByService[svc];
+  };
 
   const rememberWebModelLabel = (modelSlug: string, label: string | null) => {
     if (!webModelSeriesLabels.has(modelSlug)) {
@@ -3441,7 +3549,13 @@ export async function getAccountUsageStatsExtended(
     accumulatePrevHostEvent(doc.data() as Record<string, unknown>);
   }
 
-  for (const doc of hostPassiveResult.docs) {
+  const hostDocsChronological = [...hostPassiveResult.docs].sort(
+    (a, b) =>
+      readEventClientOccurredMs(a.data() as Record<string, unknown>) -
+      readEventClientOccurredMs(b.data() as Record<string, unknown>)
+  );
+
+  for (const doc of hostDocsChronological) {
     const raw = doc.data() as Record<string, unknown>;
     const utcDay = readAnalyticsUtcDay(raw);
     if (!utcDay || !hostByDayScratch.has(utcDay)) {
@@ -3455,10 +3569,7 @@ export async function getAccountUsageStatsExtended(
     const isMirror = sourceRaw === "optimize_api";
 
     const svc = normalizePromptlyService(raw.service);
-    const mb = readTelemetryModelBucket(raw);
-    const hostLabelRaw = raw.hostModelLabelSanitized ?? raw.host_model_label_sanitized;
-    const hostLabel =
-      typeof hostLabelRaw === "string" && hostLabelRaw.trim() ? String(hostLabelRaw).trim() : null;
+    const { mb, label: hostLabel } = readEffectiveWebEventModel(svc, raw);
 
     if (!isEngagement && !isComposer) {
       const catalogKey = `${svc}:${mb}`;
@@ -3502,13 +3613,7 @@ export async function getAccountUsageStatsExtended(
         row.screen_time_ms_svc[svc] += durMs;
         row.engagement_segment_count += 1;
         if (trackWebModelSeries && svc === webModelService) {
-          const hmb = readTelemetryModelBucket(raw);
-          const hostLabelRaw = raw.hostModelLabelSanitized ?? raw.host_model_label_sanitized;
-          const hostLabel =
-            typeof hostLabelRaw === "string" && hostLabelRaw.trim()
-              ? String(hostLabelRaw).trim().slice(0, TELEMETRY_HOST_MODEL_MAX_CHARS)
-              : null;
-          addWebModelEngagementMs(bucketKeyForDay(utcDay), hmb, hostLabel, engagementCategory, durMs);
+          addWebModelEngagementMs(bucketKeyForDay(utcDay), mb, hostLabel, engagementCategory, durMs);
         }
       }
       continue;

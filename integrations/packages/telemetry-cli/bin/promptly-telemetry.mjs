@@ -314,6 +314,43 @@ function markSessionStarted(tool, sessionId, atMs = Date.now()) {
   saveDraftTimingSessions(tool, sessions);
 }
 
+function rememberSessionScreenModel(tool, sessionId, modelMeta) {
+  const sid = String(sessionId || "").trim();
+  const bucket = String(modelMeta?.model_bucket || "").trim();
+  if (!sid || !bucket || bucket === "unknown") return;
+  const sessions = loadDraftTimingSessions(tool);
+  const prev = sessions[sid] && typeof sessions[sid] === "object" ? sessions[sid] : {};
+  sessions[sid] = {
+    ...prev,
+    screen_model_label: modelMeta?.model_label || prev.screen_model_label || null,
+    screen_model_bucket: bucket,
+    updated_at: Date.now()
+  };
+  saveDraftTimingSessions(tool, sessions);
+}
+
+function mergeSessionScreenModelMeta(tool, sessionId, modelMeta = {}) {
+  const bucket = String(modelMeta?.model_bucket || "").trim();
+  if (bucket && bucket !== "unknown") {
+    return {
+      model_label: modelMeta?.model_label || null,
+      model_bucket: bucket
+    };
+  }
+  const sid = String(sessionId || "").trim();
+  if (!sid) {
+    return { model_label: modelMeta?.model_label || null, model_bucket: "unknown" };
+  }
+  const entry = loadDraftTimingSessions(tool)[sid];
+  if (entry?.screen_model_bucket && entry.screen_model_bucket !== "unknown") {
+    return {
+      model_label: entry.screen_model_label || modelMeta?.model_label || null,
+      model_bucket: entry.screen_model_bucket
+    };
+  }
+  return { model_label: modelMeta?.model_label || null, model_bucket: "unknown" };
+}
+
 function markReadingIdleStart(tool, sessionId, atMs = Date.now()) {
   const sid = String(sessionId || "").trim();
   if (!sid) return;
@@ -356,11 +393,12 @@ function flushReadingIdleSegment(tool, sessionId, agentAccountEmail, modelMeta, 
   };
   saveDraftTimingSessions(tool, sessions);
   if (rawMs < ENGAGEMENT_MIN_MS) return null;
+  const resolvedModel = mergeSessionScreenModelMeta(tool, sessionId, modelMeta);
   return buildReadingIdleSegment(
     tool,
     Math.min(1_800_000, Math.floor(rawMs)),
     agentAccountEmail,
-    modelMeta
+    resolvedModel
   );
 }
 
@@ -1591,6 +1629,7 @@ function hookEventToTelemetry(input, tool) {
   if (eventName.includes("sessionend") || (hasSessionEnd && !hasPrompt)) {
     const dur = resolveSessionEndDurationMs(input);
     if (dur !== null) {
+      const resolvedModel = mergeSessionScreenModelMeta(tool, sessionId, modelMeta);
       return {
         tool,
         interaction_kind: "engagement_segment",
@@ -1598,7 +1637,7 @@ function hookEventToTelemetry(input, tool) {
         duration_ms: dur,
         client_occurred_ms: now,
         agent_account_email: agentAccountEmail,
-        ...modelMeta
+        ...resolvedModel
       };
     }
     return null;
@@ -1673,6 +1712,12 @@ async function cmdHook(flags) {
     const response = emitResponseEndEvents(tool, input, agentAccountEmail, modelMeta);
     if (response.event) {
       event = response.event;
+      if (sessionId) {
+        rememberSessionScreenModel(tool, sessionId, {
+          model_label: response.event.model_label,
+          model_bucket: response.event.model_bucket
+        });
+      }
     } else if (!event || event.interaction_kind === "send") {
       event = null;
     }
@@ -1681,15 +1726,25 @@ async function cmdHook(flags) {
     }
   }
   if (event) {
+    if (sessionId) {
+      const eventModel = {
+        model_label: event.model_label || null,
+        model_bucket: event.model_bucket || "unknown"
+      };
+      if (event.interaction_kind === "send" || event.interaction_kind === "response_latency") {
+        rememberSessionScreenModel(tool, sessionId, eventModel);
+      }
+    }
     if (event.interaction_kind === "send" && sessionId) {
+      const sendModel = mergeSessionScreenModelMeta(tool, sessionId, {
+        model_label: event.model_label,
+        model_bucket: event.model_bucket
+      });
       const readingIdle = flushReadingIdleSegment(
         tool,
         sessionId,
         event.agent_account_email,
-        {
-          model_label: event.model_label,
-          model_bucket: event.model_bucket
-        }
+        sendModel
       );
       if (readingIdle) {
         enqueueEvent(tool, readingIdle);
@@ -1703,10 +1758,7 @@ async function cmdHook(flags) {
             sessionId,
             draftMs,
             event.agent_account_email,
-            {
-              model_label: event.model_label,
-              model_bucket: event.model_bucket
-            }
+            sendModel
           )
         );
       }

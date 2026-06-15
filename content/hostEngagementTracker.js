@@ -22,6 +22,25 @@
     return tabVisible && !destroyed;
   }
 
+  /** @type {(() => { label: string; bucket: string }) | null} */
+  let getModelMeta = null;
+
+  function readModelMeta() {
+    if (typeof getModelMeta === "function") {
+      try {
+        const meta = getModelMeta();
+        if (meta && typeof meta === "object") {
+          const label = String(meta.label || "").trim().slice(0, 120);
+          const bucket = String(meta.bucket || "unknown").trim().slice(0, 48) || "unknown";
+          return { label, bucket };
+        }
+      } catch {
+        /* ignore scrape errors */
+      }
+    }
+    return { label: "", bucket: "unknown" };
+  }
+
   function flushCurrentSegment() {
     if (!enqueueRow || destroyed || !phaseStartedMs) {
       return;
@@ -33,12 +52,21 @@
       return;
     }
     const durationMs = Math.min(MAX_SEGMENT_MS, rawMs);
+    const modelMeta = readModelMeta();
     enqueueRow({
       interaction_kind: "engagement_segment",
       engagement_category: phase,
       duration_ms: durationMs,
       service: activeService === "unknown" ? "unknown" : String(activeService),
-      client_occurred_ms: now
+      client_occurred_ms: now,
+      ...(modelMeta.label
+        ? {
+            host_model_label: modelMeta.label,
+            host_model_bucket: modelMeta.bucket
+          }
+        : modelMeta.bucket !== "unknown"
+          ? { host_model_bucket: modelMeta.bucket }
+          : {})
     });
     phaseStartedMs = now;
   }
@@ -116,7 +144,7 @@
   }
 
   /**
-   * @param {{ site: string, isDraftSessionActive?: () => boolean }} cfg
+   * @param {{ site: string, isDraftSessionActive?: () => boolean, getModelMeta?: () => { label: string, bucket: string } }} cfg
    * @param {(row: Record<string, unknown>) => void} enqueue
    */
   function install(cfg, enqueue) {
@@ -124,6 +152,7 @@
     activeService = String(cfg?.site || "unknown");
     enqueueRow = typeof enqueue === "function" ? enqueue : null;
     isDraftSessionActive = typeof cfg?.isDraftSessionActive === "function" ? cfg.isDraftSessionActive : null;
+    getModelMeta = typeof cfg?.getModelMeta === "function" ? cfg.getModelMeta : null;
     phase = "reading_idle";
     pendingWaiting = false;
     tabVisible = document.visibilityState === "visible";
@@ -141,6 +170,7 @@
     stopHeartbeat();
     enqueueRow = null;
     isDraftSessionActive = null;
+    getModelMeta = null;
     pendingWaiting = false;
     phaseStartedMs = 0;
   }

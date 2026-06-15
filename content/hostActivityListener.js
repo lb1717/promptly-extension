@@ -407,6 +407,8 @@
     }
   }
 
+  let lastModelMeta = { label: "", bucket: "unknown" };
+
   function scrapeModelMeta(site) {
     let meta = { label: "", bucket: "unknown" };
     try {
@@ -418,6 +420,14 @@
       meta = { label: "", bucket: "unknown" };
     }
     return meta;
+  }
+
+  function currentModelMeta() {
+    const meta = scrapeModelMeta(activeCfg?.site || "unknown");
+    if (meta.bucket !== "unknown" || meta.label) {
+      lastModelMeta = meta;
+    }
+    return lastModelMeta.bucket !== "unknown" || lastModelMeta.label ? lastModelMeta : meta;
   }
 
   /**
@@ -442,6 +452,7 @@
     lastComposeTelemetryAt = now;
     const wordsRough = text.split(/\s+/).filter(Boolean).length;
     const meta = scrapeModelMeta(cfg.site);
+    lastModelMeta = meta;
     const draftSnap = readDraftSnapshot();
     enqueueRow({
       interaction_kind: "composer_input",
@@ -558,6 +569,7 @@
     lastSendAt = nowMs;
 
     const meta = scrapeModelMeta(cfg.site);
+    lastModelMeta = meta;
     const draft = consumeDraftMetrics();
 
     const sendRow = {
@@ -613,7 +625,8 @@
       window.PromptlyHostEngagementTracker.install(
         {
           site: cfg.site,
-          isDraftSessionActive: isDraftSessionValid
+          isDraftSessionActive: isDraftSessionValid,
+          getModelMeta: currentModelMeta
         },
         enqueueRow
       );
