@@ -7,6 +7,7 @@ import {
 import {
   getVendorUsageSettings,
   persistVendorUsageSnapshots,
+  storeVendorUsageTokens,
   type VendorUsageProfileSnapshot,
   type VendorUsageSyncDiagnostics
 } from "@/lib/server/vendorUsage";
@@ -43,6 +44,8 @@ function readSnapshot(raw: unknown): VendorUsageProfileSnapshot | null {
     vendor_email: typeof row.vendor_email === "string" ? row.vendor_email.slice(0, 320) : null,
     plan_slug: typeof row.plan_slug === "string" ? row.plan_slug.slice(0, 64) : null,
     plan_display: typeof row.plan_display === "string" ? row.plan_display.slice(0, 120) : null,
+    plan_organization_type:
+      typeof row.plan_organization_type === "string" ? row.plan_organization_type.slice(0, 64) : null,
     primary_window: readWindow(row.primary_window),
     secondary_window: readWindow(row.secondary_window),
     sync_error: typeof row.sync_error === "string" ? row.sync_error.slice(0, 500) : null,
@@ -95,6 +98,10 @@ export async function POST(request: Request) {
       rawDiagnostics && typeof rawDiagnostics === "object" && typeof (rawDiagnostics as { at_ms?: unknown }).at_ms === "number"
         ? (rawDiagnostics as VendorUsageSyncDiagnostics)
         : null;
+    const rawTokens = (body as { vendor_tokens?: unknown }).vendor_tokens;
+    if (rawTokens) {
+      await storeVendorUsageTokens(user.uid, rawTokens);
+    }
     const written = await persistVendorUsageSnapshots(user.uid, snapshots, clearProviders, syncDiagnostics);
     return NextResponse.json({ ok: true, written }, { status: 200, headers: buildPromptlyCorsHeaders(origin) });
   } catch (error) {

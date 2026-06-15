@@ -55,6 +55,7 @@ type VendorUsagePayload = {
     total_secondary_window_dollars_used: number;
     total_secondary_window_dollars_unused: number;
   };
+  can_live_refresh?: boolean;
 };
 
 function formatResetCountdown(resetsAt: string | null): string {
@@ -167,7 +168,7 @@ export default function VendorUsageSection({ user }: { user: User | null }) {
 
   const syncCommand = useMemo(() => vendorUsageSyncCommand(syncOs), [syncOs]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async ({ live = false }: { live?: boolean } = {}) => {
     if (!user) {
       setData(null);
       setError("Sign in to load vendor usage.");
@@ -177,6 +178,25 @@ export default function VendorUsageSection({ user }: { user: User | null }) {
     setError(null);
     try {
       const token = await user.getIdToken(false);
+      if (live) {
+        const res = await fetch("/api/account/vendor-usage", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ refresh: true })
+        });
+        const body = await res.json().catch(() => ({}));
+        if (res.status === 400 && body.error === "no_tokens") {
+          setError("Run the sync command once from your computer, then Refresh will fetch live usage.");
+        } else if (!res.ok) {
+          throw new Error(body.error || body.message || `HTTP ${res.status}`);
+        } else {
+          setData(body as VendorUsagePayload);
+          return;
+        }
+      }
       const res = await fetch("/api/account/vendor-usage", {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -284,13 +304,16 @@ export default function VendorUsageSection({ user }: { user: User | null }) {
             activity charts.
           </p>
           {lastSyncedMs > 0 ? (
-            <p className="mt-1 text-xs text-faint">Last synced {formatSyncedAt(lastSyncedMs)}</p>
+            <p className="mt-1 text-xs text-faint">
+              Last synced {formatSyncedAt(lastSyncedMs)}
+              {data?.can_live_refresh ? " · Refresh fetches live usage from your connected subscriptions" : null}
+            </p>
           ) : null}
         </div>
         <button
           type="button"
           disabled={loading}
-          onClick={() => void load()}
+          onClick={() => void load({ live: true })}
           className="rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-ink hover:bg-cream-dark disabled:opacity-50"
         >
           {loading ? "Refreshing…" : "Refresh"}
@@ -325,7 +348,8 @@ export default function VendorUsageSection({ user }: { user: User | null }) {
       {syncCopied ? (
         <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50/80 px-3 py-2 text-sm text-emerald-900">
           Command copied — paste in {syncOs === "mac" ? "Terminal.app" : "PowerShell"} (not a remote SSH session),
-          press Enter, then click <span className="font-medium">Refresh</span>.
+          press Enter once to connect. After that, use <span className="font-medium">Refresh</span> anytime for live
+          usage — no need to run the command again.
         </div>
       ) : null}
 

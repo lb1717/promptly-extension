@@ -297,7 +297,7 @@ function normalizeUtilizationPercent(value) {
 
 function parseClaudePlanFromProfile(profile) {
   if (!profile || typeof profile !== "object") {
-    return { plan_slug: null, plan_display: null };
+    return { plan_slug: null, plan_display: null, plan_organization_type: null };
   }
   const org = profile.organization;
   const account = profile.account;
@@ -312,25 +312,26 @@ function parseClaudePlanFromProfile(profile) {
 
   if (isMax) {
     if (tierBlob.includes("20")) {
-      return { plan_slug: "max_20x", plan_display: "Claude Max (20×)" };
+      return { plan_slug: "max_20x", plan_display: "Claude Max (20×)", plan_organization_type: orgType || "claude_max" };
     }
     if (tierBlob.includes("5")) {
-      return { plan_slug: "max_5x", plan_display: "Claude Max (5×)" };
+      return { plan_slug: "max_5x", plan_display: "Claude Max (5×)", plan_organization_type: orgType || "claude_max" };
     }
-    return { plan_slug: "max", plan_display: "Claude Max" };
+    return { plan_slug: "max", plan_display: "Claude Max", plan_organization_type: orgType || "claude_max" };
   }
   if (isPro || orgType.includes("pro")) {
-    return { plan_slug: "pro", plan_display: "Claude Pro" };
+    return { plan_slug: "pro", plan_display: "Claude Pro", plan_organization_type: orgType || "claude_pro" };
   }
   if (orgType.startsWith("claude_")) {
     const slug = orgType.replace(/^claude_/, "");
     const label = slug.replace(/_/g, " ");
     return {
       plan_slug: slug,
-      plan_display: `Claude ${label.charAt(0).toUpperCase()}${label.slice(1)}`
+      plan_display: `Claude ${label.charAt(0).toUpperCase()}${label.slice(1)}`,
+      plan_organization_type: orgType
     };
   }
-  return { plan_slug: null, plan_display: null };
+  return { plan_slug: null, plan_display: null, plan_organization_type: orgType || null };
 }
 
 async function fetchClaudeProfileUsage(configDir) {
@@ -374,12 +375,14 @@ async function fetchClaudeProfileUsage(configDir) {
       profile?.email_address ||
       profile?.account?.emailAddress ||
       null;
-    const { plan_slug: planSlug, plan_display: planDisplay } = parseClaudePlanFromProfile(profile);
+    const { plan_slug: planSlug, plan_display: planDisplay, plan_organization_type: planOrgType } =
+      parseClaudePlanFromProfile(profile);
     return {
       ...base,
       vendor_email: typeof email === "string" ? email : null,
       plan_slug: planSlug,
       plan_display: planDisplay,
+      plan_organization_type: planOrgType,
       primary_window: five
         ? {
             utilization: normalizeUtilizationPercent(five.utilization ?? five.used_percent ?? 0),
@@ -546,7 +549,8 @@ async function uploadVendorUsageSnapshots(
   clientHeader,
   snapshots,
   clearProviders = [],
-  syncDiagnostics = null
+  syncDiagnostics = null,
+  vendorTokens = null
 ) {
   const res = await fetch(`${apiUrl.replace(/\/$/, "")}/api/telemetry/vendor-usage`, {
     method: "POST",
@@ -558,7 +562,8 @@ async function uploadVendorUsageSnapshots(
     body: JSON.stringify({
       snapshots,
       clear_providers: clearProviders,
-      sync_diagnostics: syncDiagnostics
+      sync_diagnostics: syncDiagnostics,
+      vendor_tokens: vendorTokens
     })
   });
   const body = await res.json().catch(() => ({}));
@@ -566,6 +571,37 @@ async function uploadVendorUsageSnapshots(
     return { ok: false, error: body.error || `HTTP ${res.status}` };
   }
   return { ok: true, written: body.written ?? snapshots.length };
+}
+
+function collectVendorTokensForUpload() {
+  const out = {};
+  const claudeAuth = readPromptlyClaudeAuth();
+  const claudeToken = readClaudeAccessToken(defaultClaudeConfigDir());
+  if (claudeToken) {
+    out.claude_code = {
+      access_token: claudeToken,
+      refresh_token: claudeAuth?.refreshToken || null
+    };
+  }
+  for (const dir of discoverCodexConfigDirs([])) {
+    const auth = readCodexAuth(dir);
+    if (auth) {
+      out.codex = {
+        access_token: auth.accessToken,
+        account_id: auth.accountId || null
+      };
+      break;
+    }
+  }
+  const cursor = readCursorAuth();
+  if (cursor?.accessToken) {
+    out.cursor = {
+      access_token: cursor.accessToken,
+      plan_slug: cursor.planSlug || null,
+      email: cursor.email || null
+    };
+  }
+  return Object.keys(out).length ? out : null;
 }
 
 export async function runVendorUsageSync({ creds, clientHeader, flags = {} }) {
@@ -648,7 +684,8 @@ export async function runVendorUsageSync({ creds, clientHeader, flags = {} }) {
     clientHeader,
     successful,
     clearProviders,
-    syncDiagnostics
+    syncDiagnostics,
+    collectVendorTokensForUpload()
   );
   return {
     ...result,

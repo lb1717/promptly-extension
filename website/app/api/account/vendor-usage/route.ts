@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   getVendorUsagePayload,
+  refreshVendorUsageLive,
   updateVendorUsageSettings,
   type VendorUsageSettings
 } from "@/lib/server/vendorUsage";
@@ -39,6 +40,41 @@ export async function PATCH(request: Request) {
     await updateVendorUsageSettings(user.uid, patch);
     const payload = await getVendorUsagePayload(user.uid);
     return NextResponse.json({ ok: true, ...payload });
+  } catch (error) {
+    return NextResponse.json({ error: String(error instanceof Error ? error.message : error) }, { status: 500 });
+  }
+}
+
+export async function POST(request: Request) {
+  let user;
+  try {
+    ({ user } = await requireWebFirebaseUser(request));
+  } catch (error) {
+    return NextResponse.json({ error: String(error instanceof Error ? error.message : error) }, { status: 401 });
+  }
+  try {
+    const body = await request.json().catch(() => ({}));
+    const refresh = body && typeof body === "object" && (body as { refresh?: unknown }).refresh === true;
+    let refreshResult: { refreshed: number; error?: string } | null = null;
+    if (refresh) {
+      refreshResult = await refreshVendorUsageLive(user.uid);
+      if (refreshResult.error === "no_tokens") {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: "no_tokens",
+            message: "Run the sync command once from your computer to connect your subscriptions."
+          },
+          { status: 400 }
+        );
+      }
+    }
+    const payload = await getVendorUsagePayload(user.uid);
+    return NextResponse.json({
+      ok: true,
+      ...payload,
+      live_refresh: refreshResult
+    });
   } catch (error) {
     return NextResponse.json({ error: String(error instanceof Error ? error.message : error) }, { status: 500 });
   }

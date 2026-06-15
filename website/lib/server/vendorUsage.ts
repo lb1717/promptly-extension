@@ -7,6 +7,12 @@ import {
   normalizeUtilizationPercent,
   resolveVendorPlanPricing
 } from "@/lib/vendorPlanPricing";
+import { fetchLiveVendorUsageSnapshots } from "@/lib/server/vendorUsageFetch";
+import {
+  decryptVendorTokens,
+  encryptVendorTokens,
+  type StoredVendorTokens
+} from "@/lib/server/vendorUsageSecrets";
 
 export type VendorUsageProvider = "claude_code" | "codex" | "cursor";
 
@@ -24,6 +30,7 @@ export type VendorUsageProfileSnapshot = {
   vendor_email: string | null;
   plan_slug: string | null;
   plan_display: string | null;
+  plan_organization_type?: string | null;
   primary_window: VendorUsageWindow | null;
   secondary_window: VendorUsageWindow | null;
   sync_error: string | null;
@@ -119,10 +126,17 @@ function readWindow(raw: unknown): VendorUsageWindow | null {
 function enrichProfile(row: VendorUsageProfileSnapshot): VendorUsageProfileView {
   const vendor =
     row.provider === "claude_code" ? "anthropic" : row.provider === "codex" ? "openai" : "cursor";
-  const pricing = resolveVendorPlanPricing(vendor, row.plan_slug, row.plan_display);
+  const orgType = row.plan_organization_type?.replace(/^claude_/, "") ?? null;
+  const pricing = resolveVendorPlanPricing(
+    vendor,
+    row.plan_slug || orgType || row.plan_organization_type,
+    row.plan_display
+  );
   const monthly = pricing?.monthlyUsd ?? null;
+  const planDisplay = row.plan_display || pricing?.displayName || null;
   return {
     ...row,
+    plan_display: planDisplay,
     pricing_key: pricing?.key ?? null,
     plan_monthly_usd: monthly,
     primary_dollars_used:
@@ -241,6 +255,8 @@ export async function listVendorUsageProfiles(uid: string): Promise<VendorUsageP
       vendor_email: typeof raw.vendor_email === "string" ? raw.vendor_email : null,
       plan_slug: typeof raw.plan_slug === "string" ? raw.plan_slug : null,
       plan_display: typeof raw.plan_display === "string" ? raw.plan_display : null,
+      plan_organization_type:
+        typeof raw.plan_organization_type === "string" ? raw.plan_organization_type : null,
       primary_window: readWindow(raw.primary_window),
       secondary_window: readWindow(raw.secondary_window),
       sync_error: typeof raw.sync_error === "string" ? raw.sync_error : null,
@@ -259,6 +275,7 @@ export async function getVendorUsagePayload(uid: string) {
     listVendorUsageProfiles(uid)
   ]);
   const settings = normalizeSettings(settingsSnap.exists ? settingsSnap.data() : null);
+  const canLiveRefresh = Boolean(settingsSnap.exists && settingsSnap.data()?.encrypted_vendor_tokens);
   const rawDiagnostics = settingsSnap.exists ? settingsSnap.data()?.last_sync_diagnostics : null;
   const lastSyncDiagnostics =
     rawDiagnostics &&
@@ -275,6 +292,7 @@ export async function getVendorUsagePayload(uid: string) {
   return {
     settings,
     profiles,
+    can_live_refresh: canLiveRefresh,
     last_sync_diagnostics: lastSyncDiagnostics,
     claude_profiles: claudeProfiles,
     codex_profiles: codexProfiles,
@@ -286,4 +304,86 @@ export async function getVendorUsagePayload(uid: string) {
       total_secondary_window_dollars_unused: Math.round(totalSecondaryUnused * 100) / 100
     }
   };
+}
+
+function sanitizeStoredVendorTokens(raw: unknown): StoredVendorTokens | null {
+  if (!raw || typeof raw !== "object") return null;
+  const row = raw as Record<string, unknown>;
+  const out: StoredVendorTokens = {};
+  const claude = row.claude_code;
+  if (claude && typeof claude === "object") {
+    const c = claude as Record<string, unknown>;
+    const access = typeof c.access_token === "string" ? c.access_token.trim() : "";
+    if (access.length > 20) {
+      out.claude_code = {
+        access_token: access,
+        refresh_token: typeof c.refresh_token === "string" ? c.refresh_token : null
+      };
+    }
+  }
+  const codex = row.codex;
+  if (codex && typeof codex === "object") {
+    const c = codex as Record<string, unknown>;
+    const access = typeof c.access_token === "string" ? c.access_token.trim() : "";
+    if (access.length > 20) {
+      out.codex = {
+        access_token: access,
+        account_id: typeof c.account_id === "string" ? c.account_id : null
+      };
+    }
+  }
+  const cursor = row.cursor;
+  if (cursor && typeof cursor === "object") {
+    const c = cursor as Record<string, unknown>;
+    const access = typeof c.access_token === "string" ? c.access_token.trim() : "";
+    if (access.length > 20) {
+      out.cursor = {
+        access_token: access,
+        plan_slug: typeof c.plan_slug === "string" ? c.plan_slug : null,
+        email: typeof c.email === "string" ? c.email : null
+      };
+    }
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+export async function storeVendorUsageTokens(uid: string, rawTokens: unknown): Promise<boolean> {
+  const tokens = sanitizeStoredVendorTokens(rawTokens);
+  if (!tokens) return false;
+  await settingsRef(uid).set(
+    {
+      encrypted_vendor_tokens: encryptVendorTokens(tokens),
+      vendor_tokens_updated_at: FieldValue.serverTimestamp()
+    },
+    { merge: true }
+  );
+  return true;
+}
+
+export async function getVendorUsageTokens(uid: string): Promise<StoredVendorTokens | null> {
+  const snap = await settingsRef(uid).get();
+  if (!snap.exists) return null;
+  const blob = snap.data()?.encrypted_vendor_tokens;
+  return decryptVendorTokens(typeof blob === "string" ? blob : null);
+}
+
+export async function refreshVendorUsageLive(uid: string): Promise<{ refreshed: number; error?: string }> {
+  const tokens = await getVendorUsageTokens(uid);
+  if (!tokens) {
+    return { refreshed: 0, error: "no_tokens" };
+  }
+  const existing = await listVendorUsageProfiles(uid);
+  const existingIds = Object.fromEntries(existing.map((row) => [row.provider, row.profile_id])) as Partial<
+    Record<VendorUsageProvider, string>
+  >;
+  const snapshots = await fetchLiveVendorUsageSnapshots(tokens, existingIds);
+  if (!snapshots.length) {
+    return { refreshed: 0, error: "fetch_failed" };
+  }
+  await persistVendorUsageSnapshots(uid, snapshots, [], {
+    at_ms: Date.now(),
+    skipped: [],
+    skip_details: {}
+  });
+  return { refreshed: snapshots.length };
 }
