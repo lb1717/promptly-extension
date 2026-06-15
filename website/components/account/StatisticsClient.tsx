@@ -104,7 +104,7 @@ const CHART_FONT_FAMILY = "var(--font-roboto-chart), Roboto, sans-serif";
 /** All chart axis ticks — dates, counts, units, and category labels on axes. */
 const CHART_Y_TICK = { fill: "#5C5C5C", fontSize: 10, fontFamily: CHART_FONT_FAMILY };
 const CHART_Y_TICK_11 = { fill: "#5C5C5C", fontSize: 11, fontFamily: CHART_FONT_FAMILY };
-/** Date / bucket labels on chart X axes (cream card backgrounds). */
+/** Date / bucket labels on chart X axes (white card backgrounds). */
 const CHART_X_DATE_TICK = {
   fill: "#2a2a2a",
   fontSize: 11,
@@ -112,6 +112,8 @@ const CHART_X_DATE_TICK = {
   fontFamily: CHART_FONT_FAMILY
 };
 const CHART_X_DATE_STROKE = "#525252";
+const CHART_GRID_STROKE = "rgba(0,0,0,0.06)";
+const CHART_CURSOR_FILL = "rgba(0,0,0,0.04)";
 const CHART_AXIS_LABEL = (value: string, fill = "#5C5C5C") => ({
   value,
   angle: -90 as const,
@@ -137,7 +139,7 @@ const CHART_TOOLTIP_DARK_STYLE = {
 };
 const CHART_LEGEND_STYLE = { fontSize: 11, paddingTop: 8, fontFamily: CHART_FONT_FAMILY };
 const CHART_LEGEND_STYLE_COMPACT = { fontSize: 11, paddingTop: 4, fontFamily: CHART_FONT_FAMILY };
-/** Derived score emphasis (readable on cream cards). */
+/** Derived score emphasis (readable on white chart cards). */
 const COLOR_SCORE_GREEN = "#15803d";
 const COLOR_VOLUME_DELTA_DOWN = "#dc2626";
 const COLOR_VOLUME_TREND = "#525252";
@@ -1665,7 +1667,7 @@ function ServiceEngagementDonut({
               innerRadius="40%"
               outerRadius="72%"
               paddingAngle={hasSlices && slices.length > 1 ? 2 : 0}
-              stroke="#FAF8F4"
+              stroke="#ffffff"
               strokeWidth={2}
               label={hasSlices ? renderEngagementPiePercentLabel : false}
               labelLine={false}
@@ -1816,7 +1818,7 @@ function ModeMiniChart({
     <div className="h-56 w-full">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} layout="vertical" margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.08)" />
           <XAxis type="number" stroke="#8A8A8A" tick={CHART_Y_TICK} />
           <YAxis dataKey="name" type="category" width={92} stroke="#8A8A8A" tick={CHART_Y_TICK_11} />
           <Tooltip contentStyle={CHART_TOOLTIP_DARK_STYLE} />
@@ -3486,7 +3488,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
           ) : null}
 
           {/* Prompt volume */}
-          <section className="mb-8 rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4">
+          <section className="mb-8 rounded-2xl border border-line bg-white p-3 shadow-card sm:p-4">
             <div className="mb-3 flex items-center justify-between gap-3">
               <h2 className="text-base font-semibold uppercase tracking-[0.22em] text-ink">Prompt volume</h2>
               {promptVolumePeriodChange ? (
@@ -3510,11 +3512,11 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
               <ResponsiveContainer width="100%" height="100%">
                 {statsGroupMode === "model" && activeModelChartSeries.length ? (
                   <BarChart data={modelPromptVolumeChartRows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                    <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
                     <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
                     <YAxis stroke="#8A8A8A" allowDecimals={false} width={32} tick={CHART_Y_TICK} />
                     <Tooltip
-                      cursor={{ fill: "rgba(255,255,255,0.04)" }}
+                      cursor={{ fill: CHART_CURSOR_FILL }}
                       contentStyle={CHART_TOOLTIP_STYLE}
                       formatter={(value: number, name: string) => [formatChartNumber(value), name]}
                     />
@@ -3535,11 +3537,11 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                   </BarChart>
                 ) : (
                 <ComposedChart data={promptVolumeChartRows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
                   <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
                   <YAxis stroke="#8A8A8A" allowDecimals={false} width={32} tick={CHART_Y_TICK} />
                   <Tooltip
-                    cursor={{ fill: "rgba(255,255,255,0.04)" }}
+                    cursor={{ fill: CHART_CURSOR_FILL }}
                     content={({ active, payload, label }) => {
                       if (!active || !payload?.length) return null;
                       const items = payload.filter((entry) => entry.dataKey !== "volume_trend");
@@ -3612,7 +3614,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
 
           {screenTimeHasData ? (
             <>
-              <section className="mb-8 w-full rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4">
+              <section className="mb-8 w-full rounded-2xl border border-line bg-white p-3 shadow-card sm:p-4">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <h2 className="text-base font-semibold uppercase tracking-[0.22em] text-ink">
                     {statsGroupMode === "model" ? "Screen time by model" : "Screen time by service"}
@@ -3640,11 +3642,11 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                                 data={modelScreenTimeOverTimeRows}
                                 margin={{ top: 4, right: 8, bottom: 0, left: 0 }}
                               >
-                                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                                <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
                                 <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
                                 <YAxis stroke="#8A8A8A" allowDecimals={false} width={32} tick={CHART_Y_TICK} unit=" min" />
                                 <Tooltip
-                                  cursor={{ fill: "rgba(255,255,255,0.04)" }}
+                                  cursor={{ fill: CHART_CURSOR_FILL }}
                                   contentStyle={CHART_TOOLTIP_STYLE}
                                   formatter={(value: number, name: string) => [`${formatChartNumber(value)} min`, name]}
                                 />
@@ -3695,7 +3697,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                               margin={{ top: 4, right: barLabelRightMargin(screenTimeByModelInstantRows), bottom: 4, left: 4 }}
                               barCategoryGap="12%"
                             >
-                              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" horizontal={false} />
+                              <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} horizontal={false} />
                               <XAxis type="number" stroke="#8A8A8A" tick={CHART_Y_TICK} unit=" min" />
                               <YAxis
                                 type="category"
@@ -3746,11 +3748,11 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                             data={screenTimeOverTimeChartRows}
                             margin={{ top: 4, right: 8, bottom: 0, left: 0 }}
                           >
-                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                            <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
                             <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
                             <YAxis stroke="#8A8A8A" allowDecimals={false} width={32} tick={CHART_Y_TICK} unit=" min" />
                             <Tooltip
-                              cursor={{ fill: "rgba(255,255,255,0.04)" }}
+                              cursor={{ fill: CHART_CURSOR_FILL }}
                               contentStyle={CHART_TOOLTIP_STYLE}
                               formatter={(value: number, name: string) => [`${formatChartNumber(value)} min`, name]}
                             />
@@ -3790,7 +3792,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                           margin={{ top: 4, right: barLabelRightMargin(screenTimeByServiceRows), bottom: 4, left: 4 }}
                           barCategoryGap="12%"
                         >
-                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" horizontal={false} />
+                          <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} horizontal={false} />
                           <XAxis type="number" stroke="#8A8A8A" tick={CHART_Y_TICK} unit=" min" />
                           <YAxis
                             type="category"
@@ -3821,7 +3823,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                 )}
               </section>
 
-              <section className="mb-8 w-full rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4">
+              <section className="mb-8 w-full rounded-2xl border border-line bg-white p-3 shadow-card sm:p-4">
                 <div className="mb-3 grid grid-cols-1 items-center gap-x-2 gap-y-2 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
                   <h2 className="text-base font-semibold uppercase tracking-[0.22em] text-ink sm:justify-self-start">
                     How you spend your time
@@ -3851,11 +3853,11 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                             data={engagementOverTimeChartRows}
                             margin={{ top: 4, right: 8, bottom: 0, left: 0 }}
                           >
-                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                            <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
                             <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
                             <YAxis stroke="#8A8A8A" allowDecimals={false} width={32} tick={CHART_Y_TICK} unit=" min" />
                             <Tooltip
-                              cursor={{ fill: "rgba(255,255,255,0.04)" }}
+                              cursor={{ fill: CHART_CURSOR_FILL }}
                               contentStyle={CHART_TOOLTIP_STYLE}
                               formatter={(value: number, name: string) => [`${formatChartNumber(value)} min`, name]}
                             />
@@ -3942,7 +3944,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
               </section>
             </>
           ) : (
-            <section className="mb-8 w-full rounded-2xl border border-line bg-cream p-4 shadow-card sm:p-5">
+            <section className="mb-8 w-full rounded-2xl border border-line bg-white p-4 shadow-card sm:p-5">
               <h2 className="mb-1 text-base font-semibold uppercase tracking-[0.22em] text-ink">Screen time</h2>
               <p className="text-sm text-muted">
                 Screen time tracking starts with the latest extension or coding-agent plugins. Use ChatGPT, Claude, or
@@ -3953,7 +3955,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
           )}
 
           {promptLengthChartRows.length ? (
-            <section className="mb-8 w-full rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4">
+            <section className="mb-8 w-full rounded-2xl border border-line bg-white p-3 shadow-card sm:p-4">
               <h2 className="mb-1 text-base font-semibold uppercase tracking-[0.22em] text-ink">
                 Prompt length (words)
               </h2>
@@ -3968,7 +3970,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                     margin={{ top: 4, right: 12, bottom: 4, left: 4 }}
                     barCategoryGap="18%"
                   >
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" horizontal={false} />
+                    <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} horizontal={false} />
                     <XAxis type="number" stroke="#8A8A8A" tick={CHART_Y_TICK} allowDecimals />
                     <YAxis
                       type="category"
@@ -3993,7 +3995,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
           ) : null}
 
           {responseTimeSectionHasData ? (
-            <section className="mb-8 w-full rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4">
+            <section className="mb-8 w-full rounded-2xl border border-line bg-white p-3 shadow-card sm:p-4">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-base font-semibold uppercase tracking-[0.22em] text-ink">
                   {statsGroupMode === "model" ? "Average AI response time by model" : "Average AI response time"}
@@ -4015,11 +4017,11 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                             data={modelResponseTimeOverTimeRows}
                             margin={{ top: 4, right: 8, bottom: 0, left: 0 }}
                           >
-                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                            <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
                             <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
                             <YAxis stroke="#8A8A8A" width={40} tick={CHART_Y_TICK} unit=" s" allowDecimals />
                             <Tooltip
-                              cursor={{ fill: "rgba(255,255,255,0.04)" }}
+                              cursor={{ fill: CHART_CURSOR_FILL }}
                               contentStyle={CHART_TOOLTIP_STYLE}
                               formatter={(value: number, name: string) => [`${formatChartNumber(value)} s`, name]}
                             />
@@ -4069,7 +4071,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                         margin={{ top: 4, right: 12, bottom: 4, left: 4 }}
                         barCategoryGap="18%"
                       >
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" horizontal={false} />
+                        <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} horizontal={false} />
                         <XAxis type="number" stroke="#8A8A8A" tick={CHART_Y_TICK} unit=" s" allowDecimals />
                         <YAxis
                           type="category"
@@ -4098,11 +4100,11 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                   <div key="response-service-over-time" className="h-72 w-full sm:h-80">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={responseTimeOverTimeRows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                        <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
                         <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
                         <YAxis stroke="#8A8A8A" width={40} tick={CHART_Y_TICK} unit=" s" allowDecimals />
                         <Tooltip
-                          cursor={{ fill: "rgba(255,255,255,0.04)" }}
+                          cursor={{ fill: CHART_CURSOR_FILL }}
                           contentStyle={CHART_TOOLTIP_STYLE}
                           formatter={(value: number, name: string) => [`${formatChartNumber(value)} s`, name]}
                         />
@@ -4142,7 +4144,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                       margin={{ top: 4, right: 12, bottom: 4, left: 4 }}
                       barCategoryGap="18%"
                     >
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" horizontal={false} />
+                      <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} horizontal={false} />
                       <XAxis type="number" stroke="#8A8A8A" tick={CHART_Y_TICK} unit=" s" allowDecimals />
                       <YAxis
                         type="category"
@@ -4171,6 +4173,8 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
 
           <div className="my-10 border-t border-line" role="separator" />
 
+          <VendorUsageSection user={user} />
+
           <h2 className="mb-6 text-base font-semibold uppercase tracking-[0.22em] text-ink">Promptly Labs Diagnostics</h2>
 
           {/* Promptly impact scores (left) + average draft chart (right) */}
@@ -4181,7 +4185,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
               {promptDerivedScores?.efficiencyPercent != null ||
               promptDerivedScores?.qualityPercent != null ? (
                 <section
-                  className="flex w-full flex-col rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4 lg:w-1/2"
+                  className="flex w-full flex-col rounded-2xl border border-line bg-white p-3 shadow-card sm:p-4 lg:w-1/2"
                   style={{ minHeight: modelTimeChartRows.length ? modelTimeSectionHeight : undefined }}
                 >
                   <h2 className="mb-3 text-base font-semibold uppercase tracking-[0.22em] text-ink">Promptly impact</h2>
@@ -4218,7 +4222,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                 </section>
               ) : null}
               {modelTimeChartRows.length ? (
-                <section className="w-full rounded-2xl border border-line bg-cream p-3 shadow-card sm:p-4 lg:w-1/2">
+                <section className="w-full rounded-2xl border border-line bg-white p-3 shadow-card sm:p-4 lg:w-1/2">
                   <h2 className="mb-3 text-base font-semibold uppercase tracking-[0.22em] text-ink">
                     Average draft &amp; response time
                   </h2>
@@ -4231,7 +4235,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                         barCategoryGap="28%"
                         barGap={4}
                       >
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" horizontal={false} />
+                        <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} horizontal={false} />
                         <XAxis type="number" stroke="#8A8A8A" tick={CHART_Y_TICK} unit="s" />
                         <YAxis
                           type="category"
@@ -4273,12 +4277,12 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
           ) : null}
 
           {/*Latency */}
-          <section className="mb-12 rounded-2xl border border-line bg-cream p-6 backdrop-blur-md">
+          <section className="mb-12 rounded-2xl border border-line bg-white p-6 backdrop-blur-md">
             <h2 className="text-base font-semibold uppercase tracking-[0.22em] text-ink">Rewrite vs native turnaround time</h2>
             <div className="mt-4 h-96 w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={latencyChartRows} margin={{ top: 8, right: 12, bottom: 56, left: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
                   <XAxis dataKey="ai" stroke="#8A8A8A" tick={CHART_Y_TICK_11} />
                   <YAxis stroke="#8A8A8A" tick={CHART_Y_TICK_11} label={CHART_AXIS_LABEL("Seconds (avg)")} />
                   <Tooltip
@@ -4303,7 +4307,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
 
           {/* Pre-improve word count */}
           {preImproveWordHasData ? (
-            <section className="mb-12 rounded-2xl border border-line bg-cream p-6 backdrop-blur-md">
+            <section className="mb-12 rounded-2xl border border-line bg-white p-6 backdrop-blur-md">
               <h2 className="mb-3 text-base font-semibold uppercase tracking-[0.22em] text-ink">Words before Promptly</h2>
               {preImproveWordChangePercent !== null ? (
                 <p
@@ -4324,7 +4328,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                 <div className="mt-4 h-72 w-full">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={preImproveWordChartRows} margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                      <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
                       <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
                       <YAxis
                         stroke="#8A8A8A"
@@ -4370,11 +4374,11 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
 
           {/* Supporting technical */}
           <section className="mb-12 grid gap-10 lg:grid-cols-2">
-            <div className="rounded-2xl border border-line bg-cream-dark p-6">
+            <div className="rounded-2xl border border-line bg-white p-6">
               <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-faint">Improve mode mixes</h3>
               <ModeMiniChart modes={displayStats.breakdowns_from_events.mode} />
             </div>
-            <div className="rounded-2xl border border-line bg-cream-dark p-6">
+            <div className="rounded-2xl border border-line bg-white p-6">
               <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-faint">Billed Promptly tokens</h3>
               <div className="mt-4 h-64 w-full">
                 <ResponsiveContainer width="100%" height="100%">
@@ -4385,7 +4389,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                     }))}
                     margin={{ bottom: 8 }}
                   >
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                    <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
                     <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
                     <YAxis stroke="#8A8A8A" tick={CHART_Y_TICK} />
                     <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
@@ -4396,7 +4400,6 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
             </div>
           </section>
 
-          <VendorUsageSection user={user} />
         </>
       ) : null}
 

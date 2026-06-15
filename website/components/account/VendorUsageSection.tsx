@@ -270,7 +270,7 @@ export default function VendorUsageSection({ user }: { user: User | null }) {
 
   if (!unlocked) {
     return (
-      <section className="mb-8 w-full rounded-2xl border border-line bg-cream p-4 shadow-card sm:p-5">
+      <section className="mb-8 w-full rounded-2xl border border-line bg-white p-4 shadow-card sm:p-5">
         <h2 className="text-base font-semibold uppercase tracking-[0.22em] text-ink">AI plan usage</h2>
         <p className="mt-2 text-sm text-muted">Enter the preview password to view Claude Code and Codex subscription quotas.</p>
         <form
@@ -303,7 +303,7 @@ export default function VendorUsageSection({ user }: { user: User | null }) {
   }
 
   return (
-    <section className="mb-8 w-full rounded-2xl border border-line bg-cream p-4 shadow-card sm:p-5">
+    <section className="mb-8 w-full rounded-2xl border border-line bg-white p-4 shadow-card sm:p-5">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold uppercase tracking-[0.22em] text-ink">AI plan usage</h2>

@@ -22,11 +22,9 @@ import {
   BarChart,
   CartesianGrid,
   ComposedChart,
-  Legend,
   Line,
   LineChart,
   ResponsiveContainer,
-  Tooltip,
   XAxis,
   YAxis
 } from "recharts";
@@ -41,14 +39,6 @@ const CHART_X_DATE_TICK = {
   fontFamily: CHART_FONT_FAMILY
 };
 const CHART_X_DATE_STROKE = "#525252";
-const CHART_TOOLTIP_STYLE = {
-  background: "#FAF8F4",
-  border: "1px solid #E0DDD6",
-  color: "#111111",
-  fontFamily: CHART_FONT_FAMILY,
-  fontSize: 11
-};
-const CHART_LEGEND_STYLE = { fontSize: 8, paddingTop: 2, fontFamily: CHART_FONT_FAMILY };
 const COLOR_VOLUME_TREND = "#1e3a8a";
 const CHART_MARGIN = { top: 6, right: 10, bottom: 4, left: 4 };
 const CHART_Y_AXIS_WIDTH = 38;
@@ -138,8 +128,6 @@ function PromptVolumeChart() {
         <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" vertical={false} />
         <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} interval={2} />
         <YAxis stroke="#8A8A8A" allowDecimals={false} width={CHART_Y_AXIS_WIDTH} tick={CHART_Y_TICK} tickMargin={4} />
-        <Tooltip contentStyle={CHART_TOOLTIP_STYLE} cursor={{ fill: "rgba(0,0,0,0.04)" }} />
-        <Legend wrapperStyle={CHART_LEGEND_STYLE} iconSize={8} />
         {HOME_DEMO_MODEL_SERIES.map((series, index) => (
           <Bar
             key={series.dataKey}
@@ -186,12 +174,6 @@ function ScreenTimeChart() {
           tickMargin={4}
           unit="m"
         />
-        <Tooltip
-          contentStyle={CHART_TOOLTIP_STYLE}
-          cursor={{ fill: "rgba(0,0,0,0.04)" }}
-          formatter={(value: number, name: string) => [`${value} min`, name]}
-        />
-        <Legend wrapperStyle={CHART_LEGEND_STYLE} />
         {HOME_DEMO_SCREEN_TIME_SERIES.map((series, index, visible) => (
           <Bar
             key={series.dataKey}
@@ -234,13 +216,8 @@ function PlanSpendChart() {
           tickFormatter={(value: number) => formatCompactUsd(value)}
           domain={[200, yDomainMax]}
         />
-        <Tooltip
-          contentStyle={CHART_TOOLTIP_STYLE}
-          formatter={(value: number, name: string) => [formatCompactUsd(value), name]}
-        />
-        <Legend wrapperStyle={CHART_LEGEND_STYLE} />
         <Line
-          type="monotone"
+          type="linear"
           dataKey={HOME_DEMO_BUDGET_KEY}
           name="Budget"
           stroke="#525252"
@@ -258,7 +235,8 @@ function PlanSpendChart() {
             stroke={series.color}
             strokeWidth={series.tone === "red" ? 2.5 : 2}
             dot={{ r: 2.5, fill: series.color, strokeWidth: 0 }}
-            activeDot={{ r: 4 }}
+            activeDot={false}
+            connectNulls={false}
             isAnimationActive={false}
           />
         ))}
@@ -313,7 +291,7 @@ function AnalyticsFanCard({
             <span
               className={`tabular-nums ${
                 config.id === "spend"
-                  ? "text-2xl font-bold text-emerald-700 sm:text-3xl"
+                  ? "text-base font-semibold text-emerald-500 sm:text-lg"
                   : "text-lg font-semibold text-ink sm:text-xl"
               }`}
             >
@@ -418,7 +396,7 @@ export function HomeAnalyticsSection() {
                 <span
                   className={`tabular-nums ${
                     card.id === "spend"
-                      ? "text-2xl font-bold text-emerald-700 sm:text-3xl"
+                      ? "text-base font-semibold text-emerald-500 sm:text-lg"
                       : "text-lg font-semibold text-ink"
                   }`}
                 >

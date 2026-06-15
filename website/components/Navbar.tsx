@@ -6,6 +6,7 @@ import { NAV_LINKS, SITE } from "@/lib/constants";
 
 export function Navbar() {
   const pathname = usePathname();
+  const onAccountPage = pathname === "/account" || pathname.startsWith("/account/");
 
   return (
     <header className="sticky top-0 z-50 border-b border-line bg-page/90 backdrop-blur-xl">
@@ -39,7 +40,11 @@ export function Navbar() {
           <Link
             href="/account"
             data-onboarding-tour="account-nav"
-            className="rounded-lg border border-line px-2.5 py-1 text-xs text-ink hover:bg-cream-dark sm:px-3 sm:py-1.5 sm:text-sm"
+            className={
+              onAccountPage
+                ? "rounded-lg border border-line px-2.5 py-1 text-xs text-ink hover:bg-cream-dark sm:px-3 sm:py-1.5 sm:text-sm"
+                : "rounded-lg bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-700 sm:px-3 sm:py-1.5 sm:text-sm"
+            }
           >
             Account
           </Link>

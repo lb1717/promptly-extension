@@ -64,12 +64,12 @@ export function formatCompactUsd(value: number): string {
 
 /**
  * Illustrative subscription spend vs budget — not live data.
- * At the latest month: Claude Max ends above budget (red), ChatGPT Plus and Cursor Pro end below (green).
+ * Green lines peak and dip like usage spikes, then trend down; Claude Max ends above budget (red).
  */
 export function buildHomeDemoSpendTimeline(): HomeDemoSpendTimelineRow[] {
-  const claude = [348, 372, 361, 389, 395, 418];
-  const chatgpt = [820, 780, 700, 580, 440, 260];
-  const cursor = [860, 820, 760, 640, 500, 220];
+  const claude = [348, 435, 352, 448, 378, 418];
+  const chatgpt = [820, 580, 815, 510, 755, 260];
+  const cursor = [860, 610, 845, 490, 735, 220];
 
   return MONTH_LABELS.map((label, i) => ({
     label,
