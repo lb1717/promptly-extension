@@ -108,7 +108,15 @@ type DailyCreditsPayload = {
   reset_label?: string;
 };
 
-export function AccountClient({ extensionMode = false }: { extensionMode?: boolean }) {
+export function AccountClient({
+  extensionMode = false,
+  embedded = false,
+  hidePromptStats = false
+}: {
+  extensionMode?: boolean;
+  embedded?: boolean;
+  hidePromptStats?: boolean;
+}) {
   const searchParams = useSearchParams();
   const extensionIdFromUrl = extensionMode ? String(searchParams.get("extension_id") || "").trim() : "";
   const signinCsrfFromUrl = extensionMode ? String(searchParams.get("signin_csrf") || "").trim() : "";
@@ -547,7 +555,13 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
   }
 
   return (
-    <div className="mx-auto w-full max-w-5xl px-4 py-10 pb-24">
+    <div
+      className={
+        embedded
+          ? "mx-auto w-full max-w-6xl pb-16"
+          : "mx-auto w-full max-w-5xl px-4 py-10 pb-24"
+      }
+    >
       {!user ? (
         <div className="mx-auto flex min-h-[calc(100dvh-12rem)] w-full max-w-sm flex-col items-center justify-center">
           {loading ? (
@@ -838,6 +852,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
             ) : null}
           </section>
 
+          {!hidePromptStats ? (
           <section className="rounded-2xl border border-line bg-cream p-6 backdrop-blur-md sm:p-8">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
@@ -847,7 +862,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
               {!extensionMode ? (
                 <div className="flex shrink-0 flex-wrap gap-2">
                   <Link
-                    href="/account/statistics"
+                    href="/account"
                     data-onboarding-tour="statistics-link"
                     className="inline-flex items-center justify-center rounded-lg bg-ink px-3 py-2 text-xs font-semibold text-cream hover:bg-neutral-800"
                   >
@@ -856,7 +871,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
                 </div>
               ) : (
                 <Link
-                  href="/account/statistics"
+                  href="/account"
                   className="inline-flex shrink-0 items-center justify-center rounded-lg border border-line px-3 py-2 text-xs font-semibold text-muted hover:bg-cream-dark"
                   target="_blank"
                   rel="noreferrer"
@@ -870,6 +885,7 @@ export function AccountClient({ extensionMode = false }: { extensionMode?: boole
               <AccountPromptVolumeChart user={user} />
             ) : null}
           </section>
+          ) : null}
 
           <section className="rounded-2xl border border-line bg-cream p-6 backdrop-blur-md sm:p-8">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

@@ -213,7 +213,7 @@ export function IntegrationsAuthClient({ initialTool }: { initialTool?: string |
           Setup guide
         </Link>
         {" · "}
-        <Link href="/account/statistics" className="underline hover:text-ink">
+        <Link href="/account" className="underline hover:text-ink">
           View statistics
         </Link>
       </p>

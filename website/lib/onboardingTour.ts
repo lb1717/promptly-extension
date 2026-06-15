@@ -46,7 +46,12 @@ export function isOnboardingTourAccountPage(pathname: string): boolean {
 }
 
 export function isOnboardingTourStatisticsPage(pathname: string): boolean {
-  return pathname === "/account/statistics" || pathname.startsWith("/account/statistics/");
+  return (
+    pathname === "/account" ||
+    pathname === "/account/" ||
+    pathname === "/account/statistics" ||
+    pathname.startsWith("/account/statistics/")
+  );
 }
 
 export function readOnboardingTour(): OnboardingTourState | null {

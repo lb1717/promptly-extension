@@ -127,12 +127,12 @@ export function OnboardingTourOverlay({
 
   const goToAccount = useCallback(() => {
     advanceOnboardingTour("account-section");
-    router.push("/account");
+    router.push("/account?tab=settings");
   }, [router]);
 
   const openStatistics = useCallback(() => {
     advanceOnboardingTour("statistics-filters");
-    router.push("/account/statistics");
+    router.push("/account");
   }, [router]);
 
   useLayoutEffect(() => {
@@ -255,7 +255,7 @@ export function OnboardingTourOverlay({
       {targetRect ? <Spotlight rect={targetRect} /> : null}
 
       {step === "statistics-link" && targetRect ? (
-        <TourClickTarget rect={targetRect} label="See full statistics" onClick={openStatistics} />
+        <TourClickTarget rect={targetRect} label="Open statistics" onClick={openStatistics} />
       ) : null}
 
       {step === "account-nav" && targetRect ? (
@@ -322,13 +322,13 @@ export function OnboardingTourOverlay({
           body={
             waitingForTarget
               ? "Loading…"
-              : "Press See full statistics to view all of your AI usage and prompting stats."
+              : "Press Statistics to view all of your AI usage and prompting stats."
           }
           style={cardStyle}
         >
           <div className="flex flex-col items-center gap-2">
             <ArrowUp />
-            <p className="text-center text-xs text-faint">Tap the highlighted button above.</p>
+            <p className="text-center text-xs text-faint">Tap the highlighted tab above.</p>
           </div>
         </TourCard>
       ) : null}

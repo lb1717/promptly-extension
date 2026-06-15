@@ -1827,7 +1827,7 @@ function ModeMiniChart({
   );
 }
 
-export function StatisticsClient() {
+export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [days, setDays] = useState(30);
@@ -3303,19 +3303,24 @@ export function StatisticsClient() {
   }, [statisticsReportData, reportGenerating, days]);
 
   return (
-    <div ref={statsContainerRef} className="statistics-charts mx-auto w-full max-w-6xl px-4 py-6 pb-16">
+    <div
+      ref={statsContainerRef}
+      className={`statistics-charts mx-auto w-full max-w-6xl ${embedded ? "pb-8" : "px-4 py-6 pb-16"}`}
+    >
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-semibold text-ink">AI Statistics</h1>
         <div className="flex flex-wrap items-center gap-2">
-          <Link
-            href="/account"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-ink hover:bg-cream-dark sm:text-sm"
-          >
-            <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 12H5M12 19l-7-7 7-7" />
-            </svg>
-            Back to account
-          </Link>
+          {!embedded ? (
+            <Link
+              href="/account"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-ink hover:bg-cream-dark sm:text-sm"
+            >
+              <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 12H5M12 19l-7-7 7-7" />
+              </svg>
+              Back to account
+            </Link>
+          ) : null}
           <button
             type="button"
             disabled={!user || !statisticsReportData || statsLoading || reportGenerating}
@@ -3336,12 +3341,12 @@ export function StatisticsClient() {
 
       {!user && !loading ? (
         <div className="rounded-2xl border border-line bg-cream p-12 text-center backdrop-blur-md">
-          <p className="text-muted">Sign in on the account page to view statistics.</p>
+          <p className="text-muted">Sign in to view your AI usage and prompting statistics.</p>
           <Link
-            href="/account"
+            href="/account?tab=settings"
             className="mt-4 inline-flex justify-center rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-cream hover:bg-neutral-800"
           >
-            Go to account
+            Go to account settings
           </Link>
         </div>
       ) : null}
