@@ -124,6 +124,12 @@ function hasClaudeUsageAuth() {
   return Boolean(readClaudeAccessToken(defaultClaudeConfigDir()));
 }
 
+function isInteractiveOAuth(flags) {
+  if (flags.no_login === true || flags.no_login === "true") return false;
+  if (flags.login_claude === true || flags.login_claude === "true") return true;
+  return Boolean(process.stdin.isTTY);
+}
+
 function describeClaudeAuthFailure(interactive) {
   if (interactive) {
     return "Claude sign-in did not complete. Run usage-sync again — your browser will open for a one-time claude.ai login.";
@@ -135,12 +141,32 @@ function isClaudeAuthSyncError(message) {
   return /401|403|not signed|oauth|token|sign-in|sign in|authorization|login/i.test(String(message || ""));
 }
 
+async function probeClaudeUsageToken(accessToken) {
+  if (!accessToken) return false;
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    "anthropic-beta": CLAUDE_USAGE_BETA,
+    Accept: "application/json",
+    "User-Agent": "claude-cli/2.1.9 (external, cli)"
+  };
+  try {
+    const res = await fetch("https://api.anthropic.com/api/oauth/usage", { headers });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+function readClaudeSubscriptionAccessToken(configDir) {
+  if (isDefaultClaudeConfigDir(configDir)) {
+    return readPromptlyClaudeAuth()?.accessToken || null;
+  }
+  return readClaudeAccessToken(configDir);
+}
+
 async function ensureClaudeSignedInForSync(interactive, flags) {
   if (!interactive || flags.debug) return;
 
-  const promptlyAuth = readPromptlyClaudeAuth();
-  const missingPromptly = !promptlyAuth?.accessToken;
-  const expiresSoon = Boolean(promptlyAuth?.expiresAt && promptlyAuth.expiresAt - Date.now() < 5 * 60 * 1000);
   const ensureLogin = flags.login_claude === true || flags.login_claude === "true";
   const forceBrowser =
     flags.force_claude_login === true ||
@@ -148,15 +174,24 @@ async function ensureClaudeSignedInForSync(interactive, flags) {
     flags["force-claude-login"] === true ||
     flags["force-claude-login"] === "true";
 
-  if (!missingPromptly && !expiresSoon && !ensureLogin && !forceBrowser) return;
+  let promptlyAuth = readPromptlyClaudeAuth();
+  const expiresSoon = Boolean(promptlyAuth?.expiresAt && promptlyAuth.expiresAt - Date.now() < 5 * 60 * 1000);
+  let needsLogin = !promptlyAuth?.accessToken || expiresSoon || forceBrowser;
+
+  if (!needsLogin && promptlyAuth?.accessToken) {
+    const ok = await probeClaudeUsageToken(promptlyAuth.accessToken);
+    if (!ok) needsLogin = true;
+  }
+
+  if (!needsLogin && !ensureLogin) return;
 
   try {
     await ensureClaudeOAuthLogin({
       interactive: true,
-      forceBrowser: forceBrowser || missingPromptly
+      forceBrowser: needsLogin
     });
-  } catch {
-    /* diagnoseClaudeAuth below will explain */
+  } catch (err) {
+    console.error(String(err?.message || err));
   }
 }
 
@@ -174,9 +209,10 @@ async function fetchClaudeWithAuthRetry(configDir, interactive) {
   return row;
 }
 
-export function diagnoseClaudeAuth() {
+export function diagnoseClaudeAuth(flags = {}) {
   const steps = [];
   const note = (step, ok, detail) => steps.push({ step, ok, detail });
+  const interactive = isInteractiveOAuth(flags);
 
   const credPath = join(defaultClaudeConfigDir(), ".credentials.json");
   note(
@@ -191,16 +227,16 @@ export function diagnoseClaudeAuth() {
   const legacyPath = promptlyClaudeOAuthTokenPath();
   note("promptly_token_file_legacy", existsSync(legacyPath), legacyPath);
 
-  const token = readClaudeAccessToken(defaultClaudeConfigDir());
+  const token = readPromptlyClaudeAuth()?.accessToken || null;
   note(
     "resolved_token",
     Boolean(token),
-    token ? "ready for Anthropic usage API (no Keychain)" : describeClaudeAuthFailure(Boolean(process.stdin.isTTY))
+    token ? "ready for Anthropic usage API (no Keychain)" : describeClaudeAuthFailure(interactive)
   );
 
   return {
     token_available: Boolean(token),
-    failure: token ? null : describeClaudeAuthFailure(Boolean(process.stdin.isTTY)),
+    failure: token ? null : describeClaudeAuthFailure(interactive),
     steps
   };
 }
@@ -446,7 +482,7 @@ function parseClaudePlanFromProfile(profile) {
 
 async function fetchClaudeProfileUsage(configDir) {
   const fromPromptlyAuth = isDefaultClaudeConfigDir(configDir) && readPromptlyClaudeAuth();
-  const token = readClaudeAccessToken(configDir);
+  const token = readClaudeSubscriptionAccessToken(configDir);
   const authPath = claudeAuthJsonPath();
   const profileId = hashProfileId(fromPromptlyAuth ? authPath : configDir);
   const profileLabel = fromPromptlyAuth ? "Claude subscription" : profileLabelFromDir(configDir);
@@ -459,7 +495,7 @@ async function fetchClaudeProfileUsage(configDir) {
     synced_at_ms: Date.now()
   };
   if (!token) {
-    return { ...base, sync_error: describeClaudeAuthFailure(Boolean(process.stdin.isTTY)) };
+    return { ...base, sync_error: describeClaudeAuthFailure(isInteractiveOAuth({ login_claude: true })) };
   }
   const headers = {
     Authorization: `Bearer ${token}`,
@@ -715,11 +751,10 @@ async function uploadVendorUsageSnapshots(
 function collectVendorTokensForUpload() {
   const out = {};
   const claudeAuth = readPromptlyClaudeAuth();
-  const claudeToken = readClaudeAccessToken(defaultClaudeConfigDir());
-  if (claudeToken) {
+  if (claudeAuth?.accessToken) {
     out.claude_code = {
-      access_token: claudeToken,
-      refresh_token: claudeAuth?.refreshToken || null
+      access_token: claudeAuth.accessToken,
+      refresh_token: claudeAuth.refreshToken || null
     };
   }
   for (const dir of discoverCodexConfigDirs([])) {
@@ -758,18 +793,14 @@ export async function runVendorUsageSync({ creds, clientHeader, flags = {} }) {
   const snapshots = [];
 
   attempted.add("claude_code");
-  const interactive = Boolean(process.stdin.isTTY) && flags.no_login !== true && flags.no_login !== "true";
-  await ensureClaudeSignedInForSync(interactive, flags);
-  const claudeAuth = diagnoseClaudeAuth();
-  const claudeDirs = discoverClaudeProfileDirs(settings.claude_code?.extra_profile_dirs || []);
-  let claudeAttempted = false;
-  for (const dir of claudeDirs) {
-    claudeAttempted = true;
-    const row = await fetchClaudeWithAuthRetry(dir, interactive);
-    if (row) snapshots.push(row);
-  }
-  if (!claudeAttempted || !snapshots.some((row) => row.provider === "claude_code")) {
-    snapshots.push(await fetchClaudeWithAuthRetry(defaultClaudeConfigDir(), interactive));
+  const interactiveOAuth = isInteractiveOAuth(flags);
+  await ensureClaudeSignedInForSync(interactiveOAuth, flags);
+  const claudeAuth = diagnoseClaudeAuth(flags);
+  const defaultDir = defaultClaudeConfigDir();
+  snapshots.push(await fetchClaudeWithAuthRetry(defaultDir, interactiveOAuth));
+  for (const dir of discoverClaudeProfileDirs(settings.claude_code?.extra_profile_dirs || [])) {
+    if (dir === defaultDir) continue;
+    snapshots.push(await fetchClaudeWithAuthRetry(dir, interactiveOAuth));
   }
 
   attempted.add("codex");
@@ -784,10 +815,15 @@ export async function runVendorUsageSync({ creds, clientHeader, flags = {} }) {
   const successful = snapshots.filter((row) => row && !row.sync_error);
   const succeededProviders = new Set(successful.map((row) => row.provider));
   const clearProviders = [...attempted].filter((provider) => !succeededProviders.has(provider));
+  const claudeRows = snapshots.filter((row) => row?.provider === "claude_code");
+  const claudeSkipReason =
+    claudeRows.find((row) => row.sync_error)?.sync_error ||
+    claudeAuth.failure ||
+    "Claude subscription sync failed.";
   const skipDetails = Object.fromEntries(
     clearProviders.map((provider) => [
       provider,
-      provider === "claude_code" ? claudeAuth.failure || "Not signed in on this Mac." : "Not signed in on this Mac."
+      provider === "claude_code" ? claudeSkipReason : "Not signed in on this Mac."
     ])
   );
   const syncDiagnostics = {
