@@ -26,9 +26,9 @@ export default function HomePage() {
       <div className="relative z-10">
         <Navbar />
         <Hero />
+        <HomeAnalyticsSection />
         <DemoSection />
         <IntegratedWith />
-        <HomeAnalyticsSection />
         <PricingSection />
         <FinalCTA />
         <Footer />

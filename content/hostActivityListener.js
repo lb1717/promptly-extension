@@ -74,10 +74,10 @@
       if (tid && (tid.includes("send") || tid.includes("submit"))) {
         return true;
       }
-      if (/\b(send|submit message)\b/i.test(aria) || /\bsend\b/i.test(title)) {
+      if (/\b(send|submit message|send message)\b/i.test(aria) || /\bsend\b/i.test(title)) {
         return true;
       }
-      if (/\bstreaming-submit\b|\bsend-message\b|\bcomposer-submit\b/i.test(blob)) {
+      if (/\bstreaming-submit\b|\bsend-message\b|\bcomposer-submit\b|\bcomposer-send\b/i.test(blob)) {
         return true;
       }
       const role = String(n.getAttribute("role") || "").toLowerCase();
@@ -184,6 +184,8 @@
   /** @type {{ destroyed: boolean, site: string, getPromptTarget: () => Element|null, readComposer: () => string } | null} */
   let activeCfg = null;
   let lastSendAt = 0;
+  /** @type {ReturnType<typeof setTimeout>|null} */
+  let sendFlushTimer = null;
   /** @type {ReturnType<typeof setTimeout>|null} */
   let flushTimer = null;
   /** @type {Array<Record<string, unknown>>} */
@@ -363,6 +365,36 @@
     }
   }
 
+  function scheduleSendFlush() {
+    globalThis.clearTimeout(sendFlushTimer);
+    sendFlushTimer = globalThis.setTimeout(() => {
+      sendFlushTimer = null;
+      flushQueued();
+    }, 400);
+  }
+
+  function crossFrameSendRecentlyDeduped(siteKey) {
+    try {
+      const storage = window.top?.sessionStorage;
+      if (!storage) {
+        return false;
+      }
+      const key = `promptly:lastNativeSend:${siteKey}`;
+      const now = Date.now();
+      const raw = storage.getItem(key);
+      if (raw) {
+        const prev = JSON.parse(raw);
+        if (prev?.at && now - prev.at < DEBOUNCE_SEND_MS) {
+          return true;
+        }
+      }
+      storage.setItem(key, JSON.stringify({ at: now }));
+      return false;
+    } catch (_e) {
+      return false;
+    }
+  }
+
   function enqueueRow(row) {
     queue.push(row);
     if (queue.length > 35) {
@@ -483,19 +515,31 @@
   }
 
   function completeSendRow(sendRow, latencyMetrics) {
-    enqueueRow({
-      ...sendRow,
-      host_response_latency_ms: latencyMetrics.host_response_latency_ms ?? null,
-      assistant_output_char_estimate: latencyMetrics.assistant_output_char_estimate ?? null,
-      time_to_first_stream_activity_ms: latencyMetrics.time_to_first_stream_activity_ms ?? null,
-      stream_visual_active_ms: latencyMetrics.stream_visual_active_ms ?? null
-    });
+    const hlMs = latencyMetrics.host_response_latency_ms ?? null;
+    if (typeof hlMs === "number" && hlMs >= 500) {
+      enqueueRow({
+        interaction_kind: "engagement_segment",
+        engagement_category: "waiting",
+        duration_ms: Math.min(1_800_000, Math.floor(hlMs)),
+        service: sendRow.service,
+        ...(sendRow.host_model_label
+          ? {
+              host_model_label: sendRow.host_model_label,
+              host_model_bucket: sendRow.host_model_bucket
+            }
+          : {}),
+        client_occurred_ms: Date.now()
+      });
+      scheduleSendFlush();
+    }
   }
 
   function startResponseWatchForSend(cfg, sendRow) {
+    enqueueRow(sendRow);
+    scheduleSendFlush();
+
     const createWatch = window.PromptlyHostResponseWatcher?.createWatch;
     if (typeof createWatch !== "function") {
-      completeSendRow(sendRow, {});
       window.PromptlyHostEngagementTracker?.noteResponseComplete?.();
       return;
     }
@@ -558,12 +602,17 @@
       wordsRough = recentComposerSnapshot.words || Math.max(1, Math.min(12000, Math.ceil(chars / 6)));
     }
 
+    if (!chars && clickedSendConfirmed) {
+      chars = 1;
+      wordsRough = 1;
+    }
+
     if (!chars) {
       return false;
     }
 
     const nowMs = Date.now();
-    if (nowMs - lastSendAt < DEBOUNCE_SEND_MS) {
+    if (nowMs - lastSendAt < DEBOUNCE_SEND_MS || crossFrameSendRecentlyDeduped(cfg.site)) {
       return true;
     }
     lastSendAt = nowMs;
@@ -727,6 +776,7 @@
     function onTabHidden() {
       window.PromptlyHostEngagementTracker?.onTabHidden?.();
       abortDraftSession();
+      finalizePendingResponseWatches("flush");
       flushQueued();
       syncPendingWatchesToBackground();
     }
@@ -772,6 +822,8 @@
       globalThis.clearInterval(periodic);
       globalThis.clearTimeout(composeDebounceTimer);
       composeDebounceTimer = null;
+      globalThis.clearTimeout(sendFlushTimer);
+      sendFlushTimer = null;
       stopDraftIdleTimer();
       window.PromptlyHostEngagementTracker?.teardown?.();
       finalizePendingResponseWatches("cancel");

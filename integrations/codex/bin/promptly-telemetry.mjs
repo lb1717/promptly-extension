@@ -3,6 +3,7 @@
  * Promptly IDE telemetry CLI — self-contained (bundled into each agent plugin).
  * Never uploads raw prompt text; metadata only.
  */
+import { spawn } from "child_process";
 import {
   closeSync,
   existsSync,
@@ -12,6 +13,7 @@ import {
   readFileSync,
   readSync,
   statSync,
+  unlinkSync,
   writeFileSync
 } from "fs";
 import { homedir } from "os";
@@ -21,6 +23,7 @@ import { runVendorUsageSync } from "../lib/vendor-usage-sync.mjs";
 import { runClaudeOAuthLoginOnly } from "../lib/claude-oauth-login.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const TELEMETRY_SCRIPT = fileURLToPath(import.meta.url);
 
 const DEFAULT_API_URL = process.env.PROMPTLY_API_URL || "https://promptly-labs.com";
 const DEFAULT_PROMPTLY_DIR = join(homedir(), ".promptly");
@@ -46,6 +49,8 @@ const SESSION_MODEL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const TRANSCRIPT_TAIL_BYTES = 128 * 1024;
 const SEND_DEDUPE_MS = 4000;
 const RECENT_SENDS_MAX = 50;
+const HOOK_FLUSH_BUDGET_MS = 6000;
+const FLUSH_LOCK_TTL_MS = 120_000;
 const ALL_TOOLS = ["claude_code", "cursor", "codex"];
 
 const TOOL_CLIENT = {
@@ -312,6 +317,23 @@ function markSessionStarted(tool, sessionId, atMs = Date.now()) {
   const sessions = loadDraftTimingSessions(tool);
   sessions[sid] = { draft_window_start_ms: atMs, session_started_ms: atMs, updated_at: atMs };
   saveDraftTimingSessions(tool, sessions);
+}
+
+/** Codex often skips SessionStart — treat first prompt submit as session start for screen time. */
+function ensureSessionTimingForPromptSubmit(tool, sessionId, hookName) {
+  const sid = String(sessionId || "").trim();
+  if (!sid) return;
+  const name = String(hookName || "").toLowerCase();
+  if (!name.includes("userpromptsubmit") && !name.includes("beforesubmitprompt")) return;
+  const sessions = loadDraftTimingSessions(tool);
+  const entry = sessions[sid] && typeof sessions[sid] === "object" ? sessions[sid] : null;
+  if (!entry?.session_started_ms) {
+    markSessionStarted(tool, sid);
+    return;
+  }
+  if (!entry.draft_window_start_ms && entry.session_started_ms) {
+    markDraftWindowStart(tool, sid, entry.session_started_ms);
+  }
 }
 
 function rememberSessionScreenModel(tool, sessionId, modelMeta) {
@@ -906,6 +928,10 @@ function hookSessionLookupIds(input, tool) {
     add(input?.session_id);
     add(input?.conversation_id);
     add(input?.sessionId);
+    if (tool === "codex") {
+      const turnId = String(input?.turn_id || input?.turnId || "").trim();
+      if (turnId) add(`turn:${turnId}`);
+    }
   }
   return ids;
 }
@@ -1063,13 +1089,116 @@ function enqueueEvent(tool, event) {
 
 function isDuplicateSend(tool, input, event) {
   const sid = primarySessionId(input, tool) || "_";
-  const key = `${sid}:${event.composer_word_estimate}:${event.composer_char_estimate}`;
+  const genId = String(input?.generation_id || input?.turn_id || "").trim();
+  const key = genId
+    ? `${sid}:gen:${genId}`
+    : `${sid}:${event.composer_word_estimate}:${event.composer_char_estimate}`;
   const now = Date.now();
   const data = readJson(recentSendsPath(tool), { entries: [] });
   const entries = (Array.isArray(data.entries) ? data.entries : []).filter((entry) => now - entry.at < SEND_DEDUPE_MS);
   if (entries.some((entry) => entry.key === key)) return true;
   entries.push({ key, at: now });
   writeJson(recentSendsPath(tool), { entries: entries.slice(-RECENT_SENDS_MAX) });
+  return false;
+}
+
+function extractPromptText(input) {
+  if (!input || typeof input !== "object") return "";
+  for (const field of ["prompt", "user_prompt", "userPrompt", "message", "content"]) {
+    const value = input[field];
+    if (typeof value === "string") return value;
+  }
+  return "";
+}
+
+function flushLockPath(tool) {
+  return join(promptlyStorageDir(), `.flush-lock-${tool}.json`);
+}
+
+function tryAcquireFlushLock(tool) {
+  const path = flushLockPath(tool);
+  const now = Date.now();
+  if (existsSync(path)) {
+    const lock = readJson(path, null);
+    if (lock?.at && now - lock.at < FLUSH_LOCK_TTL_MS) {
+      return false;
+    }
+  }
+  try {
+    writeJson(path, { pid: process.pid, at: now });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function releaseFlushLock(tool) {
+  try {
+    const path = flushLockPath(tool);
+    const lock = readJson(path, null);
+    if (!lock?.pid || lock.pid === process.pid) {
+      unlinkSync(path);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function spawnDetachedFlush(tool) {
+  if (!getCredentials(tool)?.device_token) return;
+  if (loadQueue(tool).length === 0) return;
+  try {
+    const child = spawn(process.execPath, [TELEMETRY_SCRIPT, "flush", "--tool", tool], {
+      detached: true,
+      stdio: "ignore",
+      env: process.env
+    });
+    child.unref();
+  } catch {
+    /* background flush must never break hooks */
+  }
+}
+
+/** Pending submit recorded but send never reached the queue (hook killed mid-write). */
+function recoverOrphanedPendingSubmits(tool, input) {
+  const ids = hookSessionLookupIds(input, tool);
+  if (!ids.length) return 0;
+  const pending = readJson(pendingSubmitsPath(tool), { pending: {} }).pending || {};
+  const queue = loadQueue(tool);
+  let recovered = 0;
+  for (const id of ids) {
+    const entry = pending[id];
+    if (!entry?.at) continue;
+    const hasQueuedSend = queue.some(
+      (event) =>
+        event?.interaction_kind === "send" &&
+        (String(event._session_id || "") === id ||
+          (event.client_occurred_ms >= entry.at - 2000 && event.client_occurred_ms <= entry.at + 5000))
+    );
+    if (hasQueuedSend) continue;
+    enqueueEvent(tool, {
+      tool,
+      interaction_kind: "send",
+      composer_word_estimate: 1,
+      composer_char_estimate: 1,
+      client_occurred_ms: entry.at,
+      agent_account_email: entry.agent_account_email || null,
+      model_label: entry.model_label || null,
+      model_bucket: entry.model_bucket || "unknown",
+      _session_id: id
+    });
+    recovered += 1;
+  }
+  return recovered;
+}
+
+function shouldSpawnBackgroundFlush(tool, hookName, event) {
+  if (loadQueue(tool).length === 0) return false;
+  const name = String(hookName || "").toLowerCase();
+  if (name.includes("sessionend")) return true;
+  if (name.includes("beforesubmitprompt") || name.includes("userpromptsubmit")) return true;
+  if (isStopHookName(name) || name.includes("afteragentresponse")) return true;
+  if (event?.interaction_kind === "send") return true;
   return false;
 }
 
@@ -1321,55 +1450,62 @@ async function flushQueue(tool, clientHeader, attempt = 0) {
   if (normalizeTool(creds.tool) && normalizeTool(creds.tool) !== tool) {
     return { ok: false, error: `credentials_mismatch:${creds.tool}` };
   }
-  const events = loadQueue(tool).filter((event) => event?.tool === tool);
-  if (events.length !== loadQueue(tool).length) {
-    saveQueue(tool, events);
+  if (!tryAcquireFlushLock(tool)) {
+    return { ok: true, written: 0, skipped: "flush_in_progress" };
   }
-  if (!events.length) {
-    return { ok: true, written: 0 };
-  }
-  const batch = events.slice(0, MAX_BATCH);
-  const apiUrl = creds.api_url || DEFAULT_API_URL;
-  let res;
-  let body = {};
   try {
-    res = await fetch(`${apiUrl.replace(/\/$/, "")}/api/telemetry/ide-activity`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${creds.device_token}`,
-        "x-promptly-client": clientHeader || TOOL_CLIENT[tool] || "promptly-claude-code"
-      },
-      body: JSON.stringify({
-        events: batch.map((event) => {
-          const copy = { ...event };
-          delete copy._session_id;
-          return copy;
+    const events = loadQueue(tool).filter((event) => event?.tool === tool);
+    if (events.length !== loadQueue(tool).length) {
+      saveQueue(tool, events);
+    }
+    if (!events.length) {
+      return { ok: true, written: 0 };
+    }
+    const batch = events.slice(0, MAX_BATCH);
+    const apiUrl = creds.api_url || DEFAULT_API_URL;
+    let res;
+    let body = {};
+    try {
+      res = await fetch(`${apiUrl.replace(/\/$/, "")}/api/telemetry/ide-activity`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${creds.device_token}`,
+          "x-promptly-client": clientHeader || TOOL_CLIENT[tool] || "promptly-claude-code"
+        },
+        body: JSON.stringify({
+          events: batch.map((event) => {
+            const copy = { ...event };
+            delete copy._session_id;
+            return copy;
+          })
         })
-      })
-    });
-    body = await res.json().catch(() => ({}));
-  } catch (err) {
-    const message = String(err?.message || err);
-    if (attempt + 1 < MAX_FLUSH_ATTEMPTS && flushShouldRetry(undefined, message)) {
-      await sleepMs(FLUSH_RETRY_BASE_MS * (attempt + 1));
-      return flushQueue(tool, clientHeader, attempt + 1);
+      });
+      body = await res.json().catch(() => ({}));
+    } catch (err) {
+      const message = String(err?.message || err);
+      if (attempt + 1 < MAX_FLUSH_ATTEMPTS && flushShouldRetry(undefined, message)) {
+        await sleepMs(FLUSH_RETRY_BASE_MS * (attempt + 1));
+        return flushQueue(tool, clientHeader, attempt + 1);
+      }
+      return { ok: false, error: message };
     }
-    return { ok: false, error: message };
-  }
-  if (!res.ok) {
-    if (attempt + 1 < MAX_FLUSH_ATTEMPTS && flushShouldRetry(res.status, body.error)) {
-      await sleepMs(FLUSH_RETRY_BASE_MS * (attempt + 1));
-      return flushQueue(tool, clientHeader, attempt + 1);
+    if (!res.ok) {
+      if (attempt + 1 < MAX_FLUSH_ATTEMPTS && flushShouldRetry(res.status, body.error)) {
+        await sleepMs(FLUSH_RETRY_BASE_MS * (attempt + 1));
+        return flushQueue(tool, clientHeader, attempt + 1);
+      }
+      return { ok: false, error: body.error || `HTTP ${res.status}` };
     }
-    return { ok: false, error: body.error || `HTTP ${res.status}` };
+    const remaining = events.slice(batch.length);
+    saveQueue(tool, remaining);
+    if (remaining.length) {
+      return flushQueue(tool, clientHeader);
+    }
+    return { ok: true, written: body.written ?? batch.length };
+  } finally {
+    releaseFlushLock(tool);
   }
-  const remaining = events.slice(batch.length);
-  saveQueue(tool, remaining);
-  if (remaining.length) {
-    await flushQueue(tool, clientHeader);
-  }
-  return { ok: true, written: body.written ?? batch.length };
 }
 
 const VENDOR_USAGE_SYNC_MIN_MS = 15 * 60 * 1000;
@@ -1389,7 +1525,7 @@ function resolveHookEventName(input) {
   const explicit = hookEventName(input);
   if (explicit) return explicit;
   if (!input || typeof input !== "object") return "";
-  const hasPrompt = typeof input.prompt === "string" && input.prompt.length > 0;
+  const hasPrompt = extractPromptText(input).length > 0;
   if (hasPrompt) return "beforesubmitprompt";
   const hasStopStatus = typeof input.status === "string" && typeof input.loop_count === "number";
   if (hasStopStatus) return "stop";
@@ -1445,16 +1581,36 @@ function isCursorHostPayload(input) {
   return false;
 }
 
+function isCodexLikePromptSubmit(input) {
+  const event = hookEventName(input);
+  if (!event.includes("userpromptsubmit")) return false;
+  const model = hookModelToken(input);
+  if (model.startsWith("claude")) return false;
+  if (/^(gpt-|o[0-9]|codex)/.test(model)) return true;
+  if (typeof input?.effort === "string" || typeof input?.model_reasoning_effort === "string") return true;
+  if (typeof input?.reasoning_effort === "string") return true;
+  const hookCtx = readCodexHookContext(input);
+  const ctxModel = String(hookCtx?.model || "").trim().toLowerCase();
+  if (ctxModel && /^(gpt-|o[0-9]|codex)/.test(ctxModel)) return true;
+  return false;
+}
+
 function isClaudeCodeHostPayload(input) {
   const event = hookEventName(input);
   if (event.includes("userpromptsubmit")) {
+    if (isCodexLikePromptSubmit(input)) return false;
     const model = hookModelToken(input);
     if (/^(gpt-|o[0-9]|codex)/.test(model)) return false;
     if (input?.transcript_path) return true;
     if (model.startsWith("claude")) return true;
-    // Claude Code often sends turn_id without transcript_path on prompt submit.
-    if (input?.turn_id && typeof input?.session_id === "string") return true;
-    if (input?.session_id && !input?.conversation_id) return true;
+    if (input?.turn_id && typeof input?.session_id === "string") {
+      if (input?.transcript_path || model.startsWith("claude")) return true;
+      return false;
+    }
+    if (input?.session_id && !input?.conversation_id) {
+      if (input?.transcript_path || model.startsWith("claude")) return true;
+      return false;
+    }
     return false;
   }
   if (input?.transcript_path) return true;
@@ -1476,13 +1632,12 @@ function isClaudeCodeHostPayload(input) {
 function isCodexHostPayload(input) {
   const event = resolveHookEventName(input);
   if (event.includes("userpromptsubmit")) {
-    const model = hookModelToken(input);
-    if (/^(gpt-|o[0-9]|codex)/.test(model)) return true;
-    if (typeof input?.effort === "string" || typeof input?.model_reasoning_effort === "string") return true;
-    if (typeof input?.reasoning_effort === "string") return true;
-    return false;
+    return isCodexLikePromptSubmit(input);
   }
   if ((event === "stop" || event.endsWith(".stop")) && input?.session_id) {
+    const model = hookModelToken(input);
+    if (/^(gpt-|o[0-9]|codex)/.test(model)) return true;
+    if (typeof input?.last_assistant_message === "string") return true;
     if (typeof input?.loop_count !== "number") return true;
   }
   if (typeof input?.last_assistant_message === "string" || input?.stop_hook_active === true) {
@@ -1498,7 +1653,7 @@ function isCodexHostPayload(input) {
 function isPromptSubmitPayload(input) {
   const event = resolveHookEventName(input);
   if (event.includes("userpromptsubmit") || event.includes("beforesubmitprompt")) return true;
-  const hasPrompt = typeof input?.prompt === "string" && input.prompt.length > 0;
+  const hasPrompt = extractPromptText(input).length > 0;
   const hasSessionEnd =
     typeof input?.duration_ms === "number" ||
     typeof input?.durationMs === "number" ||
@@ -1570,21 +1725,23 @@ function emitResponseEndEvents(tool, input, agentAccountEmail, modelMeta, now = 
 function hookPayloadMatchesTool(input, tool) {
   if (!input || typeof input !== "object") return false;
   if (!isPromptSubmitPayload(input)) return true;
-  if (tool === "codex" && isCodexHostPayload(input)) return true;
+  if (tool === "codex") {
+    if (isCursorHostPayload(input)) return false;
+    if (/^composer-/.test(hookModelToken(input))) return false;
+    if (input?.transcript_path) return false;
+    if (hookModelToken(input).startsWith("claude")) return false;
+    // UserPromptSubmit is wired per-tool; accept Codex stdin unless clearly another host.
+    return true;
+  }
   if (tool === "claude_code") {
     if (isCursorHostPayload(input)) return false;
-    if (isClaudeCodeHostPayload(input)) return true;
-    if (isCodexHostPayload(input)) return false;
+    if (isCodexLikePromptSubmit(input)) return false;
+    if (/^composer-/.test(hookModelToken(input))) return false;
     return true;
   }
   if (tool === "cursor") {
-    if (isCodexHostPayload(input)) return false;
+    if (isCodexHostPayload(input) && !isCursorHostPayload(input)) return false;
     if (isClaudeCodeHostPayload(input) && !isCursorHostPayload(input)) return false;
-    return true;
-  }
-  if (tool === "codex") {
-    if (isClaudeCodeHostPayload(input)) return false;
-    if (/^composer-/.test(hookModelToken(input))) return false;
     return true;
   }
   return true;
@@ -1599,7 +1756,7 @@ function hookEventToTelemetry(input, tool) {
   const modelMeta = buildModelMeta(input, tool);
   const eventName = resolveHookEventName(input);
 
-  const hasPrompt = typeof input.prompt === "string" && input.prompt.length > 0;
+  const hasPrompt = extractPromptText(input).length > 0;
   const hasSessionEnd =
     typeof input.duration_ms === "number" ||
     typeof input.durationMs === "number" ||
@@ -1611,7 +1768,7 @@ function hookEventToTelemetry(input, tool) {
     eventName.includes("userpromptsubmit") || eventName.includes("beforesubmitprompt");
 
   if (isExplicitPromptEvent || (hasPrompt && !hasSessionEnd && !hasStopStatus && !eventName)) {
-    const prompt = String(input.prompt || input.user_prompt || "");
+    const prompt = extractPromptText(input);
     const words = countWords(prompt);
     const chars = Math.min(12000, prompt.length);
     return {
@@ -1678,10 +1835,12 @@ async function cmdHook(flags) {
   const input = await readStdinJson();
   if (input && !hookPayloadMatchesTool(input, tool)) {
     const clientHeader = flags.client || TOOL_CLIENT[tool];
+    spawnDetachedFlush(tool);
     try {
       await flushQueue(tool, clientHeader);
     } catch (err) {
       console.error("[promptly]", String(err?.message || err));
+      spawnDetachedFlush(tool);
     }
     process.exit(0);
   }
@@ -1693,6 +1852,7 @@ async function cmdHook(flags) {
   const hookName = resolveHookEventName(input);
   const agentAccountEmail = resolveAgentAccountEmail(input, tool);
   const modelMeta = buildModelMeta(input, tool);
+  ensureSessionTimingForPromptSubmit(tool, sessionId, hookName);
   if (sessionId) {
     const staleIdle = maybeFlushStaleReadingIdle(tool, sessionId, agentAccountEmail, modelMeta);
     if (staleIdle) {
@@ -1706,6 +1866,10 @@ async function cmdHook(flags) {
     const sessionIdle = flushReadingIdleSegment(tool, sessionId, agentAccountEmail, modelMeta);
     if (sessionIdle) {
       enqueueEvent(tool, sessionIdle);
+    }
+    const recovered = recoverOrphanedPendingSubmits(tool, input);
+    if (recovered > 0) {
+      traceHook(tool, input, null, `recovered_orphan_sends:${recovered}`);
     }
   }
   if (isResponseEndPayload(input, hookName)) {
@@ -1762,29 +1926,45 @@ async function cmdHook(flags) {
           )
         );
       }
+    }
+    if (sessionId && event.interaction_kind === "engagement_segment" && event.engagement_category === "reading_idle") {
+      markReadingIdleStart(tool, sessionId);
+    }
+    enqueueEvent(tool, event);
+    if (event.interaction_kind === "send" && sessionId) {
       recordPendingSubmit(tool, input, {
         agent_account_email: event.agent_account_email || null,
         model_label: event.model_label || null,
         model_bucket: event.model_bucket || "unknown"
       });
     }
-    if (sessionId && event.interaction_kind === "engagement_segment" && event.engagement_category === "reading_idle") {
-      markReadingIdleStart(tool, sessionId);
-    }
-    enqueueEvent(tool, event);
   }
   traceHook(tool, input, event, event ? null : "no_event_emitted");
   const clientHeader = flags.client || TOOL_CLIENT[tool];
+  if (shouldSpawnBackgroundFlush(tool, hookName, event)) {
+    spawnDetachedFlush(tool);
+  }
   try {
-    const flushResult = await flushQueue(tool, clientHeader);
+    const flushResult = await Promise.race([
+      flushQueue(tool, clientHeader),
+      sleepMs(HOOK_FLUSH_BUDGET_MS).then(() => ({
+        ok: false,
+        error: "flush_timeout_hook_budget",
+        timedOut: true
+      }))
+    ]);
     recordFlushResult(tool, flushResult);
     if (!flushResult.ok) {
       console.error("[promptly]", flushResult.error || "Upload failed");
+      spawnDetachedFlush(tool);
+    } else if (loadQueue(tool).length > 0) {
+      spawnDetachedFlush(tool);
     }
     await maybeSyncVendorUsage(tool, clientHeader);
   } catch (err) {
     const message = String(err?.message || err);
     recordFlushResult(tool, { ok: false, error: message });
+    spawnDetachedFlush(tool);
     // Hooks must not fail the host agent
     console.error("[promptly]", message);
   }
@@ -2255,8 +2435,8 @@ function auditInstalledHooks(tool) {
   }
   const required = {
     cursor: ["beforeSubmitPrompt", "afterAgentResponse", "stop"],
-    codex: ["UserPromptSubmit", "Stop"],
-    claude_code: ["UserPromptSubmit", "Stop"]
+    codex: ["UserPromptSubmit", "Stop", "SessionStart", "SessionEnd"],
+    claude_code: ["UserPromptSubmit", "Stop", "SessionStart", "SessionEnd"]
   };
   const out = [];
   for (const filePath of paths[tool] || []) {
@@ -2378,6 +2558,15 @@ function cmdDiagnostics(flags) {
         prompt: "diagnostics hello",
         model: "gpt-5.5",
         effort: "xhigh"
+      }
+    },
+    {
+      label: "UserPromptSubmit (codex bare — no model in hook)",
+      input: {
+        hook_event_name: "UserPromptSubmit",
+        session_id: sessionId,
+        turn_id: "turn-bare",
+        prompt: "diagnostics hello"
       }
     },
     {

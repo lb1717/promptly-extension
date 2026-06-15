@@ -776,18 +776,67 @@ function withBarLabels<T extends { key: string; percent: number }>(
     : 0;
   const showReference = Boolean(sinceLabel) && prevTotal > 0;
   return rows.map((row) => {
-    if (!showReference) return { ...row, barLabel: `${row.percent}%` };
+    if (!showReference) return { ...row, barLabel: singleLineBarLabel(`${row.percent}%`) };
     const prevPercent = Math.round(((prevMinutesByKey!.get(row.key) ?? 0) / prevTotal) * 100);
     const delta = row.percent - prevPercent;
     const sign = delta < 0 ? "−" : "+";
-    return { ...row, barLabel: `${row.percent}% (${sign}${Math.abs(delta)}% since ${sinceLabel})` };
+    return {
+      ...row,
+      barLabel: singleLineBarLabel(`${row.percent}% (${sign}${Math.abs(delta)}% since ${sinceLabel})`)
+    };
   });
+}
+
+function singleLineBarLabel(text: string): string {
+  return text.replace(/ /g, "\u00A0");
 }
 
 /** Right chart margin sized so the bar-end label never clips. */
 function barLabelRightMargin(rows: Array<{ barLabel: string }>): number {
   const maxLen = rows.reduce((max, row) => Math.max(max, row.barLabel.length), 0);
-  return Math.min(210, Math.max(44, Math.round(maxLen * 6.4) + 10));
+  return Math.min(300, Math.max(52, Math.round(maxLen * 6.8) + 14));
+}
+
+/** Keeps "64% (+59% since last week)" on one line beside horizontal bars. */
+function BarEndPercentLabel({
+  x,
+  y,
+  width,
+  height,
+  value
+}: {
+  x?: number | string;
+  y?: number | string;
+  width?: number | string;
+  height?: number | string;
+  value?: string | number;
+}) {
+  const label = value == null ? "" : String(value);
+  if (!label) return null;
+  const bx = Number(x ?? 0);
+  const by = Number(y ?? 0);
+  const bw = Number(width ?? 0);
+  const bh = Number(height ?? 0);
+  const labelX = bx + bw + 6;
+  const labelY = by + bh / 2 - 10;
+  const foWidth = Math.min(340, Math.max(128, label.length * 6.8 + 12));
+  return (
+    <foreignObject x={labelX} y={labelY} width={foWidth} height={20}>
+      <div
+        className="bar-end-percent-label"
+        style={{
+          fontSize: 11,
+          fontWeight: 600,
+          color: "#111111",
+          whiteSpace: "nowrap",
+          lineHeight: "20px",
+          fontFamily: CHART_FONT_FAMILY
+        }}
+      >
+        {label}
+      </div>
+    </foreignObject>
+  );
 }
 
 function clampScore(n: number, lo: number, hi: number): number {
@@ -1138,9 +1187,64 @@ function buildModelTimelineChartRows(
 }
 
 const IDE_SERVICE_KEYS = new Set<PromptVolumeAiKey>(["claude_code", "cursor", "codex"]);
+const IDE_AGENT_FILTER_KEYS: IdeToolKey[] = ["claude_code", "cursor", "codex"];
 
 function isIdeServiceKey(key: PromptVolumeAiKey): key is IdeToolKey {
   return IDE_SERVICE_KEYS.has(key);
+}
+
+function promptVolumeUsageCounts(
+  timeline: PromptVolumeChartBucket[],
+  webStats: ExtendedStatsPayload | null,
+  ideStats: IdeStatsPayload | null
+): Record<PromptVolumeAiKey, number> {
+  const counts: Record<PromptVolumeAiKey, number> = {
+    chatgpt: 0,
+    claude: 0,
+    gemini: 0,
+    other: 0,
+    claude_code: 0,
+    cursor: 0,
+    codex: 0
+  };
+  for (const row of timeline) {
+    counts.chatgpt += Math.max(0, Number(row.prompts_chatgpt ?? 0) || 0);
+    counts.claude += Math.max(0, Number(row.prompts_claude ?? 0) || 0);
+    counts.gemini += Math.max(0, Number(row.prompts_gemini ?? 0) || 0);
+    counts.other += Math.max(0, Number(row.prompts_unknown ?? 0) || 0);
+    counts.claude_code += Math.max(0, Number(row.prompts_claude_code ?? 0) || 0);
+    counts.cursor += Math.max(0, Number(row.prompts_cursor ?? 0) || 0);
+    counts.codex += Math.max(0, Number(row.prompts_codex ?? 0) || 0);
+  }
+  if (timeline.length > 0) return counts;
+  counts.chatgpt = Math.max(0, Number(webStats?.combined_totals?.prompts_chatgpt_surface ?? 0) || 0);
+  counts.claude = Math.max(0, Number(webStats?.combined_totals?.prompts_claude_surface ?? 0) || 0);
+  counts.gemini = Math.max(0, Number(webStats?.combined_totals?.prompts_gemini_surface ?? 0) || 0);
+  counts.other = Math.max(0, Number(webStats?.combined_totals?.prompts_unknown_surface ?? 0) || 0);
+  counts.claude_code = Math.max(0, Number(ideStats?.totals.prompts.claude_code ?? 0) || 0);
+  counts.cursor = Math.max(0, Number(ideStats?.totals.prompts.cursor ?? 0) || 0);
+  counts.codex = Math.max(0, Number(ideStats?.totals.prompts.codex ?? 0) || 0);
+  return counts;
+}
+
+function sortPromptVolumeAiFiltersByUsage(
+  filters: typeof PROMPT_VOLUME_AI_FILTERS,
+  usage: Record<PromptVolumeAiKey, number>
+): typeof PROMPT_VOLUME_AI_FILTERS {
+  const filterByKey = new Map(filters.map((filter) => [filter.key, filter]));
+  const ideAgents = IDE_AGENT_FILTER_KEYS.map((key) => filterByKey.get(key))
+    .filter((filter): filter is (typeof PROMPT_VOLUME_AI_FILTERS)[number] => Boolean(filter))
+    .sort(
+      (a, b) =>
+        (usage[b.key] ?? 0) - (usage[a.key] ?? 0) || a.label.localeCompare(b.label)
+    );
+  const webServices = filters
+    .filter((filter) => !isIdeServiceKey(filter.key))
+    .sort(
+      (a, b) =>
+        (usage[b.key] ?? 0) - (usage[a.key] ?? 0) || a.label.localeCompare(b.label)
+    );
+  return [...ideAgents, ...webServices];
 }
 
 function webServiceFromFilterKey(key: PromptVolumeAiKey): PromptlySvc {
@@ -2344,6 +2448,16 @@ export function StatisticsClient() {
     }));
   }, [displayStats, displayIdeStats, granularity]);
 
+  const promptVolumeUsageByService = useMemo(
+    () => promptVolumeUsageCounts(stackedTimeline, displayStats, displayIdeStats),
+    [stackedTimeline, displayStats, displayIdeStats]
+  );
+
+  const sortedPromptVolumeAiFilters = useMemo(
+    () => sortPromptVolumeAiFiltersByUsage(PROMPT_VOLUME_AI_FILTERS, promptVolumeUsageByService),
+    [promptVolumeUsageByService]
+  );
+
   const promptVolumeChartRows = useMemo(() => {
     const totals = stackedTimeline.map((row) => promptVolumeBucketTotal(row, effectivePromptVolumeAiFilters));
     const trend = smoothTrendValues(totals);
@@ -3269,7 +3383,7 @@ export function StatisticsClient() {
                         onChange={(e) => setSelectedModelService(e.target.value as PromptVolumeAiKey)}
                         className="max-w-[10rem] rounded-md border border-line bg-cream px-1.5 py-0.5 text-xs text-ink"
                       >
-                        {PROMPT_VOLUME_AI_FILTERS.map((filter) => (
+                        {sortedPromptVolumeAiFilters.map((filter) => (
                           <option key={filter.key} value={filter.key}>
                             {filter.label}
                           </option>
@@ -3305,7 +3419,7 @@ export function StatisticsClient() {
                   Show
                 </span>
                 {statsGroupMode === "service"
-                  ? PROMPT_VOLUME_AI_FILTERS.map((filter) => (
+                  ? sortedPromptVolumeAiFilters.map((filter) => (
                       <PromptVolumeAiToggleButton
                         key={filter.key}
                         label={filter.label}
@@ -3442,7 +3556,7 @@ export function StatisticsClient() {
                     }}
                   />
                   <Legend wrapperStyle={CHART_LEGEND_STYLE} />
-                  {PROMPT_VOLUME_AI_FILTERS.filter((f) => effectivePromptVolumeAiFilters[f.key]).map((filter, index, visible) => (
+                  {sortedPromptVolumeAiFilters.filter((f) => effectivePromptVolumeAiFilters[f.key]).map((filter, index, visible) => (
                     <Bar
                       key={filter.dataKey}
                       dataKey={filter.dataKey}
@@ -3590,13 +3704,7 @@ export function StatisticsClient() {
                                 {screenTimeByModelInstantRows.map((entry) => (
                                   <Cell key={entry.key} fill={entry.fill} fillOpacity={0.95} />
                                 ))}
-                                <LabelList
-                                  dataKey="barLabel"
-                                  position="right"
-                                  fill="#111111"
-                                  fontSize={11}
-                                  fontWeight={600}
-                                />
+                                <LabelList dataKey="barLabel" content={BarEndPercentLabel} />
                               </Bar>
                             </BarChart>
                           </ResponsiveContainer>
@@ -3691,13 +3799,7 @@ export function StatisticsClient() {
                             {screenTimeByServiceRows.map((entry) => (
                               <Cell key={entry.key} fill={entry.fill} fillOpacity={0.95} />
                             ))}
-                            <LabelList
-                              dataKey="barLabel"
-                              position="right"
-                              fill="#111111"
-                              fontSize={11}
-                              fontWeight={600}
-                            />
+                            <LabelList dataKey="barLabel" content={BarEndPercentLabel} />
                           </Bar>
                         </BarChart>
                       </ResponsiveContainer>

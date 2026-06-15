@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
-import type { VendorUsageProfileSnapshot, VendorUsageProvider } from "@/lib/server/vendorUsage";
-import { normalizeUtilizationPercent } from "@/lib/vendorPlanPricing";
+import type { VendorUsageProfileSnapshot, VendorUsageProvider, VendorUsageWindow } from "@/lib/server/vendorUsage";
+import { normalizeUtilizationPercent, resolveCodexWindowUsedPercent } from "@/lib/vendorPlanPricing";
 import type { StoredVendorTokens } from "@/lib/server/vendorUsageSecrets";
 
 const CLAUDE_USAGE_BETA = "oauth-2025-04-20";
@@ -144,9 +144,19 @@ async function fetchClaudeSnapshot(
   };
 }
 
+function codexWindowResetsAt(window: Record<string, unknown> | undefined): string | null {
+  if (!window) return null;
+  const resetAt = window.reset_at;
+  return resetAt ? new Date(Number(resetAt) * 1000).toISOString() : null;
+}
+
 async function fetchCodexSnapshot(
   tokenRow: NonNullable<StoredVendorTokens["codex"]>,
-  profileId: string | undefined
+  profileId: string | undefined,
+  existingWindows: { primary: VendorUsageWindow | null; secondary: VendorUsageWindow | null } = {
+    primary: null,
+    secondary: null
+  }
 ): Promise<VendorUsageProfileSnapshot | null> {
   const headers: Record<string, string> = {
     Authorization: `Bearer ${tokenRow.access_token}`,
@@ -159,6 +169,9 @@ async function fetchCodexSnapshot(
   const rateLimit = (usage.rate_limit as Record<string, unknown> | undefined) || {};
   const primary = rateLimit.primary_window as Record<string, unknown> | undefined;
   const secondary = rateLimit.secondary_window as Record<string, unknown> | undefined;
+  const limitReached = rateLimit.limit_reached === true;
+  const primaryResetsAt = codexWindowResetsAt(primary);
+  const secondaryResetsAt = codexWindowResetsAt(secondary);
   const planType = usage.plan_type || usage.planType;
   let email: string | null = null;
   try {
@@ -183,15 +196,25 @@ async function fetchCodexSnapshot(
     plan_organization_type: null,
     primary_window: primary
       ? {
-          utilization: normalizeUtilizationPercent(primary.used_percent ?? primary.utilization ?? 0),
-          resets_at: primary.reset_at ? new Date(Number(primary.reset_at) * 1000).toISOString() : null,
+          utilization: resolveCodexWindowUsedPercent(primary, {
+            limitReached,
+            previousUtilization: existingWindows.primary?.utilization ?? null,
+            previousResetsAt: existingWindows.primary?.resets_at ?? null,
+            resetsAt: primaryResetsAt
+          }),
+          resets_at: primaryResetsAt,
           window_seconds: Number(primary.limit_window_seconds ?? 5 * 3600)
         }
       : null,
     secondary_window: secondary
       ? {
-          utilization: normalizeUtilizationPercent(secondary.used_percent ?? secondary.utilization ?? 0),
-          resets_at: secondary.reset_at ? new Date(Number(secondary.reset_at) * 1000).toISOString() : null,
+          utilization: resolveCodexWindowUsedPercent(secondary, {
+            limitReached,
+            previousUtilization: existingWindows.secondary?.utilization ?? null,
+            previousResetsAt: existingWindows.secondary?.resets_at ?? null,
+            resetsAt: secondaryResetsAt
+          }),
+          resets_at: secondaryResetsAt,
           window_seconds: Number(secondary.limit_window_seconds ?? 7 * 86400)
         }
       : null,
@@ -254,7 +277,8 @@ async function fetchCursorSnapshot(
 
 export async function fetchLiveVendorUsageSnapshots(
   tokens: StoredVendorTokens,
-  existingProfileIds: Partial<Record<VendorUsageProvider, string>> = {}
+  existingProfileIds: Partial<Record<VendorUsageProvider, string>> = {},
+  existingProfiles: Partial<Record<VendorUsageProvider, VendorUsageProfileSnapshot>> = {}
 ): Promise<VendorUsageProfileSnapshot[]> {
   const snapshots: VendorUsageProfileSnapshot[] = [];
   if (tokens.claude_code?.access_token) {
@@ -262,7 +286,11 @@ export async function fetchLiveVendorUsageSnapshots(
     if (row) snapshots.push(row);
   }
   if (tokens.codex?.access_token) {
-    const row = await fetchCodexSnapshot(tokens.codex, existingProfileIds.codex);
+    const existing = existingProfiles.codex;
+    const row = await fetchCodexSnapshot(tokens.codex, existingProfileIds.codex, {
+      primary: existing?.primary_window ?? null,
+      secondary: existing?.secondary_window ?? null
+    });
     if (row) snapshots.push(row);
   }
   if (tokens.cursor?.access_token) {

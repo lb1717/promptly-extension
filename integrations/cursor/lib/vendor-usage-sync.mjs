@@ -295,6 +295,58 @@ function normalizeUtilizationPercent(value) {
   return Math.round(Math.max(0, Math.min(100, pct)));
 }
 
+function codexWindowResetsAt(window) {
+  if (!window) return null;
+  return window.reset_at ? new Date(Number(window.reset_at) * 1000).toISOString() : null;
+}
+
+/** Normalize Codex wham/usage window fields to percent used (not remaining). */
+function resolveCodexWindowUsedPercent(window, context = {}) {
+  if (!window || typeof window !== "object") return 0;
+
+  const remainingRaw =
+    window.percent_left ?? window.remaining_percent ?? window.percent_remaining;
+  if (remainingRaw != null && Number.isFinite(Number(remainingRaw))) {
+    return normalizeUtilizationPercent(100 - Number(remainingRaw));
+  }
+
+  const usedRaw = window.used_percent ?? window.utilization;
+  if (usedRaw == null || !Number.isFinite(Number(usedRaw))) return 0;
+
+  let pct = Number(usedRaw);
+  if (pct > 0 && pct <= 1) pct *= 100;
+  pct = Math.max(0, Math.min(100, pct));
+
+  const windowSeconds = Number(window.limit_window_seconds ?? 0);
+  const resetAfter = Number(window.reset_after_seconds ?? 0);
+
+  if (windowSeconds > 3600 && resetAfter > 0) {
+    const elapsedRatio = 1 - resetAfter / windowSeconds;
+    if (elapsedRatio <= 0.12 && pct >= 80) {
+      return normalizeUtilizationPercent(100 - pct);
+    }
+  }
+
+  const asUsed = normalizeUtilizationPercent(pct);
+
+  if (context.limitReached) {
+    if (pct <= 10) return 100;
+    if (pct >= 90) return asUsed;
+  }
+
+  if (
+    context.previousUtilization != null &&
+    context.previousResetsAt &&
+    context.resetsAt &&
+    context.previousResetsAt === context.resetsAt &&
+    asUsed < context.previousUtilization - 1
+  ) {
+    return normalizeUtilizationPercent(100 - pct);
+  }
+
+  return asUsed;
+}
+
 function parseClaudePlanFromProfile(profile) {
   if (!profile || typeof profile !== "object") {
     return { plan_slug: null, plan_display: null, plan_organization_type: null };
@@ -434,6 +486,7 @@ async function fetchCodexProfileUsage(configDir) {
     const usage = await res.json();
     const primary = usage?.rate_limit?.primary_window;
     const secondary = usage?.rate_limit?.secondary_window;
+    const limitReached = usage?.rate_limit?.limit_reached === true;
     const planType = usage?.plan_type || usage?.planType || null;
     let email = null;
     try {
@@ -452,15 +505,21 @@ async function fetchCodexProfileUsage(configDir) {
       plan_display: typeof planType === "string" ? planType.charAt(0).toUpperCase() + planType.slice(1) : null,
       primary_window: primary
         ? {
-            utilization: normalizeUtilizationPercent(primary.used_percent ?? primary.utilization ?? 0),
-            resets_at: primary.reset_at ? new Date(Number(primary.reset_at) * 1000).toISOString() : null,
+            utilization: resolveCodexWindowUsedPercent(primary, {
+              limitReached,
+              resetsAt: codexWindowResetsAt(primary)
+            }),
+            resets_at: codexWindowResetsAt(primary),
             window_seconds: Number(primary.limit_window_seconds ?? 5 * 3600)
           }
         : null,
       secondary_window: secondary
         ? {
-            utilization: normalizeUtilizationPercent(secondary.used_percent ?? secondary.utilization ?? 0),
-            resets_at: secondary.reset_at ? new Date(Number(secondary.reset_at) * 1000).toISOString() : null,
+            utilization: resolveCodexWindowUsedPercent(secondary, {
+              limitReached,
+              resetsAt: codexWindowResetsAt(secondary)
+            }),
+            resets_at: codexWindowResetsAt(secondary),
             window_seconds: Number(secondary.limit_window_seconds ?? 7 * 86400)
           }
         : null,

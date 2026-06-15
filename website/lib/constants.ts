@@ -60,7 +60,7 @@ export const SITE = {
 
 export const NAV_LINKS = [
   { label: "Product", href: "/" },
-  { label: "Labs", href: "/labs" }
+  { label: "Research", href: "/research" }
 ];
 
 export const DEMO_TIMING = {

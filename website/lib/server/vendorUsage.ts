@@ -9,6 +9,7 @@ import {
 } from "@/lib/vendorPlanPricing";
 import { fetchLiveVendorUsageSnapshots } from "@/lib/server/vendorUsageFetch";
 import {
+  canDecryptVendorTokensWithPrimaryKey,
   decryptVendorTokens,
   encryptVendorTokens,
   hasEncryptedVendorTokens,
@@ -412,8 +413,17 @@ export async function getVendorUsageTokenStatus(uid: string): Promise<{
 export async function getVendorUsageTokens(uid: string): Promise<StoredVendorTokens | null> {
   const snap = await settingsRef(uid).get();
   if (!snap.exists) return null;
-  const blob = snap.data()?.encrypted_vendor_tokens;
-  return decryptVendorTokens(typeof blob === "string" ? blob : null);
+  const data = snap.data();
+  const blob = data?.encrypted_vendor_tokens;
+  if (typeof blob !== "string") return null;
+  const tokens = decryptVendorTokens(blob);
+  if (!tokens) return null;
+  if (!canDecryptVendorTokensWithPrimaryKey(blob)) {
+    await storeVendorUsageTokens(uid, tokens, {
+      device_email: typeof data?.vendor_tokens_device_email === "string" ? data.vendor_tokens_device_email : null
+    });
+  }
+  return tokens;
 }
 
 export async function refreshVendorUsageLive(uid: string): Promise<{ refreshed: number; error?: string }> {
@@ -429,7 +439,10 @@ export async function refreshVendorUsageLive(uid: string): Promise<{ refreshed: 
   const existingIds = Object.fromEntries(existing.map((row) => [row.provider, row.profile_id])) as Partial<
     Record<VendorUsageProvider, string>
   >;
-  const snapshots = await fetchLiveVendorUsageSnapshots(tokens, existingIds);
+  const existingProfiles = Object.fromEntries(existing.map((row) => [row.provider, row])) as Partial<
+    Record<VendorUsageProvider, VendorUsageProfileSnapshot>
+  >;
+  const snapshots = await fetchLiveVendorUsageSnapshots(tokens, existingIds, existingProfiles);
   if (!snapshots.length) {
     return { refreshed: 0, error: "fetch_failed" };
   }

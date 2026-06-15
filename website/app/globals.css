@@ -28,6 +28,11 @@ body {
   font-family: var(--font-roboto-chart), Roboto, sans-serif !important;
 }
 
+.statistics-charts .bar-end-percent-label,
+.statistics-charts .recharts-label-list text {
+  white-space: nowrap !important;
+}
+
 .promptly-cta-shine::after {
   content: "";
   position: absolute;

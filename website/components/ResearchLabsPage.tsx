@@ -1,6 +1,7 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { AmbientBackground } from "@/components/AmbientBackground";
+import { DemoSection } from "@/components/DemoSection";
 import { Footer } from "@/components/Footer";
 import { Navbar } from "@/components/Navbar";
 import { Button } from "@/components/ui/Button";
@@ -10,8 +11,6 @@ const ResearchHeuristicDemoLazy = dynamic(
   () => import("@/components/ResearchHeuristicDemo").then((m) => ({ default: m.ResearchHeuristicDemo })),
   { ssr: false, loading: () => <p className="text-sm text-faint">Loading demo…</p> }
 );
-
-export type ResearchLabsPageVariant = "labs" | "research";
 
 const FAQS = [
   {
@@ -152,74 +151,54 @@ function SpotlightCard({
   );
 }
 
-type Props = {
-  variant?: ResearchLabsPageVariant;
-};
+type Props = Record<string, never>;
 
-export function ResearchLabsPage({ variant = "research" }: Props) {
-  const showDemo = variant === "research";
-  const isLabsSection = variant === "labs";
-
+export function ResearchLabsPage(_props?: Props) {
   return (
     <main className="relative min-h-screen bg-page text-ink">
       <AmbientBackground variant="static" />
       <div className="relative z-10">
         <Navbar />
 
-        {isLabsSection ? (
-          <div className="border-b border-line bg-cream-dark px-4 py-3 text-center text-sm text-muted">
-            Looking for the{" "}
-            <Link href="/" className="font-semibold text-ink underline-offset-2 hover:underline">
-              Promptly browser extension
-            </Link>
-            ? That&apos;s on our product page, not this research section.
-          </div>
-        ) : null}
-
-        <section className="px-4 pb-16 pt-10 sm:pb-20 sm:pt-14">
+        <section className="px-4 pb-6 pt-10 sm:pb-8 sm:pt-14">
           <div className="mx-auto max-w-6xl">
             <div className="mx-auto max-w-4xl text-center">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-faint">Research</p>
               <h1 className="mt-4 text-4xl font-semibold leading-tight text-ink sm:text-6xl">
-                {isLabsSection ? "Prompt engineering research" : "Promptly Research Labs"}
+                Prompt engineering research
               </h1>
               <p className="mx-auto mt-6 max-w-3xl text-lg leading-relaxed text-muted sm:text-xl">
                 Promptly turns a raw prompt into a parameterised instruction specification, then reconstructs an
                 optimised prompt using retrieved prompt patterns and search-based prompt optimisation.
               </p>
               <p className="mx-auto mt-6 max-w-3xl text-sm leading-relaxed text-muted sm:text-base">
-                {showDemo ? (
-                  <>
-                    This page presents a conceptual architecture for that workflow, links it to research literature, and
-                    includes a deterministic demo of how an optimisation pipeline could look in product form.
-                  </>
-                ) : (
-                  <>
-                    This page presents a conceptual architecture for that workflow and links it to research literature and
-                    MIT and arXiv sources.
-                  </>
-                )}
+                This page presents a conceptual architecture for that workflow, links it to research literature, and
+                includes a deterministic demo of how an optimisation pipeline could look in product form.
               </p>
               <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-                {showDemo ? (
-                  <Button href="#promptly-in-action">Try the demo</Button>
-                ) : (
-                  <Button href="#how-promptly-works">How Promptly works</Button>
-                )}
+                <Button href="#promptly-in-action">Try the demo</Button>
                 <Button href="/papers" variant="ghost">
                   Browse papers
                 </Button>
-                {isLabsSection ? (
-                  <Button href="/research" variant="ghost">
-                    Heuristic demo
-                  </Button>
-                ) : (
-                  <Button href="/labs" variant="ghost">
-                    Research overview
-                  </Button>
-                )}
+                <Button href="/" variant="ghost">
+                  Product page
+                </Button>
               </div>
             </div>
+          </div>
+        </section>
+
+        <DemoSection />
+
+        <section className="border-t border-line px-4 pb-4 pt-2 sm:pb-6">
+          <div className="mx-auto max-w-6xl text-center">
+            <p className="text-sm text-muted">
+              Looking for the{" "}
+              <Link href="/" className="font-semibold text-ink underline-offset-2 hover:underline">
+                Promptly browser extension
+              </Link>
+              ? That&apos;s on our product page — this section covers the research behind it.
+            </p>
           </div>
         </section>
 
@@ -488,29 +467,27 @@ export function ResearchLabsPage({ variant = "research" }: Props) {
           </div>
         </section>
 
-        {showDemo ? (
-          <section id="promptly-in-action" className="scroll-mt-24 px-4 py-10">
-            <div className="mx-auto max-w-6xl">
-              <div className="mb-10 max-w-3xl">
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-faint">Promptly in action</p>
-                <h2 className="mt-3 text-3xl font-semibold text-ink sm:text-4xl">A deterministic demo of the product workflow</h2>
-                <p className="mt-4 text-sm leading-relaxed text-muted sm:text-base">
-                  The component below is deliberately heuristic. It does not call a model; it illustrates how Promptly can
-                  analyse a raw prompt, assign tags, reconstruct a clearer instruction contract, and show the delta in a
-                  readable interface.
-                </p>
-              </div>
-              <ResearchHeuristicDemoLazy />
-              <SourcesBlock
-                items={[
-                  { label: "Effective Prompts for AI: The Essentials", url: PAPER_ENTRIES[0].url },
-                  { label: "The Prompt Report: A Systematic Survey of Prompt Engineering Techniques", url: PAPER_ENTRIES[2].url },
-                  { label: "Automatic Prompt Optimization with \"Gradient Descent\" and Beam Search", url: PAPER_ENTRIES[3].url }
-                ]}
-              />
+        <section id="promptly-in-action" className="scroll-mt-24 px-4 py-10">
+          <div className="mx-auto max-w-6xl">
+            <div className="mb-10 max-w-3xl">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-faint">Promptly in action</p>
+              <h2 className="mt-3 text-3xl font-semibold text-ink sm:text-4xl">A deterministic demo of the product workflow</h2>
+              <p className="mt-4 text-sm leading-relaxed text-muted sm:text-base">
+                The component below is deliberately heuristic. It does not call a model; it illustrates how Promptly can
+                analyse a raw prompt, assign tags, reconstruct a clearer instruction contract, and show the delta in a
+                readable interface.
+              </p>
             </div>
-          </section>
-        ) : null}
+            <ResearchHeuristicDemoLazy />
+            <SourcesBlock
+              items={[
+                { label: "Effective Prompts for AI: The Essentials", url: PAPER_ENTRIES[0].url },
+                { label: "The Prompt Report: A Systematic Survey of Prompt Engineering Techniques", url: PAPER_ENTRIES[2].url },
+                { label: "Automatic Prompt Optimization with \"Gradient Descent\" and Beam Search", url: PAPER_ENTRIES[3].url }
+              ]}
+            />
+          </div>
+        </section>
 
         <section id="faq" className="scroll-mt-24 px-4 py-10 pb-24">
           <div className="mx-auto max-w-6xl">

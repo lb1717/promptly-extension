@@ -71,6 +71,64 @@ export function normalizeUtilizationPercent(value: unknown): number {
   return Math.round(Math.max(0, Math.min(100, pct)));
 }
 
+export type CodexWindowUsedPercentContext = {
+  limitReached?: boolean;
+  previousUtilization?: number | null;
+  previousResetsAt?: string | null;
+  resetsAt?: string | null;
+};
+
+/** Normalize Codex / ChatGPT wham/usage window fields to percent used (not remaining). */
+export function resolveCodexWindowUsedPercent(
+  window: Record<string, unknown> | null | undefined,
+  context: CodexWindowUsedPercentContext = {}
+): number {
+  if (!window || typeof window !== "object") return 0;
+
+  const remainingRaw =
+    window.percent_left ?? window.remaining_percent ?? window.percent_remaining;
+  if (remainingRaw != null && Number.isFinite(Number(remainingRaw))) {
+    return normalizeUtilizationPercent(100 - Number(remainingRaw));
+  }
+
+  const usedRaw = window.used_percent ?? window.utilization;
+  if (usedRaw == null || !Number.isFinite(Number(usedRaw))) return 0;
+
+  let pct = Number(usedRaw);
+  if (pct > 0 && pct <= 1) pct *= 100;
+  pct = Math.max(0, Math.min(100, pct));
+
+  const windowSeconds = Number(window.limit_window_seconds ?? 0);
+  const resetAfter = Number(window.reset_after_seconds ?? 0);
+
+  // Near the start of a rolling window, used should be low and remaining should be high.
+  if (windowSeconds > 3600 && resetAfter > 0) {
+    const elapsedRatio = 1 - resetAfter / windowSeconds;
+    if (elapsedRatio <= 0.12 && pct >= 80) {
+      return normalizeUtilizationPercent(100 - pct);
+    }
+  }
+
+  const asUsed = normalizeUtilizationPercent(pct);
+
+  if (context.limitReached) {
+    if (pct <= 10) return 100;
+    if (pct >= 90) return asUsed;
+  }
+
+  if (
+    context.previousUtilization != null &&
+    context.previousResetsAt &&
+    context.resetsAt &&
+    context.previousResetsAt === context.resetsAt &&
+    asUsed < context.previousUtilization - 1
+  ) {
+    return normalizeUtilizationPercent(100 - pct);
+  }
+
+  return asUsed;
+}
+
 export function dollarsUsedFromUtilization(monthlyUsd: number, utilizationPercent: number, windowSeconds: number | null): number {
   const util = normalizeUtilizationPercent(utilizationPercent);
   const monthSeconds = 30 * 86400;

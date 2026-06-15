@@ -238,6 +238,9 @@
       if (el.closest("[data-testid*='composer' i], [class*='composer' i]")) {
         score += 3;
       }
+      if (el.getAttribute("role") === "textbox" && el.isContentEditable) {
+        score += 4;
+      }
       return score;
     });
   }

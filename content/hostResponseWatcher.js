@@ -11,9 +11,17 @@
   const ASSISTANT_SELECTORS = {
     chatgpt: [
       '[data-message-author-role="assistant"]',
-      '[data-testid="conversation-turn"] [data-message-author-role="assistant"]'
+      '[data-testid="conversation-turn"] [data-message-author-role="assistant"]',
+      'article[data-turn="assistant"]',
+      '[data-testid*="assistant-turn" i]'
     ],
-    claude: ['[data-testid="assistant-message"]', '[data-is-assistant="true"]', ".font-claude-message"],
+    claude: [
+      '[data-testid="assistant-message"]',
+      '[data-testid="assistant-turn"]',
+      '[data-is-assistant="true"]',
+      '[data-is-assistant-message="true"]',
+      ".font-claude-message"
+    ],
     gemini: ["message-content.model-response-text", ".model-response-text", '[data-message-type="model"]']
   };
 
@@ -54,7 +62,9 @@
         );
       }
       if (site === "claude") {
-        return !!document.querySelector('[data-is-streaming="true"], [data-is-streaming=""]');
+        return !!document.querySelector(
+          '[data-is-streaming="true"], [data-is-streaming=""], [aria-busy="true"][data-is-assistant="true"]'
+        );
       }
       if (site === "gemini") {
         return !!document.querySelector(

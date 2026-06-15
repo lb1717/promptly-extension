@@ -14,6 +14,11 @@ const nextConfig = {
         source: "/labs/papers",
         destination: "/papers",
         permanent: true
+      },
+      {
+        source: "/labs",
+        destination: "/research",
+        permanent: true
       }
     ];
   },

@@ -58,33 +58,47 @@
   /** @type {(() => void) | null} */
   let stopHostPassiveListener = null;
 
-  function claimPassiveListenerSlot(siteKey) {
+  function frameHasComposer() {
     try {
-      const root = window.top;
-      root.__promptlyPassiveListenerSlots = root.__promptlyPassiveListenerSlots || {};
-      if (root.__promptlyPassiveListenerSlots[siteKey]) {
+      const pe = adapters.getPromptElement(null);
+      return !!(pe && pe.isConnected && adapters.isEditable(pe));
+    } catch (_e) {
+      return false;
+    }
+  }
+
+  function claimPassiveListenerSlot(_siteKey) {
+    try {
+      if (!frameHasComposer()) {
         return false;
       }
-      root.__promptlyPassiveListenerSlots[siteKey] = window;
+      if (window.self === window.top) {
+        return true;
+      }
+      // Prefer the frame that actually hosts the composer (ChatGPT/Claude often embed it in a child frame).
+      try {
+        const topPe = window.top?.PromptlySiteAdapters?.getPromptElement?.(null);
+        if (topPe && topPe.isConnected && window.top?.PromptlySiteAdapters?.isEditable?.(topPe)) {
+          return false;
+        }
+      } catch (_e) {
+        /* cross-origin child frame — this frame is our best shot */
+      }
       return true;
     } catch (_e) {
       return window.self === window.top;
     }
   }
 
-  function releasePassiveListenerSlot(siteKey) {
-    try {
-      const root = window.top;
-      if (root.__promptlyPassiveListenerSlots?.[siteKey] === window) {
-        delete root.__promptlyPassiveListenerSlots[siteKey];
-      }
-    } catch (_e) {
-      /* ignore */
-    }
+  function releasePassiveListenerSlot(_siteKey) {
+    /* per-frame install — nothing to release on top */
   }
 
   function ensureHostPassiveListener() {
-    if (stopHostPassiveListener || destroyed || !currentTarget) {
+    if (stopHostPassiveListener || destroyed) {
+      return;
+    }
+    if (!frameHasComposer()) {
       return;
     }
     if (typeof window.PromptlyHostActivityListener?.install !== "function") {
@@ -95,7 +109,7 @@
     }
     stopHostPassiveListener = window.PromptlyHostActivityListener.install({
       site,
-      getPromptTarget: () => currentTarget,
+      getPromptTarget: () => currentTarget || adapters.getPromptElement(null),
       readComposer: readHostComposerForTelemetry
     });
   }
@@ -2939,8 +2953,8 @@
       currentTarget = nextTarget;
       lastPlacementSignature = null;
       observers.bindTarget(currentTarget);
-      ensureHostPassiveListener();
     }
+    ensureHostPassiveListener();
 
     if (!currentTarget || !isTargetVisible(currentTarget)) {
       lastPlacementSignature = null;
