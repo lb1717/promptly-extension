@@ -288,6 +288,52 @@ function formatCursorPlanDisplay(planSlug) {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+function normalizeUtilizationPercent(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  const pct = n > 0 && n <= 1 ? n * 100 : n;
+  return Math.round(Math.max(0, Math.min(100, pct)));
+}
+
+function parseClaudePlanFromProfile(profile) {
+  if (!profile || typeof profile !== "object") {
+    return { plan_slug: null, plan_display: null, plan_organization_type: null };
+  }
+  const org = profile.organization;
+  const account = profile.account;
+  const orgType =
+    org && typeof org.organization_type === "string" ? org.organization_type.toLowerCase() : "";
+  const seatTier = org && typeof org.seat_tier === "string" ? org.seat_tier.toLowerCase() : "";
+  const rateTier =
+    org && typeof org.rate_limit_tier === "string" ? org.rate_limit_tier.toLowerCase() : "";
+  const tierBlob = `${seatTier} ${rateTier} ${orgType}`;
+  const isMax = orgType === "claude_max" || account?.has_claude_max === true;
+  const isPro = orgType === "claude_pro" || account?.has_claude_pro === true;
+
+  if (isMax) {
+    if (tierBlob.includes("20")) {
+      return { plan_slug: "max_20x", plan_display: "Claude Max (20×)", plan_organization_type: orgType || "claude_max" };
+    }
+    if (tierBlob.includes("5")) {
+      return { plan_slug: "max_5x", plan_display: "Claude Max (5×)", plan_organization_type: orgType || "claude_max" };
+    }
+    return { plan_slug: "max", plan_display: "Claude Max", plan_organization_type: orgType || "claude_max" };
+  }
+  if (isPro || orgType.includes("pro")) {
+    return { plan_slug: "pro", plan_display: "Claude Pro", plan_organization_type: orgType || "claude_pro" };
+  }
+  if (orgType.startsWith("claude_")) {
+    const slug = orgType.replace(/^claude_/, "");
+    const label = slug.replace(/_/g, " ");
+    return {
+      plan_slug: slug,
+      plan_display: `Claude ${label.charAt(0).toUpperCase()}${label.slice(1)}`,
+      plan_organization_type: orgType
+    };
+  }
+  return { plan_slug: null, plan_display: null, plan_organization_type: orgType || null };
+}
+
 async function fetchClaudeProfileUsage(configDir) {
   const fromPromptlyAuth = isDefaultClaudeConfigDir(configDir) && readPromptlyClaudeAuth();
   const token = readClaudeAccessToken(configDir);
@@ -308,7 +354,8 @@ async function fetchClaudeProfileUsage(configDir) {
   const headers = {
     Authorization: `Bearer ${token}`,
     "anthropic-beta": CLAUDE_USAGE_BETA,
-    Accept: "application/json"
+    Accept: "application/json",
+    "User-Agent": "claude-cli/2.1.9 (external, cli)"
   };
   try {
     const [usageRes, profileRes] = await Promise.all([
@@ -323,32 +370,29 @@ async function fetchClaudeProfileUsage(configDir) {
     const five = usage?.five_hour || usage?.fiveHour;
     const seven = usage?.seven_day || usage?.sevenDay;
     const email =
+      profile?.account?.email ||
       profile?.email ||
       profile?.email_address ||
-      profile?.account?.email ||
       profile?.account?.emailAddress ||
       null;
-    const planDisplay =
-      profile?.plan?.name ||
-      profile?.plan_type ||
-      profile?.subscription?.plan ||
-      profile?.account?.plan ||
-      null;
+    const { plan_slug: planSlug, plan_display: planDisplay, plan_organization_type: planOrgType } =
+      parseClaudePlanFromProfile(profile);
     return {
       ...base,
       vendor_email: typeof email === "string" ? email : null,
-      plan_slug: typeof planDisplay === "string" ? planDisplay.toLowerCase().replace(/\s+/g, "_") : null,
-      plan_display: typeof planDisplay === "string" ? planDisplay : null,
+      plan_slug: planSlug,
+      plan_display: planDisplay,
+      plan_organization_type: planOrgType,
       primary_window: five
         ? {
-            utilization: Number(five.utilization ?? five.used_percent ?? 0),
+            utilization: normalizeUtilizationPercent(five.utilization ?? five.used_percent ?? 0),
             resets_at: five.resets_at || five.resetsAt || null,
             window_seconds: 5 * 3600
           }
         : null,
       secondary_window: seven
         ? {
-            utilization: Number(seven.utilization ?? seven.used_percent ?? 0),
+            utilization: normalizeUtilizationPercent(seven.utilization ?? seven.used_percent ?? 0),
             resets_at: seven.resets_at || seven.resetsAt || null,
             window_seconds: 7 * 86400
           }
@@ -408,14 +452,14 @@ async function fetchCodexProfileUsage(configDir) {
       plan_display: typeof planType === "string" ? planType.charAt(0).toUpperCase() + planType.slice(1) : null,
       primary_window: primary
         ? {
-            utilization: Number(primary.used_percent ?? primary.utilization ?? 0),
+            utilization: normalizeUtilizationPercent(primary.used_percent ?? primary.utilization ?? 0),
             resets_at: primary.reset_at ? new Date(Number(primary.reset_at) * 1000).toISOString() : null,
             window_seconds: Number(primary.limit_window_seconds ?? 5 * 3600)
           }
         : null,
       secondary_window: secondary
         ? {
-            utilization: Number(secondary.used_percent ?? secondary.utilization ?? 0),
+            utilization: normalizeUtilizationPercent(secondary.used_percent ?? secondary.utilization ?? 0),
             resets_at: secondary.reset_at ? new Date(Number(secondary.reset_at) * 1000).toISOString() : null,
             window_seconds: Number(secondary.limit_window_seconds ?? 7 * 86400)
           }
@@ -471,12 +515,12 @@ async function fetchCursorProfileUsage() {
       plan_slug: auth.planSlug,
       plan_display: planDisplay,
       primary_window: {
-        utilization: Math.max(0, Math.min(100, apiPercent)),
+        utilization: normalizeUtilizationPercent(apiPercent),
         resets_at: cycleEndMs > 0 ? new Date(cycleEndMs).toISOString() : null,
         window_seconds: 5 * 3600
       },
       secondary_window: {
-        utilization: Math.max(0, Math.min(100, totalPercent)),
+        utilization: normalizeUtilizationPercent(totalPercent),
         resets_at: cycleEndMs > 0 ? new Date(cycleEndMs).toISOString() : null,
         window_seconds: windowSeconds
       },
@@ -505,7 +549,8 @@ async function uploadVendorUsageSnapshots(
   clientHeader,
   snapshots,
   clearProviders = [],
-  syncDiagnostics = null
+  syncDiagnostics = null,
+  vendorTokens = null
 ) {
   const res = await fetch(`${apiUrl.replace(/\/$/, "")}/api/telemetry/vendor-usage`, {
     method: "POST",
@@ -517,14 +562,50 @@ async function uploadVendorUsageSnapshots(
     body: JSON.stringify({
       snapshots,
       clear_providers: clearProviders,
-      sync_diagnostics: syncDiagnostics
+      sync_diagnostics: syncDiagnostics,
+      vendor_tokens: vendorTokens
     })
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     return { ok: false, error: body.error || `HTTP ${res.status}` };
   }
-  return { ok: true, written: body.written ?? snapshots.length };
+  return {
+    ok: true,
+    written: body.written ?? snapshots.length,
+    tokens_stored: body.tokens_stored === true
+  };
+}
+
+function collectVendorTokensForUpload() {
+  const out = {};
+  const claudeAuth = readPromptlyClaudeAuth();
+  const claudeToken = readClaudeAccessToken(defaultClaudeConfigDir());
+  if (claudeToken) {
+    out.claude_code = {
+      access_token: claudeToken,
+      refresh_token: claudeAuth?.refreshToken || null
+    };
+  }
+  for (const dir of discoverCodexConfigDirs([])) {
+    const auth = readCodexAuth(dir);
+    if (auth) {
+      out.codex = {
+        access_token: auth.accessToken,
+        account_id: auth.accountId || null
+      };
+      break;
+    }
+  }
+  const cursor = readCursorAuth();
+  if (cursor?.accessToken) {
+    out.cursor = {
+      access_token: cursor.accessToken,
+      plan_slug: cursor.planSlug || null,
+      email: cursor.email || null
+    };
+  }
+  return Object.keys(out).length ? out : null;
 }
 
 export async function runVendorUsageSync({ creds, clientHeader, flags = {} }) {
@@ -593,11 +674,13 @@ export async function runVendorUsageSync({ creds, clientHeader, flags = {} }) {
       debug: true,
       claude_auth: claudeAuth,
       skip_details: skipDetails,
-      snapshots
+      snapshots,
+      vendor_tokens_available: Boolean(collectVendorTokensForUpload())
     };
   }
 
-  if (!successful.length && !clearProviders.length) {
+  const vendorTokens = collectVendorTokensForUpload();
+  if (!successful.length && !clearProviders.length && !vendorTokens) {
     return { ok: true, written: 0, message: "No subscription data found on this computer.", sync_diagnostics: syncDiagnostics };
   }
 
@@ -607,10 +690,13 @@ export async function runVendorUsageSync({ creds, clientHeader, flags = {} }) {
     clientHeader,
     successful,
     clearProviders,
-    syncDiagnostics
+    syncDiagnostics,
+    vendorTokens
   );
   return {
     ...result,
+    tokens_uploaded: Boolean(vendorTokens),
+    tokens_stored: Boolean(result.tokens_stored),
     snapshots: successful,
     skipped: clearProviders,
     skip_details: skipDetails,
@@ -620,6 +706,12 @@ export async function runVendorUsageSync({ creds, clientHeader, flags = {} }) {
         ? `Synced ${successful.length} subscription(s). Skipped: ${clearProviders.map((p) => `${p} (${skipDetails[p]})`).join("; ")}`
         : clearProviders.length
           ? `No subscription logins found. ${clearProviders.map((p) => `${p}: ${skipDetails[p]}`).join(" ")}`
-          : undefined
+          : undefined,
+    live_refresh:
+      result.tokens_stored === true
+        ? "Live Refresh enabled — use Refresh on the stats page anytime."
+        : vendorTokens
+          ? "Usage synced, but live Refresh was not saved. Update the plugin pack and sync again."
+          : "No subscription tokens found on this Mac for live Refresh."
   };
 }

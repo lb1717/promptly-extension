@@ -72,7 +72,8 @@ writeFileSync(join(root, "codex/.mcp.json"), `${JSON.stringify(codexMcp, null, 2
 writeFileSync(join(root, "codex/mcp.json"), `${JSON.stringify(codexMcp, null, 2)}\n`);
 
 function cursorHookJson(tool) {
-  const cmd = `node ./bin/promptly-telemetry.mjs hook --tool ${tool}`;
+  // stop/sessionEnd run with project cwd — relative ./bin fails silently (Cursor forum #157195).
+  const cmd = `node "\${CURSOR_PLUGIN_ROOT}/bin/promptly-telemetry.mjs" hook --tool ${tool}`;
   return {
     version: 1,
     hooks: {

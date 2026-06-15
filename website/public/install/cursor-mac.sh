@@ -47,6 +47,10 @@ if ! grep -q 'hook --tool cursor' "${CURSOR_PLUGIN}/hooks/hooks.json" 2>/dev/nul
   echo "✗ Hooks are not configured for Cursor (expected --tool cursor)"
   exit 1
 fi
+if ! grep -q 'CURSOR_PLUGIN_ROOT' "${CURSOR_PLUGIN}/hooks/hooks.json" 2>/dev/null; then
+  echo "✗ Cursor hooks must use \${CURSOR_PLUGIN_ROOT}/bin (re-run install or update plugin pack)"
+  exit 1
+fi
 if ! grep -q '"PROMPTLY_TOOL": "cursor"' "${CURSOR_PLUGIN}/mcp.json" 2>/dev/null; then
   echo "✗ MCP server is not configured for Cursor"
   exit 1

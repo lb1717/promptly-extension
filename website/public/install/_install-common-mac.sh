@@ -258,19 +258,19 @@ promptly_write_cursor_hooks_json() {
   "version": 1,
   "hooks": {
     "beforeSubmitPrompt": [
-      { "command": "node ./bin/promptly-telemetry.mjs hook --tool cursor" }
+      { "command": "node \"${CURSOR_PLUGIN_ROOT}/bin/promptly-telemetry.mjs\" hook --tool cursor" }
     ],
     "afterAgentResponse": [
-      { "command": "node ./bin/promptly-telemetry.mjs hook --tool cursor" }
+      { "command": "node \"${CURSOR_PLUGIN_ROOT}/bin/promptly-telemetry.mjs\" hook --tool cursor" }
     ],
     "stop": [
-      { "command": "node ./bin/promptly-telemetry.mjs hook --tool cursor" }
+      { "command": "node \"${CURSOR_PLUGIN_ROOT}/bin/promptly-telemetry.mjs\" hook --tool cursor" }
     ],
     "sessionStart": [
-      { "command": "node ./bin/promptly-telemetry.mjs hook --tool cursor" }
+      { "command": "node \"${CURSOR_PLUGIN_ROOT}/bin/promptly-telemetry.mjs\" hook --tool cursor" }
     ],
     "sessionEnd": [
-      { "command": "node ./bin/promptly-telemetry.mjs hook --tool cursor" }
+      { "command": "node \"${CURSOR_PLUGIN_ROOT}/bin/promptly-telemetry.mjs\" hook --tool cursor" }
     ]
   }
 }
@@ -417,6 +417,10 @@ promptly_install_for_cursor() {
   fi
   if ! grep -q 'hook --tool cursor' "${cursor_plugin}/hooks/hooks.json" 2>/dev/null; then
     echo "✗ Hooks are not configured for Cursor (expected --tool cursor)"
+    return 1
+  fi
+  if ! grep -q 'CURSOR_PLUGIN_ROOT' "${cursor_plugin}/hooks/hooks.json" 2>/dev/null; then
+    echo "✗ Cursor hooks must use \${CURSOR_PLUGIN_ROOT}/bin (re-run install or update plugin pack)"
     return 1
   fi
   if ! grep -q '"PROMPTLY_TOOL": "cursor"' "${cursor_plugin}/mcp.json" 2>/dev/null; then

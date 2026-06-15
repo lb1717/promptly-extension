@@ -3,27 +3,27 @@
   "hooks": {
     "beforeSubmitPrompt": [
       {
-        "command": "node ./bin/promptly-telemetry.mjs hook --tool cursor"
+        "command": "node \"${CURSOR_PLUGIN_ROOT}/bin/promptly-telemetry.mjs\" hook --tool cursor"
       }
     ],
     "afterAgentResponse": [
       {
-        "command": "node ./bin/promptly-telemetry.mjs hook --tool cursor"
+        "command": "node \"${CURSOR_PLUGIN_ROOT}/bin/promptly-telemetry.mjs\" hook --tool cursor"
       }
     ],
     "stop": [
       {
-        "command": "node ./bin/promptly-telemetry.mjs hook --tool cursor"
+        "command": "node \"${CURSOR_PLUGIN_ROOT}/bin/promptly-telemetry.mjs\" hook --tool cursor"
       }
     ],
     "sessionStart": [
       {
-        "command": "node ./bin/promptly-telemetry.mjs hook --tool cursor"
+        "command": "node \"${CURSOR_PLUGIN_ROOT}/bin/promptly-telemetry.mjs\" hook --tool cursor"
       }
     ],
     "sessionEnd": [
       {
-        "command": "node ./bin/promptly-telemetry.mjs hook --tool cursor"
+        "command": "node \"${CURSOR_PLUGIN_ROOT}/bin/promptly-telemetry.mjs\" hook --tool cursor"
       }
     ]
   }

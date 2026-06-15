@@ -1,6 +1,6 @@
 /** Short-lived in-memory cache for expensive Firestore stats queries (per server instance). */
 
-export const STATS_QUERY_CACHE_TTL_MS = 300_000;
+export const STATS_QUERY_CACHE_TTL_MS = 60_000;
 const DEFAULT_TTL_MS = STATS_QUERY_CACHE_TTL_MS;
 const MAX_ENTRIES = 128;
 
@@ -41,4 +41,20 @@ export async function withStatsQueryCache<T>(
   const value = await loader();
   setStatsQueryCached(key, value, opts?.ttlMs);
   return value;
+}
+
+/** Drop cached stats for a user after new telemetry is written so dashboards update quickly. */
+export function invalidateStatsQueryCacheForUid(uid: string): void {
+  const normalized = String(uid || "").trim();
+  if (!normalized) return;
+  const prefixes = [
+    `ide-events:${normalized}:`,
+    `host-events:${normalized}:`,
+    `optimize-events:${normalized}:`
+  ];
+  for (const key of [...cache.keys()]) {
+    if (prefixes.some((prefix) => key.startsWith(prefix))) {
+      cache.delete(key);
+    }
+  }
 }

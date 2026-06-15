@@ -1194,7 +1194,20 @@ async function readStdinJson() {
   });
 }
 
-async function flushQueue(tool, clientHeader) {
+const MAX_FLUSH_ATTEMPTS = 3;
+const FLUSH_RETRY_BASE_MS = 400;
+
+function sleepMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function flushShouldRetry(status, error) {
+  if (typeof status === "number" && (status === 429 || status >= 500)) return true;
+  if (!status && error && /fetch failed|ECONNRESET|ETIMEDOUT|network/i.test(String(error))) return true;
+  return false;
+}
+
+async function flushQueue(tool, clientHeader, attempt = 0) {
   const creds = getCredentials(tool);
   if (!creds?.device_token) {
     return { ok: false, error: "not_connected" };
@@ -1211,23 +1224,38 @@ async function flushQueue(tool, clientHeader) {
   }
   const batch = events.slice(0, MAX_BATCH);
   const apiUrl = creds.api_url || DEFAULT_API_URL;
-  const res = await fetch(`${apiUrl.replace(/\/$/, "")}/api/telemetry/ide-activity`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${creds.device_token}`,
-      "x-promptly-client": clientHeader || TOOL_CLIENT[tool] || "promptly-claude-code"
-    },
-    body: JSON.stringify({
-      events: batch.map((event) => {
-        const copy = { ...event };
-        delete copy._session_id;
-        return copy;
+  let res;
+  let body = {};
+  try {
+    res = await fetch(`${apiUrl.replace(/\/$/, "")}/api/telemetry/ide-activity`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${creds.device_token}`,
+        "x-promptly-client": clientHeader || TOOL_CLIENT[tool] || "promptly-claude-code"
+      },
+      body: JSON.stringify({
+        events: batch.map((event) => {
+          const copy = { ...event };
+          delete copy._session_id;
+          return copy;
+        })
       })
-    })
-  });
-  const body = await res.json().catch(() => ({}));
+    });
+    body = await res.json().catch(() => ({}));
+  } catch (err) {
+    const message = String(err?.message || err);
+    if (attempt + 1 < MAX_FLUSH_ATTEMPTS && flushShouldRetry(undefined, message)) {
+      await sleepMs(FLUSH_RETRY_BASE_MS * (attempt + 1));
+      return flushQueue(tool, clientHeader, attempt + 1);
+    }
+    return { ok: false, error: message };
+  }
   if (!res.ok) {
+    if (attempt + 1 < MAX_FLUSH_ATTEMPTS && flushShouldRetry(res.status, body.error)) {
+      await sleepMs(FLUSH_RETRY_BASE_MS * (attempt + 1));
+      return flushQueue(tool, clientHeader, attempt + 1);
+    }
     return { ok: false, error: body.error || `HTTP ${res.status}` };
   }
   const remaining = events.slice(batch.length);
@@ -2098,8 +2126,12 @@ function auditInstalledHooks(tool) {
     }
     const raw = readFileSync(filePath, "utf8");
     const missing = (required[tool] || []).filter((key) => !raw.includes(`"${key}"`));
-    const usesPluginRoot = tool !== "codex" || raw.includes("PLUGIN_ROOT");
-    const usesRelativeBin = tool === "codex" && /node \.\/bin\/promptly-telemetry/.test(raw);
+    const usesPluginRoot =
+      tool === "cursor"
+        ? raw.includes("CURSOR_PLUGIN_ROOT") || raw.includes("CLAUDE_PLUGIN_ROOT")
+        : tool !== "codex" || raw.includes("PLUGIN_ROOT");
+    const usesRelativeBin =
+      (tool === "codex" || tool === "cursor") && /node \.\/bin\/promptly-telemetry/.test(raw);
     out.push({
       path: filePath,
       exists: true,
@@ -2283,6 +2315,7 @@ function cmdDiagnostics(flags) {
     notes: [
       "response_end_without_pending_submit means the assistant finished hook ran without a matching prompt submit — usually missing afterAgentResponse/Stop hooks or session id mismatch.",
       "pending_orphans that grow after each prompt mean response-end hooks are not firing; reinstall the plugin pack.",
+      "Cursor stop/sessionEnd hooks run from the project root — hooks must use ${CURSOR_PLUGIN_ROOT}/bin/promptly-telemetry.mjs, not ./bin.",
       "Codex hooks must use ${PLUGIN_ROOT}/bin/promptly-telemetry.mjs — relative ./bin paths fail silently in Codex Desktop.",
       "After updating Codex hooks, quit and reopen Codex and re-trust the Promptly plugin hooks.",
       "Run with --simulate to exercise submit → draft → response on a fake session."

@@ -7,7 +7,7 @@ import {
   type QueryDocumentSnapshot
 } from "firebase-admin/firestore";
 import { getFirebaseAdminAuth, getFirebaseAdminDb } from "@/lib/server/firebaseAdmin";
-import { STATS_QUERY_CACHE_TTL_MS, withStatsQueryCache } from "@/lib/server/statsQueryCache";
+import { STATS_QUERY_CACHE_TTL_MS, invalidateStatsQueryCacheForUid, withStatsQueryCache } from "@/lib/server/statsQueryCache";
 import { PROMPTLY_USER_CONTENT_TOKEN } from "./promptEngineeringConstants";
 import {
   extractFrameworkInstructionsFromTemplate,
@@ -507,6 +507,7 @@ async function persistOptimizeTelemetryEvent(params: {
     hostModelLabelSanitized: telemetry.hostModelLabelSanitized,
     hostModelBucket: telemetry.hostModelBucket
   });
+  invalidateStatsQueryCacheForUid(params.user.uid);
 
   /** So `/account/statistics` passive charts are not blank when DOM send sniffing misses (iframes / synthetic sends). */
   try {
@@ -876,6 +877,9 @@ export async function persistHostLlmActivityEvents(user: PromptlyUser, rows: Hos
     queued += 1;
   }
   await writer.close();
+  if (queued > 0) {
+    invalidateStatsQueryCacheForUid(user.uid);
+  }
   return queued;
 }
 
@@ -1609,6 +1613,9 @@ export async function persistIdeActivityEvents(user: PromptlyUser, rows: IdeActi
     queued += 1;
   }
   await writer.close();
+  if (queued > 0) {
+    invalidateStatsQueryCacheForUid(user.uid);
+  }
   return queued;
 }
 
