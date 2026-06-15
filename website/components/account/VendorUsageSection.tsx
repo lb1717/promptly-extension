@@ -206,6 +206,7 @@ type MonthlyExpenditureSummary = {
   totalMonthlyUsd: number;
   inUseUsd: number;
   predictedUsagePercent: number | null;
+  predictedLossUsd: number | null;
 };
 
 function computeMonthlyExpenditureSummary(
@@ -263,43 +264,56 @@ function computeMonthlyExpenditureSummary(
 
   if (pricedProfiles === 0) return null;
 
+  const predictedUsagePercent =
+    totalMonthlyUsd > 0 ? Math.round((predictedSpendUsd / totalMonthlyUsd) * 1000) / 10 : null;
+  const roundedPredictedSpend = Math.round(predictedSpendUsd * 100) / 100;
+
   return {
     totalMonthlyUsd: Math.round(totalMonthlyUsd * 100) / 100,
     inUseUsd: Math.round(inUseUsd * 100) / 100,
-    predictedUsagePercent:
-      totalMonthlyUsd > 0 ? Math.round((predictedSpendUsd / totalMonthlyUsd) * 1000) / 10 : null
+    predictedUsagePercent,
+    predictedLossUsd:
+      predictedUsagePercent != null && predictedUsagePercent < 100
+        ? Math.max(0, Math.round((totalMonthlyUsd - roundedPredictedSpend) * 100) / 100)
+        : null
   };
 }
 
-function predictedUsageColor(percent: number | null): string {
-  if (percent == null) return "#5C5C5C";
-  if (percent >= 100) return "#dc2626";
-  if (percent >= 75) return "#d97706";
-  return "#15803d";
+function ExpenditureStat({
+  label,
+  value,
+  valueClassName
+}: {
+  label: string;
+  value: string;
+  valueClassName?: string;
+}) {
+  return (
+    <div className="text-right">
+      <p className="text-[10px] font-medium uppercase tracking-wide text-faint">{label}</p>
+      <p className={`mt-0.5 text-sm font-semibold tabular-nums leading-none text-ink ${valueClassName ?? ""}`}>
+        {value}
+      </p>
+    </div>
+  );
 }
 
-function MonthlyExpenditureBox({ summary }: { summary: MonthlyExpenditureSummary }) {
-  const predictedColor = predictedUsageColor(summary.predictedUsagePercent);
-
+function MonthlyExpenditureStats({ summary }: { summary: MonthlyExpenditureSummary }) {
   return (
-    <div className="min-w-[11rem] rounded-xl border border-line bg-cream-dark/60 px-3 py-2.5 sm:min-w-[12.5rem]">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-faint">Monthly expenditure</p>
-      <dl className="mt-2 space-y-1.5">
-        <div className="flex items-baseline justify-between gap-3">
-          <dt className="text-[11px] text-muted">Total</dt>
-          <dd className="text-sm font-semibold tabular-nums text-ink">{formatUsd(summary.totalMonthlyUsd)}/mo</dd>
-        </div>
-        <div className="flex items-baseline justify-between gap-3">
-          <dt className="text-[11px] text-muted">Value in use</dt>
-          <dd className="text-sm font-semibold tabular-nums text-ink">{formatUsd(summary.inUseUsd)}</dd>
-        </div>
-        <div className="flex items-baseline justify-between gap-3 border-t border-line/70 pt-1.5">
-          <dt className="text-[11px] text-muted">Predicted</dt>
-          <dd className="text-sm font-semibold tabular-nums" style={{ color: predictedColor }}>
-            {summary.predictedUsagePercent != null ? `${summary.predictedUsagePercent}% of plan` : "—"}
-          </dd>
-        </div>
-      </dl>
+    <div className="flex flex-wrap items-end justify-end gap-4 sm:gap-5">
+      <ExpenditureStat label="Monthly cost" value={`${formatUsd(summary.totalMonthlyUsd)}/mo`} />
+      <ExpenditureStat label="Value used this month" value={formatUsd(summary.inUseUsd)} />
+      <ExpenditureStat
+        label="Predicted use"
+        value={summary.predictedUsagePercent != null ? `${summary.predictedUsagePercent}%` : "—"}
+      />
+      {summary.predictedLossUsd != null ? (
+        <ExpenditureStat
+          label="Predicted loss"
+          value={formatUsd(summary.predictedLossUsd)}
+          valueClassName="text-red-600"
+        />
+      ) : null}
     </div>
   );
 }
@@ -719,15 +733,15 @@ export default function VendorUsageSection({
 
   return (
     <section className="mb-8 w-full rounded-2xl border border-line bg-white p-4 shadow-card sm:p-5">
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
         <h2 className="text-base font-semibold uppercase tracking-[0.22em] text-ink">AI plan usage</h2>
-        <div className="flex flex-wrap items-start justify-end gap-3">
-          {expenditureSummary ? <MonthlyExpenditureBox summary={expenditureSummary} /> : null}
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-4 sm:gap-5">
+          {expenditureSummary ? <MonthlyExpenditureStats summary={expenditureSummary} /> : null}
           <button
             type="button"
             disabled={loading}
             onClick={() => void load({ live: true })}
-            className="rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-ink hover:bg-cream-dark disabled:opacity-50"
+            className="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-ink hover:bg-cream-dark disabled:opacity-50"
           >
             {loading ? "Refreshing…" : "Refresh"}
           </button>
