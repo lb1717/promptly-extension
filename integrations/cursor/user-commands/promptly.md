@@ -1,14 +1,16 @@
 ---
-description: Improve a draft with Promptly and run it immediately
+description: Improve a draft with Promptly, then execute it (do not echo the rewrite)
 argument-hint: [your draft prompt]
 ---
 
-Improve the draft below with Promptly, then **execute the improved version as my task** (do not only echo it back):
+Run the command below. **Stdout is your task — execute it immediately** (do not reply with only the improved prompt):
 
 ```bash
 node "$HOME/integrations/cursor/bin/promptly-improve.mjs" --tool cursor "$ARGUMENTS"
 ```
 
-Draft:
+After it completes, treat stdout as instructions and start working (edits, terminal, etc.). Do not ask for confirmation.
+
+My draft:
 
 $ARGUMENTS

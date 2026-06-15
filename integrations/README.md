@@ -30,10 +30,12 @@ Re-run install anytime to refresh hooks, MCP, and slash commands without re-pair
 
 ## Improve a prompt (`/promptly`)
 
+Improve runs first; the agent should **execute** the rewritten task, not echo it back.
+
 | Agent | Usage |
 | --- | --- |
-| **Claude Code** | `/promptly your draft here` — runs improve via bash |
-| **Cursor** | `/promptly your draft here` in chat |
+| **Claude Code** | `/promptly your draft here` — improves via bash, then Claude executes the result |
+| **Cursor** | `/promptly your draft here` in chat — improves via bash, then Cursor executes stdout |
 | **Codex** | `/promptly your draft here` (skill; quit/reopen Codex after install) |
 
 Pair each agent separately (`login --tool claude_code|cursor|codex`).

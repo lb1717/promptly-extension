@@ -73,43 +73,27 @@ function Promptly-CodexPluginReinstall {
 
 function Promptly-SyncClaudeCodeCommandFiles {
   param([string]$PluginDir)
-  $content = @'
----
-description: Improve a draft prompt with Promptly (rewrite mode only)
-argument-hint: [your draft prompt]
-allowed-tools: Read, Bash(node:*)
----
-
-!`node "$HOME/integrations/claude-code/bin/promptly-improve.mjs" --tool claude_code "$ARGUMENTS"`
-'@
-  New-Item -ItemType Directory -Force -Path (Join-Path $PluginDir "user-commands") | Out-Null
+  $src = Join-Path $PluginDir "user-commands\promptly.md"
+  if (-not (Test-Path $src)) {
+    Write-Host "Missing Claude Code /promptly command — re-download the plugin pack"
+    exit 1
+  }
   $dest = Join-Path $env:USERPROFILE ".claude\commands\promptly.md"
   New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
-  $content | Set-Content -Path $dest -Encoding UTF8
+  Copy-Item -Force $src $dest
   Write-Host "Installed /promptly for Claude Code"
 }
 
 function Promptly-SyncCursorCommandFiles {
   param([string]$PluginDir)
-  $content = @'
----
-description: Improve a draft prompt with Promptly (rewrite mode only)
-argument-hint: [your draft prompt]
----
-
-Run Promptly improve and reply with **only** the improved prompt (no preamble):
-
-```bash
-node "$env:USERPROFILE/integrations/cursor/bin/promptly-improve.mjs" --tool cursor "$ARGUMENTS"
-```
-
-Draft:
-
-$ARGUMENTS
-'@
+  $src = Join-Path $PluginDir "user-commands\promptly.md"
+  if (-not (Test-Path $src)) {
+    Write-Host "Missing Cursor /promptly command — re-download the plugin pack"
+    exit 1
+  }
   $dest = Join-Path $env:USERPROFILE ".cursor\commands\promptly.md"
   New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
-  $content | Set-Content -Path $dest -Encoding UTF8
+  Copy-Item -Force $src $dest
   Write-Host "Installed /promptly for Cursor"
 }
 

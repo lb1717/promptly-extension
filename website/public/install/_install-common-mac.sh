@@ -162,31 +162,13 @@ promptly_sync_all_agent_runtimes() {
 
 promptly_sync_claude_code_command_files() {
   local plugin_dir="${1:-${HOME}/integrations/claude-code}"
-  mkdir -p "${plugin_dir}/commands" "${plugin_dir}/user-commands"
-  cat >"${plugin_dir}/commands/promptly.md" <<'EOF'
----
-description: Improve a draft with Promptly and run it immediately
-argument-hint: [your draft prompt]
-allowed-tools: Read, Bash(node:*)
----
-
-!`node "${CLAUDE_PLUGIN_ROOT}/bin/promptly-improve.mjs" --tool claude_code "$ARGUMENTS"`
-
-The block above is my improved task. Start working on it now — do not ask me to confirm or restate it.
-EOF
-  cat >"${plugin_dir}/user-commands/promptly.md" <<'EOF'
----
-description: Improve a draft with Promptly and run it immediately
-argument-hint: [your draft prompt]
-allowed-tools: Read, Bash(node:*)
----
-
-!`node "$HOME/integrations/claude-code/bin/promptly-improve.mjs" --tool claude_code "$ARGUMENTS"`
-
-The block above is my improved task. Start working on it now — do not ask me to confirm or restate it.
-EOF
+  local src="${plugin_dir}/user-commands/promptly.md"
+  if [[ ! -f "${src}" ]]; then
+    echo "✗ Missing ${src} — re-download the plugin pack"
+    return 1
+  fi
   mkdir -p "${HOME}/.claude/commands" "${HOME}/.claude/skills/promptly"
-  cp "${plugin_dir}/user-commands/promptly.md" "${HOME}/.claude/commands/promptly.md"
+  cp "${src}" "${HOME}/.claude/commands/promptly.md"
   if [[ -f "${plugin_dir}/skill/SKILL.md" ]]; then
     cp "${plugin_dir}/skill/SKILL.md" "${HOME}/.claude/skills/promptly/SKILL.md"
   fi
@@ -195,26 +177,14 @@ EOF
 
 promptly_sync_cursor_command_files() {
   local plugin_dir="${1:-${HOME}/integrations/cursor}"
-  mkdir -p "${plugin_dir}/commands" "${plugin_dir}/user-commands"
-  cat >"${plugin_dir}/user-commands/promptly.md" <<'EOF'
----
-description: Improve a draft with Promptly and run it immediately
-argument-hint: [your draft prompt]
----
-
-Improve the draft below with Promptly, then **execute the improved version as my task** (do not only echo it back):
-
-```bash
-node "$HOME/integrations/cursor/bin/promptly-improve.mjs" --tool cursor "$ARGUMENTS"
-```
-
-Draft:
-
-$ARGUMENTS
-EOF
-  cp "${plugin_dir}/user-commands/promptly.md" "${plugin_dir}/commands/promptly.md"
+  local src="${plugin_dir}/user-commands/promptly.md"
+  if [[ ! -f "${src}" ]]; then
+    echo "✗ Missing ${src} — re-download the plugin pack"
+    return 1
+  fi
   mkdir -p "${HOME}/.cursor/commands"
-  cp "${plugin_dir}/user-commands/promptly.md" "${HOME}/.cursor/commands/promptly.md"
+  cp "${src}" "${HOME}/.cursor/commands/promptly.md"
+  cp "${src}" "${plugin_dir}/commands/promptly.md"
   echo "→ Installed /promptly for Cursor (~/.cursor/commands/promptly.md)"
 }
 
