@@ -1,6 +1,11 @@
 import { createHash } from "crypto";
 import type { VendorUsageProfileSnapshot, VendorUsageProvider, VendorUsageWindow } from "@/lib/server/vendorUsage";
-import { normalizeUtilizationPercent, resolveVendorWindowUsedPercent } from "@/lib/vendorPlanPricing";
+import {
+  normalizeUtilizationPercent,
+  parseVendorResetsAtIso,
+  resolveClaudeWindowUsedPercent,
+  resolveVendorWindowUsedPercent
+} from "@/lib/vendorPlanPricing";
 import type { StoredVendorTokens } from "@/lib/server/vendorUsageSecrets";
 
 const CLAUDE_USAGE_BETA = "oauth-2025-04-20";
@@ -114,14 +119,8 @@ async function fetchClaudeSnapshot(
   const plan = parseClaudePlanFromProfile(profile);
   const fiveRow = five as Record<string, unknown> | undefined;
   const sevenRow = seven as Record<string, unknown> | undefined;
-  const fiveResetsAt =
-    (typeof fiveRow?.resets_at === "string" && fiveRow.resets_at) ||
-    (typeof fiveRow?.resetsAt === "string" && fiveRow.resetsAt) ||
-    null;
-  const sevenResetsAt =
-    (typeof sevenRow?.resets_at === "string" && sevenRow.resets_at) ||
-    (typeof sevenRow?.resetsAt === "string" && sevenRow.resetsAt) ||
-    null;
+  const fiveResetsAt = parseVendorResetsAtIso(fiveRow?.resets_at ?? fiveRow?.resetsAt);
+  const sevenResetsAt = parseVendorResetsAtIso(sevenRow?.resets_at ?? sevenRow?.resetsAt);
   return {
     provider: "claude_code",
     profile_id: profileId || hashProfileId("claude_subscription"),
@@ -133,7 +132,7 @@ async function fetchClaudeSnapshot(
     plan_organization_type: plan.plan_organization_type,
     primary_window: fiveRow
       ? {
-          utilization: resolveVendorWindowUsedPercent(fiveRow, {
+          utilization: resolveClaudeWindowUsedPercent(fiveRow, {
             previousUtilization: existingWindows.primary?.utilization ?? null,
             previousResetsAt: existingWindows.primary?.resets_at ?? null,
             resetsAt: fiveResetsAt,
@@ -145,7 +144,7 @@ async function fetchClaudeSnapshot(
       : null,
     secondary_window: sevenRow
       ? {
-          utilization: resolveVendorWindowUsedPercent(sevenRow, {
+          utilization: resolveClaudeWindowUsedPercent(sevenRow, {
             previousUtilization: existingWindows.secondary?.utilization ?? null,
             previousResetsAt: existingWindows.secondary?.resets_at ?? null,
             resetsAt: sevenResetsAt,

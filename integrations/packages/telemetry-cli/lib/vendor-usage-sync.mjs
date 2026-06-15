@@ -444,8 +444,6 @@ async function fetchClaudeProfileUsage(configDir) {
       null;
     const { plan_slug: planSlug, plan_display: planDisplay, plan_organization_type: planOrgType } =
       parseClaudePlanFromProfile(profile);
-    const fiveResetsAt = five?.resets_at || five?.resetsAt || null;
-    const sevenResetsAt = seven?.resets_at || seven?.resetsAt || null;
     return {
       ...base,
       vendor_email: typeof email === "string" ? email : null,
@@ -454,21 +452,15 @@ async function fetchClaudeProfileUsage(configDir) {
       plan_organization_type: planOrgType,
       primary_window: five
         ? {
-            utilization: resolveVendorWindowUsedPercent(five, {
-              resetsAt: fiveResetsAt,
-              windowSeconds: 5 * 3600
-            }),
-            resets_at: fiveResetsAt,
+            utilization: normalizeUtilizationPercent(five.utilization ?? five.used_percent ?? 0),
+            resets_at: five.resets_at || five.resetsAt || null,
             window_seconds: 5 * 3600
           }
         : null,
       secondary_window: seven
         ? {
-            utilization: resolveVendorWindowUsedPercent(seven, {
-              resetsAt: sevenResetsAt,
-              windowSeconds: 7 * 86400
-            }),
-            resets_at: sevenResetsAt,
+            utilization: normalizeUtilizationPercent(seven.utilization ?? seven.used_percent ?? 0),
+            resets_at: seven.resets_at || seven.resetsAt || null,
             window_seconds: 7 * 86400
           }
         : null,

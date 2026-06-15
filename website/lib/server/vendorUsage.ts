@@ -5,6 +5,8 @@ import {
   dollarsUnusedFromUtilization,
   dollarsUsedFromUtilization,
   normalizeUtilizationPercent,
+  parseVendorResetsAtIso,
+  resolveClaudeWindowUsedPercent,
   resolveVendorPlanPricing
 } from "@/lib/vendorPlanPricing";
 import { fetchLiveVendorUsageSnapshots } from "@/lib/server/vendorUsageFetch";
@@ -189,10 +191,57 @@ function readWindow(raw: unknown): VendorUsageWindow | null {
   if (utilization === null) return null;
   return {
     utilization: normalizeUtilizationPercent(utilization),
-    resets_at: typeof row.resets_at === "string" ? row.resets_at : null,
+    resets_at: parseVendorResetsAtIso(row.resets_at) ?? (typeof row.resets_at === "string" ? row.resets_at : null),
     window_seconds:
       typeof row.window_seconds === "number" && Number.isFinite(row.window_seconds) ? row.window_seconds : null
   };
+}
+
+function fixClaudeWindow(
+  window: VendorUsageWindow | null,
+  history: VendorUsageHistoryPoint[],
+  windowSeconds: number
+): VendorUsageWindow | null {
+  if (!window) return null;
+  const previousPoint = history.length > 0 ? history[history.length - 1] : null;
+  const resetsAt = parseVendorResetsAtIso(window.resets_at) ?? window.resets_at;
+  return {
+    ...window,
+    resets_at: resetsAt,
+    utilization: resolveClaudeWindowUsedPercent(
+      { utilization: window.utilization },
+      {
+        previousUtilization: previousPoint?.utilization ?? null,
+        previousResetsAt: resetsAt,
+        resetsAt,
+        windowSeconds
+      }
+    )
+  };
+}
+
+function fixClaudeHistory(
+  history: VendorUsageHistoryPoint[],
+  window: VendorUsageWindow | null,
+  windowSeconds: number
+): VendorUsageHistoryPoint[] {
+  if (!history.length || !window) return history;
+  const resetsAt = parseVendorResetsAtIso(window.resets_at) ?? window.resets_at;
+  return history.map((point, index) => {
+    const previous = index > 0 ? history[index - 1] : null;
+    return {
+      ...point,
+      utilization: resolveClaudeWindowUsedPercent(
+        { utilization: point.utilization },
+        {
+          previousUtilization: previous?.utilization ?? null,
+          previousResetsAt: resetsAt,
+          resetsAt,
+          windowSeconds
+        }
+      )
+    };
+  });
 }
 
 function enrichProfile(
@@ -209,24 +258,53 @@ function enrichProfile(
   );
   const monthly = pricing?.monthlyUsd ?? null;
   const planDisplay = row.plan_display || pricing?.displayName || null;
+  const primaryWindow =
+    row.provider === "claude_code"
+      ? fixClaudeWindow(row.primary_window, usage_history.primary, row.primary_window?.window_seconds ?? 5 * 3600)
+      : row.primary_window;
+  const secondaryWindow =
+    row.provider === "claude_code"
+      ? fixClaudeWindow(
+          row.secondary_window,
+          usage_history.secondary,
+          row.secondary_window?.window_seconds ?? 7 * 86400
+        )
+      : row.secondary_window;
+  const normalizedHistory =
+    row.provider === "claude_code"
+      ? {
+          primary: fixClaudeHistory(
+            usage_history.primary,
+            row.primary_window,
+            row.primary_window?.window_seconds ?? 5 * 3600
+          ),
+          secondary: fixClaudeHistory(
+            usage_history.secondary,
+            row.secondary_window,
+            row.secondary_window?.window_seconds ?? 7 * 86400
+          )
+        }
+      : usage_history;
   return {
     ...row,
+    primary_window: primaryWindow,
+    secondary_window: secondaryWindow,
     plan_display: planDisplay,
     pricing_key: pricing?.key ?? null,
     plan_monthly_usd: monthly,
     primary_dollars_used:
-      monthly != null && row.primary_window
-        ? dollarsUsedFromUtilization(monthly, row.primary_window.utilization, row.primary_window.window_seconds)
+      monthly != null && primaryWindow
+        ? dollarsUsedFromUtilization(monthly, primaryWindow.utilization, primaryWindow.window_seconds)
         : null,
     secondary_dollars_used:
-      monthly != null && row.secondary_window
-        ? dollarsUsedFromUtilization(monthly, row.secondary_window.utilization, row.secondary_window.window_seconds)
+      monthly != null && secondaryWindow
+        ? dollarsUsedFromUtilization(monthly, secondaryWindow.utilization, secondaryWindow.window_seconds)
         : null,
     secondary_dollars_unused:
-      monthly != null && row.secondary_window
-        ? dollarsUnusedFromUtilization(monthly, row.secondary_window.utilization, row.secondary_window.window_seconds)
+      monthly != null && secondaryWindow
+        ? dollarsUnusedFromUtilization(monthly, secondaryWindow.utilization, secondaryWindow.window_seconds)
         : null,
-    usage_history
+    usage_history: normalizedHistory
   };
 }
 

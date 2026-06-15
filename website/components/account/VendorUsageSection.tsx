@@ -130,7 +130,20 @@ function buildChartRows(
       utilization: Math.max(0, Math.min(100, currentWindow.utilization))
     });
   }
-  return rows.sort((a, b) => a.at_ms - b.at_ms);
+  const sorted = rows.sort((a, b) => a.at_ms - b.at_ms);
+  if (sorted.length === 1) {
+    const point = sorted[0];
+    const startMs = point.at_ms - 12 * 3600 * 1000;
+    return [
+      {
+        at_ms: startMs,
+        label: formatChartTime(startMs),
+        utilization: point.utilization
+      },
+      point
+    ];
+  }
+  return sorted;
 }
 
 function UsageTrendChart({
@@ -169,7 +182,7 @@ function UsageTrendChart({
             dataKey="utilization"
             stroke={lineColor}
             strokeWidth={2.75}
-            dot={rows.length <= 1 ? { r: 3, fill: lineColor, strokeWidth: 0 } : false}
+            dot={false}
             activeDot={{ r: 4, fill: lineColor, strokeWidth: 0 }}
             isAnimationActive={false}
           />
@@ -256,9 +269,6 @@ function SubscriptionUsageRow({ profile }: { profile: VendorProfile }) {
             {formatResetCountdown(activeWindow.resets_at)}
           </p>
           <UsageTrendChart rows={chartRows} currentUtil={currentUtil} />
-          {chartRows.length <= 1 ? (
-            <p className="mt-2 text-[11px] text-faint">Refresh over time to build a usage trend for this window.</p>
-          ) : null}
         </>
       ) : (
         <p className="text-sm text-muted">No usage window available for this subscription yet.</p>
