@@ -13,6 +13,7 @@ import {
   YAxis
 } from "recharts";
 import { CopyBlock } from "@/components/integrations/integrationCopyBlock";
+import { dollarsUsedFromUtilization } from "@/lib/vendorPlanPricing";
 import {
   detectVendorUsageInstallOs,
   vendorUsageSyncCommand,
@@ -163,6 +164,145 @@ type ChartRow = {
   utilization: number;
   isReading: boolean;
 };
+
+function formatUsd(value: number): string {
+  if (!Number.isFinite(value)) return "—";
+  return value >= 100 ? `$${Math.round(value)}` : `$${value.toFixed(2)}`;
+}
+
+function activeUsageWindow(profile: VendorProfile): {
+  window: UsageWindow;
+  history: UsageHistoryPoint[];
+  dollarsUsed: number;
+} | null {
+  if (profile.secondary_window && profile.secondary_dollars_used != null) {
+    return {
+      window: profile.secondary_window,
+      history: profile.usage_history?.secondary ?? [],
+      dollarsUsed: profile.secondary_dollars_used
+    };
+  }
+  if (profile.primary_window && profile.primary_dollars_used != null) {
+    return {
+      window: profile.primary_window,
+      history: profile.usage_history?.primary ?? [],
+      dollarsUsed: profile.primary_dollars_used
+    };
+  }
+  return null;
+}
+
+function windowElapsedDays(window: UsageWindow, nowMs: number): number {
+  const windowSeconds = window.window_seconds ?? 7 * 86400;
+  const resetMs = window.resets_at ? Date.parse(window.resets_at) : NaN;
+  if (Number.isFinite(resetMs)) {
+    const startMs = resetMs - windowSeconds * 1000;
+    return Math.max(1 / 24, (nowMs - startMs) / 86400000);
+  }
+  return Math.max(1, 1);
+}
+
+type MonthlyExpenditureSummary = {
+  totalMonthlyUsd: number;
+  inUseUsd: number;
+  predictedUsagePercent: number | null;
+};
+
+function computeMonthlyExpenditureSummary(
+  profiles: VendorProfile[],
+  rangeDays: number,
+  nowMs = Date.now()
+): MonthlyExpenditureSummary | null {
+  let totalMonthlyUsd = 0;
+  let inUseUsd = 0;
+  let predictedSpendUsd = 0;
+  let pricedProfiles = 0;
+
+  for (const profile of profiles) {
+    const monthly = profile.plan_monthly_usd;
+    if (monthly == null || monthly <= 0) continue;
+
+    const active = activeUsageWindow(profile);
+    if (!active) continue;
+
+    const { window, history, dollarsUsed } = active;
+    const windowSeconds = window.window_seconds ?? 7 * 86400;
+    const lookbackMs = resolveChartLookbackMs(rangeDays, windowSeconds);
+    const startMs = nowMs - lookbackMs;
+
+    const points = [...history]
+      .filter((point) => point.at_ms >= startMs && point.at_ms <= nowMs)
+      .sort((a, b) => a.at_ms - b.at_ms);
+
+    let dailyRate = dollarsUsed / windowElapsedDays(window, nowMs);
+
+    if (points.length >= 2) {
+      const first = points[0];
+      const last = points[points.length - 1];
+      const spanDays = Math.max(1 / 24, (last.at_ms - first.at_ms) / 86400000);
+      const firstDollars = dollarsUsedFromUtilization(monthly, first.utilization, windowSeconds);
+      const lastDollars = dollarsUsedFromUtilization(monthly, last.utilization, windowSeconds);
+      const delta = lastDollars - firstDollars;
+      if (delta >= 0) {
+        dailyRate = delta / spanDays;
+      } else {
+        dailyRate = lastDollars / spanDays;
+      }
+    } else if (points.length === 1) {
+      const spanDays = Math.max(1 / 24, (nowMs - points[0].at_ms) / 86400000);
+      dailyRate = dollarsUsed / spanDays;
+    }
+
+    const predictedMonthlySpend = dailyRate * 30;
+
+    totalMonthlyUsd += monthly;
+    inUseUsd += dollarsUsed;
+    predictedSpendUsd += predictedMonthlySpend;
+    pricedProfiles += 1;
+  }
+
+  if (pricedProfiles === 0) return null;
+
+  return {
+    totalMonthlyUsd: Math.round(totalMonthlyUsd * 100) / 100,
+    inUseUsd: Math.round(inUseUsd * 100) / 100,
+    predictedUsagePercent:
+      totalMonthlyUsd > 0 ? Math.round((predictedSpendUsd / totalMonthlyUsd) * 1000) / 10 : null
+  };
+}
+
+function predictedUsageColor(percent: number | null): string {
+  if (percent == null) return "#5C5C5C";
+  if (percent >= 100) return "#dc2626";
+  if (percent >= 75) return "#d97706";
+  return "#15803d";
+}
+
+function MonthlyExpenditureBox({ summary }: { summary: MonthlyExpenditureSummary }) {
+  const predictedColor = predictedUsageColor(summary.predictedUsagePercent);
+
+  return (
+    <div className="min-w-[11rem] rounded-xl border border-line bg-cream-dark/60 px-3 py-2.5 sm:min-w-[12.5rem]">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-faint">Monthly expenditure</p>
+      <dl className="mt-2 space-y-1.5">
+        <div className="flex items-baseline justify-between gap-3">
+          <dt className="text-[11px] text-muted">Total</dt>
+          <dd className="text-sm font-semibold tabular-nums text-ink">{formatUsd(summary.totalMonthlyUsd)}/mo</dd>
+        </div>
+        <div className="flex items-baseline justify-between gap-3">
+          <dt className="text-[11px] text-muted">Value in use</dt>
+          <dd className="text-sm font-semibold tabular-nums text-ink">{formatUsd(summary.inUseUsd)}</dd>
+        </div>
+        <div className="flex items-baseline justify-between gap-3 border-t border-line/70 pt-1.5">
+          <dt className="text-[11px] text-muted">Predicted</dt>
+          <dd className="text-sm font-semibold tabular-nums" style={{ color: predictedColor }}>
+            {summary.predictedUsagePercent != null ? `${summary.predictedUsagePercent}% of plan` : "—"}
+          </dd>
+        </div>
+      </dl>
+    </div>
+  );
+}
 
 function windowLabels(provider: VendorProfile["provider"]): { primary: string; secondary: string } {
   if (provider === "cursor") {
@@ -538,6 +678,11 @@ export default function VendorUsageSection({
   const hasCodex = profiles.some((p) => p.provider === "codex");
   const hasClaude = profiles.some((p) => p.provider === "claude_code");
 
+  const expenditureSummary = useMemo(
+    () => computeMonthlyExpenditureSummary(profiles, rangeDays),
+    [profiles, rangeDays]
+  );
+
   if (!unlocked) {
     return (
       <section className="mb-8 w-full rounded-2xl border border-line bg-white p-4 shadow-card sm:p-5">
@@ -574,16 +719,19 @@ export default function VendorUsageSection({
 
   return (
     <section className="mb-8 w-full rounded-2xl border border-line bg-white p-4 shadow-card sm:p-5">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <h2 className="text-base font-semibold uppercase tracking-[0.22em] text-ink">AI plan usage</h2>
-        <button
-          type="button"
-          disabled={loading}
-          onClick={() => void load({ live: true })}
-          className="rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-ink hover:bg-cream-dark disabled:opacity-50"
-        >
-          {loading ? "Refreshing…" : "Refresh"}
-        </button>
+        <div className="flex flex-wrap items-start justify-end gap-3">
+          {expenditureSummary ? <MonthlyExpenditureBox summary={expenditureSummary} /> : null}
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => void load({ live: true })}
+            className="rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-ink hover:bg-cream-dark disabled:opacity-50"
+          >
+            {loading ? "Refreshing…" : "Refresh"}
+          </button>
+        </div>
       </div>
 
       <div className="mb-5 flex flex-wrap items-center gap-2">
