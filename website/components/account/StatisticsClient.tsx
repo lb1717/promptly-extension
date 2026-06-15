@@ -120,10 +120,15 @@ const CHART_AXIS_LABEL = (value: string, fill = "#5C5C5C") => ({
   style: { fontFamily: CHART_FONT_FAMILY }
 });
 const CHART_TOOLTIP_STYLE = {
-  background: "#FAF8F4",
-  border: "1px solid #E0DDD6",
+  background: "#ffffff",
+  border: "1px solid #e8e8e8",
+  borderRadius: 6,
+  padding: "5px 7px",
+  fontSize: 10,
+  lineHeight: 1.3,
   color: "#111111",
-  fontFamily: CHART_FONT_FAMILY
+  fontFamily: CHART_FONT_FAMILY,
+  boxShadow: "0 2px 8px rgba(17, 17, 17, 0.08)"
 };
 const CHART_TOOLTIP_DARK_STYLE = {
   background: "#161018",
@@ -1553,8 +1558,8 @@ function EngagementPieSideTooltip({
   if (!active || !payload?.length) return null;
   const boxW = viewBox?.width ?? 280;
   const boxH = viewBox?.height ?? 208;
-  const panelW = 92;
-  const panelH = Math.min(88, 28 + payload.length * 22);
+  const panelW = 76;
+  const panelH = Math.min(72, 20 + payload.length * 16);
   const x = boxW - panelW - 4;
   const y = Math.max(6, (boxH - panelH) / 2);
 
@@ -1563,17 +1568,16 @@ function EngagementPieSideTooltip({
       <div
         style={{
           ...CHART_TOOLTIP_STYLE,
-          padding: "8px 10px",
-          fontSize: 11,
-          lineHeight: 1.35,
-          boxShadow: "0 4px 14px rgba(17,17,17,0.08)"
+          padding: "5px 7px",
+          fontSize: 10,
+          lineHeight: 1.3
         }}
       >
         {payload.map((entry, index) => (
           <p
             key={String(entry.name)}
             className="tabular-nums"
-            style={{ color: entry.payload?.fill ?? "#1F1B16", margin: index === 0 ? 0 : "6px 0 0" }}
+            style={{ color: entry.payload?.fill ?? "#1F1B16", margin: index === 0 ? 0 : "4px 0 0" }}
           >
             <span className="font-semibold">{entry.name}</span>
             <br />
@@ -3538,13 +3542,13 @@ export function StatisticsClient() {
                       return (
                         <div style={CHART_TOOLTIP_STYLE}>
                           {label ? (
-                            <p className="mb-1.5 text-xs font-semibold text-ink">{label}</p>
+                            <p className="mb-0.5 text-[10px] font-semibold leading-tight text-ink">{label}</p>
                           ) : null}
-                          <div className="space-y-1">
+                          <div className="space-y-0.5">
                             {items.map((entry) => (
                               <p
                                 key={String(entry.dataKey)}
-                                className="text-xs tabular-nums"
+                                className="text-[10px] leading-tight tabular-nums"
                                 style={{ color: entry.color ?? "#1F1B16" }}
                               >
                                 {entry.name}: {formatChartNumber(entry.value)}

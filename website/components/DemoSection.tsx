@@ -1,6 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
+import Link from "next/link";
 import { DEMO_TIMING } from "@/lib/constants";
 import { useEffect, useRef, useState } from "react";
 
@@ -177,6 +178,17 @@ export function DemoSection() {
   return (
     <section id="how-it-works" className="overflow-x-hidden px-3 pb-5 pt-4 sm:px-4 sm:pb-8 sm:pt-8">
       <div className="mx-auto max-w-6xl">
+        <p className="mb-3 text-center sm:mb-4">
+          <Link
+            href="/research"
+            className="group inline-flex items-center gap-2 text-sm font-semibold text-ink transition hover:text-muted sm:text-base"
+          >
+            Explore our prompt engineering tools
+            <span aria-hidden className="transition-transform group-hover:translate-x-0.5">
+              →
+            </span>
+          </Link>
+        </p>
         <div className="relative mx-auto max-w-5xl rounded-2xl border border-line bg-cream px-3 pb-4 pt-16 shadow-card sm:rounded-3xl sm:px-8 sm:pb-8 sm:pt-20">
           <div
             ref={promptBoxRef}

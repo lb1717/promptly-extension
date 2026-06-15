@@ -18,8 +18,12 @@ export const WEBSITE_PLANS: readonly WebsitePlan[] = [
     key: "free",
     name: "Free",
     priceDisplay: "$0.00/mo",
-    subtitle: "Try Promptly with weekly token limits.",
-    details: ["Core models and functionality", "Weekly limited tokens"],
+    subtitle: "Improve prompts in the browser and see how you use AI.",
+    details: [
+      "One-click prompt improvement in ChatGPT, Claude, and Gemini",
+      "Personal statistics on prompt volume and screen time",
+      "Weekly token limits"
+    ],
     paid: false,
     available: true
   },
@@ -27,12 +31,12 @@ export const WEBSITE_PLANS: readonly WebsitePlan[] = [
     key: "student",
     name: "Student",
     priceDisplay: "$9.99/mo",
-    subtitle: "Built for coursework, research, and academic writing.",
+    subtitle: "Stronger prompts and usage stats for coursework and research.",
     details: [
-      "Prompt engineering designed for students",
-      "Created to improve academic work",
-      "Strong and fast models available",
-      "Basic AI usage statistics"
+      "Prompt improvement for essays, problem sets, and research drafts",
+      "Track prompt volume, time on AI, and which models you use",
+      "Explore prompt diagnostics and research tools on the Labs page",
+      "Higher weekly token limits at student pricing"
     ],
     paid: true,
     available: true
@@ -41,13 +45,13 @@ export const WEBSITE_PLANS: readonly WebsitePlan[] = [
     key: "pro",
     name: "Pro",
     priceDisplay: "$20.00/mo",
-    subtitle: "Professional-grade prompting for frequent daily use.",
+    subtitle: "Professional prompt quality plus a full picture of your AI habits.",
     details: [
-      "Advanced prompt optimization for professionals",
-      "Created to save time on extensive AI use",
-      "Highest model quality available",
-      "Fastest model quality available",
-      "Extensive AI usage statistics"
+      "Advanced one-click prompt optimization for daily professional work",
+      "Statistics on prompts, screen time, and models across web AI tools",
+      "Claude Code, Cursor, and Codex usage in one statistics dashboard",
+      "Prompt diagnostics and research tools to sharpen how you write instructions",
+      "Highest token limits and model quality"
     ],
     paid: true,
     available: true,
@@ -57,13 +61,14 @@ export const WEBSITE_PLANS: readonly WebsitePlan[] = [
     key: "enterprise",
     name: "Enterprise",
     priceDisplay: "$70.00/mo",
-    subtitle: "Maximum capability for professionals and teams.",
+    subtitle: "Firm-wide prompt quality, diagnostics, and spend visibility.",
     details: [
-      "Research-grade intelligence prompt engineering",
-      "Highest model quality available",
-      "Fastest model quality available",
-      "Usage statistics to understand AI across teams and cut time on prompting",
-      "Designed for founders and executives tracking AI performance firm-wide"
+      "Everything in Pro for power users and team leads",
+      "Aggregate statistics on prompt volume, engagement, and tool adoption",
+      "Track Claude Code, Cursor, and Codex usage across your organization",
+      "Subscription spend tracking and budget visibility for AI plans",
+      "Prompt diagnostics to keep team output consistent and measurable",
+      "Maximum token limits for intensive daily use"
     ],
     paid: true,
     available: true

@@ -9,7 +9,7 @@ export function PricingSection() {
           Plans
         </h2>
         <p className="mx-auto mb-12 max-w-2xl text-center text-lg font-semibold text-ink sm:text-xl">
-          Simple plans for everyday use and professional workflows.
+          Better prompts, prompt diagnostics, and statistics you can act on.
         </p>
         <div className="mx-auto grid max-w-5xl gap-6 md:grid-cols-2">
           {PRICING_PAGE_PLANS.map((plan) => (

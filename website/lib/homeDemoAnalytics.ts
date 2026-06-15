@@ -6,10 +6,12 @@ export type HomeDemoScreenTimeRow = {
   cursor: number;
 };
 
-export type HomeDemoPlanSpendRow = {
-  plan: string;
-  monthlyUsd: number;
-  fill: string;
+export type HomeDemoSpendTimelineRow = {
+  label: string;
+  budget: number;
+  claude_max: number;
+  chatgpt_plus: number;
+  cursor_pro: number;
 };
 
 const SCREEN_WEEK_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
@@ -43,16 +45,55 @@ export const HOME_DEMO_SCREEN_TIME_SERIES = [
   { dataKey: "cursor" as const, name: "Cursor", color: "#9333ea" }
 ];
 
-/** Illustrative monthly subscription catalog spend — not live data. */
-export function buildHomeDemoPlanSpend(): HomeDemoPlanSpendRow[] {
-  return [
-    { plan: "Claude Max", monthlyUsd: 100, fill: "#cc785c" },
-    { plan: "ChatGPT Plus", monthlyUsd: 20, fill: "#10a37f" },
-    { plan: "Cursor Pro+", monthlyUsd: 60, fill: "#9333ea" },
-    { plan: "Gemini Advanced", monthlyUsd: 20, fill: "#4285f4" }
-  ];
+const MONTH_LABELS = ["Oct", "Nov", "Dec", "Jan", "Feb", "Mar"] as const;
+const MONTHLY_BUDGET = 380;
+
+/** Compact USD for chart axes and headlines — e.g. $1.2k, $96. */
+export function formatCompactUsd(value: number): string {
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000) {
+    const scaled = value / 1_000_000;
+    return `$${scaled.toFixed(1).replace(/\.0$/, "")}M`;
+  }
+  if (abs >= 1000) {
+    const scaled = value / 1000;
+    return `$${scaled.toFixed(1).replace(/\.0$/, "")}k`;
+  }
+  return `$${Math.round(value)}`;
 }
 
-export function homeDemoPlanSpendTotal(rows: HomeDemoPlanSpendRow[]): number {
-  return rows.reduce((sum, row) => sum + row.monthlyUsd, 0);
+/**
+ * Illustrative subscription spend vs budget — not live data.
+ * At the latest month: Claude Max ends above budget (red), ChatGPT Plus and Cursor Pro end below (green).
+ */
+export function buildHomeDemoSpendTimeline(): HomeDemoSpendTimelineRow[] {
+  const claude = [348, 372, 361, 389, 395, 418];
+  const chatgpt = [820, 780, 700, 580, 440, 260];
+  const cursor = [860, 820, 760, 640, 500, 220];
+
+  return MONTH_LABELS.map((label, i) => ({
+    label,
+    budget: MONTHLY_BUDGET,
+    claude_max: claude[i]!,
+    chatgpt_plus: chatgpt[i]!,
+    cursor_pro: cursor[i]!
+  }));
 }
+
+/** Illustrative monthly savings from subscriptions trending under budget (not live data). */
+export function homeDemoSpendSavedUsd(rows: HomeDemoSpendTimelineRow[]): number {
+  if (rows.length < 2) return 0;
+  const first = rows[0]!;
+  const latest = rows[rows.length - 1]!;
+  const chatgptSaved = Math.max(0, first.chatgpt_plus - latest.chatgpt_plus);
+  const cursorSaved = Math.max(0, first.cursor_pro - latest.cursor_pro);
+  return chatgptSaved + cursorSaved;
+}
+
+export const HOME_DEMO_SPEND_SERIES = [
+  { dataKey: "chatgpt_plus" as const, name: "ChatGPT Plus", color: "#16a34a", tone: "green" as const },
+  { dataKey: "cursor_pro" as const, name: "Cursor Pro", color: "#22c55e", tone: "green" as const },
+  { dataKey: "claude_max" as const, name: "Claude Max", color: "#dc2626", tone: "red" as const }
+];
+
+export const HOME_DEMO_BUDGET_KEY = "budget" as const;
