@@ -114,6 +114,15 @@ export function readPromptlyClaudeAuth() {
   return parseStoredAuth(readJson(claudeAuthJsonPath(), null));
 }
 
+export function clearPromptlyClaudeAuth() {
+  try {
+    if (existsSync(claudeAuthJsonPath())) unlinkSync(claudeAuthJsonPath());
+  } catch {
+    /* ignore */
+  }
+  clearPendingOAuth();
+}
+
 function savePromptlyClaudeAuth({ accessToken, refreshToken, expiresAt, email }) {
   const path = claudeAuthJsonPath();
   writeJson(path, {
@@ -236,9 +245,18 @@ async function completeFromCallbackUrl(callbackUrl) {
   });
 }
 
-export async function ensureClaudeOAuthLogin({ interactive = true, timeoutMs = 120000, callbackUrl = null } = {}) {
+export async function ensureClaudeOAuthLogin({
+  interactive = true,
+  timeoutMs = 120000,
+  callbackUrl = null,
+  forceBrowser = false
+} = {}) {
+  if (forceBrowser && !callbackUrl) {
+    clearPromptlyClaudeAuth();
+  }
+
   const existing = readPromptlyClaudeAuth();
-  if (existing?.accessToken && !callbackUrl) {
+  if (existing?.accessToken && !callbackUrl && !forceBrowser) {
     const expiresSoon = existing.expiresAt && existing.expiresAt - Date.now() < 5 * 60 * 1000;
     if (!expiresSoon) return existing;
     if (existing.refreshToken) {
@@ -247,8 +265,11 @@ export async function ensureClaudeOAuthLogin({ interactive = true, timeoutMs = 1
         savePromptlyClaudeAuth(refreshed);
         return refreshed;
       } catch {
+        clearPromptlyClaudeAuth();
         /* fall through to browser login */
       }
+    } else {
+      clearPromptlyClaudeAuth();
     }
   }
 
@@ -333,7 +354,10 @@ export async function ensureClaudeOAuthLogin({ interactive = true, timeoutMs = 1
       redirectUri = `http://localhost:${address.port}/callback`;
       savePendingOAuth({ state, verifier, redirect_uri: redirectUri });
       const authUrl = buildAuthUrl(state, challenge, redirectUri);
-      openBrowser(authUrl);
+      console.error("Opening browser for Claude subscription sign-in…");
+      if (!openBrowser(authUrl)) {
+        console.error(`Open this URL to sign in:\n${authUrl}`);
+      }
     });
 
     const timer = setTimeout(() => {

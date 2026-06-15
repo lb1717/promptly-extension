@@ -2695,7 +2695,22 @@ async function cmdLoginClaude(flags) {
 async function cmdUsageSync(flags) {
   const syncFlags = {
     force: flags.force === true || flags.force === "true",
-    debug: flags.debug === true || flags.debug === "true"
+    debug: flags.debug === true || flags.debug === "true",
+    login_claude:
+      flags.login_claude === true ||
+      flags.login_claude === "true" ||
+      flags["login-claude"] === true ||
+      flags["login-claude"] === "true",
+    force_claude_login:
+      flags.force_claude_login === true ||
+      flags.force_claude_login === "true" ||
+      flags["force-claude-login"] === true ||
+      flags["force-claude-login"] === "true",
+    no_login:
+      flags.no_login === true ||
+      flags.no_login === "true" ||
+      flags["no-login"] === true ||
+      flags["no-login"] === "true"
   };
   const tool = normalizeTool(flags.tool);
   let creds = null;
@@ -2790,7 +2805,7 @@ Commands:
   login --tool <tool> --from-sibling  Pair this agent to the same Promptly account as another agent on this computer
   align-device --set-primary <CODE>  Same as fix-account (legacy alias)
   test-send --tool <tool>     Upload one test prompt (verify stats pipeline)
-  usage-sync [--debug] [--no-login] [--tool <tool>]  Sync Claude, Codex, and Cursor subscription usage
+  usage-sync [--login-claude] [--debug] [--no-login] [--tool <tool>]  Sync Claude, Codex, and Cursor subscription usage
   login-claude [--callback <url>]                  Browser sign-in for Claude subscription usage
   diagnostics [--tool <tool>] Simulate hook payloads and show local timing state
   status [--tool <tool>]      Show connection status for one or all tools

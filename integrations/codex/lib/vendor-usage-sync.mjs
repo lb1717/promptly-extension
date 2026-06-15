@@ -131,6 +131,49 @@ function describeClaudeAuthFailure(interactive) {
   return "No Claude OAuth token saved yet. Run the sync command from Terminal.app — it opens your browser once to sign in.";
 }
 
+function isClaudeAuthSyncError(message) {
+  return /401|403|not signed|oauth|token|sign-in|sign in|authorization|login/i.test(String(message || ""));
+}
+
+async function ensureClaudeSignedInForSync(interactive, flags) {
+  if (!interactive || flags.debug) return;
+
+  const promptlyAuth = readPromptlyClaudeAuth();
+  const missingPromptly = !promptlyAuth?.accessToken;
+  const expiresSoon = Boolean(promptlyAuth?.expiresAt && promptlyAuth.expiresAt - Date.now() < 5 * 60 * 1000);
+  const ensureLogin = flags.login_claude === true || flags.login_claude === "true";
+  const forceBrowser =
+    flags.force_claude_login === true ||
+    flags.force_claude_login === "true" ||
+    flags["force-claude-login"] === true ||
+    flags["force-claude-login"] === "true";
+
+  if (!missingPromptly && !expiresSoon && !ensureLogin && !forceBrowser) return;
+
+  try {
+    await ensureClaudeOAuthLogin({
+      interactive: true,
+      forceBrowser: forceBrowser || missingPromptly
+    });
+  } catch {
+    /* diagnoseClaudeAuth below will explain */
+  }
+}
+
+async function fetchClaudeWithAuthRetry(configDir, interactive) {
+  let row = await fetchClaudeProfileUsage(configDir);
+  if (!interactive || !row.sync_error || !isClaudeAuthSyncError(row.sync_error)) {
+    return row;
+  }
+  try {
+    await ensureClaudeOAuthLogin({ interactive: true, forceBrowser: true });
+    row = await fetchClaudeProfileUsage(configDir);
+  } catch {
+    /* keep original error */
+  }
+  return row;
+}
+
 export function diagnoseClaudeAuth() {
   const steps = [];
   const note = (step, ok, detail) => steps.push({ step, ok, detail });
@@ -716,23 +759,17 @@ export async function runVendorUsageSync({ creds, clientHeader, flags = {} }) {
 
   attempted.add("claude_code");
   const interactive = Boolean(process.stdin.isTTY) && flags.no_login !== true && flags.no_login !== "true";
-  if (!readClaudeAccessToken(defaultClaudeConfigDir()) && interactive && !flags.debug) {
-    try {
-      await ensureClaudeOAuthLogin({ interactive: true });
-    } catch {
-      /* diagnose below will explain */
-    }
-  }
+  await ensureClaudeSignedInForSync(interactive, flags);
   const claudeAuth = diagnoseClaudeAuth();
   const claudeDirs = discoverClaudeProfileDirs(settings.claude_code?.extra_profile_dirs || []);
   let claudeAttempted = false;
   for (const dir of claudeDirs) {
     claudeAttempted = true;
-    const row = await fetchClaudeProfileUsage(dir);
+    const row = await fetchClaudeWithAuthRetry(dir, interactive);
     if (row) snapshots.push(row);
   }
   if (!claudeAttempted || !snapshots.some((row) => row.provider === "claude_code")) {
-    snapshots.push(await fetchClaudeProfileUsage(defaultClaudeConfigDir()));
+    snapshots.push(await fetchClaudeWithAuthRetry(defaultClaudeConfigDir(), interactive));
   }
 
   attempted.add("codex");

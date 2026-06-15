@@ -16,7 +16,7 @@ export function vendorUsageSyncCommand(os: VendorUsageInstallOs): string {
       ? 'node "$env:USERPROFILE\\integrations\\packages\\telemetry-cli\\bin\\promptly-telemetry.mjs"'
       : 'node "$HOME/integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs"';
   if (os === "mac") {
-    return `curl -fsSL "${PLUGIN_PACK_URL}" -o /tmp/promptly-agents.zip && unzip -qo /tmp/promptly-agents.zip -d "$HOME" && ${cli} usage-sync`;
+    return `curl -fsSL "${PLUGIN_PACK_URL}" -o /tmp/promptly-agents.zip && unzip -qo /tmp/promptly-agents.zip -d "$HOME" && ${cli} usage-sync --login-claude`;
   }
-  return `${cli} usage-sync`;
+  return `${cli} usage-sync --login-claude`;
 }
