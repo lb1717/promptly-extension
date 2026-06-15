@@ -42,7 +42,7 @@ const CHART_X_DATE_STROKE = "#525252";
 const COLOR_VOLUME_TREND = "#1e3a8a";
 const CHART_MARGIN = { top: 6, right: 10, bottom: 4, left: 4 };
 const CHART_Y_AXIS_WIDTH = 38;
-const CAROUSEL_MS = 2800;
+const CAROUSEL_MS = 1500;
 
 type AnalyticsCardId = "volume" | "screen" | "spend";
 
