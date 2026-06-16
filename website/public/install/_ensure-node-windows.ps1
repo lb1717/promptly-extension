@@ -21,7 +21,7 @@ function Promptly-InvokeNpm {
   param([Parameter(Mandatory)][string[]]$Args)
   $npmCmd = Promptly-GetNpmCmdPath
   if (-not $npmCmd) { return 127 }
-  & $npmCmd @Args
+  & $npmCmd @Args 2>&1 | Write-Host
   return $LASTEXITCODE
 }
 
@@ -177,7 +177,7 @@ function Promptly-EnsureAgentCli {
   $cli = Promptly-GetAgentCliPath -Name $Name
   if ($cli) {
     Write-Host "-> Found $DisplayName CLI at $cli"
-    & $cli --version
+    & $cli --version 2>&1 | Write-Host
     return $true
   }
 
@@ -205,7 +205,7 @@ function Promptly-EnsureAgentCli {
   $cli = Promptly-GetAgentCliPath -Name $Name
   if ($cli) {
     Write-Host "-> Installed $DisplayName CLI at $cli"
-    & $cli --version
+    & $cli --version 2>&1 | Write-Host
     return $true
   }
 

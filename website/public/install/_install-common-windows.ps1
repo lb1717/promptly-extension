@@ -59,7 +59,7 @@ function Promptly-ClaudePluginReinstall {
     & $claude plugin uninstall promptly-claude-code@promptly-labs 2>$null
   }
   Write-Host "-> Installing fresh Promptly plugin..."
-  & $claude plugin install promptly-claude-code@promptly-labs
+  & $claude plugin install promptly-claude-code@promptly-labs 2>&1 | Write-Host
 }
 
 function Promptly-CodexMarketplaceAdd {
@@ -87,8 +87,8 @@ function Promptly-CodexPluginReinstall {
     & $codex plugin remove promptly-codex@promptly-labs 2>$null
   }
   Write-Host "-> Installing fresh Promptly plugin..."
-  & $codex plugin add promptly-codex@promptly-labs
-  if ($LASTEXITCODE -ne 0) { & $codex plugin install promptly-codex@promptly-labs }
+  & $codex plugin add promptly-codex@promptly-labs 2>&1 | Write-Host
+  if ($LASTEXITCODE -ne 0) { & $codex plugin install promptly-codex@promptly-labs 2>&1 | Write-Host }
 }
 
 function Promptly-SyncClaudeCodeCommandFiles {

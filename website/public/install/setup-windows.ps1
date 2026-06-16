@@ -77,9 +77,20 @@ function Setup-PromptlyAgents {
   $failed = @()
 
   function Register-AgentResult {
-    param([string]$Label, [int]$ExitCode)
-    if ($ExitCode -eq 0) { $script:installed += $Label }
-    elseif ($ExitCode -eq 2) { $script:skipped += $Label }
+    param([string]$Label, $ExitCode)
+    $code = 1
+    if ($ExitCode -is [int]) {
+      $code = $ExitCode
+    } else {
+      foreach ($item in @($ExitCode)) {
+        if ($item -is [int]) {
+          $code = $item
+          break
+        }
+      }
+    }
+    if ($code -eq 0) { $script:installed += $Label }
+    elseif ($code -eq 2) { $script:skipped += $Label }
     else { $script:failed += $Label }
   }
 
