@@ -351,15 +351,8 @@ export function HomeAnalyticsSection() {
   });
 
   return (
-    <section id="analytics" className="border-t border-line px-4 pb-16 pt-10 sm:pb-20 sm:pt-12">
+    <section id="analytics" className="border-t border-line px-4 pb-16 pt-4 sm:pb-20 sm:pt-6">
       <div className="mx-auto max-w-6xl">
-        <SectionHeader
-          className="mb-4 sm:mb-5"
-          eyebrow="AI observability"
-          title="Track your AI usage"
-          subtitle="Get statistics on your prompt volume, time spent on AI and your subscription expenditure. One dashboard for individuals, firm leaders, or operations teams."
-        />
-
         <div className="relative mx-auto hidden h-[min(68vw,520px)] max-h-[520px] min-h-[400px] w-full max-w-6xl sm:block sm:min-h-[440px]">
           {cards.map((card) => {
             const isFocused = focusedId === card.id;
@@ -420,6 +413,13 @@ export function HomeAnalyticsSection() {
             </article>
           ))}
         </div>
+
+        <SectionHeader
+          className="mt-8 mb-8 sm:mt-0"
+          eyebrow="AI observability"
+          title="Track your AI usage"
+          subtitle="Get statistics on your prompt volume, time spent on AI and your subscription expenditure. One dashboard for individuals, firm leaders, or operations teams."
+        />
 
         <div className="mx-auto mt-10 max-w-3xl space-y-4 text-center text-sm leading-relaxed text-muted sm:text-base">
           <p>
