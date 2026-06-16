@@ -32,6 +32,164 @@ function Promptly-SyncTelemetryCli {
   exit 1
 }
 
+function Promptly-MakeCodexHookEntry {
+  param([string]$Command)
+  return @{ hooks = @(@{ type = "command"; command = $Command; timeout = 15 }) }
+}
+
+function Promptly-WriteCodexHooksJson {
+  param([Parameter(Mandatory)][string]$HooksPath)
+  $node = Promptly-GetHookNodePrefix
+  $cmd = $node + ' "${PLUGIN_ROOT}/bin/promptly-telemetry.mjs" hook --tool codex'
+  $payload = @{
+    hooks = @{
+      UserPromptSubmit = @(Promptly-MakeCodexHookEntry -Command $cmd)
+      Stop = @(Promptly-MakeCodexHookEntry -Command $cmd)
+      SessionStart = @(Promptly-MakeCodexHookEntry -Command $cmd)
+      SessionEnd = @(Promptly-MakeCodexHookEntry -Command $cmd)
+    }
+  }
+  New-Item -ItemType Directory -Force -Path (Split-Path $HooksPath) | Out-Null
+  ($payload | ConvertTo-Json -Depth 8) + "`n" | Set-Content -LiteralPath $HooksPath -Encoding utf8
+}
+
+function Promptly-WriteCursorHooksJson {
+  param([Parameter(Mandatory)][string]$HooksPath)
+  $node = Promptly-GetHookNodePrefix
+  $cmd = $node + ' "${CURSOR_PLUGIN_ROOT}/bin/promptly-telemetry.mjs" hook --tool cursor'
+  $entry = @{ command = $cmd }
+  $payload = @{
+    version = 1
+    hooks = @{
+      beforeSubmitPrompt = @($entry)
+      afterAgentResponse = @($entry)
+      stop = @($entry)
+      sessionStart = @($entry)
+      sessionEnd = @($entry)
+    }
+  }
+  New-Item -ItemType Directory -Force -Path (Split-Path $HooksPath) | Out-Null
+  ($payload | ConvertTo-Json -Depth 8) + "`n" | Set-Content -LiteralPath $HooksPath -Encoding utf8
+}
+
+function Promptly-WriteClaudeHooksJson {
+  param([Parameter(Mandatory)][string]$HooksPath)
+  $node = Promptly-GetHookNodePrefix
+  $cmd = $node + ' "${CLAUDE_PLUGIN_ROOT}/bin/promptly-telemetry.mjs" hook --tool claude_code'
+  $payload = @{
+    hooks = @{
+      UserPromptSubmit = @(Promptly-MakeCodexHookEntry -Command $cmd)
+      Stop = @(Promptly-MakeCodexHookEntry -Command $cmd)
+      SessionStart = @(Promptly-MakeCodexHookEntry -Command $cmd)
+      SessionEnd = @(Promptly-MakeCodexHookEntry -Command $cmd)
+    }
+  }
+  New-Item -ItemType Directory -Force -Path (Split-Path $HooksPath) | Out-Null
+  ($payload | ConvertTo-Json -Depth 8) + "`n" | Set-Content -LiteralPath $HooksPath -Encoding utf8
+}
+
+function Promptly-ApplyWindowsHookPaths {
+  param([string]$Integrations)
+  Promptly-WriteCodexHooksJson -HooksPath (Join-Path $Integrations "codex\hooks\hooks.json")
+  Promptly-WriteCursorHooksJson -HooksPath (Join-Path $Integrations "cursor\hooks\hooks.json")
+  Promptly-WriteClaudeHooksJson -HooksPath (Join-Path $Integrations "claude-code\hooks\hooks.json")
+}
+
+function Promptly-PreparePluginPack {
+  param([string]$Integrations)
+  $syncScript = Join-Path $Integrations "scripts\sync-plugin-pack.mjs"
+  $nodeExe = (Get-Command node.exe -ErrorAction SilentlyContinue).Source
+  if (-not $nodeExe) {
+    $nodeExe = (Get-Command node -ErrorAction SilentlyContinue).Source
+  }
+  if ($syncScript -and (Test-Path $syncScript) -and $nodeExe) {
+    Write-Host "-> Syncing plugin pack hooks and CLIs..."
+    & $nodeExe $syncScript 2>&1 | Out-Null
+  }
+  Promptly-ApplyWindowsHookPaths -Integrations $Integrations
+}
+
+function Promptly-SyncClaudePluginCache {
+  $src = Join-Path $env:USERPROFILE "integrations\packages\telemetry-cli\bin\promptly-telemetry.mjs"
+  $hooksSrc = Join-Path $env:USERPROFILE "integrations\claude-code\hooks\hooks.json"
+  if (-not (Test-Path $src)) { return }
+  $cacheRoot = Join-Path $env:USERPROFILE ".claude\plugins\cache\promptly-labs\promptly-claude-code"
+  if (-not (Test-Path $cacheRoot)) { return }
+  Get-ChildItem -Path $cacheRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+    $binDir = Join-Path $_.FullName "bin"
+    if (Test-Path (Split-Path $binDir)) {
+      New-Item -ItemType Directory -Force -Path $binDir | Out-Null
+      Copy-Item -Force $src (Join-Path $binDir "promptly-telemetry.mjs")
+    }
+    if (Test-Path $hooksSrc) {
+      $hooksDir = Join-Path $_.FullName "hooks"
+      New-Item -ItemType Directory -Force -Path $hooksDir | Out-Null
+      Copy-Item -Force $hooksSrc (Join-Path $hooksDir "hooks.json")
+    }
+  }
+}
+
+function Promptly-SyncCodexPluginCache {
+  $src = Join-Path $env:USERPROFILE "integrations\packages\telemetry-cli\bin\promptly-telemetry.mjs"
+  $hooksSrc = Join-Path $env:USERPROFILE "integrations\codex\hooks\hooks.json"
+  if (-not (Test-Path $src)) { return }
+  $cacheRoot = Join-Path $env:USERPROFILE ".codex\plugins\cache\promptly-labs\promptly-codex"
+  if (-not (Test-Path $cacheRoot)) { return }
+  Get-ChildItem -Path $cacheRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+    foreach ($binRel in @("bin", "codex\bin")) {
+      $binDir = Join-Path $_.FullName $binRel
+      $parent = Split-Path $binDir
+      if (Test-Path $parent) {
+        New-Item -ItemType Directory -Force -Path $binDir | Out-Null
+        Copy-Item -Force $src (Join-Path $binDir "promptly-telemetry.mjs")
+      }
+    }
+    if (Test-Path $hooksSrc) {
+      foreach ($hooksRel in @("hooks", "codex\hooks")) {
+        $hooksDir = Join-Path $_.FullName $hooksRel
+        $parent = Split-Path $hooksDir
+        if (Test-Path $parent) {
+          New-Item -ItemType Directory -Force -Path $hooksDir | Out-Null
+          Copy-Item -Force $hooksSrc (Join-Path $hooksDir "hooks.json")
+        }
+      }
+    }
+  }
+}
+
+function Promptly-SyncAllAgentRuntimes {
+  param([string]$Integrations = (Join-Path $env:USERPROFILE "integrations"))
+  $cliSrc = Join-Path $env:USERPROFILE "integrations\packages\telemetry-cli\bin\promptly-telemetry.mjs"
+  if (-not (Test-Path $cliSrc)) { return }
+
+  foreach ($plugin in @("claude-code", "cursor", "codex")) {
+    $pluginDir = Join-Path $Integrations $plugin
+    if (Test-Path $pluginDir) {
+      Promptly-SyncTelemetryCli -PluginDir $pluginDir
+    }
+  }
+
+  Promptly-SyncClaudePluginCache
+  Promptly-SyncCodexPluginCache
+
+  $cursorDest = Join-Path $env:USERPROFILE ".cursor\plugins\local\promptly-cursor"
+  $cursorSrc = Join-Path $Integrations "cursor"
+  if (Test-Path $cursorSrc) {
+    if (Test-Path $cursorDest) { Remove-Item -Recurse -Force $cursorDest }
+    New-Item -ItemType Directory -Force -Path (Split-Path $cursorDest) | Out-Null
+    Copy-Item -Recurse -Force $cursorSrc $cursorDest
+  }
+
+  $nodeExe = (Get-Command node.exe -ErrorAction SilentlyContinue).Source
+  if (-not $nodeExe) {
+    $nodeExe = (Get-Command node -ErrorAction SilentlyContinue).Source
+  }
+  if ($nodeExe) {
+    & $nodeExe $cliSrc sync-runtimes 2>&1 | Write-Host
+  }
+  Write-Host "Synced live hooks + telemetry CLI for Claude Code, Cursor, and Codex"
+}
+
 function Promptly-ClaudeMarketplaceRefresh {
   param([string]$IntegrationsPath)
   $claude = Promptly-GetAgentCliPath -Name claude
@@ -101,6 +259,12 @@ function Promptly-SyncClaudeCodeCommandFiles {
   $dest = Join-Path $env:USERPROFILE ".claude\commands\promptly.md"
   New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
   Copy-Item -Force $src $dest
+  $skillSrc = Join-Path $PluginDir "skill\SKILL.md"
+  if (Test-Path $skillSrc) {
+    $skillDestDir = Join-Path $env:USERPROFILE ".claude\skills\promptly"
+    New-Item -ItemType Directory -Force -Path $skillDestDir | Out-Null
+    Copy-Item -Force $skillSrc (Join-Path $skillDestDir "SKILL.md")
+  }
   Write-Host "Installed /promptly for Claude Code"
 }
 
@@ -114,6 +278,9 @@ function Promptly-SyncCursorCommandFiles {
   $dest = Join-Path $env:USERPROFILE ".cursor\commands\promptly.md"
   New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
   Copy-Item -Force $src $dest
+  $pluginCmd = Join-Path $PluginDir "commands\promptly.md"
+  New-Item -ItemType Directory -Force -Path (Split-Path $pluginCmd) | Out-Null
+  Copy-Item -Force $src $pluginCmd
   Write-Host "Installed /promptly for Cursor"
 }
 
@@ -161,6 +328,7 @@ function Promptly-VerifyPluginPack {
     Write-Host "Plugin pack missing improve CLI"
     return $false
   }
+  Promptly-PreparePluginPack -Integrations $Integrations
   Write-Host "Plugin pack OK"
   return $true
 }
@@ -171,13 +339,23 @@ function Promptly-InstallForCursor {
   Write-Host "=== Cursor ==="
   $source = Join-Path $Integrations "cursor"
   if (-not (Test-Path $source)) { Write-Host "Cursor plugin files missing"; return 1 }
+  Promptly-PreparePluginPack -Integrations $Integrations
   Promptly-SyncTelemetryCli -PluginDir $source
   try { Promptly-SyncImproveCli -PluginDir $source } catch { }
   Promptly-CursorPluginReinstall -Integrations $Integrations
   Promptly-SyncCursorCommandFiles -PluginDir $source
   $plugin = Join-Path $env:USERPROFILE ".cursor\plugins\local\promptly-cursor"
-  if (-not (Select-String -Path (Join-Path $plugin "hooks\hooks.json") -Pattern 'hook --tool cursor' -Quiet)) {
+  $hooksPath = Join-Path $plugin "hooks\hooks.json"
+  if (-not (Select-String -Path $hooksPath -Pattern 'afterAgentResponse' -Quiet)) {
+    Write-Host "Cursor hooks missing afterAgentResponse"
+    return 1
+  }
+  if (-not (Select-String -Path $hooksPath -Pattern 'hook --tool cursor' -Quiet)) {
     Write-Host "Hooks not configured for Cursor"
+    return 1
+  }
+  if (-not (Select-String -Path $hooksPath -Pattern 'CURSOR_PLUGIN_ROOT' -Quiet)) {
+    Write-Host "Cursor hooks must use `${CURSOR_PLUGIN_ROOT}/bin"
     return 1
   }
   Write-Host "Promptly installed for Cursor"
@@ -191,11 +369,24 @@ function Promptly-InstallForClaudeCode {
   if (-not (Promptly-EnsureClaudeCli)) { return 2 }
   $plugin = Join-Path $Integrations "claude-code"
   if (-not (Test-Path $plugin)) { Write-Host "Claude Code plugin files missing"; return 1 }
+  Promptly-PreparePluginPack -Integrations $Integrations
   Promptly-SyncTelemetryCli -PluginDir $plugin
   try { Promptly-SyncImproveCli -PluginDir $plugin } catch { }
   Promptly-SyncClaudeCodeCommandFiles -PluginDir $plugin
   Promptly-ClaudeMarketplaceRefresh -IntegrationsPath $Integrations
   Promptly-ClaudePluginReinstall
+  Promptly-SyncClaudePluginCache
+  $claude = Promptly-GetAgentCliPath -Name claude
+  $pluginList = & $claude plugin list 2>&1 | Out-String
+  if ($pluginList -notmatch "promptly-claude-code") {
+    Write-Host "Promptly plugin not found in claude plugin list"
+    return 1
+  }
+  $hooksPath = Join-Path $plugin "hooks\hooks.json"
+  if (-not (Select-String -Path $hooksPath -Pattern 'hook --tool claude_code' -Quiet)) {
+    Write-Host "Hooks not configured for Claude Code"
+    return 1
+  }
   Write-Host "Promptly installed for Claude Code"
   return 0
 }
@@ -207,11 +398,29 @@ function Promptly-InstallForCodex {
   if (-not (Promptly-EnsureCodexCli)) { return 2 }
   $plugin = Join-Path $Integrations "codex"
   if (-not (Test-Path $plugin)) { Write-Host "Codex plugin files missing"; return 1 }
+  Promptly-PreparePluginPack -Integrations $Integrations
   Promptly-SyncTelemetryCli -PluginDir $plugin
   try { Promptly-SyncImproveCli -PluginDir $plugin } catch { }
   Promptly-InstallCodexSkill -PluginDir $plugin
   Promptly-CodexMarketplaceAdd -IntegrationsPath $Integrations
   Promptly-CodexPluginReinstall
+  Promptly-SyncCodexPluginCache
+  $codex = Promptly-GetAgentCliPath -Name codex
+  $pluginList = & $codex plugin list 2>&1 | Out-String
+  if ($pluginList -notmatch "promptly-codex") {
+    Write-Host "Promptly plugin not found in codex plugin list"
+    return 1
+  }
+  $hooksPath = Join-Path $plugin "hooks\hooks.json"
+  if (-not (Select-String -Path $hooksPath -Pattern 'UserPromptSubmit' -Quiet)) {
+    Write-Host "Codex hooks missing UserPromptSubmit"
+    return 1
+  }
+  if (-not (Select-String -Path $hooksPath -Pattern 'PLUGIN_ROOT' -Quiet)) {
+    Write-Host "Codex hooks must use `${PLUGIN_ROOT}/bin"
+    return 1
+  }
   Write-Host "Promptly installed for Codex"
+  Write-Host "  After reopening Codex, type /hooks in your project and trust Promptly hooks"
   return 0
 }

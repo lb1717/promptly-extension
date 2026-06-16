@@ -218,7 +218,17 @@ function Promptly-EnsureAgentCli {
   return $false
 }
 
-function Ensure-NodeJs {
+function Promptly-GetHookNodePrefix {
+  $nodeExe = (Get-Command node.exe -ErrorAction SilentlyContinue).Source
+  if (-not $nodeExe) {
+    $nodeExe = (Get-Command node -ErrorAction SilentlyContinue).Source
+  }
+  if ($nodeExe) {
+    return "`"$nodeExe`""
+  }
+  return "node"
+}
+
   Write-Host "-> Checking Node.js..."
   $nodeCmd = Get-Command node.exe -ErrorAction SilentlyContinue
   if (-not $nodeCmd) {

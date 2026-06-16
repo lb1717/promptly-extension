@@ -23,27 +23,7 @@ if (-not (Get-Command Promptly-UnzipPluginPack -ErrorAction SilentlyContinue)) {
 
 function Sync-PromptlyAgentRuntimes {
   param([string]$CliSrc)
-  $paths = @(
-    (Join-Path $env:USERPROFILE "integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs"),
-    (Join-Path $env:USERPROFILE "integrations/claude-code/bin/promptly-telemetry.mjs"),
-    (Join-Path $env:USERPROFILE "integrations/cursor/bin/promptly-telemetry.mjs"),
-    (Join-Path $env:USERPROFILE "integrations/codex/bin/promptly-telemetry.mjs"),
-    (Join-Path $env:USERPROFILE ".cursor/plugins/local/promptly-cursor/bin/promptly-telemetry.mjs")
-  )
-  foreach ($dest in $paths) {
-    $dir = Split-Path $dest
-    if (Test-Path $dir) {
-      New-Item -ItemType Directory -Force -Path $dir | Out-Null
-      Copy-Item -Force $CliSrc $dest
-    }
-  }
-  $cursorSrc = Join-Path $env:USERPROFILE "integrations/cursor"
-  $cursorDest = Join-Path $env:USERPROFILE ".cursor/plugins/local/promptly-cursor"
-  if (Test-Path $cursorSrc) {
-    if (Test-Path $cursorDest) { Remove-Item -Recurse -Force $cursorDest }
-    New-Item -ItemType Directory -Force -Path (Split-Path $cursorDest) | Out-Null
-    Copy-Item -Recurse -Force $cursorSrc $cursorDest
-  }
+  Promptly-SyncAllAgentRuntimes
 }
 
 function Setup-PromptlyAgents {
@@ -124,6 +104,11 @@ function Setup-PromptlyAgents {
   Write-Host "-> Syncing hooks + telemetry into Claude Code, Cursor, and Codex runtimes..."
   Sync-PromptlyAgentRuntimes -CliSrc $cliDest
 
+  Write-Host "-> Verifying hook wiring..."
+  & $nodeExe $cliDest status --tool codex 2>&1 | Write-Host
+  & $nodeExe $cliDest status --tool claude_code 2>&1 | Write-Host
+  & $nodeExe $cliDest status --tool cursor 2>&1 | Write-Host
+
   Write-Host "-> Syncing AI subscription usage (Claude, Codex, Cursor)..."
   Write-Host "  First-time setup opens your browser once for claude.ai sign-in."
   & $nodeExe $cliDest usage-sync --login-claude
@@ -135,6 +120,12 @@ function Setup-PromptlyAgents {
 
   Write-Host ""
   Write-Host "OK. Restart Claude Code, Cursor, and Codex if they were open, then send a test prompt."
+  Write-Host ""
+  Write-Host "Enable hooks after reopening:"
+  Write-Host "  Codex: open your project, type /hooks, and trust Promptly hooks"
+  Write-Host "  Cursor: reload the window and allow hooks when prompted"
+  Write-Host "  Claude Code: run /reload-plugins once, then send a prompt"
+  Write-Host ""
   Write-Host "Stats: https://promptly-labs.com/account/statistics"
 }
 
