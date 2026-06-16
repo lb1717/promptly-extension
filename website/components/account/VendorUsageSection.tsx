@@ -13,7 +13,7 @@ import {
   XAxis,
   YAxis
 } from "recharts";
-import { dollarsUsedFromUtilization } from "@/lib/vendorPlanPricing";
+import { dollarsUsedFromUtilization, normalizeUtilizationPercent } from "@/lib/vendorPlanPricing";
 
 const VENDOR_USAGE_PASSWORD = "oat123";
 const UNLOCK_KEY = "promptly_vendor_usage_unlocked";
@@ -126,6 +126,49 @@ function formatChartTime(atMs: number): string {
   });
 }
 
+/** Claude snapshots store remaining quota in `utilization`; flip at read time for charts and labels. */
+function displayUtilization(
+  provider: VendorProfile["provider"],
+  raw: number,
+  opts: { capAt100?: boolean } = {}
+): number {
+  let value = provider === "claude_code" ? 100 - raw : raw;
+  value = normalizeUtilizationPercent(value);
+  if (opts.capAt100 === false) {
+    return Math.max(0, value);
+  }
+  return Math.max(0, Math.min(100, value));
+}
+
+function resolveBillingCycleBounds(window: UsageWindow, referenceMs: number) {
+  const windowSeconds = window.window_seconds ?? 7 * 86400;
+  const cycleMs = windowSeconds * 1000;
+  const resetMs = window.resets_at ? Date.parse(window.resets_at) : NaN;
+  if (!Number.isFinite(resetMs)) {
+    return {
+      cycleStartMs: referenceMs - cycleMs,
+      cycleEndMs: referenceMs,
+      nowMs: referenceMs
+    };
+  }
+  const cycleEndMs = resetMs;
+  const cycleStartMs = resetMs - cycleMs;
+  const nowMs = Math.min(Math.max(referenceMs, cycleStartMs), cycleEndMs);
+  return { cycleStartMs, cycleEndMs, nowMs };
+}
+
+function chartYDomainMax(values: number[]): number {
+  const peak = values.reduce((max, value) => (Number.isFinite(value) ? Math.max(max, value) : max), 0);
+  if (peak <= 100) return 100;
+  return Math.ceil(peak / 10) * 10;
+}
+
+function chartYTicks(yMax: number): number[] {
+  const base = [0, 25, 50, 75, 100];
+  if (yMax <= 100) return base;
+  const extra = Math.ceil(yMax / 25) * 25;
+  return extra > 100 ? [...base, extra] : base;
+}
 function windowCycleMs(windowSeconds: number | null): number {
   if (windowSeconds && windowSeconds > 0) return windowSeconds * 1000;
   return 7 * 86400 * 1000;
@@ -157,8 +200,19 @@ function formatChartXLabel(atMs: number, spanMs: number, windowSeconds: number |
 type ChartRow = {
   at_ms: number;
   label: string;
-  utilization: number;
+  utilization: number | null;
+  projectedUtilization: number | null;
   isReading: boolean;
+  isProjection: boolean;
+};
+
+type BillingCycleChart = {
+  rows: ChartRow[];
+  cycleStartMs: number;
+  cycleEndMs: number;
+  nowMs: number;
+  projectedEndUtil: number;
+  yMax: number;
 };
 
 function formatUsd(value: number): string {
@@ -222,12 +276,21 @@ function computeMonthlyExpenditureSummary(
     const active = activeUsageWindow(profile);
     if (!active) continue;
 
-    const { window, history, dollarsUsed } = active;
+    const { window, history } = active;
     const windowSeconds = window.window_seconds ?? 7 * 86400;
     const lookbackMs = resolveChartLookbackMs(rangeDays, windowSeconds);
     const startMs = nowMs - lookbackMs;
+    const displayCurrentUtil = displayUtilization(profile.provider, window.utilization);
+    const dollarsUsed =
+      profile.plan_monthly_usd != null
+        ? dollarsUsedFromUtilization(profile.plan_monthly_usd, displayCurrentUtil, windowSeconds)
+        : active.dollarsUsed;
 
     const points = [...history]
+      .map((point) => ({
+        ...point,
+        utilization: displayUtilization(profile.provider, point.utilization)
+      }))
       .filter((point) => point.at_ms >= startMs && point.at_ms <= nowMs)
       .sort((a, b) => a.at_ms - b.at_ms);
 
@@ -321,78 +384,115 @@ function windowLabels(provider: VendorProfile["provider"]): { primary: string; s
   return { primary: "5-hour", secondary: "Weekly" };
 }
 
-function buildChartRows(
+function buildBillingCycleChartRows(
+  provider: VendorProfile["provider"],
   history: UsageHistoryPoint[],
   currentWindow: UsageWindow | null,
   syncedAtMs: number,
-  rangeDays: number,
   windowSeconds: number | null
-): ChartRow[] {
-  const nowMs = syncedAtMs || Date.now();
-  const lookbackMs = resolveChartLookbackMs(rangeDays, windowSeconds);
-  const startMs = nowMs - lookbackMs;
+): BillingCycleChart | null {
+  if (!currentWindow) return null;
 
-  const rows: ChartRow[] = history
-    .filter((point) => point.at_ms >= startMs && point.at_ms <= nowMs + 60_000)
+  const referenceMs = syncedAtMs || Date.now();
+  const { cycleStartMs, cycleEndMs, nowMs } = resolveBillingCycleBounds(currentWindow, referenceMs);
+  const spanMs = Math.max(cycleEndMs - cycleStartMs, 1);
+  const currentUtil = displayUtilization(provider, currentWindow.utilization);
+
+  const actualRows: ChartRow[] = history
+    .filter((point) => point.at_ms >= cycleStartMs && point.at_ms <= nowMs + 60_000)
     .map((point) => ({
       at_ms: point.at_ms,
-      label: formatChartXLabel(point.at_ms, lookbackMs, windowSeconds),
-      utilization: Math.max(0, Math.min(100, point.utilization)),
-      isReading: true
-    }));
+      label: formatChartXLabel(point.at_ms, spanMs, windowSeconds),
+      utilization: displayUtilization(provider, point.utilization),
+      projectedUtilization: null,
+      isReading: true,
+      isProjection: false
+    }))
+    .sort((a, b) => a.at_ms - b.at_ms);
 
-  if (rows.length === 0 && currentWindow) {
-    rows.push({
+  if (actualRows.length === 0) {
+    actualRows.push({
       at_ms: nowMs,
-      label: formatChartXLabel(nowMs, lookbackMs, windowSeconds),
-      utilization: Math.max(0, Math.min(100, currentWindow.utilization)),
-      isReading: true
+      label: formatChartXLabel(nowMs, spanMs, windowSeconds),
+      utilization: currentUtil,
+      projectedUtilization: null,
+      isReading: true,
+      isProjection: false
     });
-  } else if (currentWindow) {
-    const latest = rows[rows.length - 1];
-    if (!latest || nowMs - latest.at_ms > 60_000) {
-      rows.push({
+  } else {
+    const latest = actualRows[actualRows.length - 1];
+    if (nowMs - latest.at_ms > 60_000) {
+      actualRows.push({
         at_ms: nowMs,
-        label: formatChartXLabel(nowMs, lookbackMs, windowSeconds),
-        utilization: Math.max(0, Math.min(100, currentWindow.utilization)),
-        isReading: true
+        label: formatChartXLabel(nowMs, spanMs, windowSeconds),
+        utilization: currentUtil,
+        projectedUtilization: null,
+        isReading: true,
+        isProjection: false
       });
     } else {
-      latest.utilization = Math.max(0, Math.min(100, currentWindow.utilization));
-      latest.label = formatChartXLabel(latest.at_ms, lookbackMs, windowSeconds);
+      latest.at_ms = nowMs;
+      latest.utilization = currentUtil;
+      latest.label = formatChartXLabel(nowMs, spanMs, windowSeconds);
     }
   }
 
-  const sorted = rows.sort((a, b) => a.at_ms - b.at_ms);
-  if (sorted.length === 1) {
-    const point = sorted[0];
-    const padMs = Math.min(Math.max(windowCycleMs(windowSeconds) * 0.35, 2 * 3600 * 1000), lookbackMs * 0.2);
-    return [
-      {
-        at_ms: point.at_ms - padMs,
-        label: formatChartXLabel(point.at_ms - padMs, lookbackMs, windowSeconds),
-        utilization: point.utilization,
-        isReading: false
-      },
-      point
-    ];
-  }
-  return sorted;
+  const firstActual = actualRows[0];
+  const lastActual = actualRows[actualRows.length - 1];
+  const elapsedMs = Math.max(nowMs - firstActual.at_ms, 60_000);
+  const startUtil = firstActual.utilization ?? 0;
+  const endUtil = lastActual.utilization ?? currentUtil;
+  const displayRate = (endUtil - startUtil) / elapsedMs;
+  const projectedEndFromDisplay = endUtil + displayRate * (cycleEndMs - nowMs);
+
+  const solidRows = actualRows.slice(0, -1).map((row) => ({ ...row, projectedUtilization: null }));
+  const junction: ChartRow = {
+    ...lastActual,
+    at_ms: nowMs,
+    label: formatChartXLabel(nowMs, spanMs, windowSeconds),
+    utilization: endUtil,
+    projectedUtilization: endUtil,
+    isReading: true,
+    isProjection: false
+  };
+  const projectionEnd: ChartRow = {
+    at_ms: cycleEndMs,
+    label: formatChartXLabel(cycleEndMs, spanMs, windowSeconds),
+    utilization: null,
+    projectedUtilization: Math.max(0, projectedEndFromDisplay),
+    isReading: false,
+    isProjection: true
+  };
+
+  const rows = [...solidRows, junction, projectionEnd];
+  const yMax = chartYDomainMax(
+    rows.flatMap((row) => [row.utilization, row.projectedUtilization].filter((v): v is number => v != null))
+  );
+
+  return {
+    rows,
+    cycleStartMs,
+    cycleEndMs,
+    nowMs,
+    projectedEndUtil: Math.max(0, projectedEndFromDisplay),
+    yMax
+  };
 }
 
 function UsageTrendChart({
-  rows,
+  chart,
   currentUtil,
   windowSeconds
 }: {
-  rows: ChartRow[];
+  chart: BillingCycleChart;
   currentUtil: number;
   windowSeconds: number | null;
 }) {
+  const { rows, cycleStartMs, cycleEndMs, nowMs, yMax } = chart;
+  const spanMs = Math.max(cycleEndMs - cycleStartMs, 1);
   const lineColor =
     currentUtil >= 75 ? "#059669" : currentUtil >= 40 ? "#d97706" : currentUtil >= 15 ? "#ea580c" : "#dc2626";
-  const spanMs =
-    rows.length >= 2 ? Math.max(rows[rows.length - 1].at_ms - rows[0].at_ms, windowCycleMs(windowSeconds)) : windowCycleMs(windowSeconds);
+  const projectionColor = "#64748b";
 
   return (
     <div className="h-52 w-full sm:h-56">
@@ -402,42 +502,54 @@ function UsageTrendChart({
           <XAxis
             dataKey="at_ms"
             type="number"
-            domain={["dataMin", "dataMax"]}
+            domain={[cycleStartMs, cycleEndMs]}
             stroke={CHART_X_DATE_STROKE}
             tick={CHART_X_DATE_TICK}
             minTickGap={28}
             tickFormatter={(value) => formatChartXLabel(Number(value), spanMs, windowSeconds)}
           />
           <YAxis
-            domain={[0, 100]}
+            domain={[0, yMax]}
             stroke="#8A8A8A"
             allowDecimals={false}
             width={36}
             tick={CHART_Y_TICK}
-            ticks={[0, 25, 50, 75, 100]}
+            ticks={chartYTicks(yMax)}
             unit="%"
           />
           <Tooltip
             contentStyle={CHART_TOOLTIP_STYLE}
-            formatter={(value: number) => [`${Math.round(value)}% used`, "Usage"]}
+            formatter={(value: number, _name, item) => {
+              const row = item?.payload as ChartRow | undefined;
+              const label = row?.isProjection ? "Projected usage" : "Usage";
+              return [`${Math.round(value)}% used`, label];
+            }}
             labelFormatter={(_, payload) => {
               const atMs = payload?.[0]?.payload?.at_ms;
               return typeof atMs === "number" ? formatChartTime(atMs) : "";
             }}
           />
-          <ReferenceLine y={100} stroke="#16a34a" strokeDasharray="4 4" strokeOpacity={0.75} />
+          <ReferenceLine
+            x={nowMs}
+            stroke="#94a3b8"
+            strokeDasharray="2 4"
+            strokeOpacity={0.8}
+            label={{ value: "Now", position: "insideTopRight", fill: "#64748b", fontSize: 10 }}
+          />
+          <ReferenceLine y={100} stroke="#16a34a" strokeDasharray="4 4" strokeOpacity={0.75} label={{ value: "100%", position: "insideTopLeft", fill: "#16a34a", fontSize: 10 }} />
           <ReferenceLine y={75} stroke="#86efac" strokeDasharray="3 6" strokeOpacity={0.35} />
           <ReferenceLine y={50} stroke="#d1d5db" strokeDasharray="3 6" strokeOpacity={0.35} />
           <ReferenceLine y={25} stroke="#fca5a5" strokeDasharray="3 6" strokeOpacity={0.35} />
           <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="4 4" strokeOpacity={0.55} />
           <Line
-            type="monotone"
+            type="linear"
             dataKey="utilization"
             stroke={lineColor}
             strokeWidth={2.75}
+            connectNulls={false}
             dot={({ cx, cy, index }) => {
               const row = rows[index];
-              if (!row?.isReading || cx == null || cy == null) {
+              if (!row?.isReading || row.utilization == null || cx == null || cy == null) {
                 return <circle cx={cx ?? 0} cy={cy ?? 0} r={0} fill="transparent" />;
               }
               return (
@@ -452,6 +564,32 @@ function UsageTrendChart({
               );
             }}
             activeDot={{ r: 5, fill: lineColor, stroke: "#ffffff", strokeWidth: 1.5 }}
+            isAnimationActive={false}
+          />
+          <Line
+            type="linear"
+            dataKey="projectedUtilization"
+            stroke={projectionColor}
+            strokeWidth={2}
+            strokeDasharray="5 5"
+            connectNulls
+            dot={({ cx, cy, index }) => {
+              const row = rows[index];
+              if (!row?.isProjection || row.projectedUtilization == null || cx == null || cy == null) {
+                return <circle cx={cx ?? 0} cy={cy ?? 0} r={0} fill="transparent" />;
+              }
+              return (
+                <circle
+                  cx={cx}
+                  cy={cy}
+                  r={3}
+                  fill={projectionColor}
+                  stroke="#ffffff"
+                  strokeWidth={1.5}
+                />
+              );
+            }}
+            activeDot={{ r: 4, fill: projectionColor, stroke: "#ffffff", strokeWidth: 1.5 }}
             isAnimationActive={false}
           />
         </LineChart>
@@ -479,18 +617,26 @@ function SubscriptionUsageRow({
       : profile.usage_history?.secondary ?? [];
   const dollarsUsed =
     windowKind === "primary" ? profile.primary_dollars_used : profile.secondary_dollars_used;
-  const chartRows = useMemo(
+  const chart = useMemo(
     () =>
-      buildChartRows(
+      buildBillingCycleChartRows(
+        profile.provider,
         activeHistory,
         activeWindow,
         profile.synced_at_ms,
-        rangeDays,
         activeWindow?.window_seconds ?? null
       ),
-    [activeHistory, activeWindow, profile.synced_at_ms, rangeDays]
+    [profile.provider, activeHistory, activeWindow, profile.synced_at_ms]
   );
-  const currentUtil = activeWindow?.utilization ?? 0;
+  const currentUtil = activeWindow ? displayUtilization(profile.provider, activeWindow.utilization) : 0;
+  const displayDollarsUsed =
+    activeWindow && profile.plan_monthly_usd != null
+      ? dollarsUsedFromUtilization(
+          profile.plan_monthly_usd,
+          currentUtil,
+          activeWindow.window_seconds ?? null
+        )
+      : dollarsUsed;
   const windowLabel = windowKind === "primary" ? labels.primary : labels.secondary;
 
   return (
@@ -535,9 +681,9 @@ function SubscriptionUsageRow({
       {activeWindow ? (
         <>
           <p className="mb-3 text-sm text-muted">
-            {dollarsUsed != null ? (
+            {displayDollarsUsed != null ? (
               <>
-                About <span className="font-semibold tabular-nums text-ink">${dollarsUsed.toFixed(2)}</span> of your{" "}
+                About <span className="font-semibold tabular-nums text-ink">${displayDollarsUsed.toFixed(2)}</span> of your{" "}
                 {windowLabel.toLowerCase()} plan value used
               </>
             ) : (
@@ -546,14 +692,23 @@ function SubscriptionUsageRow({
                 {windowLabel.toLowerCase()} limit used
               </>
             )}
-            {" · resets in "}
+            {" · resets "}
             {formatResetCountdown(activeWindow.resets_at)}
+            {chart && chart.projectedEndUtil > 0 ? (
+              <>
+                {" · projected "}
+                <span className="font-medium tabular-nums text-ink">{Math.round(chart.projectedEndUtil)}%</span>
+                {" at cycle end"}
+              </>
+            ) : null}
           </p>
-          <UsageTrendChart
-            rows={chartRows}
-            currentUtil={currentUtil}
-            windowSeconds={activeWindow.window_seconds}
-          />
+          {chart ? (
+            <UsageTrendChart
+              chart={chart}
+              currentUtil={currentUtil}
+              windowSeconds={activeWindow.window_seconds}
+            />
+          ) : null}
         </>
       ) : (
         <p className="text-sm text-muted">No usage window available for this subscription yet.</p>
