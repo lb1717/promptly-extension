@@ -30,8 +30,10 @@
     if (destroyed) return;
     lastUserActivityMs = Date.now();
     if (phase === "reading_idle" && isTabVisible() && windowFocused && !phaseStartedMs) {
-      phaseStartedMs = Date.now();
+      startSegment(Date.now());
       ensureHeartbeat();
+    } else {
+      ensureModelContinuity();
     }
   }
 
@@ -45,12 +47,14 @@
   function pauseReadingIdle() {
     if (phase !== "reading_idle" || !phaseStartedMs) return;
     flushCurrentSegment();
-    phaseStartedMs = 0;
+    clearSegment();
     stopHeartbeat();
   }
 
   /** @type {(() => { label: string; bucket: string }) | null} */
   let getModelMeta = null;
+  /** @type {{ label: string; bucket: string } | null} */
+  let segmentModelMeta = null;
 
   function readModelMeta() {
     if (typeof getModelMeta === "function") {
@@ -68,6 +72,30 @@
     return { label: "", bucket: "unknown" };
   }
 
+  function modelKey(meta) {
+    return `${String(meta?.label || "")}::${String(meta?.bucket || "unknown")}`;
+  }
+
+  function startSegment(atMs = Date.now()) {
+    phaseStartedMs = atMs;
+    segmentModelMeta = readModelMeta();
+  }
+
+  function clearSegment() {
+    phaseStartedMs = 0;
+    segmentModelMeta = null;
+  }
+
+  function ensureModelContinuity() {
+    if (!phaseStartedMs) return;
+    const current = readModelMeta();
+    const active = segmentModelMeta || current;
+    if (modelKey(current) !== modelKey(active)) {
+      flushCurrentSegment(Date.now());
+      startSegment(Date.now());
+    }
+  }
+
   function flushCurrentSegment(endMs = Date.now()) {
     if (!enqueueRow || destroyed || !phaseStartedMs) {
       return;
@@ -77,20 +105,20 @@
       endMs = Math.min(endMs, lastUserActivityMs);
     } else if (!active) {
       if (phase === "reading_idle") {
-        phaseStartedMs = 0;
+        clearSegment();
       }
       return;
     }
     const rawMs = Math.max(0, endMs - phaseStartedMs);
     if (rawMs < MIN_SEGMENT_MS) {
-      phaseStartedMs = endMs;
+      startSegment(endMs);
       if (phase === "reading_idle" && !isEngagementActive()) {
-        phaseStartedMs = 0;
+        clearSegment();
       }
       return;
     }
     const durationMs = Math.min(MAX_SEGMENT_MS, rawMs);
-    const modelMeta = readModelMeta();
+    const modelMeta = segmentModelMeta || readModelMeta();
     enqueueRow({
       interaction_kind: "engagement_segment",
       engagement_category: phase,
@@ -106,9 +134,9 @@
           ? { host_model_bucket: modelMeta.bucket }
           : {})
     });
-    phaseStartedMs = endMs;
+    startSegment(endMs);
     if (phase === "reading_idle" && !isEngagementActive()) {
-      phaseStartedMs = 0;
+      clearSegment();
     }
   }
 
@@ -125,6 +153,7 @@
         }
         return;
       }
+      ensureModelContinuity();
       flushCurrentSegment();
     }, HEARTBEAT_FLUSH_MS);
   }
@@ -146,17 +175,31 @@
       if (phase !== normalized) {
         flushCurrentSegment();
         phase = normalized;
-        phaseStartedMs = normalized === "reading_idle" ? 0 : Date.now();
+        if (normalized === "reading_idle") {
+          clearSegment();
+        } else {
+          startSegment(Date.now());
+        }
         lastUserActivityMs = Date.now();
       } else if (options.forceRestart) {
         flushCurrentSegment();
-        phaseStartedMs = normalized === "reading_idle" ? 0 : Date.now();
+        if (normalized === "reading_idle") {
+          clearSegment();
+        } else {
+          startSegment(Date.now());
+        }
         lastUserActivityMs = Date.now();
+      } else if (normalized !== "reading_idle" && !phaseStartedMs) {
+        startSegment(Date.now());
+        lastUserActivityMs = Date.now();
+      }
+      if (normalized !== "reading_idle") {
+        ensureModelContinuity();
       }
       ensureHeartbeat();
     } else {
       phase = normalized;
-      phaseStartedMs = 0;
+      clearSegment();
     }
     if (normalized === "waiting") {
       pendingWaiting = true;
@@ -178,7 +221,7 @@
     }
     phase = resumePhase;
     lastUserActivityMs = Date.now();
-    phaseStartedMs = 0;
+    clearSegment();
     if (windowFocused) {
       ensureHeartbeat();
     }
@@ -189,7 +232,7 @@
       flushCurrentSegment();
     }
     tabVisible = false;
-    phaseStartedMs = 0;
+    clearSegment();
     stopHeartbeat();
   }
 
@@ -207,7 +250,7 @@
       pauseReadingIdle();
     } else if (tabVisible) {
       flushCurrentSegment();
-      phaseStartedMs = 0;
+      clearSegment();
       stopHeartbeat();
     }
   }
@@ -226,7 +269,7 @@
     pendingWaiting = false;
     tabVisible = document.visibilityState === "visible";
     windowFocused = document.hasFocus();
-    phaseStartedMs = 0;
+    clearSegment();
     lastUserActivityMs = Date.now();
     if (tabVisible && windowFocused) {
       ensureHeartbeat();
@@ -243,11 +286,16 @@
     isDraftSessionActive = null;
     getModelMeta = null;
     pendingWaiting = false;
-    phaseStartedMs = 0;
+    clearSegment();
   }
 
   function noteDraftingStarted() {
     setPhase("drafting");
+    ensureModelContinuity();
+  }
+
+  function noteModelMayHaveChanged() {
+    ensureModelContinuity();
   }
 
   function noteSendRecorded() {
@@ -255,7 +303,7 @@
     pendingWaiting = true;
     // Waiting screen time comes from host_response_latency_ms on the send row (avoids double-counting).
     phase = "reading_idle";
-    phaseStartedMs = 0;
+    clearSegment();
     stopHeartbeat();
   }
 
@@ -278,6 +326,7 @@
     onWindowBlur,
     noteUserActivity,
     noteDraftingStarted,
+    noteModelMayHaveChanged,
     noteSendRecorded,
     noteResponseComplete,
     noteDraftAborted

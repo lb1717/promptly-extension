@@ -973,31 +973,34 @@ function SubscriptionUsageRow({
             <p className="mt-1 truncate text-xs text-faint">{profile.vendor_email}</p>
           ) : null}
         </div>
-        {showWindowToggle ? (
-          <div className="inline-flex shrink-0 rounded-lg border border-line bg-cream-dark p-0.5">
-            <button
-              type="button"
-              onClick={() => setWindowKind("primary")}
-              className={`rounded-md px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${
-                windowKind === "primary" ? "bg-ink text-cream" : "text-faint hover:text-ink"
-              }`}
-            >
-              {labels.primary}
-            </button>
-            <button
-              type="button"
-              onClick={() => setWindowKind("secondary")}
-              className={`rounded-md px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${
-                windowKind === "secondary" ? "bg-ink text-cream" : "text-faint hover:text-ink"
-              }`}
-            >
-              {labels.secondary}
-            </button>
+        {activeWindow ? (
+          <div className="flex shrink-0 flex-col items-center">
+            {showWindowToggle ? (
+              <div className="inline-flex rounded-lg border border-line bg-cream-dark p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setWindowKind("primary")}
+                  className={`rounded-md px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${
+                    windowKind === "primary" ? "bg-ink text-cream" : "text-faint hover:text-ink"
+                  }`}
+                >
+                  {labels.primary}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setWindowKind("secondary")}
+                  className={`rounded-md px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${
+                    windowKind === "secondary" ? "bg-ink text-cream" : "text-faint hover:text-ink"
+                  }`}
+                >
+                  {labels.secondary}
+                </button>
+              </div>
+            ) : null}
+            <PeriodNavigator state={periodNav} onChange={setPeriodOffset} />
           </div>
         ) : null}
       </div>
-
-      {activeWindow ? <PeriodNavigator state={periodNav} onChange={setPeriodOffset} /> : null}
 
       {activeWindow ? (
         <>

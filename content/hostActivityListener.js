@@ -181,6 +181,26 @@
     return editable instanceof Element;
   }
 
+  function readEditableDraftText(el) {
+    if (!(el instanceof Element)) {
+      return "";
+    }
+    const editable = el.closest("[contenteditable=''], [contenteditable='true'], textarea, input[type='text']");
+    if (editable instanceof HTMLTextAreaElement || editable instanceof HTMLInputElement) {
+      return String(editable.value || "").trim();
+    }
+    if (editable instanceof HTMLElement) {
+      return String(editable.innerText || editable.textContent || "").trim();
+    }
+    if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
+      return String(el.value || "").trim();
+    }
+    if (el instanceof HTMLElement && el.isContentEditable) {
+      return String(el.innerText || el.textContent || "").trim();
+    }
+    return "";
+  }
+
   let installedHere = false;
   /** @type {{ destroyed: boolean, site: string, getPromptTarget: () => Element|null, readComposer: () => string } | null} */
   let activeCfg = null;
@@ -231,14 +251,11 @@
 
   function noteDraftActivity() {
     const now = Date.now();
-    const wasNew = !draftSession.startedMs;
     if (!draftSession.startedMs) {
       draftSession.startedMs = now;
     }
     draftSession.lastActiveMs = now;
-    if (wasNew) {
-      window.PromptlyHostEngagementTracker?.noteDraftingStarted?.();
-    }
+    window.PromptlyHostEngagementTracker?.noteDraftingStarted?.();
   }
 
   function checkDraftIdleTimeout() {
@@ -287,7 +304,7 @@
     return { draft_duration_ms: dur, draft_active_ms: dur };
   }
 
-  function noteComposerTyping() {
+  function noteComposerTyping(ev) {
     if (!activeCfg || activeCfg.destroyed) {
       return;
     }
@@ -296,6 +313,9 @@
       text = String(activeCfg.readComposer() || "").trim();
     } catch (_e) {
       text = "";
+    }
+    if (!text && ev?.target instanceof Element) {
+      text = readEditableDraftText(ev.target);
     }
     if (!text.length) {
       return;
@@ -324,6 +344,20 @@
     if (!text.length && draftSession.startedMs) {
       abortDraftSession();
     }
+  }
+
+  function composerHasText(cfg) {
+    if (!cfg || cfg.destroyed) return false;
+    try {
+      if (String(cfg.readComposer() || "").trim().length > 0) return true;
+    } catch (_e) {
+      /* fall through */
+    }
+    const composer = resolveComposerRoot(cfg);
+    if (composer instanceof Element) {
+      return readEditableDraftText(composer).length > 0;
+    }
+    return false;
   }
 
   function syncPendingWatchesToBackground() {
@@ -626,6 +660,7 @@
 
     const meta = scrapeModelMeta(cfg.site);
     lastModelMeta = meta;
+    window.PromptlyHostEngagementTracker?.noteModelMayHaveChanged?.();
     const draft = consumeDraftMetrics();
 
     const sendRow = {
@@ -731,7 +766,7 @@
         return;
       }
 
-      noteComposerTyping();
+      noteComposerTyping(ev);
 
       globalThis.clearTimeout(composeDebounceTimer);
       composeDebounceTimer = globalThis.setTimeout(() => {
@@ -806,19 +841,24 @@
       }
     });
 
-    const onEngagementActivity = () => {
+    const onReadingScrollActivity = (ev) => {
+      if (cfg.destroyed || !activeCfg || isDraftSessionValid() || composerHasText(cfg)) {
+        return;
+      }
+      const composer = resolveComposerRoot(cfg);
+      if (composer && eventPathContainsComposer(ev, composer)) {
+        return;
+      }
       window.PromptlyHostEngagementTracker?.noteUserActivity?.();
     };
     window.addEventListener("focus", () => {
       window.PromptlyHostEngagementTracker?.onWindowFocus?.();
-      onEngagementActivity();
     });
     window.addEventListener("blur", () => {
       window.PromptlyHostEngagementTracker?.onWindowBlur?.();
     });
-    document.addEventListener("scroll", onEngagementActivity, { capture: true, passive: true });
-    window.addEventListener("wheel", onEngagementActivity, { capture: true, passive: true });
-    document.addEventListener("pointerdown", onEngagementActivity, { capture: true, passive: true });
+    document.addEventListener("scroll", onReadingScrollActivity, { capture: true, passive: true });
+    window.addEventListener("wheel", onReadingScrollActivity, { capture: true, passive: true });
 
     window.addEventListener(
       "pageshow",
