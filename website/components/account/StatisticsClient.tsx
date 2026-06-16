@@ -143,6 +143,7 @@ const CHART_LEGEND_STYLE_COMPACT = { fontSize: 11, paddingTop: 4, fontFamily: CH
 const COLOR_SCORE_GREEN = "#15803d";
 const COLOR_VOLUME_DELTA_DOWN = "#dc2626";
 const COLOR_VOLUME_TREND = "#525252";
+const STATS_SCROLL_STORAGE_KEY = "promptly_statistics_scroll_y";
 
 type PromptlySvc = "chatgpt" | "claude" | "gemini" | "unknown";
 
@@ -1870,6 +1871,20 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
   const STATS_FILTER_NAV_OFFSET_PX = 56;
   const STATS_FILTER_PINNED_TOP_GAP_PX = 12;
   const STATS_FILTER_STICKY_TOP_PX = STATS_FILTER_NAV_OFFSET_PX + STATS_FILTER_PINNED_TOP_GAP_PX;
+  const pendingScrollRestoreRef = useRef(false);
+
+  const saveScrollPosition = useCallback(() => {
+    if (typeof window === "undefined") return;
+    window.sessionStorage.setItem(STATS_SCROLL_STORAGE_KEY, String(Math.max(0, Math.round(window.scrollY))));
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    pendingScrollRestoreRef.current = window.sessionStorage.getItem(STATS_SCROLL_STORAGE_KEY) != null;
+    const onBeforeUnload = () => saveScrollPosition();
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [saveScrollPosition]);
 
   const placeholderStats = useMemo(
     () => buildPlaceholderExtendedStats(days, granularity),
@@ -1882,6 +1897,25 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
   const displayIdeStats = user
     ? ideStats ?? (ideStatsLoading ? null : placeholderIdeStats)
     : null;
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !pendingScrollRestoreRef.current) return;
+    if (loading || statsLoading || ideStatsLoading) return;
+    if (user && !stats && !ideStats && !statsError && !ideStatsError) return;
+    const raw = window.sessionStorage.getItem(STATS_SCROLL_STORAGE_KEY);
+    if (!raw) return;
+    const y = Number(raw);
+    if (!Number.isFinite(y) || y <= 0) {
+      window.sessionStorage.removeItem(STATS_SCROLL_STORAGE_KEY);
+      pendingScrollRestoreRef.current = false;
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      window.scrollTo({ top: y, behavior: "auto" });
+      window.sessionStorage.removeItem(STATS_SCROLL_STORAGE_KEY);
+      pendingScrollRestoreRef.current = false;
+    });
+  }, [loading, statsLoading, ideStatsLoading, user, stats, ideStats, statsError, ideStatsError]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -2328,6 +2362,8 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
 
   const refreshAllStats = useCallback(() => {
     if (!user) return;
+    saveScrollPosition();
+    pendingScrollRestoreRef.current = true;
     const captureCatalog = statsGroupMode !== "model";
     void loadExtended(user, days, granularity, statsScopeParams, true, captureCatalog);
     void loadIdeStats(
@@ -2349,7 +2385,8 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
     loadExtended,
     loadIdeStats,
     statsScopeParams,
-    statsGroupMode
+    statsGroupMode,
+    saveScrollPosition
   ]);
 
   useEffect(() => {
@@ -2424,9 +2461,8 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
     }
     prevModelServiceRef.current = selectedModelService;
     const buckets = new Set<string>();
-    for (const row of modelOptionsForSelectedService) {
-      buckets.add(row.bucket);
-    }
+    const top = modelOptionsForSelectedService[0];
+    if (top) buckets.add(top.bucket);
     setSelectedModelBuckets(buckets);
   }, [
     statsGroupMode,
@@ -3127,24 +3163,6 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
     [engagementByServicePies, engagementByModelPies, engagementOverTimeHasData, displayStats]
   );
 
-  const screenTimeHasData = useMemo(
-    () =>
-      (displayStats?.engagement_totals?.segment_count ?? 0) > 0 ||
-      screenTimeByServiceChartHasData ||
-      screenTimeOverTimeHasData ||
-      engagementSpendHasData ||
-      ideScreenTimeHasData ||
-      ideEngagementHasData,
-    [
-      displayStats,
-      screenTimeByServiceChartHasData,
-      screenTimeOverTimeHasData,
-      engagementSpendHasData,
-      ideScreenTimeHasData,
-      ideEngagementHasData
-    ]
-  );
-
   const statsInfoNotices = useMemo((): ReactNode[] => {
     if (!displayStats) return [];
     const notices: ReactNode[] = [];
@@ -3614,8 +3632,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
             ) : null}
           </section>
 
-          {screenTimeHasData ? (
-            <>
+          <>
               <section className="mb-8 w-full rounded-2xl border border-line bg-white p-3 shadow-card sm:p-4">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <h2 className="text-base font-semibold uppercase tracking-[0.22em] text-ink">
@@ -3944,17 +3961,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                   <p className="text-sm text-muted">Turn on at least one service under Show to view how you spend time.</p>
                 )}
               </section>
-            </>
-          ) : (
-            <section className="mb-8 w-full rounded-2xl border border-line bg-white p-4 shadow-card sm:p-5">
-              <h2 className="mb-1 text-base font-semibold uppercase tracking-[0.22em] text-ink">Screen time</h2>
-              <p className="text-sm text-muted">
-                Screen time tracking starts with the latest extension or coding-agent plugins. Use ChatGPT, Claude, or
-                Gemini in the browser, or Claude Code, Cursor, and Codex in the IDE while signed in to see time by
-                service and how you spend it (drafting, waiting, reading).
-              </p>
-            </section>
-          )}
+          </>
 
           {promptLengthChartRows.length ? (
             <section className="mb-8 w-full rounded-2xl border border-line bg-white p-3 shadow-card sm:p-4">
