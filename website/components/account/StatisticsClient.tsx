@@ -3819,7 +3819,6 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                             stroke="#8A8A8A"
                             tick={CHART_Y_TICK_11}
                             width={screenTimeServiceLabelWidth}
-                            reversed
                           />
                           <Tooltip
                             contentStyle={CHART_TOOLTIP_STYLE}
