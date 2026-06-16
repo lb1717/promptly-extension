@@ -34,27 +34,42 @@ function Promptly-SyncTelemetryCli {
 
 function Promptly-ClaudeMarketplaceRefresh {
   param([string]$IntegrationsPath)
-  $out = claude plugin marketplace add $IntegrationsPath 2>&1 | Out-String
+  $claude = Promptly-GetGlobalCliPath -Name claude
+  if (-not $claude) {
+    Write-Host "Claude Code CLI not found"
+    exit 1
+  }
+  $out = & $claude plugin marketplace add $IntegrationsPath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0 -and $out -notmatch 'already installed|already exists') {
     Write-Host "Failed to add marketplace: $out"
     exit 1
   }
-  claude plugin marketplace update promptly-labs 2>$null | Out-Null
+  & $claude plugin marketplace update promptly-labs 2>$null | Out-Null
   Write-Host "Marketplace refreshed"
 }
 
 function Promptly-ClaudePluginReinstall {
-  if ((claude plugin list 2>&1 | Out-String) -match 'promptly-claude-code') {
+  $claude = Promptly-GetGlobalCliPath -Name claude
+  if (-not $claude) {
+    Write-Host "Claude Code CLI not found"
+    exit 1
+  }
+  if ((& $claude plugin list 2>&1 | Out-String) -match 'promptly-claude-code') {
     Write-Host "-> Removing previous Promptly Claude Code plugin..."
-    claude plugin uninstall promptly-claude-code@promptly-labs 2>$null
+    & $claude plugin uninstall promptly-claude-code@promptly-labs 2>$null
   }
   Write-Host "-> Installing fresh Promptly plugin..."
-  claude plugin install promptly-claude-code@promptly-labs
+  & $claude plugin install promptly-claude-code@promptly-labs
 }
 
 function Promptly-CodexMarketplaceAdd {
   param([string]$IntegrationsPath)
-  $out = codex plugin marketplace add $IntegrationsPath 2>&1 | Out-String
+  $codex = Promptly-GetGlobalCliPath -Name codex
+  if (-not $codex) {
+    Write-Host "Codex CLI not found"
+    exit 1
+  }
+  $out = & $codex plugin marketplace add $IntegrationsPath 2>&1 | Out-String
   if ($LASTEXITCODE -eq 0) { return }
   if ($out -match 'already installed|already exists') { return }
   Write-Host "Failed to add marketplace: $out"
@@ -62,13 +77,18 @@ function Promptly-CodexMarketplaceAdd {
 }
 
 function Promptly-CodexPluginReinstall {
-  if ((codex plugin list 2>&1 | Out-String) -match 'promptly-codex') {
+  $codex = Promptly-GetGlobalCliPath -Name codex
+  if (-not $codex) {
+    Write-Host "Codex CLI not found"
+    exit 1
+  }
+  if ((& $codex plugin list 2>&1 | Out-String) -match 'promptly-codex') {
     Write-Host "-> Removing previous Promptly Codex plugin..."
-    codex plugin remove promptly-codex@promptly-labs 2>$null
+    & $codex plugin remove promptly-codex@promptly-labs 2>$null
   }
   Write-Host "-> Installing fresh Promptly plugin..."
-  codex plugin add promptly-codex@promptly-labs
-  if ($LASTEXITCODE -ne 0) { codex plugin install promptly-codex@promptly-labs }
+  & $codex plugin add promptly-codex@promptly-labs
+  if ($LASTEXITCODE -ne 0) { & $codex plugin install promptly-codex@promptly-labs }
 }
 
 function Promptly-SyncClaudeCodeCommandFiles {
@@ -120,42 +140,40 @@ function Promptly-CursorPluginReinstall {
 }
 
 function Promptly-EnsureClaudeCli {
-  $globalBin = npm prefix -g 2>$null
-  if ($globalBin) { $env:Path = "$globalBin;$env:Path" }
-  if (Get-Command claude -ErrorAction SilentlyContinue) {
-    claude --version
+  Promptly-RefreshNpmPath
+  $claude = Promptly-GetGlobalCliPath -Name claude
+  if ($claude) {
+    & $claude --version
     return $true
   }
   Write-Host "-> Claude Code CLI not found; installing @anthropic-ai/claude-code..."
-  npm install -g @anthropic-ai/claude-code
-  if ($LASTEXITCODE -ne 0) {
+  if ((Promptly-InvokeNpm -Args @("install", "-g", "@anthropic-ai/claude-code")) -ne 0) {
     Write-Host "Warning: Could not install Claude Code CLI"
     return $false
   }
-  $globalBin = npm prefix -g 2>$null
-  if ($globalBin) { $env:Path = "$globalBin;$env:Path" }
-  if (-not (Get-Command claude -ErrorAction SilentlyContinue)) { return $false }
-  claude --version
+  Promptly-RefreshNpmPath
+  $claude = Promptly-GetGlobalCliPath -Name claude
+  if (-not $claude) { return $false }
+  & $claude --version
   return $true
 }
 
 function Promptly-EnsureCodexCli {
-  $globalBin = npm prefix -g 2>$null
-  if ($globalBin) { $env:Path = "$globalBin;$env:Path" }
-  if (Get-Command codex -ErrorAction SilentlyContinue) {
-    codex --version
+  Promptly-RefreshNpmPath
+  $codex = Promptly-GetGlobalCliPath -Name codex
+  if ($codex) {
+    & $codex --version
     return $true
   }
   Write-Host "-> Codex CLI not found; installing @openai/codex..."
-  npm install -g @openai/codex
-  if ($LASTEXITCODE -ne 0) {
+  if ((Promptly-InvokeNpm -Args @("install", "-g", "@openai/codex")) -ne 0) {
     Write-Host "Warning: Could not install Codex CLI"
     return $false
   }
-  $globalBin = npm prefix -g 2>$null
-  if ($globalBin) { $env:Path = "$globalBin;$env:Path" }
-  if (-not (Get-Command codex -ErrorAction SilentlyContinue)) { return $false }
-  codex --version
+  Promptly-RefreshNpmPath
+  $codex = Promptly-GetGlobalCliPath -Name codex
+  if (-not $codex) { return $false }
+  & $codex --version
   return $true
 }
 

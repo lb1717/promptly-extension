@@ -17,15 +17,20 @@ if (-not (Get-Command Promptly-UnzipPluginPack -ErrorAction SilentlyContinue)) {
 }
 
 Ensure-NodeJs
-
-$env:Path = "$(npm prefix -g)\bin;" + $env:Path
+Promptly-RefreshNpmPath
 
 Write-Host "-> Checking Codex CLI..."
-if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
-  npm install -g @openai/codex
-  $env:Path = "$(npm prefix -g)\bin;" + $env:Path
+$codex = Promptly-GetGlobalCliPath -Name codex
+if (-not $codex) {
+  Promptly-InvokeNpm -Args @("install", "-g", "@openai/codex") | Out-Null
+  Promptly-RefreshNpmPath
+  $codex = Promptly-GetGlobalCliPath -Name codex
 }
-codex --version
+if (-not $codex) {
+  Write-Host "Codex CLI not found after install"
+  exit 1
+}
+& $codex --version
 
 Write-Host "-> Downloading Promptly plugin pack..."
 Invoke-WebRequest -Uri $PluginPackUrl -OutFile $ZipPath -UseBasicParsing
@@ -40,7 +45,7 @@ Write-Host "-> Installing Promptly in Codex..."
 Promptly-CodexMarketplaceAdd -IntegrationsPath $Integrations
 Promptly-CodexPluginReinstall
 
-$pluginList = codex plugin list 2>&1 | Out-String
+$pluginList = & $codex plugin list 2>&1 | Out-String
 if ($pluginList -notmatch "promptly-codex") {
   Write-Host "Promptly plugin not found - retry this step"
   exit 1

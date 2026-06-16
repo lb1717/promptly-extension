@@ -102,15 +102,20 @@ function Setup-PromptlyAgents {
     exit 1
   }
 
+  $nodeExe = (Get-Command node.exe -ErrorAction SilentlyContinue).Source
+  if (-not $nodeExe) {
+    $nodeExe = (Get-Command node -ErrorAction SilentlyContinue).Source
+  }
+
   Write-Host "-> Pairing all agents, merging stats, and verifying live uploads..."
-  node $cliDest fix-account $Code
+  & $nodeExe $cliDest fix-account $Code
 
   Write-Host "-> Syncing hooks + telemetry into Claude Code, Cursor, and Codex runtimes..."
   Sync-PromptlyAgentRuntimes -CliSrc $cliDest
 
   Write-Host "-> Syncing AI subscription usage (Claude, Codex, Cursor)..."
   Write-Host "  First-time setup opens your browser once for claude.ai sign-in."
-  node $cliDest usage-sync --login-claude
+  & $nodeExe $cliDest usage-sync --login-claude
   if ($LASTEXITCODE -ne 0) {
     Write-Host "Subscription sync incomplete — resync anytime at https://promptly-labs.com/integrations#resync-subscriptions"
   } else {

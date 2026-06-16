@@ -17,15 +17,20 @@ if (-not (Get-Command Promptly-UnzipPluginPack -ErrorAction SilentlyContinue)) {
 }
 
 Ensure-NodeJs
-
-$env:Path = "$(npm prefix -g)\bin;" + $env:Path
+Promptly-RefreshNpmPath
 
 Write-Host "-> Checking Claude Code CLI..."
-if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
-  npm install -g @anthropic-ai/claude-code
-  $env:Path = "$(npm prefix -g)\bin;" + $env:Path
+$claude = Promptly-GetGlobalCliPath -Name claude
+if (-not $claude) {
+  Promptly-InvokeNpm -Args @("install", "-g", "@anthropic-ai/claude-code") | Out-Null
+  Promptly-RefreshNpmPath
+  $claude = Promptly-GetGlobalCliPath -Name claude
 }
-claude --version
+if (-not $claude) {
+  Write-Host "Claude Code CLI not found after install"
+  exit 1
+}
+& $claude --version
 
 Write-Host "-> Downloading Promptly plugin pack..."
 Invoke-WebRequest -Uri $PluginPackUrl -OutFile $ZipPath -UseBasicParsing
@@ -40,7 +45,7 @@ Write-Host "-> Installing Promptly in Claude Code..."
 Promptly-ClaudeMarketplaceRefresh -IntegrationsPath $Integrations
 Promptly-ClaudePluginReinstall
 
-$pluginList = claude plugin list 2>&1 | Out-String
+$pluginList = & $claude plugin list 2>&1 | Out-String
 if ($pluginList -notmatch "promptly-claude-code") {
   Write-Host "Promptly plugin not found - retry this step"
   exit 1
