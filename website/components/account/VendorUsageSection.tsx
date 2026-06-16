@@ -126,13 +126,12 @@ function formatChartTime(atMs: number): string {
   });
 }
 
-/** Claude snapshots store remaining quota in `utilization`; flip at read time for charts and labels. */
+/** Snapshots are already normalized to percent used by the sync/fetch layer. */
 function displayUtilization(
-  provider: VendorProfile["provider"],
   raw: number,
   opts: { capAt100?: boolean } = {}
 ): number {
-  let value = provider === "claude_code" ? 100 - raw : raw;
+  let value = raw;
   value = normalizeUtilizationPercent(value);
   if (opts.capAt100 === false) {
     return Math.max(0, value);
@@ -185,7 +184,6 @@ function totalCycleDays(cycleStartMs: number, cycleEndMs: number): number {
 }
 
 function aggregateDailyUsagePoints(
-  provider: VendorProfile["provider"],
   history: UsageHistoryPoint[],
   currentUtil: number,
   cycleStartMs: number,
@@ -203,7 +201,7 @@ function aggregateDailyUsagePoints(
   };
 
   for (const point of history) {
-    upsert(point.at_ms, displayUtilization(provider, point.utilization));
+    upsert(point.at_ms, displayUtilization(point.utilization));
   }
   upsert(nowMs, currentUtil);
 
@@ -347,7 +345,7 @@ function computeMonthlyExpenditureSummary(
     const windowSeconds = window.window_seconds ?? 7 * 86400;
     const lookbackMs = resolveChartLookbackMs(rangeDays, windowSeconds);
     const startMs = nowMs - lookbackMs;
-    const displayCurrentUtil = displayUtilization(profile.provider, window.utilization);
+    const displayCurrentUtil = displayUtilization(window.utilization);
     const dollarsUsed =
       profile.plan_monthly_usd != null
         ? dollarsUsedFromUtilization(profile.plan_monthly_usd, displayCurrentUtil, windowSeconds)
@@ -356,7 +354,7 @@ function computeMonthlyExpenditureSummary(
     const points = [...history]
       .map((point) => ({
         ...point,
-        utilization: displayUtilization(profile.provider, point.utilization)
+        utilization: displayUtilization(point.utilization)
       }))
       .filter((point) => point.at_ms >= startMs && point.at_ms <= nowMs)
       .sort((a, b) => a.at_ms - b.at_ms);
@@ -482,7 +480,6 @@ function resolveChartReferenceLabels(cycleStartMs: number, cycleEndMs: number, n
 }
 
 function buildBillingCycleChartRows(
-  provider: VendorProfile["provider"],
   history: UsageHistoryPoint[],
   currentWindow: UsageWindow | null,
   syncedAtMs: number,
@@ -493,9 +490,9 @@ function buildBillingCycleChartRows(
   const referenceMs = syncedAtMs || Date.now();
   const { cycleStartMs, cycleEndMs, nowMs } = resolveBillingCycleBounds(currentWindow, referenceMs);
   const spanMs = Math.max(cycleEndMs - cycleStartMs, 1);
-  const currentUtil = displayUtilization(provider, currentWindow.utilization);
+  const currentUtil = displayUtilization(currentWindow.utilization);
 
-  const dailyPoints = aggregateDailyUsagePoints(provider, history, currentUtil, cycleStartMs, nowMs);
+  const dailyPoints = aggregateDailyUsagePoints(history, currentUtil, cycleStartMs, nowMs);
   if (dailyPoints.length === 0) {
     dailyPoints.push({
       at_ms: dayChartMs(nowMs),
@@ -755,15 +752,14 @@ function SubscriptionUsageRow({
   const chart = useMemo(
     () =>
       buildBillingCycleChartRows(
-        profile.provider,
         activeHistory,
         activeWindow,
         profile.synced_at_ms,
         activeWindow?.window_seconds ?? null
       ),
-    [profile.provider, activeHistory, activeWindow, profile.synced_at_ms]
+    [activeHistory, activeWindow, profile.synced_at_ms]
   );
-  const currentUtil = activeWindow ? displayUtilization(profile.provider, activeWindow.utilization) : 0;
+  const currentUtil = activeWindow ? displayUtilization(activeWindow.utilization) : 0;
   const displayDollarsUsed =
     activeWindow && profile.plan_monthly_usd != null
       ? dollarsUsedFromUtilization(
