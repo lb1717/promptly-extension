@@ -1943,7 +1943,8 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
         params.set(key, value);
       }
       const res = await fetch(`/api/account/stats/extended?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${token}` },
+        cache: refresh ? "no-store" : "default"
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -1996,7 +1997,8 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
         params.set(key, value);
       }
       const res = await fetch(`/api/account/stats/ide?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${token}` },
+        cache: refresh ? "no-store" : "default"
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {

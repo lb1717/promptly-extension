@@ -1104,7 +1104,17 @@ function isDuplicateSend(tool, input, event) {
 
 function extractPromptText(input) {
   if (!input || typeof input !== "object") return "";
-  for (const field of ["prompt", "user_prompt", "userPrompt", "message", "content"]) {
+  for (const field of [
+    "prompt",
+    "user_prompt",
+    "userPrompt",
+    "message",
+    "content",
+    "user_input",
+    "userInput",
+    "input_text",
+    "inputText"
+  ]) {
     const value = input[field];
     if (typeof value === "string") return value;
   }
@@ -1440,6 +1450,54 @@ function flushShouldRetry(status, error) {
   if (typeof status === "number" && (status === 429 || status >= 500)) return true;
   if (!status && error && /fetch failed|ECONNRESET|ETIMEDOUT|network/i.test(String(error))) return true;
   return false;
+}
+
+async function drainTelemetryQueue(tool, clientHeader, maxAttempts = 8) {
+  let attempts = 0;
+  let lastResult = { ok: true, written: 0 };
+  while (loadQueue(tool).length > 0 && attempts < maxAttempts) {
+    lastResult = await flushQueue(tool, clientHeader);
+    if (loadQueue(tool).length === 0) {
+      return lastResult;
+    }
+    if (lastResult.skipped === "flush_in_progress") {
+      await sleepMs(120);
+      attempts += 1;
+      continue;
+    }
+    if (!lastResult.ok) {
+      await sleepMs(FLUSH_RETRY_BASE_MS);
+    }
+    attempts += 1;
+  }
+  return lastResult;
+}
+
+async function awaitFlushHookQueue(tool, clientHeader, hookName, event) {
+  if (!getCredentials(tool)?.device_token || loadQueue(tool).length === 0) {
+    return;
+  }
+  const urgent = shouldSpawnBackgroundFlush(tool, hookName, event);
+  let flushResult;
+  if (urgent) {
+    flushResult = await drainTelemetryQueue(tool, clientHeader);
+  } else {
+    flushResult = await Promise.race([
+      drainTelemetryQueue(tool, clientHeader, 3),
+      sleepMs(HOOK_FLUSH_BUDGET_MS).then(() => ({
+        ok: false,
+        error: "flush_timeout_hook_budget",
+        timedOut: true
+      }))
+    ]);
+  }
+  recordFlushResult(tool, flushResult);
+  if (!flushResult.ok) {
+    console.error("[promptly]", flushResult.error || "Upload failed");
+  }
+  if (loadQueue(tool).length > 0) {
+    spawnDetachedFlush(tool);
+  }
 }
 
 async function flushQueue(tool, clientHeader, attempt = 0) {
@@ -1941,25 +1999,8 @@ async function cmdHook(flags) {
   }
   traceHook(tool, input, event, event ? null : "no_event_emitted");
   const clientHeader = flags.client || TOOL_CLIENT[tool];
-  if (shouldSpawnBackgroundFlush(tool, hookName, event)) {
-    spawnDetachedFlush(tool);
-  }
   try {
-    const flushResult = await Promise.race([
-      flushQueue(tool, clientHeader),
-      sleepMs(HOOK_FLUSH_BUDGET_MS).then(() => ({
-        ok: false,
-        error: "flush_timeout_hook_budget",
-        timedOut: true
-      }))
-    ]);
-    recordFlushResult(tool, flushResult);
-    if (!flushResult.ok) {
-      console.error("[promptly]", flushResult.error || "Upload failed");
-      spawnDetachedFlush(tool);
-    } else if (loadQueue(tool).length > 0) {
-      spawnDetachedFlush(tool);
-    }
+    await awaitFlushHookQueue(tool, clientHeader, hookName, event);
     await maybeSyncVendorUsage(tool, clientHeader);
   } catch (err) {
     const message = String(err?.message || err);

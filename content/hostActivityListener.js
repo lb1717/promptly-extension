@@ -1,5 +1,6 @@
 (() => {
   const DEBOUNCE_SEND_MS = 750;
+  const QUEUE_FLUSH_DEBOUNCE_MS = 200;
 
   /** How long to idle after keystrokes before taking a composer sample. */
   const COMPOSER_INPUT_DEBOUNCE_MS = 2200;
@@ -365,12 +366,18 @@
     }
   }
 
+  function scheduleQueueFlush(delayMs = QUEUE_FLUSH_DEBOUNCE_MS) {
+    globalThis.clearTimeout(flushTimer);
+    flushTimer = globalThis.setTimeout(() => {
+      flushTimer = null;
+      flushQueued();
+    }, delayMs);
+  }
+
   function scheduleSendFlush() {
     globalThis.clearTimeout(sendFlushTimer);
-    sendFlushTimer = globalThis.setTimeout(() => {
-      sendFlushTimer = null;
-      flushQueued();
-    }, 400);
+    sendFlushTimer = null;
+    scheduleQueueFlush(0);
   }
 
   function crossFrameSendRecentlyDeduped(siteKey) {
@@ -811,9 +818,9 @@
 
     const periodic = globalThis.setInterval(() => {
       if (queue.length && !flushTimer) {
-        flushTimer = globalThis.setTimeout(flushQueued, 100);
+        scheduleQueueFlush(100);
       }
-    }, 20000);
+    }, 5000);
 
     return () => {
       cfg.destroyed = true;

@@ -1,6 +1,6 @@
 /** Short-lived in-memory cache for expensive Firestore stats queries (per server instance). */
 
-export const STATS_QUERY_CACHE_TTL_MS = 60_000;
+export const STATS_QUERY_CACHE_TTL_MS = 15_000;
 const DEFAULT_TTL_MS = STATS_QUERY_CACHE_TTL_MS;
 const MAX_ENTRIES = 128;
 
