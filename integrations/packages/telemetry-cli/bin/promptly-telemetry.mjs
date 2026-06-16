@@ -606,10 +606,174 @@ function readCodexTurnContextFromTranscript(transcriptPath, turnId) {
 }
 
 function readCodexHookContext(input) {
-  const transcriptPath = input?.transcript_path ?? input?.transcriptPath;
+  const transcriptPath = resolveCodexTranscriptPath(input);
   const turnId = input?.turn_id ?? input?.turnId;
   if (!transcriptPath) return null;
   return readCodexTurnContextFromTranscript(transcriptPath, turnId);
+}
+
+function extractCodexMessageText(content) {
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) => {
+      if (!part || typeof part !== "object") return "";
+      return typeof part.text === "string" ? part.text : "";
+    })
+    .join("")
+    .trim();
+}
+
+function isCodexBootstrapPrompt(text) {
+  const sample = String(text || "").trim();
+  if (!sample) return true;
+  if (sample.startsWith("# AGENTS.md")) return true;
+  if (sample.includes("<INSTRUCTIONS>") && sample.includes("AGENTS.md")) return true;
+  return false;
+}
+
+function findCodexSessionTranscriptPath(sessionId) {
+  const sid = String(sessionId || "").trim();
+  if (!sid) return null;
+  const suffix = `-${sid}.jsonl`;
+  const root = join(homedir(), ".codex", "sessions");
+  const walk = (dir, depth = 0) => {
+    if (depth > 5 || !existsSync(dir)) return null;
+    let entries = [];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return null;
+    }
+    for (const entry of entries) {
+      const path = join(dir, entry.name);
+      if (entry.isFile() && entry.name.endsWith(suffix)) return path;
+      if (entry.isDirectory()) {
+        const nested = walk(path, depth + 1);
+        if (nested) return nested;
+      }
+    }
+    return null;
+  };
+  return walk(root);
+}
+
+function resolveCodexTranscriptPath(input) {
+  const explicit = expandHomePath(input?.transcript_path ?? input?.transcriptPath);
+  if (explicit && existsSync(explicit)) return explicit;
+  return findCodexSessionTranscriptPath(primarySessionId(input, "codex"));
+}
+
+function readCodexTurnBundle(transcriptPath, turnId) {
+  const path = expandHomePath(transcriptPath);
+  const wantedTurn = String(turnId || "").trim();
+  if (!path || !existsSync(path) || !wantedTurn) return null;
+  let lines = [];
+  try {
+    lines = readFileSync(path, "utf8").split("\n").filter(Boolean);
+  } catch {
+    return null;
+  }
+  let afterTurnContext = false;
+  let userPrompt = null;
+  let taskComplete = null;
+  let turnContext = null;
+  for (const line of lines) {
+    try {
+      const row = JSON.parse(line);
+      if (row?.type === "turn_context") {
+        const payload = row.payload;
+        const tid = typeof payload?.turn_id === "string" ? payload.turn_id.trim() : "";
+        if (tid === wantedTurn) {
+          turnContext = payload;
+          afterTurnContext = true;
+          userPrompt = null;
+        } else {
+          afterTurnContext = false;
+        }
+        continue;
+      }
+      if (afterTurnContext && row?.type === "response_item") {
+        const payload = row.payload;
+        if (payload?.type === "message" && payload?.role === "user") {
+          const text = extractCodexMessageText(payload.content);
+          if (text && !isCodexBootstrapPrompt(text)) {
+            userPrompt = text;
+          }
+        }
+        continue;
+      }
+      if (row?.type === "event_msg" && row?.payload?.type === "task_complete") {
+        if (row.payload?.turn_id === wantedTurn) {
+          taskComplete = row.payload;
+        }
+      }
+    } catch {
+      /* skip malformed transcript line */
+    }
+  }
+  if (!userPrompt || !taskComplete) return null;
+  return { userPrompt, taskComplete, turnContext };
+}
+
+function recoverCodexTurnEventsFromStop(input, tool, agentAccountEmail, modelMeta, now = Date.now()) {
+  if (tool !== "codex" || !isResponseEndPayload(input)) return null;
+  if (peekPendingSubmit(tool, input)?.at) return null;
+  const turnId = String(input?.turn_id || input?.turnId || "").trim();
+  const sessionId = primarySessionId(input, tool);
+  if (!turnId || !sessionId) return null;
+  const transcriptPath = resolveCodexTranscriptPath(input);
+  if (!transcriptPath) return null;
+  const bundle = readCodexTurnBundle(transcriptPath, turnId);
+  if (!bundle) return null;
+
+  const completedRaw = Number(bundle.taskComplete.completed_at ?? 0);
+  const completedMs =
+    completedRaw > 1_000_000_000_000
+      ? Math.floor(completedRaw)
+      : completedRaw > 0
+        ? Math.floor(completedRaw * 1000)
+        : now;
+  const durationMs = Math.min(
+    1_800_000,
+    Math.max(
+      RESPONSE_LATENCY_MIN_MS,
+      Math.floor(Number(bundle.taskComplete.duration_ms ?? bundle.taskComplete.durationMs ?? 0))
+    )
+  );
+  const sendAtMs = Math.max(completedMs - durationMs, completedMs - 1_800_000);
+
+  const ctxModel =
+    typeof bundle.turnContext?.model === "string"
+      ? bundle.turnContext.model.trim()
+      : typeof input?.model === "string"
+        ? input.model.trim()
+        : null;
+  const mergedInput = ctxModel ? { ...input, model: ctxModel } : input;
+  const resolvedModel = buildModelMeta(mergedInput, tool);
+  const words = countWords(bundle.userPrompt);
+  const chars = Math.min(12000, bundle.userPrompt.length);
+
+  return {
+    send: {
+      tool,
+      interaction_kind: "send",
+      composer_word_estimate: words || 1,
+      composer_char_estimate: chars || 1,
+      client_occurred_ms: sendAtMs,
+      agent_account_email: agentAccountEmail,
+      _session_id: sessionId,
+      ...resolvedModel
+    },
+    latency: {
+      tool,
+      interaction_kind: "response_latency",
+      host_response_latency_ms: durationMs,
+      client_occurred_ms: completedMs || now,
+      agent_account_email: agentAccountEmail,
+      model_label: resolvedModel.model_label || modelMeta.model_label || null,
+      model_bucket: resolvedModel.model_bucket || modelMeta.model_bucket || "unknown"
+    }
+  };
 }
 
 function readCodexConfig() {
@@ -1773,11 +1937,17 @@ function emitResponseEndEvents(tool, input, agentAccountEmail, modelMeta, now = 
     markReadingIdleStart(tool, sessionId, now);
   }
   const event = buildStopTelemetryEvent(tool, input, agentAccountEmail, modelMeta, now);
-  if (!event) {
-    return { event: null, patched: false };
+  if (event) {
+    const patched = patchQueuedSendLatency(tool, lookupIds, event.host_response_latency_ms);
+    return { event, patched, recoveredSend: null };
   }
-  const patched = patchQueuedSendLatency(tool, lookupIds, event.host_response_latency_ms);
-  return { event, patched };
+  if (tool === "codex") {
+    const recovered = recoverCodexTurnEventsFromStop(input, tool, agentAccountEmail, modelMeta, now);
+    if (recovered?.latency) {
+      return { event: recovered.latency, patched: false, recoveredSend: recovered.send || null };
+    }
+  }
+  return { event: null, patched: false, recoveredSend: null };
 }
 
 function hookPayloadMatchesTool(input, tool) {
@@ -1932,6 +2102,11 @@ async function cmdHook(flags) {
   }
   if (isResponseEndPayload(input, hookName)) {
     const response = emitResponseEndEvents(tool, input, agentAccountEmail, modelMeta);
+    if (response.recoveredSend && !isDuplicateSend(tool, input, response.recoveredSend)) {
+      ensureSessionTimingForPromptSubmit(tool, sessionId, "userpromptsubmit");
+      enqueueEvent(tool, response.recoveredSend);
+      traceHook(tool, input, response.recoveredSend, "codex_stop_transcript_recovery");
+    }
     if (response.event) {
       event = response.event;
       if (sessionId) {
@@ -2413,6 +2588,21 @@ function explainHookSample(input, tool) {
   if (isResponseEndPayload(input, eventName)) {
     const lookupIds = hookSessionLookupIds(input, tool);
     const pendingEntry = peekPendingSubmit(tool, input);
+    if (!pendingEntry?.at && tool === "codex") {
+      const agentAccountEmail = resolveAgentAccountEmail(input, tool);
+      const modelMeta = buildModelMeta(input, tool);
+      const recovered = recoverCodexTurnEventsFromStop(input, tool, agentAccountEmail, modelMeta);
+      if (recovered?.send && recovered?.latency) {
+        return {
+          event: recovered.latency,
+          recovered_send: recovered.send,
+          reason: "codex_stop_transcript_recovery",
+          event_name: eventName,
+          session_id: sessionId || null,
+          lookup_ids: lookupIds
+        };
+      }
+    }
     if (!pendingEntry?.at) {
       return {
         event: null,
