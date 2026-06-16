@@ -9,14 +9,16 @@ $PluginPackUrl = if ($env:PROMPTLY_PLUGIN_PACK_URL) { $env:PROMPTLY_PLUGIN_PACK_
 $Integrations = Join-Path $env:USERPROFILE "integrations"
 $InstallBase = if ($env:PROMPTLY_INSTALL_BASE) { $env:PROMPTLY_INSTALL_BASE } else { "https://promptly-labs.com/install" }
 
-function Promptly-ImportRemoteScript {
-  param([Parameter(Mandatory)][string]$Uri)
-  $response = Invoke-WebRequest -Uri $Uri -UseBasicParsing
-  $text = $response.Content
-  if ($text -is [byte[]]) {
-    $text = [System.Text.Encoding]::UTF8.GetString($text)
-  }
-  Invoke-Expression ([string]$text)
+# Load shared helpers at script scope (must not run inside a function).
+$__loaderRes = Invoke-WebRequest -Uri "$InstallBase/_load-helpers-windows.ps1" -UseBasicParsing
+$__loaderText = $__loaderRes.Content
+if ($__loaderText -is [byte[]]) {
+  $__loaderText = [System.Text.Encoding]::UTF8.GetString($__loaderText)
+}
+Invoke-Expression ([string]$__loaderText.TrimStart([char]0xFEFF))
+if (-not (Get-Command Promptly-UnzipPluginPack -ErrorAction SilentlyContinue)) {
+  Write-Host "X Failed to load Promptly install helpers from $InstallBase"
+  exit 1
 }
 
 function Sync-PromptlyAgentRuntimes {
@@ -57,13 +59,11 @@ function Setup-PromptlyAgents {
     exit 1
   }
 
-  Promptly-ImportRemoteScript -Uri "$InstallBase/_ensure-node-windows.ps1"
-  try {
-    Promptly-ImportRemoteScript -Uri "$InstallBase/_install-common-windows.ps1"
-  } catch {
-    Write-Host "Failed to load install helpers"
+  if (-not (Get-Command Ensure-NodeJs -ErrorAction SilentlyContinue)) {
+    Write-Host "X Install helpers are missing. Re-run: irm ${InstallBase}/setup-windows.ps1 | iex"
     exit 1
   }
+
   Ensure-NodeJs
 
   $zipPath = Join-Path $env:USERPROFILE "promptly.zip"

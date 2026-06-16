@@ -1,29 +1,26 @@
 $ErrorActionPreference = "Stop"
 
-$PluginPackUrl = if ($env:PROMPTLY_PLUGIN_PACK_URL) { $env:PROMPTLY_PLUGIN_PACK_URL } else { "https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.7" }
+$PluginPackUrl = if ($env:PROMPTLY_PLUGIN_PACK_URL) { $env:PROMPTLY_PLUGIN_PACK_URL } else { "https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.6.8" }
 $Integrations = Join-Path $env:USERPROFILE "integrations"
 $CursorPlugin = Join-Path $env:USERPROFILE ".cursor\plugins\local\promptly-cursor"
 $ZipPath = Join-Path $env:USERPROFILE "promptly.zip"
 $InstallBase = if ($env:PROMPTLY_INSTALL_BASE) { $env:PROMPTLY_INSTALL_BASE } else { "https://promptly-labs.com/install" }
 
-function Promptly-ImportRemoteScript {
-  param([Parameter(Mandatory)][string]$Uri)
-  $response = Invoke-WebRequest -Uri $Uri -UseBasicParsing
-  $text = $response.Content
-  if ($text -is [byte[]]) {
-    $text = [System.Text.Encoding]::UTF8.GetString($text)
-  }
-  Invoke-Expression ([string]$text)
+$__loaderRes = Invoke-WebRequest -Uri "$InstallBase/_load-helpers-windows.ps1" -UseBasicParsing
+$__loaderText = $__loaderRes.Content
+if ($__loaderText -is [byte[]]) {
+  $__loaderText = [System.Text.Encoding]::UTF8.GetString($__loaderText)
+}
+Invoke-Expression ([string]$__loaderText.TrimStart([char]0xFEFF))
+if (-not (Get-Command Promptly-UnzipPluginPack -ErrorAction SilentlyContinue)) {
+  Write-Host "X Failed to load Promptly install helpers from $InstallBase"
+  exit 1
 }
 
-Promptly-ImportRemoteScript -Uri "$InstallBase/_ensure-node-windows.ps1"
-try {
-  Promptly-ImportRemoteScript -Uri "$InstallBase/_install-common-windows.ps1"
-} catch { }
 Ensure-NodeJs
 
 Write-Host "-> Downloading Promptly plugin pack..."
-Invoke-WebRequest -Uri $PluginPackUrl -OutFile $ZipPath
+Invoke-WebRequest -Uri $PluginPackUrl -OutFile $ZipPath -UseBasicParsing
 Promptly-UnzipPluginPack -ZipPath $ZipPath -Dest $env:USERPROFILE
 
 $SourceCursor = Join-Path $Integrations "cursor"
