@@ -229,6 +229,7 @@ function Promptly-GetHookNodePrefix {
   return "node"
 }
 
+function Ensure-NodeJs {
   Write-Host "-> Checking Node.js..."
   $nodeCmd = Get-Command node.exe -ErrorAction SilentlyContinue
   if (-not $nodeCmd) {
