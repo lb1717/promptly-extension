@@ -157,6 +157,65 @@ function resolveBillingCycleBounds(window: UsageWindow, referenceMs: number) {
   return { cycleStartMs, cycleEndMs, nowMs };
 }
 
+const DAY_MS = 86_400_000;
+
+function startOfLocalDayMs(atMs: number): number {
+  const d = new Date(atMs);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function localDayKey(atMs: number): string {
+  const d = new Date(atMs);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function dayChartMs(atMs: number): number {
+  return startOfLocalDayMs(atMs) + DAY_MS / 2;
+}
+
+function cycleDayIndex(cycleStartMs: number, atMs: number): number {
+  const start = startOfLocalDayMs(cycleStartMs);
+  const point = startOfLocalDayMs(atMs);
+  return Math.max(1, Math.floor((point - start) / DAY_MS) + 1);
+}
+
+function totalCycleDays(cycleStartMs: number, cycleEndMs: number): number {
+  return cycleDayIndex(cycleStartMs, Math.max(cycleStartMs, cycleEndMs - 1));
+}
+
+function aggregateDailyUsagePoints(
+  provider: VendorProfile["provider"],
+  history: UsageHistoryPoint[],
+  currentUtil: number,
+  cycleStartMs: number,
+  nowMs: number
+): { at_ms: number; utilization: number; dayIndex: number }[] {
+  const byDay = new Map<string, { at_ms: number; utilization: number }>();
+
+  const upsert = (atMs: number, utilization: number) => {
+    if (atMs < cycleStartMs || atMs > nowMs) return;
+    const key = localDayKey(atMs);
+    const existing = byDay.get(key);
+    if (!existing || atMs >= existing.at_ms) {
+      byDay.set(key, { at_ms: atMs, utilization });
+    }
+  };
+
+  for (const point of history) {
+    upsert(point.at_ms, displayUtilization(provider, point.utilization));
+  }
+  upsert(nowMs, currentUtil);
+
+  return [...byDay.values()]
+    .sort((a, b) => a.at_ms - b.at_ms)
+    .map((row) => ({
+      at_ms: dayChartMs(row.at_ms),
+      utilization: row.utilization,
+      dayIndex: cycleDayIndex(cycleStartMs, row.at_ms)
+    }));
+}
+
 function chartYDomainMax(values: number[]): number {
   const peak = values.reduce((max, value) => (Number.isFinite(value) ? Math.max(max, value) : max), 0);
   if (peak <= 100) return 100;
@@ -183,10 +242,17 @@ function resolveChartLookbackMs(rangeDays: number, windowSeconds: number | null)
   return rangeMs;
 }
 
+function formatCycleBoundaryLabel(atMs: number): string {
+  return new Date(atMs).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 function formatChartXLabel(atMs: number, spanMs: number, windowSeconds: number | null): string {
   const date = new Date(atMs);
+  if (spanMs > 2 * DAY_MS) {
+    return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
   const cycleMs = windowCycleMs(windowSeconds);
-  if (cycleMs <= 6 * 3600 * 1000 || spanMs <= 3 * 86400 * 1000) {
+  if (cycleMs <= 6 * 3600 * 1000 || spanMs <= 3 * DAY_MS) {
     return date.toLocaleString(undefined, {
       month: "short",
       day: "numeric",
@@ -204,6 +270,7 @@ type ChartRow = {
   projectedUtilization: number | null;
   isReading: boolean;
   isProjection: boolean;
+  isCycleAnchor?: boolean;
 };
 
 type BillingCycleChart = {
@@ -398,70 +465,60 @@ function buildBillingCycleChartRows(
   const spanMs = Math.max(cycleEndMs - cycleStartMs, 1);
   const currentUtil = displayUtilization(provider, currentWindow.utilization);
 
-  const actualRows: ChartRow[] = history
-    .filter((point) => point.at_ms >= cycleStartMs && point.at_ms <= nowMs + 60_000)
-    .map((point) => ({
+  const dailyPoints = aggregateDailyUsagePoints(provider, history, currentUtil, cycleStartMs, nowMs);
+  if (dailyPoints.length === 0) {
+    dailyPoints.push({
+      at_ms: dayChartMs(nowMs),
+      utilization: currentUtil,
+      dayIndex: cycleDayIndex(cycleStartMs, nowMs)
+    });
+  }
+
+  const currentDayIndex = cycleDayIndex(cycleStartMs, nowMs);
+  const latestUtil = dailyPoints[dailyPoints.length - 1].utilization;
+  const dailyAverage = latestUtil / currentDayIndex;
+  const cycleDays = totalCycleDays(cycleStartMs, cycleEndMs);
+  const projectedEndFromDisplay = dailyAverage * cycleDays;
+
+  const cycleStartRow: ChartRow = {
+    at_ms: cycleStartMs,
+    label: formatChartXLabel(cycleStartMs, spanMs, windowSeconds),
+    utilization: 0,
+    projectedUtilization: null,
+    isReading: true,
+    isProjection: false,
+    isCycleAnchor: true
+  };
+
+  const solidRows: ChartRow[] = [
+    cycleStartRow,
+    ...dailyPoints.map((point) => ({
       at_ms: point.at_ms,
       label: formatChartXLabel(point.at_ms, spanMs, windowSeconds),
-      utilization: displayUtilization(provider, point.utilization),
+      utilization: point.utilization,
       projectedUtilization: null,
       isReading: true,
       isProjection: false
     }))
-    .sort((a, b) => a.at_ms - b.at_ms);
+  ];
 
-  if (actualRows.length === 0) {
-    actualRows.push({
-      at_ms: nowMs,
-      label: formatChartXLabel(nowMs, spanMs, windowSeconds),
-      utilization: currentUtil,
-      projectedUtilization: null,
-      isReading: true,
-      isProjection: false
-    });
-  } else {
-    const latest = actualRows[actualRows.length - 1];
-    if (nowMs - latest.at_ms > 60_000) {
-      actualRows.push({
-        at_ms: nowMs,
-        label: formatChartXLabel(nowMs, spanMs, windowSeconds),
-        utilization: currentUtil,
-        projectedUtilization: null,
-        isReading: true,
-        isProjection: false
-      });
-    } else {
-      latest.at_ms = nowMs;
-      latest.utilization = currentUtil;
-      latest.label = formatChartXLabel(nowMs, spanMs, windowSeconds);
-    }
-  }
-
-  const firstActual = actualRows[0];
-  const lastActual = actualRows[actualRows.length - 1];
-  const elapsedMs = Math.max(nowMs - firstActual.at_ms, 60_000);
-  const startUtil = firstActual.utilization ?? 0;
-  const endUtil = lastActual.utilization ?? currentUtil;
-  const displayRate = (endUtil - startUtil) / elapsedMs;
-  const projectedEndFromDisplay = endUtil + displayRate * (cycleEndMs - nowMs);
-
-  const solidRows = actualRows.slice(0, -1).map((row) => ({ ...row, projectedUtilization: null }));
   const junction: ChartRow = {
-    ...lastActual,
     at_ms: nowMs,
     label: formatChartXLabel(nowMs, spanMs, windowSeconds),
-    utilization: endUtil,
-    projectedUtilization: endUtil,
-    isReading: true,
+    utilization: null,
+    projectedUtilization: latestUtil,
+    isReading: false,
     isProjection: false
   };
+
   const projectionEnd: ChartRow = {
     at_ms: cycleEndMs,
     label: formatChartXLabel(cycleEndMs, spanMs, windowSeconds),
     utilization: null,
     projectedUtilization: Math.max(0, projectedEndFromDisplay),
     isReading: false,
-    isProjection: true
+    isProjection: true,
+    isCycleAnchor: true
   };
 
   const rows = [...solidRows, junction, projectionEnd];
@@ -497,12 +554,13 @@ function UsageTrendChart({
   return (
     <div className="h-52 w-full sm:h-56">
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={rows} margin={{ top: 8, right: 12, bottom: 4, left: 4 }}>
+        <LineChart data={rows} margin={{ top: 22, right: 18, bottom: 4, left: 4 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
           <XAxis
             dataKey="at_ms"
             type="number"
             domain={[cycleStartMs, cycleEndMs]}
+            allowDataOverflow
             stroke={CHART_X_DATE_STROKE}
             tick={CHART_X_DATE_TICK}
             minTickGap={28}
@@ -530,11 +588,34 @@ function UsageTrendChart({
             }}
           />
           <ReferenceLine
+            x={cycleStartMs}
+            stroke="#cbd5e1"
+            strokeWidth={1}
+            label={{
+              value: `Start · ${formatCycleBoundaryLabel(cycleStartMs)}`,
+              position: "insideTopLeft",
+              fill: "#64748b",
+              fontSize: 9
+            }}
+          />
+          <ReferenceLine
+            x={cycleEndMs}
+            stroke="#cbd5e1"
+            strokeWidth={1}
+            label={{
+              value: `End · ${formatCycleBoundaryLabel(cycleEndMs)}`,
+              position: "insideTopRight",
+              fill: "#64748b",
+              fontSize: 9
+            }}
+          />
+          <ReferenceLine
             x={nowMs}
             stroke="#94a3b8"
             strokeDasharray="2 4"
-            strokeOpacity={0.8}
-            label={{ value: "Now", position: "insideTopRight", fill: "#64748b", fontSize: 10 }}
+            strokeWidth={1}
+            strokeOpacity={0.85}
+            label={{ value: "Now", position: "insideTop", fill: "#64748b", fontSize: 9 }}
           />
           <ReferenceLine y={100} stroke="#16a34a" strokeDasharray="4 4" strokeOpacity={0.75} label={{ value: "100%", position: "insideTopLeft", fill: "#16a34a", fontSize: 10 }} />
           <ReferenceLine y={75} stroke="#86efac" strokeDasharray="3 6" strokeOpacity={0.35} />
@@ -549,17 +630,24 @@ function UsageTrendChart({
             connectNulls={false}
             dot={({ cx, cy, index }) => {
               const row = rows[index];
-              if (!row?.isReading || row.utilization == null || cx == null || cy == null) {
+              const showDot =
+                row &&
+                row.utilization != null &&
+                cx != null &&
+                cy != null &&
+                (row.isReading || row.isCycleAnchor);
+              if (!showDot) {
                 return <circle cx={cx ?? 0} cy={cy ?? 0} r={0} fill="transparent" />;
               }
+              const anchor = row.isCycleAnchor && row.utilization === 0;
               return (
                 <circle
                   cx={cx}
                   cy={cy}
-                  r={3.5}
-                  fill={lineColor}
-                  stroke="#ffffff"
-                  strokeWidth={1.5}
+                  r={anchor ? 3 : 3.5}
+                  fill={anchor ? "#ffffff" : lineColor}
+                  stroke={lineColor}
+                  strokeWidth={anchor ? 2 : 1.5}
                 />
               );
             }}
@@ -575,14 +663,20 @@ function UsageTrendChart({
             connectNulls
             dot={({ cx, cy, index }) => {
               const row = rows[index];
-              if (!row?.isProjection || row.projectedUtilization == null || cx == null || cy == null) {
+              if (
+                !row ||
+                row.projectedUtilization == null ||
+                cx == null ||
+                cy == null ||
+                (!row.isProjection && !row.isCycleAnchor)
+              ) {
                 return <circle cx={cx ?? 0} cy={cy ?? 0} r={0} fill="transparent" />;
               }
               return (
                 <circle
                   cx={cx}
                   cy={cy}
-                  r={3}
+                  r={row.isCycleAnchor ? 3 : 3}
                   fill={projectionColor}
                   stroke="#ffffff"
                   strokeWidth={1.5}
