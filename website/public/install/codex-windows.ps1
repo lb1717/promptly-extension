@@ -20,17 +20,11 @@ Ensure-NodeJs
 Promptly-RefreshNpmPath
 
 Write-Host "-> Checking Codex CLI..."
-$codex = Promptly-GetGlobalCliPath -Name codex
-if (-not $codex) {
-  Promptly-InvokeNpm -Args @("install", "-g", "@openai/codex") | Out-Null
-  Promptly-RefreshNpmPath
-  $codex = Promptly-GetGlobalCliPath -Name codex
-}
-if (-not $codex) {
-  Write-Host "Codex CLI not found after install"
+if (-not (Promptly-EnsureCodexCli)) {
+  Write-Host "Codex CLI is required for plugin install. Install it, reopen PowerShell, and rerun."
   exit 1
 }
-& $codex --version
+$codex = Promptly-GetAgentCliPath -Name codex
 
 Write-Host "-> Downloading Promptly plugin pack..."
 Invoke-WebRequest -Uri $PluginPackUrl -OutFile $ZipPath -UseBasicParsing

@@ -34,7 +34,7 @@ function Promptly-SyncTelemetryCli {
 
 function Promptly-ClaudeMarketplaceRefresh {
   param([string]$IntegrationsPath)
-  $claude = Promptly-GetGlobalCliPath -Name claude
+  $claude = Promptly-GetAgentCliPath -Name claude
   if (-not $claude) {
     Write-Host "Claude Code CLI not found"
     exit 1
@@ -49,7 +49,7 @@ function Promptly-ClaudeMarketplaceRefresh {
 }
 
 function Promptly-ClaudePluginReinstall {
-  $claude = Promptly-GetGlobalCliPath -Name claude
+  $claude = Promptly-GetAgentCliPath -Name claude
   if (-not $claude) {
     Write-Host "Claude Code CLI not found"
     exit 1
@@ -64,7 +64,7 @@ function Promptly-ClaudePluginReinstall {
 
 function Promptly-CodexMarketplaceAdd {
   param([string]$IntegrationsPath)
-  $codex = Promptly-GetGlobalCliPath -Name codex
+  $codex = Promptly-GetAgentCliPath -Name codex
   if (-not $codex) {
     Write-Host "Codex CLI not found"
     exit 1
@@ -77,7 +77,7 @@ function Promptly-CodexMarketplaceAdd {
 }
 
 function Promptly-CodexPluginReinstall {
-  $codex = Promptly-GetGlobalCliPath -Name codex
+  $codex = Promptly-GetAgentCliPath -Name codex
   if (-not $codex) {
     Write-Host "Codex CLI not found"
     exit 1
@@ -140,41 +140,11 @@ function Promptly-CursorPluginReinstall {
 }
 
 function Promptly-EnsureClaudeCli {
-  Promptly-RefreshNpmPath
-  $claude = Promptly-GetGlobalCliPath -Name claude
-  if ($claude) {
-    & $claude --version
-    return $true
-  }
-  Write-Host "-> Claude Code CLI not found; installing @anthropic-ai/claude-code..."
-  if ((Promptly-InvokeNpm -Args @("install", "-g", "@anthropic-ai/claude-code")) -ne 0) {
-    Write-Host "Warning: Could not install Claude Code CLI"
-    return $false
-  }
-  Promptly-RefreshNpmPath
-  $claude = Promptly-GetGlobalCliPath -Name claude
-  if (-not $claude) { return $false }
-  & $claude --version
-  return $true
+  return Promptly-EnsureAgentCli -Name claude -NpmPackage "@anthropic-ai/claude-code" -DisplayName "Claude Code"
 }
 
 function Promptly-EnsureCodexCli {
-  Promptly-RefreshNpmPath
-  $codex = Promptly-GetGlobalCliPath -Name codex
-  if ($codex) {
-    & $codex --version
-    return $true
-  }
-  Write-Host "-> Codex CLI not found; installing @openai/codex..."
-  if ((Promptly-InvokeNpm -Args @("install", "-g", "@openai/codex")) -ne 0) {
-    Write-Host "Warning: Could not install Codex CLI"
-    return $false
-  }
-  Promptly-RefreshNpmPath
-  $codex = Promptly-GetGlobalCliPath -Name codex
-  if (-not $codex) { return $false }
-  & $codex --version
-  return $true
+  return Promptly-EnsureAgentCli -Name codex -NpmPackage "@openai/codex" -DisplayName "Codex"
 }
 
 function Promptly-VerifyPluginPack {

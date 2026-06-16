@@ -20,17 +20,11 @@ Ensure-NodeJs
 Promptly-RefreshNpmPath
 
 Write-Host "-> Checking Claude Code CLI..."
-$claude = Promptly-GetGlobalCliPath -Name claude
-if (-not $claude) {
-  Promptly-InvokeNpm -Args @("install", "-g", "@anthropic-ai/claude-code") | Out-Null
-  Promptly-RefreshNpmPath
-  $claude = Promptly-GetGlobalCliPath -Name claude
-}
-if (-not $claude) {
-  Write-Host "Claude Code CLI not found after install"
+if (-not (Promptly-EnsureClaudeCli)) {
+  Write-Host "Claude Code CLI is required for plugin install. Install it, reopen PowerShell, and rerun."
   exit 1
 }
-& $claude --version
+$claude = Promptly-GetAgentCliPath -Name claude
 
 Write-Host "-> Downloading Promptly plugin pack..."
 Invoke-WebRequest -Uri $PluginPackUrl -OutFile $ZipPath -UseBasicParsing
