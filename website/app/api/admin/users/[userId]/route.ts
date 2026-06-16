@@ -1,4 +1,5 @@
 import {
+  adminUpdateUserCompanyMembership,
   adminSetUserDailyTokenLimit,
   getAdminUserDetail,
   requireAdminSession
@@ -28,6 +29,19 @@ export async function PATCH(request: Request, context: { params: { userId: strin
   const { userId } = context.params;
   const body = await request.json().catch(() => null);
   const b = body && typeof body === "object" ? (body as Record<string, unknown>) : null;
+  if (b && (Object.prototype.hasOwnProperty.call(b, "company_id") || Object.prototype.hasOwnProperty.call(b, "company_role"))) {
+    try {
+      const result = await adminUpdateUserCompanyMembership(decodeURIComponent(userId), {
+        company_id: b.company_id,
+        company_role: b.company_role
+      });
+      return NextResponse.json(result, { status: 200 });
+    } catch (error) {
+      const message = String(error instanceof Error ? error.message : error);
+      const status = /not found/i.test(message) ? 404 : 400;
+      return NextResponse.json({ error: message }, { status });
+    }
+  }
   const rawLimit = b ? b.daily_token_limit : undefined;
   let next: number | null;
   if (rawLimit === null) {

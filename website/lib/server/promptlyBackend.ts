@@ -7026,6 +7026,10 @@ export async function getAdminUserDetail(userId: string, days: number) {
       ),
       provider: typeof raw.provider === "string" ? raw.provider : null,
       google_sub: typeof raw.googleSub === "string" ? raw.googleSub : null,
+      company_id: typeof raw.companyId === "string" ? raw.companyId : null,
+      company_role: raw.companyRole === "admin" ? "admin" : typeof raw.companyId === "string" ? "member" : null,
+      company_name: typeof raw.companyName === "string" ? raw.companyName : null,
+      company_logo_url: typeof raw.companyLogoUrl === "string" ? raw.companyLogoUrl : null,
       created_at: firestoreTimestampToIso(raw.createdAt),
       updated_at: firestoreTimestampToIso(raw.updatedAt),
       last_seen_at: firestoreTimestampToIso(raw.lastSeenAt)
@@ -7162,6 +7166,9 @@ export async function getAdminUsers(days: number) {
           Math.floor(Number(raw.allTimeMaxDailyTokenUsage || 0) || 0)
         ),
         daily_token_limit: dailyLimit,
+        company_id: typeof raw.companyId === "string" ? raw.companyId : null,
+        company_role: raw.companyRole === "admin" ? "admin" : typeof raw.companyId === "string" ? "member" : null,
+        company_name: typeof raw.companyName === "string" ? raw.companyName : null,
         today_tokens: dayTokens.get(today) || 0,
         prompts_improved: Math.max(0, Math.floor(Number(raw.promptsImprovedTotal || 0) || 0))
       };

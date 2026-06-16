@@ -1,18 +1,22 @@
 "use client";
 
 import { AccountClient } from "@/components/account/AccountClient";
+import { CompanyStatisticsClient } from "@/components/account/CompanyStatisticsClient";
 import { StatisticsClient } from "@/components/account/StatisticsClient";
+import { getFirebaseAuth } from "@/lib/firebaseClient";
 import {
   ONBOARDING_TOUR_EVENT,
   readOnboardingTour,
   type OnboardingTourStep
 } from "@/lib/onboardingTour";
+import { onAuthStateChanged, type User } from "firebase/auth";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-export type AccountHubTab = "statistics" | "settings";
+export type AccountHubTab = "statistics" | "company-statistics" | "settings";
 
 function parseTab(raw: string | null): AccountHubTab {
+  if (raw === "company-statistics") return "company-statistics";
   return raw === "settings" ? "settings" : "statistics";
 }
 
@@ -30,6 +34,9 @@ export function AccountHubClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const tab = parseTab(searchParams.get("tab"));
+  const [user, setUser] = useState<User | null>(null);
+  const [isCompanyAdmin, setIsCompanyAdmin] = useState(false);
+  const [companyContextLoaded, setCompanyContextLoaded] = useState(false);
 
   const setTab = useCallback(
     (next: AccountHubTab) => {
@@ -37,7 +44,7 @@ export function AccountHubClient() {
       if (next === "statistics") {
         params.delete("tab");
       } else {
-        params.set("tab", "settings");
+        params.set("tab", next);
       }
       const qs = params.toString();
       router.replace(qs ? `/account?${qs}` : "/account", { scroll: false });
@@ -58,13 +65,48 @@ export function AccountHubClient() {
     return () => window.removeEventListener(ONBOARDING_TOUR_EVENT, syncTourTab);
   }, [syncTourTab]);
 
+  useEffect(() => {
+    const auth = getFirebaseAuth();
+    return onAuthStateChanged(auth, async (nextUser) => {
+      setUser(nextUser);
+      setIsCompanyAdmin(false);
+      setCompanyContextLoaded(false);
+      if (!nextUser) {
+        setCompanyContextLoaded(true);
+        return;
+      }
+      try {
+        const token = await nextUser.getIdToken(false);
+        const res = await fetch("/api/account/company", {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store"
+        });
+        const json = await res.json().catch(() => ({}));
+        setIsCompanyAdmin(Boolean(res.ok && json.membership?.is_admin));
+      } catch {
+        setIsCompanyAdmin(false);
+      } finally {
+        setCompanyContextLoaded(true);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (companyContextLoaded && tab === "company-statistics" && !isCompanyAdmin) {
+      setTab("statistics");
+    }
+  }, [companyContextLoaded, isCompanyAdmin, setTab, tab]);
+
   const tabs = useMemo(
     () =>
       [
-        { id: "statistics" as const, label: "Statistics" },
+        { id: "statistics" as const, label: isCompanyAdmin ? "My Statistics" : "Statistics" },
+        ...(isCompanyAdmin
+          ? [{ id: "company-statistics" as const, label: "Company Statistics" }]
+          : []),
         { id: "settings" as const, label: "Account Settings" }
       ] as const,
-    []
+    [isCompanyAdmin]
   );
 
   return (
@@ -98,8 +140,23 @@ export function AccountHubClient() {
         })}
       </div>
 
-      <div role="tabpanel" aria-label={tab === "statistics" ? "Statistics" : "Account Settings"}>
-        {tab === "statistics" ? <StatisticsClient embedded /> : <AccountClient embedded hidePromptStats />}
+      <div
+        role="tabpanel"
+        aria-label={
+          tab === "statistics"
+            ? "My Statistics"
+            : tab === "company-statistics"
+              ? "Company Statistics"
+              : "Account Settings"
+        }
+      >
+        {tab === "statistics" ? (
+          <StatisticsClient embedded />
+        ) : tab === "company-statistics" ? (
+          <CompanyStatisticsClient user={user} />
+        ) : (
+          <AccountClient embedded hidePromptStats />
+        )}
       </div>
     </div>
   );

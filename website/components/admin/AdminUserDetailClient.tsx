@@ -19,6 +19,10 @@ type DetailResponse = {
     all_time_max_daily_token_usage: number;
     provider: string | null;
     google_sub: string | null;
+    company_id?: string | null;
+    company_role?: "admin" | "member" | null;
+    company_name?: string | null;
+    company_logo_url?: string | null;
     created_at: string | null;
     updated_at: string | null;
     last_seen_at: string | null;
@@ -42,6 +46,18 @@ type DetailResponse = {
   }>;
 };
 
+type Company = {
+  id: string;
+  name: string;
+  logo_url: string | null;
+};
+
+type CompaniesResponse = {
+  ok?: boolean;
+  error?: string;
+  companies?: Company[];
+};
+
 const SPANS = [7, 14, 30, 90] as const;
 
 function formatNumber(value: number) {
@@ -53,7 +69,13 @@ export function AdminUserDetailClient({ userId }: { userId: string }) {
   const [data, setData] = useState<DetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [companySaving, setCompanySaving] = useState(false);
   const [limitInput, setLimitInput] = useState("");
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [companyIdInput, setCompanyIdInput] = useState("");
+  const [companyRoleInput, setCompanyRoleInput] = useState<"admin" | "member">("member");
+  const [newCompanyName, setNewCompanyName] = useState("");
+  const [newCompanyLogo, setNewCompanyLogo] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -74,6 +96,8 @@ export function AdminUserDetailClient({ userId }: { userId: string }) {
       setData(json);
       const ov = json.user?.daily_token_limit_override;
       setLimitInput(ov != null && ov !== undefined ? String(ov) : "");
+      setCompanyIdInput(json.user?.company_id || "");
+      setCompanyRoleInput(json.user?.company_role === "admin" ? "admin" : "member");
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));
     } finally {
@@ -81,11 +105,24 @@ export function AdminUserDetailClient({ userId }: { userId: string }) {
     }
   }, [userId, days]);
 
+  const loadCompanies = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/companies", { cache: "no-store" });
+      const json = (await res.json()) as CompaniesResponse;
+      if (res.ok) {
+        setCompanies(json.companies || []);
+      }
+    } catch {
+      // Company controls are secondary to the user detail view.
+    }
+  }, []);
+
   useEffect(() => {
     load();
+    loadCompanies();
     const id = window.setInterval(load, 12000);
     return () => window.clearInterval(id);
-  }, [load]);
+  }, [load, loadCompanies]);
 
   async function saveLimit() {
     const trimmed = limitInput.trim();
@@ -121,6 +158,77 @@ export function AdminUserDetailClient({ userId }: { userId: string }) {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function saveCompanyAssignment(nextCompanyId = companyIdInput) {
+    setCompanySaving(true);
+    setError("");
+    setMessage("");
+    try {
+      const payload = {
+        company_id: nextCompanyId || null,
+        company_role: companyRoleInput
+      };
+      const res = await fetch(`/api/admin/users/${encodeURIComponent(userId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(String(json.error || "Company update failed"));
+        return;
+      }
+      setMessage(nextCompanyId ? "Company membership saved." : "Removed user from company.");
+      await load();
+    } catch (e) {
+      setError(String(e instanceof Error ? e.message : e));
+    } finally {
+      setCompanySaving(false);
+    }
+  }
+
+  async function createCompanyAndAssign() {
+    const name = newCompanyName.trim();
+    if (!name) {
+      setError("Enter a company name.");
+      return;
+    }
+    setCompanySaving(true);
+    setError("");
+    setMessage("");
+    try {
+      const res = await fetch("/api/admin/companies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, logo_url: newCompanyLogo })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.company?.id) {
+        setError(String(json.error || "Could not create company"));
+        return;
+      }
+      await loadCompanies();
+      setNewCompanyName("");
+      setNewCompanyLogo(null);
+      setCompanyIdInput(json.company.id);
+      await saveCompanyAssignment(json.company.id);
+    } catch (e) {
+      setError(String(e instanceof Error ? e.message : e));
+    } finally {
+      setCompanySaving(false);
+    }
+  }
+
+  function readLogoFile(file: File | null) {
+    if (!file) {
+      setNewCompanyLogo(null);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => setNewCompanyLogo(typeof reader.result === "string" ? reader.result : null);
+    reader.onerror = () => setError("Could not read logo file.");
+    reader.readAsDataURL(file);
   }
 
   const u = data?.user;
@@ -174,6 +282,85 @@ export function AdminUserDetailClient({ userId }: { userId: string }) {
         <>
           <section className="mb-8 rounded-2xl border border-violet-500/20 bg-[#221830]/60 p-5">
             <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-violet-300/90">
+              Company membership
+            </h2>
+            <div className="mb-5 grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem_auto]">
+              <label className="flex flex-col gap-1 text-xs text-violet-200/90">
+                Existing company
+                <select
+                  value={companyIdInput}
+                  onChange={(e) => setCompanyIdInput(e.target.value)}
+                  className="rounded-lg border border-violet-500/30 bg-[#161022] px-3 py-2 text-sm text-white"
+                >
+                  <option value="">No company</option>
+                  {companies.map((company) => (
+                    <option key={company.id} value={company.id}>
+                      {company.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-violet-200/90">
+                Role
+                <select
+                  value={companyRoleInput}
+                  onChange={(e) => setCompanyRoleInput(e.target.value === "admin" ? "admin" : "member")}
+                  className="rounded-lg border border-violet-500/30 bg-[#161022] px-3 py-2 text-sm text-white"
+                >
+                  <option value="member">Normal account</option>
+                  <option value="admin">Company admin</option>
+                </select>
+              </label>
+              <button
+                type="button"
+                onClick={() => saveCompanyAssignment()}
+                disabled={companySaving}
+                className="self-end rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500 disabled:opacity-50"
+              >
+                {companySaving ? "Saving…" : "Save company"}
+              </button>
+            </div>
+            {u.company_name ? (
+              <div className="mb-5 flex items-center gap-3 rounded-xl border border-violet-500/20 bg-[#161022] px-3 py-2">
+                {u.company_logo_url ? (
+                  <img src={u.company_logo_url} alt="" className="h-9 w-9 rounded-md object-contain" />
+                ) : null}
+                <p className="text-sm text-violet-100">
+                  Current: {u.company_name} · {u.company_role === "admin" ? "admin" : "normal account"}
+                </p>
+              </div>
+            ) : null}
+            <div className="border-t border-violet-500/20 pt-4">
+              <p className="mb-3 text-xs text-violet-200/70">
+                Create a new company, optionally upload a logo, then assign this user to it.
+              </p>
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+                <input
+                  value={newCompanyName}
+                  onChange={(e) => setNewCompanyName(e.target.value)}
+                  placeholder="Company name"
+                  className="rounded-lg border border-violet-500/30 bg-[#161022] px-3 py-2 text-sm text-white"
+                />
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml"
+                  onChange={(e) => readLogoFile(e.target.files?.[0] || null)}
+                  className="rounded-lg border border-violet-500/30 bg-[#161022] px-3 py-2 text-xs text-violet-100"
+                />
+                <button
+                  type="button"
+                  onClick={() => createCompanyAndAssign()}
+                  disabled={companySaving}
+                  className="rounded-lg border border-violet-500/35 px-4 py-2 text-sm font-semibold text-violet-100 hover:bg-violet-500/15 disabled:opacity-50"
+                >
+                  Create & assign
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <section className="mb-8 rounded-2xl border border-violet-500/20 bg-[#221830]/60 p-5">
+            <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-violet-300/90">
               Daily token limit
             </h2>
             <p className="mb-4 text-xs text-violet-200/70">
@@ -224,6 +411,12 @@ export function AdminUserDetailClient({ userId }: { userId: string }) {
               <div>
                 <dt className="text-xs uppercase text-violet-400/80">Billing tier</dt>
                 <dd className="text-violet-100">{u.subscription_tier || "free"}</dd>
+              </div>
+              <div>
+                <dt className="text-xs uppercase text-violet-400/80">Company</dt>
+                <dd className="text-violet-100">
+                  {u.company_name ? `${u.company_name} (${u.company_role === "admin" ? "admin" : "normal"})` : "—"}
+                </dd>
               </div>
               <div>
                 <dt className="text-xs uppercase text-violet-400/80">Provider</dt>

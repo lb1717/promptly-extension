@@ -108,6 +108,11 @@ type DailyCreditsPayload = {
   reset_label?: string;
 };
 
+type AccountCompanyPayload = {
+  company: { id: string; name: string; logo_url: string | null } | null;
+  membership: { role: "admin" | "member"; is_admin: boolean } | null;
+};
+
 export function AccountClient({
   extensionMode = false,
   embedded = false,
@@ -135,6 +140,7 @@ export function AccountClient({
   const [billingLoading, setBillingLoading] = useState(false);
   const [billingError, setBillingError] = useState("");
   const [dailyCredits, setDailyCredits] = useState<DailyCreditsPayload | null>(null);
+  const [accountCompany, setAccountCompany] = useState<AccountCompanyPayload | null>(null);
   const [dailyCreditsLoading, setDailyCreditsLoading] = useState(false);
   const [dailyCreditsError, setDailyCreditsError] = useState("");
   const [portalBusy, setPortalBusy] = useState(false);
@@ -241,6 +247,27 @@ export function AccountClient({
     }
   }, []);
 
+  const loadAccountCompany = useCallback(async (current: User) => {
+    try {
+      const token = await current.getIdToken();
+      const res = await fetch("/api/account/company", {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store"
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setAccountCompany(null);
+        return;
+      }
+      setAccountCompany({
+        company: data.company || null,
+        membership: data.membership || null
+      });
+    } catch {
+      setAccountCompany(null);
+    }
+  }, []);
+
   const syncExtensionSession = useCallback(async (current: User) => {
     const candidateIds = getPromptlyExtensionCandidateIds(extensionIdFromUrl || undefined);
     if (!candidateIds.length) {
@@ -290,14 +317,15 @@ export function AccountClient({
       if (nextUser) {
         setBusy(false);
         void syncExtensionSession(nextUser);
-        await Promise.all([loadBilling(nextUser), loadDailyCredits(nextUser)]);
+        await Promise.all([loadBilling(nextUser), loadDailyCredits(nextUser), loadAccountCompany(nextUser)]);
       } else {
         setBilling(null);
         setDailyCredits(null);
+        setAccountCompany(null);
       }
     });
     return () => unsub();
-  }, [loadBilling, loadDailyCredits, syncExtensionSession]);
+  }, [loadAccountCompany, loadBilling, loadDailyCredits, syncExtensionSession]);
 
   const permissionInlineMessages = useMemo(() => {
     const msgs: string[] = [];
@@ -318,8 +346,11 @@ export function AccountClient({
   }, [billing?.subscriptionTier]);
 
   const currentPlanLabel = useMemo(
-    () => tierLabel(billing?.subscriptionTier || "free"),
-    [billing?.subscriptionTier]
+    () => {
+      const base = tierLabel(billing?.subscriptionTier || "free");
+      return accountCompany?.company?.name ? `${base} (${accountCompany.company.name})` : base;
+    },
+    [accountCompany?.company?.name, billing?.subscriptionTier]
   );
 
   const weeklyTokenResetLabel = useMemo(() => {
@@ -1018,7 +1049,7 @@ export function AccountClient({
               <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 <div className="rounded-xl border border-line bg-cream-dark p-4">
                   <p className="text-xs uppercase tracking-wider text-faint">Current plan</p>
-                  <p className="mt-2 text-xl font-semibold text-ink">{tierLabel(billing.subscriptionTier)}</p>
+                  <p className="mt-2 text-xl font-semibold text-ink">{currentPlanLabel}</p>
                   <p className="mt-1 text-xs text-faint capitalize">
                     Status: {billing.subscriptionStatus.replace(/_/g, " ")}
                   </p>
