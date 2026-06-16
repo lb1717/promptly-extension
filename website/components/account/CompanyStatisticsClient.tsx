@@ -45,7 +45,7 @@ type CompanyMember = {
   label: string;
   totals: {
     prompts: number;
-    tokens: number;
+    screen_time_minutes: number;
     auto: number;
     manual: number;
     generated: number;
@@ -61,7 +61,7 @@ type CompanyStatsPayload = {
   members: CompanyMember[];
   totals: {
     prompts: number;
-    tokens: number;
+    screen_time_minutes: number;
     auto: number;
     manual: number;
     generated: number;
@@ -70,8 +70,12 @@ type CompanyStatsPayload = {
   timeline: Array<{
     day: string;
     total_prompts: number;
-    total_tokens: number;
-    by_member: Record<string, { prompts: number; tokens: number; auto: number; manual: number; generated: number }>;
+    by_member: Record<string, { prompts: number; auto: number; manual: number; generated: number }>;
+  }>;
+  screen_time_timeline: Array<{
+    day: string;
+    total_screen_time_minutes: number;
+    by_member: Record<string, number>;
   }>;
   plan_usage_timeline: Array<Record<string, number | string>>;
   subscription_profiles: Array<{
@@ -99,6 +103,14 @@ function formatNumber(value: number) {
 function formatCurrency(value: number) {
   if (!Number.isFinite(value)) return "—";
   return value >= 100 ? `$${Math.round(value)}` : `$${value.toFixed(2)}`;
+}
+
+function formatScreenTimeMinutes(minutes: number) {
+  const total = Math.max(0, Math.round(Number(minutes || 0)));
+  if (total < 60) return `${formatNumber(total)} min`;
+  const hours = Math.floor(total / 60);
+  const mins = total % 60;
+  return mins ? `${hours}h ${mins}m` : `${hours}h`;
 }
 
 function shortDate(day: string) {
@@ -174,14 +186,14 @@ export function CompanyStatisticsClient({ user }: { user: User | null }) {
     [data?.timeline, members]
   );
 
-  const tokenRows = useMemo(
+  const screenTimeRows = useMemo(
     () =>
-      (data?.timeline || []).map((row) => ({
+      (data?.screen_time_timeline || []).map((row) => ({
         day: row.day,
         label: shortDate(row.day),
-        ...Object.fromEntries(members.map((member) => [member.user_id, row.by_member[member.user_id]?.tokens || 0]))
+        ...Object.fromEntries(members.map((member) => [member.user_id, row.by_member[member.user_id] || 0]))
       })),
-    [data?.timeline, members]
+    [data?.screen_time_timeline, members]
   );
 
   const selectedMember = members.find((member) => member.user_id === selectedMemberId) || null;
@@ -253,7 +265,7 @@ export function CompanyStatisticsClient({ user }: { user: User | null }) {
 
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Prompts" value={formatNumber(selectedTotals?.prompts || 0)} />
-        <StatCard label="Promptly tokens" value={formatNumber(selectedTotals?.tokens || 0)} />
+        <StatCard label="AI screen time" value={formatScreenTimeMinutes(selectedTotals?.screen_time_minutes || 0)} />
         <StatCard label="AI plan cost" value={`${formatCurrency(selectedTotals?.plan_monthly_usd || 0)}/mo`} />
         <StatCard label="Generated" value={formatNumber(selectedTotals?.generated || 0)} />
       </section>
@@ -284,14 +296,18 @@ export function CompanyStatisticsClient({ user }: { user: User | null }) {
       </section>
 
       <section className="rounded-2xl border border-line bg-cream p-5 shadow-card">
-        <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-faint">Promptly tokens by person</h3>
+        <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-faint">AI screen time by person</h3>
+        <p className="mt-1 text-xs text-faint">Minutes spent drafting, waiting, and reading AI output in the IDE.</p>
         <div className="mt-4 h-72 w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={tokenRows} margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
+            <BarChart data={screenTimeRows} margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.08)" vertical={false} />
               <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} />
-              <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
+              <YAxis tick={{ fontSize: 11 }} unit="m" />
+              <Tooltip
+                contentStyle={CHART_TOOLTIP_STYLE}
+                formatter={(value: number) => [`${formatNumber(value)} min`, ""]}
+              />
               <Legend wrapperStyle={{ fontSize: 11 }} />
               {visibleMembers.map((member, index) => (
                 <Bar
@@ -350,7 +366,7 @@ export function CompanyStatisticsClient({ user }: { user: User | null }) {
                 <th className="pb-3 pr-4 font-semibold">Person</th>
                 <th className="pb-3 pr-4 font-semibold">Role</th>
                 <th className="pb-3 pr-4 font-semibold">Prompts</th>
-                <th className="pb-3 pr-4 font-semibold">Tokens</th>
+                <th className="pb-3 pr-4 font-semibold">Screen time</th>
                 <th className="pb-3 pr-4 font-semibold">AI plans</th>
                 <th className="pb-3 font-semibold">Monthly cost</th>
               </tr>
@@ -366,7 +382,7 @@ export function CompanyStatisticsClient({ user }: { user: User | null }) {
                     </td>
                     <td className="py-3 pr-4 capitalize">{member.role === "admin" ? "Admin" : "Normal"}</td>
                     <td className="py-3 pr-4 tabular-nums">{formatNumber(member.totals.prompts)}</td>
-                    <td className="py-3 pr-4 tabular-nums">{formatNumber(member.totals.tokens)}</td>
+                    <td className="py-3 pr-4 tabular-nums">{formatScreenTimeMinutes(member.totals.screen_time_minutes)}</td>
                     <td className="py-3 pr-4 text-xs">
                       {plans.length
                         ? plans.map((profile) => `${providerLabel(profile.provider)} ${profile.plan_display || ""}`.trim()).join(", ")

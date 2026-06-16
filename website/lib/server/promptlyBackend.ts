@@ -5124,6 +5124,11 @@ async function upsertPromptlyUser(userId: string, email: string | null, patch: R
     { merge: true }
   );
 
+  if (normalizedEmail) {
+    const { applyPendingCompanyInviteForUser } = await import("@/lib/server/companyData");
+    await applyPendingCompanyInviteForUser(userId, normalizedEmail).catch(() => undefined);
+  }
+
   return promptlyUser;
 }
 

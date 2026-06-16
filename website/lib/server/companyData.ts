@@ -5,6 +5,9 @@ import { listVendorUsageProfiles, type VendorUsageProfileView } from "@/lib/serv
 const COMPANIES_COLLECTION = "companies";
 const USERS_COLLECTION = "users";
 const DAILY_USAGE_COLLECTION = "promptly_usage_daily";
+const IDE_EVENTS_COLLECTION = "promptly_ide_events";
+const COMPANY_EMAIL_INVITES_COLLECTION = "company_email_invites";
+const PENDING_INVITES_SUBCOLLECTION = "pending_invites";
 const MAX_COMPANY_LOGO_DATA_URL_CHARS = 220_000;
 
 export type CompanyRole = "admin" | "member";
@@ -23,6 +26,12 @@ export type CompanyMember = {
   display_name: string | null;
   role: CompanyRole;
   subscription_tier: string;
+};
+
+export type CompanyPendingInvite = {
+  email: string;
+  role: CompanyRole;
+  created_at: string | null;
 };
 
 function timestampToIso(value: unknown): string | null {
@@ -66,6 +75,40 @@ function readCompany(id: string, raw: Record<string, unknown>): CompanyRecord {
 
 function readRole(raw: unknown): CompanyRole {
   return raw === "admin" ? "admin" : "member";
+}
+
+function normalizeInviteEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+function msToStatMinutes(ms: number): number {
+  return Math.round((ms / 60000) * 10) / 10;
+}
+
+function screenMsFromIdeEvent(raw: Record<string, unknown>): number {
+  const ik = String(raw.interactionKind ?? raw.interaction_kind ?? "").toLowerCase();
+  if (ik === "engagement_segment" || ik === "engagement") {
+    const catRaw = raw.engagementCategory ?? raw.engagement_category;
+    const cat = typeof catRaw === "string" ? catRaw.trim().toLowerCase() : "";
+    const durRaw = raw.engagementDurationMs ?? raw.engagement_duration_ms ?? raw.duration_ms ?? raw.durationMs;
+    const durMs = typeof durRaw === "number" && Number.isFinite(durRaw) ? Math.floor(durRaw) : 0;
+    if ((cat === "drafting" || cat === "waiting" || cat === "reading_idle") && durMs >= 500) {
+      return durMs;
+    }
+    return 0;
+  }
+  if (ik === "response_latency") {
+    const hlRaw = raw.hostResponseLatencyMs ?? raw.host_response_latency_ms;
+    const hlMs = typeof hlRaw === "number" && Number.isFinite(hlRaw) ? Math.floor(hlRaw) : 0;
+    return hlMs > 0 ? hlMs : 0;
+  }
+  return 0;
+}
+
+async function getCompanyById(companyId: string): Promise<CompanyRecord> {
+  const snap = await getFirebaseAdminDb().collection(COMPANIES_COLLECTION).doc(companyId).get();
+  if (!snap.exists) throw new Error("Company not found");
+  return readCompany(snap.id, (snap.data() || {}) as Record<string, unknown>);
 }
 
 function readMember(docId: string, raw: Record<string, unknown>): CompanyMember {
@@ -112,6 +155,35 @@ export async function updateCompany(
   const snap = await ref.get();
   if (!snap.exists) throw new Error("Company not found");
   return readCompany(ref.id, (snap.data() || {}) as Record<string, unknown>);
+}
+
+export async function listCompanyPendingInvites(companyId: string): Promise<CompanyPendingInvite[]> {
+  const id = String(companyId || "").trim();
+  if (!id) return [];
+  const snap = await getFirebaseAdminDb()
+    .collection(COMPANIES_COLLECTION)
+    .doc(id)
+    .collection(PENDING_INVITES_SUBCOLLECTION)
+    .get();
+  return snap.docs
+    .map((doc) => {
+      const raw = (doc.data() || {}) as Record<string, unknown>;
+      return {
+        email: typeof raw.email === "string" ? raw.email : doc.id,
+        role: readRole(raw.role),
+        created_at: timestampToIso(raw.createdAt)
+      };
+    })
+    .sort((a, b) => a.email.localeCompare(b.email));
+}
+
+export async function getCompanyAdminDetail(companyId: string) {
+  const company = await getCompanyById(companyId);
+  const [members, pending_invites] = await Promise.all([
+    listCompanyMembers(companyId),
+    listCompanyPendingInvites(companyId)
+  ]);
+  return { company, members, pending_invites };
 }
 
 export async function listCompanyMembers(companyId: string): Promise<CompanyMember[]> {
@@ -203,6 +275,149 @@ export async function adminUpdateUserCompanyMembership(
   return { ok: true as const, user_id: uid, company, role };
 }
 
+export async function assignEmailToCompany(companyId: string, email: unknown, role: unknown) {
+  const id = String(companyId || "").trim();
+  if (!id) throw new Error("Missing company id");
+  const normalized = normalizeInviteEmail(String(email || ""));
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) {
+    throw new Error("Invalid email address");
+  }
+  const companyRole: CompanyRole = role === "admin" ? "admin" : "member";
+  const company = await getCompanyById(id);
+  const db = getFirebaseAdminDb();
+
+  const usersSnap = await db.collection(USERS_COLLECTION).where("email", "==", normalized).limit(8).get();
+  const activeUser = usersSnap.docs.find((doc) => {
+    const raw = (doc.data() || {}) as Record<string, unknown>;
+    return !raw.duplicateDisabled && typeof raw.mergedIntoUid !== "string";
+  });
+
+  if (activeUser) {
+    await adminUpdateUserCompanyMembership(activeUser.id, {
+      company_id: id,
+      company_role: companyRole
+    });
+    await removeCompanyPendingInvite(id, normalized);
+    return {
+      ok: true as const,
+      assigned: "user" as const,
+      user_id: activeUser.id,
+      email: normalized,
+      role: companyRole,
+      company
+    };
+  }
+
+  const inviteRef = db.collection(COMPANIES_COLLECTION).doc(id).collection(PENDING_INVITES_SUBCOLLECTION).doc(normalized);
+  const globalRef = db.collection(COMPANY_EMAIL_INVITES_COLLECTION).doc(normalized);
+  await db.runTransaction(async (tx) => {
+    tx.set(inviteRef, {
+      email: normalized,
+      role: companyRole,
+      companyId: id,
+      createdAt: FieldValue.serverTimestamp()
+    });
+    tx.set(globalRef, {
+      email: normalized,
+      role: companyRole,
+      companyId: id,
+      companyName: company.name,
+      companyLogoUrl: company.logo_url,
+      createdAt: FieldValue.serverTimestamp()
+    });
+  });
+
+  return {
+    ok: true as const,
+    assigned: "pending" as const,
+    email: normalized,
+    role: companyRole,
+    company
+  };
+}
+
+export async function removeCompanyPendingInvite(companyId: string, email: string) {
+  const id = String(companyId || "").trim();
+  const normalized = normalizeInviteEmail(email);
+  if (!id || !normalized) return;
+  const db = getFirebaseAdminDb();
+  await Promise.all([
+    db.collection(COMPANIES_COLLECTION).doc(id).collection(PENDING_INVITES_SUBCOLLECTION).doc(normalized).delete(),
+    db.collection(COMPANY_EMAIL_INVITES_COLLECTION).doc(normalized).delete()
+  ]);
+}
+
+export async function removeUserFromCompany(userId: string) {
+  return adminUpdateUserCompanyMembership(userId, { company_id: null, company_role: "member" });
+}
+
+export async function applyPendingCompanyInviteForUser(uid: string, email: string | null) {
+  const normalized = email ? normalizeInviteEmail(email) : "";
+  if (!normalized || !uid) return;
+
+  const db = getFirebaseAdminDb();
+  const userSnap = await db.collection(USERS_COLLECTION).doc(uid).get();
+  if (!userSnap.exists) return;
+  const userRaw = (userSnap.data() || {}) as Record<string, unknown>;
+  if (typeof userRaw.companyId === "string" && userRaw.companyId.trim()) return;
+
+  const inviteSnap = await db.collection(COMPANY_EMAIL_INVITES_COLLECTION).doc(normalized).get();
+  if (!inviteSnap.exists) return;
+  const invite = (inviteSnap.data() || {}) as Record<string, unknown>;
+  const companyId = String(invite.companyId || "").trim();
+  if (!companyId) return;
+
+  const role = readRole(invite.role);
+  await adminUpdateUserCompanyMembership(uid, { company_id: companyId, company_role: role });
+  await removeCompanyPendingInvite(companyId, normalized);
+}
+
+async function queryMemberScreenTimeByDay(
+  memberIds: string[],
+  startDay: string,
+  endDay: string,
+  daysList: string[]
+) {
+  const db = getFirebaseAdminDb();
+  const memberScreenMs = new Map(memberIds.map((id) => [id, 0]));
+  const timeline = daysList.map((day) => ({
+    day,
+    total_screen_time_minutes: 0,
+    by_member: Object.fromEntries(memberIds.map((id) => [id, 0])) as Record<string, number>
+  }));
+  const timelineByDay = new Map(timeline.map((row) => [row.day, row]));
+
+  await Promise.all(
+    memberIds.map(async (uid) => {
+      try {
+        const snap = await db
+          .collection(IDE_EVENTS_COLLECTION)
+          .where("uid", "==", uid)
+          .where("utcDay", ">=", startDay)
+          .where("utcDay", "<=", endDay)
+          .get();
+        for (const doc of snap.docs) {
+          const raw = (doc.data() || {}) as Record<string, unknown>;
+          const utcDay = String(raw.utcDay || "").trim();
+          if (!utcDay) continue;
+          const ms = screenMsFromIdeEvent(raw);
+          if (ms <= 0) continue;
+          memberScreenMs.set(uid, (memberScreenMs.get(uid) || 0) + ms);
+          const bucket = timelineByDay.get(utcDay);
+          if (!bucket) continue;
+          const minutes = msToStatMinutes(ms);
+          bucket.by_member[uid] = (bucket.by_member[uid] || 0) + minutes;
+          bucket.total_screen_time_minutes += minutes;
+        }
+      } catch {
+        // Skip members whose IDE events cannot be queried.
+      }
+    })
+  );
+
+  return { timeline, memberScreenMs };
+}
+
 function recentUtcDays(days: number): string[] {
   const range = Math.max(1, Math.min(365, Math.floor(days || 30)));
   const out: string[] = [];
@@ -246,19 +461,18 @@ export async function getCompanyStatsForAdmin(uid: string, days: number) {
   const timeline = daysList.map((day) => ({
     day,
     total_prompts: 0,
-    total_tokens: 0,
     by_member: Object.fromEntries(
       members.map((member) => [
         member.user_id,
-        { prompts: 0, tokens: 0, auto: 0, manual: 0, generated: 0 }
+        { prompts: 0, auto: 0, manual: 0, generated: 0 }
       ])
-    ) as Record<string, { prompts: number; tokens: number; auto: number; manual: number; generated: number }>
+    ) as Record<string, { prompts: number; auto: number; manual: number; generated: number }>
   }));
   const timelineByDay = new Map(timeline.map((row) => [row.day, row]));
   const memberTotals = new Map(
     members.map((member) => [
       member.user_id,
-      { prompts: 0, tokens: 0, auto: 0, manual: 0, generated: 0, plan_monthly_usd: 0 }
+      { prompts: 0, auto: 0, manual: 0, generated: 0, plan_monthly_usd: 0, screen_time_minutes: 0 }
     ])
   );
 
@@ -271,18 +485,26 @@ export async function getCompanyStatsForAdmin(uid: string, days: number) {
     const member = memberTotals.get(rowUid);
     if (!bucket || !member) continue;
     const prompts = Math.max(0, Math.floor(Number(raw.promptsImproved || 0) || 0));
-    const tokens = Math.max(0, Math.floor(Number(raw.used || 0) || 0));
     const auto = Math.max(0, Math.floor(Number(raw.auto || 0) || 0));
     const manual = Math.max(0, Math.floor(Number(raw.manual || 0) || 0));
     const generated = Math.max(0, Math.floor(Number(raw.generated || 0) || 0));
     bucket.total_prompts += prompts;
-    bucket.total_tokens += tokens;
-    bucket.by_member[rowUid] = { prompts, tokens, auto, manual, generated };
+    bucket.by_member[rowUid] = { prompts, auto, manual, generated };
     member.prompts += prompts;
-    member.tokens += tokens;
     member.auto += auto;
     member.manual += manual;
     member.generated += generated;
+  }
+
+  const { timeline: screenTimeTimeline, memberScreenMs } = await queryMemberScreenTimeByDay(
+    members.map((member) => member.user_id),
+    startDay,
+    endDay,
+    daysList
+  );
+  for (const [uid, ms] of memberScreenMs.entries()) {
+    const member = memberTotals.get(uid);
+    if (member) member.screen_time_minutes = msToStatMinutes(ms);
   }
 
   const profilesByMember = await Promise.all(
@@ -316,14 +538,14 @@ export async function getCompanyStatsForAdmin(uid: string, days: number) {
   const totals = [...memberTotals.values()].reduce(
     (acc, row) => {
       acc.prompts += row.prompts;
-      acc.tokens += row.tokens;
       acc.auto += row.auto;
       acc.manual += row.manual;
       acc.generated += row.generated;
       acc.plan_monthly_usd += row.plan_monthly_usd;
+      acc.screen_time_minutes += row.screen_time_minutes;
       return acc;
     },
-    { prompts: 0, tokens: 0, auto: 0, manual: 0, generated: 0, plan_monthly_usd: 0 }
+    { prompts: 0, auto: 0, manual: 0, generated: 0, plan_monthly_usd: 0, screen_time_minutes: 0 }
   );
 
   return {
@@ -336,15 +558,16 @@ export async function getCompanyStatsForAdmin(uid: string, days: number) {
       label: memberLabel(member),
       totals: memberTotals.get(member.user_id) || {
         prompts: 0,
-        tokens: 0,
         auto: 0,
         manual: 0,
         generated: 0,
-        plan_monthly_usd: 0
+        plan_monthly_usd: 0,
+        screen_time_minutes: 0
       }
     })),
     totals,
     timeline,
+    screen_time_timeline: screenTimeTimeline,
     plan_usage_timeline: [...planUsagePoints.values()].sort((a, b) =>
       String(a.day).localeCompare(String(b.day))
     ),

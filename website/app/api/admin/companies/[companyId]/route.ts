@@ -1,8 +1,23 @@
-import { NextResponse } from "next/server";
+import {
+  getCompanyAdminDetail,
+  requireAdminSession
+} from "@/lib/adminData";
 import { updateCompany } from "@/lib/server/companyData";
-import { requireAdminSession } from "@/lib/adminData";
+import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
+
+export async function GET(_request: Request, context: { params: { companyId: string } }) {
+  if (!requireAdminSession()) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  try {
+    const detail = await getCompanyAdminDetail(decodeURIComponent(context.params.companyId));
+    return NextResponse.json({ ok: true, ...detail }, { status: 200 });
+  } catch (error) {
+    return NextResponse.json({ error: String(error instanceof Error ? error.message : error) }, { status: 404 });
+  }
+}
 
 export async function PATCH(request: Request, context: { params: { companyId: string } }) {
   if (!requireAdminSession()) {

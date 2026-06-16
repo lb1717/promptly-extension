@@ -6,7 +6,15 @@ import {
   getAdminUserDetail,
   getAdminUsers
 } from "@/lib/server/promptlyBackend";
-import { adminUpdateUserCompanyMembership, createCompany, listCompanies } from "@/lib/server/companyData";
+import {
+  adminUpdateUserCompanyMembership,
+  assignEmailToCompany,
+  createCompany,
+  getCompanyAdminDetail,
+  listCompanies,
+  removeCompanyPendingInvite,
+  removeUserFromCompany
+} from "@/lib/server/companyData";
 
 export function requireAdminSession() {
   return Boolean(cookies().get(ADMIN_COOKIE_NAME)?.value);
@@ -15,9 +23,13 @@ export function requireAdminSession() {
 export {
   adminSetUserDailyTokenLimit,
   adminUpdateUserCompanyMembership,
+  assignEmailToCompany,
   createCompany,
   getAdminStats,
   getAdminUserDetail,
   getAdminUsers,
-  listCompanies
+  getCompanyAdminDetail,
+  listCompanies,
+  removeCompanyPendingInvite,
+  removeUserFromCompany
 };
