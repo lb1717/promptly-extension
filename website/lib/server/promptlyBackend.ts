@@ -2416,6 +2416,22 @@ export async function getAccountIdeUsageStats(
     }
   >();
   const modelSeriesLabels = new Map<string, string | null>();
+  type IdeScreenInterval = {
+    bucket: string;
+    tool: PromptlyIdeTool;
+    category: HostEngagementCategory;
+    startMs: number;
+    endMs: number;
+    modelSlug: string;
+    label: string | null;
+  };
+  const screenIntervals: IdeScreenInterval[] = [];
+  const prevScreenIntervals: IdeScreenInterval[] = [];
+  const screenCategoryPriority: Record<HostEngagementCategory, number> = {
+    drafting: 3,
+    waiting: 2,
+    reading_idle: 1
+  };
 
   const rememberModelLabel = (modelSlug: string, label: string | null) => {
     if (!modelSeriesLabels.has(modelSlug)) {
@@ -2459,6 +2475,63 @@ export async function getAccountIdeUsageStats(
     else row.reading_idle_ms += durMs;
   };
 
+  const pushScreenInterval = (
+    target: IdeScreenInterval[],
+    bucket: string,
+    tool: PromptlyIdeTool,
+    category: HostEngagementCategory,
+    raw: Record<string, unknown>,
+    durMs: number,
+    modelSlug: string,
+    label: string | null
+  ) => {
+    if (!(durMs >= 500)) return;
+    const endMs = readEventClientOccurredMs(raw);
+    if (!endMs) return;
+    target.push({
+      bucket,
+      tool,
+      category,
+      startMs: Math.max(0, endMs - durMs),
+      endMs,
+      modelSlug,
+      label
+    });
+  };
+
+  const allocateScreenIntervals = (
+    intervals: IdeScreenInterval[],
+    apply: (interval: IdeScreenInterval, durMs: number) => void
+  ) => {
+    const byBucketTool = new Map<string, IdeScreenInterval[]>();
+    for (const interval of intervals) {
+      if (interval.endMs <= interval.startMs) continue;
+      const key = `${interval.bucket}:${interval.tool}`;
+      const group = byBucketTool.get(key) ?? [];
+      group.push(interval);
+      byBucketTool.set(key, group);
+    }
+
+    for (const group of byBucketTool.values()) {
+      const bounds = [...new Set(group.flatMap((interval) => [interval.startMs, interval.endMs]))].sort((a, b) => a - b);
+      for (let i = 0; i < bounds.length - 1; i += 1) {
+        const startMs = bounds[i]!;
+        const endMs = bounds[i + 1]!;
+        const durMs = endMs - startMs;
+        if (durMs < 1) continue;
+        const active = group
+          .filter((interval) => interval.startMs < endMs && interval.endMs > startMs)
+          .sort((a, b) => {
+            const priority = screenCategoryPriority[b.category] - screenCategoryPriority[a.category];
+            if (priority !== 0) return priority;
+            return b.startMs - a.startMs;
+          });
+        const winner = active[0];
+        if (winner) apply(winner, durMs);
+      }
+    }
+  };
+
   const readIdeEventModel = (raw: Record<string, unknown>) => {
     const mb = readTelemetryModelBucket(raw);
     const labelRaw = raw.modelLabelSanitized ?? raw.model_label ?? raw.modelLabel;
@@ -2482,6 +2555,8 @@ export async function getAccountIdeUsageStats(
 
   /** Screen-time ms for events in the reference window, mirroring the in-range accumulation rules. */
   const accumulatePrevWindowEvent = (raw: Record<string, unknown>) => {
+    const utcDay = readAnalyticsUtcDay(raw);
+    if (!utcDay) return;
     const tool = normalizePromptlyIdeTool(raw.tool);
     if (!tool) return;
     if (!passesIdeScopeFilter(tool, raw, scopeFilter)) return;
@@ -2502,11 +2577,13 @@ export async function getAccountIdeUsageStats(
       if (hlMs !== null && hlMs > 0) screenMs = hlMs;
     }
     if (screenMs <= 0) return;
-    prevScreenMsByTool[tool] += screenMs;
-    if (trackModelSeries) {
-      const { mb } = readEffectiveIdeEventModel(tool, raw);
-      prevModelScreenMsByModel.set(mb, (prevModelScreenMsByModel.get(mb) ?? 0) + screenMs);
-    }
+    const category =
+      ik === "response_latency"
+        ? "waiting"
+        : String(raw.engagementCategory ?? raw.engagement_category).trim().toLowerCase();
+    if (category !== "drafting" && category !== "waiting" && category !== "reading_idle") return;
+    const { mb, label } = readEffectiveIdeEventModel(tool, raw);
+    pushScreenInterval(prevScreenIntervals, bucketKeyForDay(utcDay), tool, category, raw, screenMs, mb, label);
   };
 
   for (const doc of prevWindowDocs) {
@@ -2552,17 +2629,12 @@ export async function getAccountIdeUsageStats(
       const hlMs =
         typeof hlRaw === "number" && Number.isFinite(hlRaw) ? Math.floor(hlRaw) : null;
       if (hlMs !== null && hlMs > 0) {
-        row.engagement_ms.waiting[tool] += hlMs;
-        row.screen_time_ms[tool] += hlMs;
         row.latency_sum_ms[tool] += hlMs;
         row.latency_samples[tool] += 1;
-        screenTotals[tool] += hlMs;
-        engagementTotalsMs.waiting += hlMs;
-        engagementMsByTool[tool].waiting += hlMs;
         responseLatencyByTool[tool].push(hlMs);
 
         const { mb, label } = readEffectiveIdeEventModel(tool, raw);
-        addModelEngagementMs(bucket, mb, label, "waiting", hlMs);
+        pushScreenInterval(screenIntervals, bucket, tool, "waiting", raw, hlMs, mb, label);
         if (trackModelSeries) {
           bumpNestedMetric(modelLatencySumMsByDay, bucket, mb, hlMs);
           bumpNestedMetric(modelLatencySamplesByDay, bucket, mb, 1);
@@ -2603,13 +2675,8 @@ export async function getAccountIdeUsageStats(
       const durMs =
         typeof durRaw === "number" && Number.isFinite(durRaw) ? Math.floor(durRaw) : null;
       if (cat && durMs !== null && durMs >= 500) {
-        row.engagement_ms[cat][tool] += durMs;
-        row.screen_time_ms[tool] += durMs;
-        screenTotals[tool] += durMs;
-        engagementTotalsMs[cat] += durMs;
-        engagementMsByTool[tool][cat] += durMs;
         const { mb, label } = readEffectiveIdeEventModel(tool, raw);
-        addModelEngagementMs(bucket, mb, label, cat, durMs);
+        pushScreenInterval(screenIntervals, bucket, tool, cat, raw, durMs, mb, label);
         if (cat === "drafting") {
           draftSegmentCountByTool[tool] += 1;
           draftTotalMsByTool[tool] += durMs;
@@ -2689,15 +2756,10 @@ export async function getAccountIdeUsageStats(
     const hlMs =
       typeof hlRaw === "number" && Number.isFinite(hlRaw) ? Math.floor(hlRaw) : null;
     if (hlMs !== null && hlMs > 0) {
-      row.engagement_ms.waiting[tool] += hlMs;
-      row.screen_time_ms[tool] += hlMs;
       row.latency_sum_ms[tool] += hlMs;
       row.latency_samples[tool] += 1;
-      screenTotals[tool] += hlMs;
-      engagementTotalsMs.waiting += hlMs;
-      engagementMsByTool[tool].waiting += hlMs;
       responseLatencyByTool[tool].push(hlMs);
-      addModelEngagementMs(bucket, mb, label, "waiting", hlMs);
+      pushScreenInterval(screenIntervals, bucket, tool, "waiting", raw, hlMs, mb, label);
       if (trackModelSeries) {
         bumpNestedMetric(modelLatencySumMsByDay, bucket, mb, hlMs);
         bumpNestedMetric(modelLatencySamplesByDay, bucket, mb, 1);
@@ -2707,6 +2769,27 @@ export async function getAccountIdeUsageStats(
       modelBucketAgg.set(modelKey, modelPrev);
     }
   }
+
+  allocateScreenIntervals(prevScreenIntervals, (interval, durMs) => {
+    prevScreenMsByTool[interval.tool] += durMs;
+    if (trackModelSeries) {
+      prevModelScreenMsByModel.set(
+        interval.modelSlug,
+        (prevModelScreenMsByModel.get(interval.modelSlug) ?? 0) + durMs
+      );
+    }
+  });
+
+  allocateScreenIntervals(screenIntervals, (interval, durMs) => {
+    const row = byBucket.get(interval.bucket);
+    if (!row) return;
+    row.engagement_ms[interval.category][interval.tool] += durMs;
+    row.screen_time_ms[interval.tool] += durMs;
+    screenTotals[interval.tool] += durMs;
+    engagementTotalsMs[interval.category] += durMs;
+    engagementMsByTool[interval.tool][interval.category] += durMs;
+    addModelEngagementMs(interval.bucket, interval.modelSlug, interval.label, interval.category, durMs);
+  });
 
   const percentile = (values: number[], p: number): number | null => {
     if (!values.length) return null;
@@ -3387,6 +3470,77 @@ export async function getAccountUsageStatsExtended(
     else if (category === "waiting") row.waiting_ms += durMs;
     else row.reading_idle_ms += durMs;
   };
+  type WebScreenInterval = {
+    utcDay: string;
+    bucket: string;
+    service: PromptlyService;
+    category: HostEngagementCategory;
+    startMs: number;
+    endMs: number;
+    modelSlug: string;
+    label: string | null;
+  };
+  const webScreenIntervals: WebScreenInterval[] = [];
+  const prevWebScreenIntervals: WebScreenInterval[] = [];
+  const webScreenCategoryPriority: Record<HostEngagementCategory, number> = {
+    drafting: 3,
+    waiting: 2,
+    reading_idle: 1
+  };
+  const pushWebScreenInterval = (
+    target: WebScreenInterval[],
+    utcDay: string,
+    service: PromptlyService,
+    category: HostEngagementCategory,
+    raw: Record<string, unknown>,
+    durMs: number,
+    modelSlug: string,
+    label: string | null
+  ) => {
+    if (!(durMs >= HOST_ENGAGEMENT_MIN_SEGMENT_MS)) return;
+    const endMs = readEventClientOccurredMs(raw);
+    if (!endMs) return;
+    target.push({
+      utcDay,
+      bucket: bucketKeyForDay(utcDay),
+      service,
+      category,
+      startMs: Math.max(0, endMs - durMs),
+      endMs,
+      modelSlug,
+      label
+    });
+  };
+  const allocateWebScreenIntervals = (
+    intervals: WebScreenInterval[],
+    apply: (interval: WebScreenInterval, durMs: number) => void
+  ) => {
+    const byDayService = new Map<string, WebScreenInterval[]>();
+    for (const interval of intervals) {
+      if (interval.endMs <= interval.startMs) continue;
+      const key = `${interval.utcDay}:${interval.service}`;
+      const group = byDayService.get(key) ?? [];
+      group.push(interval);
+      byDayService.set(key, group);
+    }
+    for (const group of byDayService.values()) {
+      const bounds = [...new Set(group.flatMap((interval) => [interval.startMs, interval.endMs]))].sort((a, b) => a - b);
+      for (let i = 0; i < bounds.length - 1; i += 1) {
+        const startMs = bounds[i]!;
+        const endMs = bounds[i + 1]!;
+        const durMs = endMs - startMs;
+        if (durMs < 1) continue;
+        const winner = group
+          .filter((interval) => interval.startMs < endMs && interval.endMs > startMs)
+          .sort((a, b) => {
+            const priority = webScreenCategoryPriority[b.category] - webScreenCategoryPriority[a.category];
+            if (priority !== 0) return priority;
+            return b.startMs - a.startMs;
+          })[0];
+        if (winner) apply(winner, durMs);
+      }
+    }
+  };
 
   const optimizeLatencySvc = {
     sum: emptyServicePromptCounts(),
@@ -3500,11 +3654,9 @@ export async function getAccountUsageStatsExtended(
       const durRaw = raw.engagementDurationMs ?? raw.engagement_duration_ms ?? raw.duration_ms ?? raw.durationMs;
       const durMs = typeof durRaw === "number" && Number.isFinite(durRaw) ? Math.floor(durRaw) : null;
       if ((cat === "drafting" || cat === "waiting" || cat === "reading_idle") && durMs !== null && durMs >= HOST_ENGAGEMENT_MIN_SEGMENT_MS) {
-        prevScreenMsBySvc[svc] += durMs;
-        if (trackWebModelSeries && svc === webModelService) {
-          const mb = readTelemetryModelBucket(raw);
-          prevWebModelScreenMsByModel.set(mb, (prevWebModelScreenMsByModel.get(mb) ?? 0) + durMs);
-        }
+        const utcDay = readAnalyticsUtcDay(raw);
+        const { mb, label } = readEffectiveWebEventModel(svc, raw);
+        if (utcDay) pushWebScreenInterval(prevWebScreenIntervals, utcDay, svc, cat, raw, durMs, mb, label);
       }
       return;
     }
@@ -3530,18 +3682,13 @@ export async function getAccountUsageStatsExtended(
         : draftWallMs !== null && draftWallMs > 0
           ? draftWallMs
           : null;
-    if (hlMs !== null && hlMs >= HOST_ENGAGEMENT_MIN_SEGMENT_MS) {
-      prevScreenMsBySvc[svc] += hlMs;
+    const utcDay = readAnalyticsUtcDay(raw);
+    const { mb, label } = readEffectiveWebEventModel(svc, raw);
+    if (utcDay && hlMs !== null && hlMs >= HOST_ENGAGEMENT_MIN_SEGMENT_MS) {
+      pushWebScreenInterval(prevWebScreenIntervals, utcDay, svc, "waiting", raw, hlMs, mb, label);
     }
-    if (draftMs !== null && draftMs >= HOST_ENGAGEMENT_MIN_SEGMENT_MS) {
-      prevScreenMsBySvc[svc] += draftMs;
-    }
-    // Native sends: host response latency counts toward model screen time (waiting), as in-range.
-    if (!trackWebModelSeries || svc !== webModelService) return;
-    if (!passesWebScopeFilter(svc, raw, scopeFilter)) return;
-    if (hlMs !== null && hlMs > 0) {
-      const mb = readTelemetryModelBucket(raw);
-      prevWebModelScreenMsByModel.set(mb, (prevWebModelScreenMsByModel.get(mb) ?? 0) + hlMs);
+    if (utcDay && draftMs !== null && draftMs >= HOST_ENGAGEMENT_MIN_SEGMENT_MS) {
+      pushWebScreenInterval(prevWebScreenIntervals, utcDay, svc, "drafting", raw, draftMs, mb, label);
     }
   };
 
@@ -3609,12 +3756,9 @@ export async function getAccountUsageStatsExtended(
       const durMs =
         typeof durRaw === "number" && Number.isFinite(durRaw) ? Math.floor(durRaw) : null;
       if (engagementCategory && durMs !== null && durMs >= HOST_ENGAGEMENT_MIN_SEGMENT_MS) {
-        row.engagement_ms_by_category[engagementCategory][svc] += durMs;
-        row.screen_time_ms_svc[svc] += durMs;
         row.engagement_segment_count += 1;
-        if (trackWebModelSeries && svc === webModelService) {
-          addWebModelEngagementMs(bucketKeyForDay(utcDay), mb, hostLabel, engagementCategory, durMs);
-        }
+        const { mb: eventMb, label: eventLabel } = readEffectiveWebEventModel(svc, raw);
+        pushWebScreenInterval(webScreenIntervals, utcDay, svc, engagementCategory, raw, durMs, eventMb, eventLabel);
       }
       continue;
     }
@@ -3692,11 +3836,9 @@ export async function getAccountUsageStatsExtended(
           row.waiting_sum_ms += hlMs;
           row.waiting_samples += 1;
           if (hlMs >= HOST_ENGAGEMENT_MIN_SEGMENT_MS) {
-            row.screen_time_ms_svc[svc] += hlMs;
-            row.engagement_ms_by_category.waiting[svc] += hlMs;
+            pushWebScreenInterval(webScreenIntervals, utcDay, svc, "waiting", raw, hlMs, mb, hostLabel);
           }
           if (trackWebModelSeries && svc === webModelService) {
-            addWebModelEngagementMs(bucketKeyForDay(utcDay), mb, hostLabel, "waiting", hlMs);
             bumpNestedMetric(webModelLatencySumMsByDay, bucketKeyForDay(utcDay), mb, hlMs);
             bumpNestedMetric(webModelLatencySamplesByDay, bucketKeyForDay(utcDay), mb, 1);
             const latencyPrev = webModelLatencyAgg.get(mb) ?? { sum: 0, samples: 0 };
@@ -3706,11 +3848,7 @@ export async function getAccountUsageStatsExtended(
           }
         }
         if (draftMs !== null && draftMs >= HOST_ENGAGEMENT_MIN_SEGMENT_MS) {
-          row.screen_time_ms_svc[svc] += draftMs;
-          row.engagement_ms_by_category.drafting[svc] += draftMs;
-          if (trackWebModelSeries && svc === webModelService) {
-            addWebModelEngagementMs(bucketKeyForDay(utcDay), mb, hostLabel, "drafting", draftMs);
-          }
+          pushWebScreenInterval(webScreenIntervals, utcDay, svc, "drafting", raw, draftMs, mb, hostLabel);
         }
         if (draftWallMs !== null && draftWallMs > 0) {
           row.draft_wall_sum_ms += draftWallMs;
@@ -3741,6 +3879,26 @@ export async function getAccountUsageStatsExtended(
       row.assistant_reply_char_sum += Math.min(400000, Math.floor(assist));
     }
   }
+
+  allocateWebScreenIntervals(prevWebScreenIntervals, (interval, durMs) => {
+    prevScreenMsBySvc[interval.service] += durMs;
+    if (trackWebModelSeries && interval.service === webModelService) {
+      prevWebModelScreenMsByModel.set(
+        interval.modelSlug,
+        (prevWebModelScreenMsByModel.get(interval.modelSlug) ?? 0) + durMs
+      );
+    }
+  });
+
+  allocateWebScreenIntervals(webScreenIntervals, (interval, durMs) => {
+    const row = hostByDayScratch.get(interval.utcDay);
+    if (!row) return;
+    row.engagement_ms_by_category[interval.category][interval.service] += durMs;
+    row.screen_time_ms_svc[interval.service] += durMs;
+    if (trackWebModelSeries && interval.service === webModelService) {
+      addWebModelEngagementMs(interval.bucket, interval.modelSlug, interval.label, interval.category, durMs);
+    }
+  });
 
   /** Merge daily scratch into timeline rows with optional ISO-week bucketing */
   let timelineFlat: TimelineBucketAgg[];

@@ -2388,6 +2388,9 @@ async function cmdHook(flags) {
     if (sessionId && event.interaction_kind === "engagement_segment" && event.engagement_category === "reading_idle") {
       markReadingIdleStart(tool, sessionId);
     }
+    if (sessionId && event.interaction_kind === "response_latency") {
+      markDraftWindowStart(tool, sessionId);
+    }
     enqueueEvent(tool, event);
     if (event.interaction_kind === "send" && sessionId) {
       recordPendingSubmit(tool, input, {

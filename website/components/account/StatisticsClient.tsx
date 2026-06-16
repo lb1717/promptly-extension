@@ -102,8 +102,8 @@ function appendIdeEmailFilterParams(
 
 const CHART_FONT_FAMILY = "var(--font-roboto-chart), Roboto, sans-serif";
 /** All chart axis ticks — dates, counts, units, and category labels on axes. */
-const CHART_Y_TICK = { fill: "#5C5C5C", fontSize: 10, fontFamily: CHART_FONT_FAMILY };
-const CHART_Y_TICK_11 = { fill: "#5C5C5C", fontSize: 11, fontFamily: CHART_FONT_FAMILY };
+const CHART_Y_TICK = { fill: "#2a2a2a", fontSize: 10, fontFamily: CHART_FONT_FAMILY };
+const CHART_Y_TICK_11 = { fill: "#2a2a2a", fontSize: 11, fontFamily: CHART_FONT_FAMILY };
 /** Date / bucket labels on chart X axes (white card backgrounds). */
 const CHART_X_DATE_TICK = {
   fill: "#2a2a2a",
@@ -114,7 +114,7 @@ const CHART_X_DATE_TICK = {
 const CHART_X_DATE_STROKE = "#525252";
 const CHART_GRID_STROKE = "rgba(0,0,0,0.06)";
 const CHART_CURSOR_FILL = "rgba(0,0,0,0.04)";
-const CHART_AXIS_LABEL = (value: string, fill = "#5C5C5C") => ({
+const CHART_AXIS_LABEL = (value: string, fill = "#2a2a2a") => ({
   value,
   angle: -90 as const,
   position: "insideLeft" as const,
@@ -144,6 +144,7 @@ const COLOR_SCORE_GREEN = "#15803d";
 const COLOR_VOLUME_DELTA_DOWN = "#dc2626";
 const COLOR_VOLUME_TREND = "#525252";
 const STATS_SCROLL_STORAGE_KEY = "promptly_statistics_scroll_y";
+const STATS_FILTER_LABEL_CLASS = "text-[13px] font-semibold uppercase tracking-wider text-muted";
 
 type PromptlySvc = "chatgpt" | "claude" | "gemini" | "unknown";
 
@@ -1820,8 +1821,8 @@ function ModeMiniChart({
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} layout="vertical" margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.08)" />
-          <XAxis type="number" stroke="#8A8A8A" tick={CHART_Y_TICK} />
-          <YAxis dataKey="name" type="category" width={92} stroke="#8A8A8A" tick={CHART_Y_TICK_11} />
+          <XAxis type="number" stroke={CHART_X_DATE_STROKE} tick={CHART_Y_TICK} />
+          <YAxis dataKey="name" type="category" width={92} stroke={CHART_X_DATE_STROKE} tick={CHART_Y_TICK_11} />
           <Tooltip contentStyle={CHART_TOOLTIP_DARK_STYLE} />
           <Bar dataKey="prompts" name="Runs" radius={[0, 6, 6, 0]} fill="#a78bfa" />
         </BarChart>
@@ -3390,7 +3391,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
               <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-2">
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-faint">Range</span>
+                    <span className={`mr-1 ${STATS_FILTER_LABEL_CLASS}`}>Range</span>
                     {STATS_RANGE_OPTIONS.map((option) => (
                       <button
                         key={option.label}
@@ -3407,7 +3408,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                   <div className="hidden h-5 w-px shrink-0 bg-line sm:block" aria-hidden />
                   <StatsGroupModeToggle value={statsGroupMode} onChange={setStatsGroupMode} />
                   {statsGroupMode === "model" ? (
-                    <label className="flex items-center gap-1.5 text-xs text-faint">
+                    <label className={`flex items-center gap-1.5 ${STATS_FILTER_LABEL_CLASS}`}>
                       Service
                       <select
                         value={selectedModelService}
@@ -3424,7 +3425,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                   ) : null}
                 </div>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-2 sm:ml-auto">
-                  <label className="flex items-center gap-1.5 text-xs text-faint">
+                  <label className={`flex items-center gap-1.5 ${STATS_FILTER_LABEL_CLASS}`}>
                     Buckets
                     <select
                       value={granularity}
@@ -3439,14 +3440,14 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                     type="button"
                     disabled={statsLoading || ideStatsLoading || !user}
                     onClick={refreshAllStats}
-                    className="w-[5.5rem] rounded-md border border-line px-2 py-0.5 text-center text-xs text-muted hover:bg-cream-dark disabled:opacity-50"
+                    className={`w-[5.5rem] rounded-md border border-line px-2 py-0.5 text-center hover:bg-cream-dark disabled:opacity-50 ${STATS_FILTER_LABEL_CLASS}`}
                   >
                     {statsLoading || ideStatsLoading ? "Refreshing…" : "Refresh"}
                   </button>
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-x-2 gap-y-2 border-t border-line/70 pt-2">
-                <span className="mr-1 shrink-0 text-[10px] font-semibold uppercase tracking-wider text-faint">
+                <span className={`mr-1 shrink-0 ${STATS_FILTER_LABEL_CLASS}`}>
                   Show
                 </span>
                 {statsGroupMode === "service"
@@ -3534,7 +3535,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                   <BarChart data={modelPromptVolumeChartRows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
                     <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
-                    <YAxis stroke="#8A8A8A" allowDecimals={false} width={32} tick={CHART_Y_TICK} />
+                    <YAxis stroke={CHART_X_DATE_STROKE} allowDecimals={false} width={32} tick={CHART_Y_TICK} />
                     <Tooltip
                       cursor={{ fill: CHART_CURSOR_FILL }}
                       contentStyle={CHART_TOOLTIP_STYLE}
@@ -3559,7 +3560,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                 <ComposedChart data={promptVolumeChartRows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
                   <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
-                  <YAxis stroke="#8A8A8A" allowDecimals={false} width={32} tick={CHART_Y_TICK} />
+                  <YAxis stroke={CHART_X_DATE_STROKE} allowDecimals={false} width={32} tick={CHART_Y_TICK} />
                   <Tooltip
                     cursor={{ fill: CHART_CURSOR_FILL }}
                     content={({ active, payload, label }) => {
@@ -3663,7 +3664,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                               >
                                 <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
                                 <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
-                                <YAxis stroke="#8A8A8A" allowDecimals={false} width={32} tick={CHART_Y_TICK} unit=" min" />
+                                <YAxis stroke={CHART_X_DATE_STROKE} allowDecimals={false} width={32} tick={CHART_Y_TICK} unit=" min" />
                                 <Tooltip
                                   cursor={{ fill: CHART_CURSOR_FILL }}
                                   contentStyle={CHART_TOOLTIP_STYLE}
@@ -3717,11 +3718,11 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                               barCategoryGap="12%"
                             >
                               <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} horizontal={false} />
-                              <XAxis type="number" stroke="#8A8A8A" tick={CHART_Y_TICK} unit=" min" />
+                              <XAxis type="number" stroke={CHART_X_DATE_STROKE} tick={CHART_Y_TICK} unit=" min" />
                               <YAxis
                                 type="category"
                                 dataKey="model"
-                                stroke="#8A8A8A"
+                                stroke={CHART_X_DATE_STROKE}
                                 tick={CHART_Y_TICK_11}
                                 width={120}
                                 reversed
@@ -3769,7 +3770,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                           >
                             <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
                             <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
-                            <YAxis stroke="#8A8A8A" allowDecimals={false} width={32} tick={CHART_Y_TICK} unit=" min" />
+                            <YAxis stroke={CHART_X_DATE_STROKE} allowDecimals={false} width={32} tick={CHART_Y_TICK} unit=" min" />
                             <Tooltip
                               cursor={{ fill: CHART_CURSOR_FILL }}
                               contentStyle={CHART_TOOLTIP_STYLE}
@@ -3812,11 +3813,11 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                           barCategoryGap="12%"
                         >
                           <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} horizontal={false} />
-                          <XAxis type="number" stroke="#8A8A8A" tick={CHART_Y_TICK} unit=" min" />
+                          <XAxis type="number" stroke={CHART_X_DATE_STROKE} tick={CHART_Y_TICK} unit=" min" />
                           <YAxis
                             type="category"
                             dataKey="service"
-                            stroke="#8A8A8A"
+                            stroke={CHART_X_DATE_STROKE}
                             tick={CHART_Y_TICK_11}
                             width={screenTimeServiceLabelWidth}
                           />
@@ -3873,7 +3874,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                           >
                             <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
                             <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
-                            <YAxis stroke="#8A8A8A" allowDecimals={false} width={32} tick={CHART_Y_TICK} unit=" min" />
+                            <YAxis stroke={CHART_X_DATE_STROKE} allowDecimals={false} width={32} tick={CHART_Y_TICK} unit=" min" />
                             <Tooltip
                               cursor={{ fill: CHART_CURSOR_FILL }}
                               contentStyle={CHART_TOOLTIP_STYLE}
@@ -3979,11 +3980,11 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                     barCategoryGap="18%"
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} horizontal={false} />
-                    <XAxis type="number" stroke="#8A8A8A" tick={CHART_Y_TICK} allowDecimals />
+                    <XAxis type="number" stroke={CHART_X_DATE_STROKE} tick={CHART_Y_TICK} allowDecimals />
                     <YAxis
                       type="category"
                       dataKey="label"
-                      stroke="#8A8A8A"
+                      stroke={CHART_X_DATE_STROKE}
                       tick={CHART_Y_TICK_11}
                       width={120}
                     />
@@ -4027,7 +4028,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                           >
                             <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
                             <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
-                            <YAxis stroke="#8A8A8A" width={40} tick={CHART_Y_TICK} unit=" s" allowDecimals />
+                            <YAxis stroke={CHART_X_DATE_STROKE} width={40} tick={CHART_Y_TICK} unit=" s" allowDecimals />
                             <Tooltip
                               cursor={{ fill: CHART_CURSOR_FILL }}
                               contentStyle={CHART_TOOLTIP_STYLE}
@@ -4080,11 +4081,11 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                         barCategoryGap="18%"
                       >
                         <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} horizontal={false} />
-                        <XAxis type="number" stroke="#8A8A8A" tick={CHART_Y_TICK} unit=" s" allowDecimals />
+                        <XAxis type="number" stroke={CHART_X_DATE_STROKE} tick={CHART_Y_TICK} unit=" s" allowDecimals />
                         <YAxis
                           type="category"
                           dataKey="model"
-                          stroke="#8A8A8A"
+                          stroke={CHART_X_DATE_STROKE}
                           tick={CHART_Y_TICK_11}
                           width={140}
                         />
@@ -4110,7 +4111,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                       <BarChart data={responseTimeOverTimeRows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
                         <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
-                        <YAxis stroke="#8A8A8A" width={40} tick={CHART_Y_TICK} unit=" s" allowDecimals />
+                        <YAxis stroke={CHART_X_DATE_STROKE} width={40} tick={CHART_Y_TICK} unit=" s" allowDecimals />
                         <Tooltip
                           cursor={{ fill: CHART_CURSOR_FILL }}
                           contentStyle={CHART_TOOLTIP_STYLE}
@@ -4153,11 +4154,11 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                       barCategoryGap="18%"
                     >
                       <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} horizontal={false} />
-                      <XAxis type="number" stroke="#8A8A8A" tick={CHART_Y_TICK} unit=" s" allowDecimals />
+                      <XAxis type="number" stroke={CHART_X_DATE_STROKE} tick={CHART_Y_TICK} unit=" s" allowDecimals />
                       <YAxis
                         type="category"
                         dataKey="service"
-                        stroke="#8A8A8A"
+                        stroke={CHART_X_DATE_STROKE}
                         tick={CHART_Y_TICK_11}
                         width={screenTimeServiceLabelWidth}
                       />
@@ -4244,11 +4245,11 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                         barGap={4}
                       >
                         <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} horizontal={false} />
-                        <XAxis type="number" stroke="#8A8A8A" tick={CHART_Y_TICK} unit="s" />
+                        <XAxis type="number" stroke={CHART_X_DATE_STROKE} tick={CHART_Y_TICK} unit="s" />
                         <YAxis
                           type="category"
                           dataKey="model"
-                          stroke="#8A8A8A"
+                          stroke={CHART_X_DATE_STROKE}
                           tick={CHART_Y_TICK_11}
                           width={72}
                         />
@@ -4291,8 +4292,8 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={latencyChartRows} margin={{ top: 8, right: 12, bottom: 56, left: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
-                  <XAxis dataKey="ai" stroke="#8A8A8A" tick={CHART_Y_TICK_11} />
-                  <YAxis stroke="#8A8A8A" tick={CHART_Y_TICK_11} label={CHART_AXIS_LABEL("Seconds (avg)")} />
+                  <XAxis dataKey="ai" stroke={CHART_X_DATE_STROKE} tick={CHART_Y_TICK_11} />
+                  <YAxis stroke={CHART_X_DATE_STROKE} tick={CHART_Y_TICK_11} label={CHART_AXIS_LABEL("Seconds (avg)")} />
                   <Tooltip
                     contentStyle={CHART_TOOLTIP_STYLE}
                     formatter={(value: number, name: string) => [`${formatChartNumber(value)} s`, name]}
@@ -4339,7 +4340,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                       <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
                       <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
                       <YAxis
-                        stroke="#8A8A8A"
+                        stroke={CHART_X_DATE_STROKE}
                         tick={CHART_Y_TICK_11}
                         allowDecimals
                         label={CHART_AXIS_LABEL("Avg words")}
@@ -4399,7 +4400,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
                     <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
-                    <YAxis stroke="#8A8A8A" tick={CHART_Y_TICK} />
+                    <YAxis stroke={CHART_X_DATE_STROKE} tick={CHART_Y_TICK} />
                     <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
                     <Bar dataKey="billed_promptly_tokens" fill="#9333ea" name="Promptly billed tokens / bucket" radius={[4, 4, 0, 0]} maxBarSize={32} />
                   </BarChart>

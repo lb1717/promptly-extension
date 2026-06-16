@@ -29,6 +29,12 @@ const CHART_X_DATE_TICK = {
 };
 const CHART_X_DATE_STROKE = "#525252";
 const CHART_GRID_STROKE = "rgba(0,0,0,0.06)";
+const PLAN_USAGE_GUIDES = {
+  low: "#dc2626",
+  medium: "#f97316",
+  high: "#86efac",
+  full: "#16a34a"
+};
 const CHART_TOOLTIP_STYLE = {
   background: "#ffffff",
   border: "1px solid #e8e8e8",
@@ -734,8 +740,14 @@ function UsageTrendChart({
   const spanMs = Math.max(cycleEndMs - cycleStartMs, 1);
   const refLabels = resolveChartReferenceLabels(cycleStartMs, cycleEndMs, nowMs);
   const lineColor =
-    currentUtil >= 75 ? "#059669" : currentUtil >= 40 ? "#d97706" : currentUtil >= 15 ? "#ea580c" : "#dc2626";
-  const projectionColor = "#64748b";
+    currentUtil > 75
+      ? PLAN_USAGE_GUIDES.full
+      : currentUtil > 50
+        ? PLAN_USAGE_GUIDES.high
+        : currentUtil > 25
+          ? PLAN_USAGE_GUIDES.medium
+          : PLAN_USAGE_GUIDES.low;
+  const projectionColor = lineColor;
 
   return (
     <div className="h-52 w-full sm:h-56">
@@ -838,11 +850,11 @@ function UsageTrendChart({
                 : {})}
             />
           ) : null}
-          <ReferenceLine y={100} stroke="#16a34a" strokeDasharray="4 4" strokeOpacity={0.75} />
-          <ReferenceLine y={75} stroke="#4ade80" strokeDasharray="3 6" strokeOpacity={0.58} />
-          <ReferenceLine y={50} stroke="#9ca3af" strokeDasharray="3 6" strokeOpacity={0.55} />
-          <ReferenceLine y={25} stroke="#f87171" strokeDasharray="3 6" strokeOpacity={0.58} />
-          <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="4 4" strokeOpacity={0.55} />
+          <ReferenceLine y={100} stroke={PLAN_USAGE_GUIDES.full} strokeDasharray="4 4" strokeOpacity={0.82} />
+          <ReferenceLine y={75} stroke={PLAN_USAGE_GUIDES.high} strokeDasharray="3 6" strokeOpacity={0.78} />
+          <ReferenceLine y={50} stroke={PLAN_USAGE_GUIDES.medium} strokeDasharray="3 6" strokeOpacity={0.78} />
+          <ReferenceLine y={25} stroke={PLAN_USAGE_GUIDES.low} strokeDasharray="3 6" strokeOpacity={0.78} />
+          <ReferenceLine y={0} stroke={PLAN_USAGE_GUIDES.low} strokeDasharray="4 4" strokeOpacity={0.62} />
           <Line
             type="linear"
             dataKey="utilization"
