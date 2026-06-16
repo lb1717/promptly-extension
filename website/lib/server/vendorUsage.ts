@@ -107,6 +107,9 @@ export function hashVendorProfileId(configDir: string): string {
   return createHash("sha256").update(configDir).digest("hex").slice(0, 16);
 }
 
+/** Stable Firestore profile id for the default Promptly Claude OAuth subscription. */
+export const CLAUDE_SUBSCRIPTION_PROFILE_ID = hashVendorProfileId("claude_subscription");
+
 function normalizeSettings(raw: unknown): VendorUsageSettings {
   const obj = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   const readProvider = (key: VendorUsageProvider): VendorUsageProviderSettings => {
@@ -353,6 +356,38 @@ export async function clearVendorUsageProfiles(uid: string, providers: VendorUsa
   return deleted;
 }
 
+async function pruneStaleClaudeProfiles(uid: string, keepDocId: string): Promise<void> {
+  const snap = await getFirebaseAdminDb().collection("users").doc(uid).collection("vendor_usage_profiles").get();
+  const batch = getFirebaseAdminDb().batch();
+  let pending = 0;
+  for (const doc of snap.docs) {
+    if (doc.id.startsWith("claude_code_") && doc.id !== keepDocId) {
+      batch.delete(doc.ref);
+      pending += 1;
+    }
+  }
+  if (pending > 0) await batch.commit();
+}
+
+function profileViewScore(row: VendorUsageProfileView): number {
+  return (
+    (row.primary_window ? 4 : 0) +
+    (row.secondary_window ? 2 : 0) +
+    (row.synced_at_ms || 0) / 1e15
+  );
+}
+
+function dedupeProfilesByProvider(views: VendorUsageProfileView[]): VendorUsageProfileView[] {
+  const best = new Map<VendorUsageProvider, VendorUsageProfileView>();
+  for (const row of views) {
+    const prev = best.get(row.provider);
+    if (!prev || profileViewScore(row) > profileViewScore(prev)) {
+      best.set(row.provider, row);
+    }
+  }
+  return [...best.values()];
+}
+
 export async function persistVendorUsageSnapshots(
   uid: string,
   snapshots: VendorUsageProfileSnapshot[],
@@ -371,6 +406,7 @@ export async function persistVendorUsageSnapshots(
   }
   if (!snapshots.length) return 0;
   let written = 0;
+  let keptClaudeDocId: string | null = null;
   for (const snap of snapshots.slice(0, 24)) {
     if (snap.provider !== "claude_code" && snap.provider !== "codex" && snap.provider !== "cursor") continue;
     if (!snap.profile_id || snap.sync_error) continue;
@@ -381,6 +417,7 @@ export async function persistVendorUsageSnapshots(
     await profileRef(uid, docId).set(
       {
         ...snap,
+        sync_error: null,
         usage_history,
         uid,
         updated_at: FieldValue.serverTimestamp()
@@ -388,6 +425,10 @@ export async function persistVendorUsageSnapshots(
       { merge: true }
     );
     written += 1;
+    if (snap.provider === "claude_code") keptClaudeDocId = docId;
+  }
+  if (keptClaudeDocId) {
+    await pruneStaleClaudeProfiles(uid, keptClaudeDocId);
   }
   return written;
 }
@@ -399,7 +440,11 @@ export async function listVendorUsageProfiles(uid: string): Promise<VendorUsageP
     const raw = doc.data() as Record<string, unknown>;
     const provider = raw.provider;
     if (provider !== "claude_code" && provider !== "codex" && provider !== "cursor") continue;
-    if (!raw.profile_id || raw.sync_error) continue;
+    if (!raw.profile_id) continue;
+    const primary_window = readWindow(raw.primary_window);
+    const secondary_window = readWindow(raw.secondary_window);
+    const sync_error = typeof raw.sync_error === "string" ? raw.sync_error : null;
+    if (sync_error && !primary_window && !secondary_window) continue;
     const usage_history = readUsageHistory(raw.usage_history);
     views.push(
       enrichProfile(
@@ -413,16 +458,18 @@ export async function listVendorUsageProfiles(uid: string): Promise<VendorUsageP
           plan_display: typeof raw.plan_display === "string" ? raw.plan_display : null,
           plan_organization_type:
             typeof raw.plan_organization_type === "string" ? raw.plan_organization_type : null,
-          primary_window: readWindow(raw.primary_window),
-          secondary_window: readWindow(raw.secondary_window),
-          sync_error: typeof raw.sync_error === "string" ? raw.sync_error : null,
+          primary_window,
+          secondary_window,
+          sync_error: primary_window || secondary_window ? null : sync_error,
           synced_at_ms: typeof raw.synced_at_ms === "number" ? raw.synced_at_ms : 0
         },
         usage_history
       )
     );
   }
-  return views.sort((a, b) => b.synced_at_ms - a.synced_at_ms || a.profile_label.localeCompare(b.profile_label));
+  return dedupeProfilesByProvider(views).sort(
+    (a, b) => b.synced_at_ms - a.synced_at_ms || a.profile_label.localeCompare(b.profile_label)
+  );
 }
 
 export async function getVendorUsagePayload(uid: string, viewerEmail: string | null = null) {
@@ -596,6 +643,9 @@ export async function refreshVendorUsageLive(uid: string): Promise<{ refreshed: 
   const existingProfiles = Object.fromEntries(existing.map((row) => [row.provider, row])) as Partial<
     Record<VendorUsageProvider, VendorUsageProfileSnapshot>
   >;
+  if (tokens.claude_code?.access_token) {
+    existingIds.claude_code = CLAUDE_SUBSCRIPTION_PROFILE_ID;
+  }
   const snapshots = await fetchLiveVendorUsageSnapshots(tokens, existingIds, existingProfiles);
   if (!snapshots.length) {
     return { refreshed: 0, error: "fetch_failed" };

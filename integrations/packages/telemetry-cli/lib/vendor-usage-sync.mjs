@@ -28,6 +28,8 @@ function hashProfileId(configDir) {
   return createHash("sha256").update(configDir).digest("hex").slice(0, 16);
 }
 
+const CLAUDE_SUBSCRIPTION_PROFILE_SEED = "claude_subscription";
+
 function profileLabelFromDir(configDir) {
   const base = basename(configDir);
   if (base === ".claude") return "Default";
@@ -441,6 +443,97 @@ function resolveVendorWindowUsedPercent(window, context = {}) {
 
 const resolveCodexWindowUsedPercent = resolveVendorWindowUsedPercent;
 
+function parseClaudeResetsAtIso(value) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? value : null;
+}
+
+function resetsAtElapsedRatio(resetsAt, windowSeconds) {
+  if (!resetsAt || !windowSeconds || windowSeconds <= 0) return null;
+  const resetMs = Date.parse(resetsAt);
+  if (!Number.isFinite(resetMs)) return null;
+  const remainingMs = resetMs - Date.now();
+  if (remainingMs < 0) return 1;
+  return Math.max(0, Math.min(1, 1 - remainingMs / (windowSeconds * 1000)));
+}
+
+function resolveClaudeWindowUsedPercent(window, context = {}) {
+  if (!window || typeof window !== "object") return 0;
+
+  const usedExplicit = window.used_percentage ?? window.used_percent;
+  if (usedExplicit != null && Number.isFinite(Number(usedExplicit))) {
+    return normalizeUtilizationPercent(usedExplicit);
+  }
+
+  const remainingRaw =
+    window.remaining_percentage ??
+    window.percent_left ??
+    window.remaining_percent ??
+    window.percent_remaining;
+  if (remainingRaw != null && Number.isFinite(Number(remainingRaw))) {
+    return normalizeUtilizationPercent(100 - Number(remainingRaw));
+  }
+
+  const utilRaw = window.utilization;
+  if (utilRaw == null || !Number.isFinite(Number(utilRaw))) return 0;
+
+  let pct = Number(utilRaw);
+  if (pct > 0 && pct <= 1) pct *= 100;
+  pct = Math.max(0, Math.min(100, pct));
+  const asUsed = normalizeUtilizationPercent(pct);
+
+  const windowSeconds = Number(context.windowSeconds ?? 5 * 3600);
+  const resetsAt =
+    context.resetsAt ?? parseClaudeResetsAtIso(window.resets_at ?? window.resetsAt);
+  const elapsed = resetsAtElapsedRatio(resetsAt, windowSeconds);
+
+  if (elapsed != null && elapsed <= 0.12 && pct >= 80) {
+    return normalizeUtilizationPercent(100 - pct);
+  }
+
+  if (
+    context.previousUtilization != null &&
+    context.previousResetsAt &&
+    resetsAt &&
+    context.previousResetsAt === resetsAt &&
+    asUsed < context.previousUtilization - 1
+  ) {
+    return normalizeUtilizationPercent(100 - pct);
+  }
+
+  return asUsed;
+}
+
+function extractClaudeUsageWindow(usage, ...keys) {
+  if (!usage || typeof usage !== "object") return null;
+  for (const key of keys) {
+    const row = usage[key];
+    if (row && typeof row === "object") return row;
+  }
+  const rateLimits = usage.rate_limits;
+  if (rateLimits && typeof rateLimits === "object") {
+    for (const key of keys) {
+      const row = rateLimits[key];
+      if (row && typeof row === "object") return row;
+    }
+  }
+  return null;
+}
+
+function buildClaudeStoredWindow(row, windowSeconds) {
+  if (!row || typeof row !== "object") return null;
+  const resets_at = row.resets_at || row.resetsAt || null;
+  return {
+    utilization: resolveClaudeWindowUsedPercent(row, {
+      resetsAt: resets_at,
+      windowSeconds
+    }),
+    resets_at,
+    window_seconds: windowSeconds
+  };
+}
+
 function parseClaudePlanFromProfile(profile) {
   if (!profile || typeof profile !== "object") {
     return { plan_slug: null, plan_display: null, plan_organization_type: null };
@@ -484,7 +577,9 @@ async function fetchClaudeProfileUsage(configDir) {
   const fromPromptlyAuth = isDefaultClaudeConfigDir(configDir) && readPromptlyClaudeAuth();
   const token = readClaudeSubscriptionAccessToken(configDir);
   const authPath = claudeAuthJsonPath();
-  const profileId = hashProfileId(fromPromptlyAuth ? authPath : configDir);
+  const profileId = fromPromptlyAuth
+    ? hashProfileId(CLAUDE_SUBSCRIPTION_PROFILE_SEED)
+    : hashProfileId(configDir);
   const profileLabel = fromPromptlyAuth ? "Claude subscription" : profileLabelFromDir(configDir);
   const resolvedConfigDir = fromPromptlyAuth ? authPath : configDir;
   const base = {
@@ -513,8 +608,8 @@ async function fetchClaudeProfileUsage(configDir) {
     }
     const usage = await usageRes.json();
     const profile = profileRes.ok ? await profileRes.json() : null;
-    const five = usage?.five_hour || usage?.fiveHour;
-    const seven = usage?.seven_day || usage?.sevenDay;
+    const five = extractClaudeUsageWindow(usage, "five_hour", "fiveHour");
+    const seven = extractClaudeUsageWindow(usage, "seven_day", "sevenDay");
     const email =
       profile?.account?.email ||
       profile?.email ||
@@ -529,20 +624,8 @@ async function fetchClaudeProfileUsage(configDir) {
       plan_slug: planSlug,
       plan_display: planDisplay,
       plan_organization_type: planOrgType,
-      primary_window: five
-        ? {
-            utilization: normalizeUtilizationPercent(five.utilization ?? five.used_percent ?? 0),
-            resets_at: five.resets_at || five.resetsAt || null,
-            window_seconds: 5 * 3600
-          }
-        : null,
-      secondary_window: seven
-        ? {
-            utilization: normalizeUtilizationPercent(seven.utilization ?? seven.used_percent ?? 0),
-            resets_at: seven.resets_at || seven.resetsAt || null,
-            window_seconds: 7 * 86400
-          }
-        : null,
+      primary_window: buildClaudeStoredWindow(five, 5 * 3600),
+      secondary_window: buildClaudeStoredWindow(seven, 7 * 86400),
       sync_error: null
     };
   } catch (err) {
@@ -812,9 +895,17 @@ export async function runVendorUsageSync({ creds, clientHeader, flags = {} }) {
   attempted.add("cursor");
   snapshots.push(await fetchCursorProfileUsage());
 
-  const successful = snapshots.filter((row) => row && !row.sync_error);
+  const vendorTokens = collectVendorTokensForUpload();
+  let successful = snapshots.filter((row) => row && !row.sync_error);
+  if (vendorTokens?.claude_code && !successful.some((row) => row.provider === "claude_code")) {
+    const retry = await fetchClaudeProfileUsage(defaultClaudeConfigDir());
+    if (!retry.sync_error) successful.push(retry);
+  }
   const succeededProviders = new Set(successful.map((row) => row.provider));
-  const clearProviders = [...attempted].filter((provider) => !succeededProviders.has(provider));
+  let clearProviders = [...attempted].filter((provider) => !succeededProviders.has(provider));
+  if (vendorTokens?.claude_code) {
+    clearProviders = clearProviders.filter((provider) => provider !== "claude_code");
+  }
   const claudeRows = snapshots.filter((row) => row?.provider === "claude_code");
   const claudeSkipReason =
     claudeRows.find((row) => row.sync_error)?.sync_error ||
@@ -840,11 +931,10 @@ export async function runVendorUsageSync({ creds, clientHeader, flags = {} }) {
       claude_auth: claudeAuth,
       skip_details: skipDetails,
       snapshots,
-      vendor_tokens_available: Boolean(collectVendorTokensForUpload())
+      vendor_tokens_available: Boolean(vendorTokens)
     };
   }
 
-  const vendorTokens = collectVendorTokensForUpload();
   if (!successful.length && !clearProviders.length && !vendorTokens) {
     return { ok: true, written: 0, message: "No subscription data found on this computer.", sync_diagnostics: syncDiagnostics };
   }

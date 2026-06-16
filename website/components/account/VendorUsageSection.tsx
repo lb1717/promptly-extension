@@ -822,7 +822,7 @@ export default function VendorUsageSection({
             <p>
               Claude not synced —{" "}
               {data?.last_sync_diagnostics?.skip_details?.claude_code ||
-                "run the sync command and complete browser sign-in."}
+                "run the sync command and complete browser sign-in, then click Refresh."}
             </p>
           ) : null}
           {!hasCursor ? <p>Cursor not synced — open Cursor, sign in, then sync again.</p> : null}

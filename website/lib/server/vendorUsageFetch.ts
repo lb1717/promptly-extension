@@ -16,6 +16,23 @@ function hashProfileId(seed: string): string {
   return createHash("sha256").update(seed).digest("hex").slice(0, 16);
 }
 
+const CLAUDE_SUBSCRIPTION_PROFILE_ID = hashProfileId("claude_subscription");
+
+function extractClaudeUsageWindow(usage: Record<string, unknown>, ...keys: string[]) {
+  for (const key of keys) {
+    const row = usage[key];
+    if (row && typeof row === "object") return row as Record<string, unknown>;
+  }
+  const rateLimits = usage.rate_limits;
+  if (rateLimits && typeof rateLimits === "object") {
+    for (const key of keys) {
+      const row = (rateLimits as Record<string, unknown>)[key];
+      if (row && typeof row === "object") return row as Record<string, unknown>;
+    }
+  }
+  return null;
+}
+
 function parseClaudePlanFromProfile(profile: Record<string, unknown> | null) {
   if (!profile) return { plan_slug: null, plan_display: null, plan_organization_type: null };
   const org = (profile.organization as Record<string, unknown> | undefined) || {};
@@ -109,8 +126,9 @@ async function fetchClaudeSnapshot(
     fetch("https://api.anthropic.com/api/oauth/profile", { headers })
   ]);
   const profile = profileRes.ok ? ((await profileRes.json()) as Record<string, unknown>) : null;
-  const five = (usage as Record<string, unknown>)?.five_hour || (usage as Record<string, unknown>)?.fiveHour;
-  const seven = (usage as Record<string, unknown>)?.seven_day || (usage as Record<string, unknown>)?.sevenDay;
+  const usageBody = usage as Record<string, unknown>;
+  const five = extractClaudeUsageWindow(usageBody, "five_hour", "fiveHour");
+  const seven = extractClaudeUsageWindow(usageBody, "seven_day", "sevenDay");
   const account = (profile?.account as Record<string, unknown> | undefined) || {};
   const email =
     (typeof account.email === "string" && account.email) ||
@@ -123,7 +141,7 @@ async function fetchClaudeSnapshot(
   const sevenResetsAt = parseVendorResetsAtIso(sevenRow?.resets_at ?? sevenRow?.resetsAt);
   return {
     provider: "claude_code",
-    profile_id: profileId || hashProfileId("claude_subscription"),
+    profile_id: profileId || CLAUDE_SUBSCRIPTION_PROFILE_ID,
     profile_label: "Claude subscription",
     config_dir: null,
     vendor_email: email,
