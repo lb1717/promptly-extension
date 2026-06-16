@@ -5,9 +5,19 @@ $Integrations = Join-Path $env:USERPROFILE "integrations"
 $ZipPath = Join-Path $env:USERPROFILE "promptly.zip"
 $InstallBase = if ($env:PROMPTLY_INSTALL_BASE) { $env:PROMPTLY_INSTALL_BASE } else { "https://promptly-labs.com/install" }
 
-Invoke-Expression ((Invoke-WebRequest -Uri "$InstallBase/_ensure-node-windows.ps1" -UseBasicParsing).Content)
+function Promptly-ImportRemoteScript {
+  param([Parameter(Mandatory)][string]$Uri)
+  $response = Invoke-WebRequest -Uri $Uri -UseBasicParsing
+  $text = $response.Content
+  if ($text -is [byte[]]) {
+    $text = [System.Text.Encoding]::UTF8.GetString($text)
+  }
+  Invoke-Expression ([string]$text)
+}
+
+Promptly-ImportRemoteScript -Uri "$InstallBase/_ensure-node-windows.ps1"
 try {
-  Invoke-Expression ((Invoke-WebRequest -Uri "$InstallBase/_install-common-windows.ps1" -UseBasicParsing).Content)
+  Promptly-ImportRemoteScript -Uri "$InstallBase/_install-common-windows.ps1"
 } catch { }
 Ensure-NodeJs
 

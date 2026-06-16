@@ -6,11 +6,21 @@ param(
 
 $InstallBase = if ($env:PROMPTLY_INSTALL_BASE) { $env:PROMPTLY_INSTALL_BASE } else { "https://promptly-labs.com/install" }
 
+function Promptly-ImportRemoteScript {
+  param([Parameter(Mandatory)][string]$Uri)
+  $response = Invoke-WebRequest -Uri $Uri -UseBasicParsing
+  $text = $response.Content
+  if ($text -is [byte[]]) {
+    $text = [System.Text.Encoding]::UTF8.GetString($text)
+  }
+  Invoke-Expression ([string]$text)
+}
+
 if (-not $Code) {
   Write-Host "Get a pairing code at https://promptly-labs.com/integrations, then run:"
   Write-Host "  irm ${InstallBase}/setup-windows.ps1 | iex; Setup-PromptlyAgents -Code YOUR_CODE"
   exit 1
 }
 
-Invoke-Expression ((Invoke-WebRequest -Uri "$InstallBase/setup-windows.ps1" -UseBasicParsing).Content)
+Promptly-ImportRemoteScript -Uri "$InstallBase/setup-windows.ps1"
 Setup-PromptlyAgents -Code $Code

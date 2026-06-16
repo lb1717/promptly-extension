@@ -9,6 +9,16 @@ $PluginPackUrl = if ($env:PROMPTLY_PLUGIN_PACK_URL) { $env:PROMPTLY_PLUGIN_PACK_
 $Integrations = Join-Path $env:USERPROFILE "integrations"
 $InstallBase = if ($env:PROMPTLY_INSTALL_BASE) { $env:PROMPTLY_INSTALL_BASE } else { "https://promptly-labs.com/install" }
 
+function Promptly-ImportRemoteScript {
+  param([Parameter(Mandatory)][string]$Uri)
+  $response = Invoke-WebRequest -Uri $Uri -UseBasicParsing
+  $text = $response.Content
+  if ($text -is [byte[]]) {
+    $text = [System.Text.Encoding]::UTF8.GetString($text)
+  }
+  Invoke-Expression ([string]$text)
+}
+
 function Sync-PromptlyAgentRuntimes {
   param([string]$CliSrc)
   $paths = @(
@@ -47,9 +57,9 @@ function Setup-PromptlyAgents {
     exit 1
   }
 
-  Invoke-Expression ((Invoke-WebRequest -Uri "$InstallBase/_ensure-node-windows.ps1" -UseBasicParsing).Content)
+  Promptly-ImportRemoteScript -Uri "$InstallBase/_ensure-node-windows.ps1"
   try {
-    Invoke-Expression ((Invoke-WebRequest -Uri "$InstallBase/_install-common-windows.ps1" -UseBasicParsing).Content)
+    Promptly-ImportRemoteScript -Uri "$InstallBase/_install-common-windows.ps1"
   } catch {
     Write-Host "Failed to load install helpers"
     exit 1
