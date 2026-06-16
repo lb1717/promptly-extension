@@ -183,9 +183,99 @@ function totalCycleDays(cycleStartMs: number, cycleEndMs: number): number {
   return cycleDayIndex(cycleStartMs, Math.max(cycleStartMs, cycleEndMs - 1));
 }
 
+function periodBoundsForOffset(currentWindow: UsageWindow, referenceMs: number, periodOffset: number) {
+  const { cycleStartMs, cycleEndMs, nowMs } = resolveBillingCycleBounds(currentWindow, referenceMs);
+  const cycleMs = Math.max(cycleEndMs - cycleStartMs, 1);
+  const periodStartMs = cycleStartMs + periodOffset * cycleMs;
+  const periodEndMs = cycleEndMs + periodOffset * cycleMs;
+  const periodNowMs = periodOffset === 0 ? nowMs : periodEndMs;
+  return { cycleStartMs: periodStartMs, cycleEndMs: periodEndMs, nowMs: periodNowMs, cycleMs };
+}
+
+function shortTime(atMs: number): string {
+  const date = new Date(atMs);
+  const hour = date.getHours();
+  const minute = date.getMinutes();
+  const h12 = hour % 12 || 12;
+  const suffix = hour < 12 ? "a" : "p";
+  return minute ? `${h12}:${String(minute).padStart(2, "0")}${suffix}` : `${h12}${suffix}`;
+}
+
+function shortMonthDay(atMs: number, includeSpace = true): string {
+  const date = new Date(atMs);
+  const month = date.toLocaleDateString(undefined, { month: "short" });
+  return includeSpace ? `${month} ${date.getDate()}` : `${month}${date.getDate()}`;
+}
+
+function formatPeriodLabel(startMs: number, endMs: number, isCurrent: boolean): string {
+  if (isCurrent) return "Current period";
+  const duration = Math.max(endMs - startMs, 1);
+  const endForLabel = Math.max(startMs, endMs - 1);
+  const start = new Date(startMs);
+  const end = new Date(endForLabel);
+  if (duration <= DAY_MS) {
+    return `${shortTime(startMs)}-${shortTime(endForLabel)}`.slice(0, 14);
+  }
+  if (start.getFullYear() === end.getFullYear() && start.getMonth() === end.getMonth()) {
+    return `${shortMonthDay(startMs)}-${end.getDate()}`.slice(0, 14);
+  }
+  return `${shortMonthDay(startMs, false)}-${shortMonthDay(endForLabel, false)}`.slice(0, 14);
+}
+
+function periodOffsetForPoint(cycleStartMs: number, cycleMs: number, atMs: number): number {
+  return Math.floor((atMs - cycleStartMs) / cycleMs);
+}
+
+function buildAvailablePeriodOffsets(
+  history: UsageHistoryPoint[],
+  currentWindow: UsageWindow | null,
+  syncedAtMs: number
+): number[] {
+  if (!currentWindow) return [0];
+  const referenceMs = syncedAtMs || Date.now();
+  const { cycleStartMs, cycleMs, nowMs } = periodBoundsForOffset(currentWindow, referenceMs, 0);
+  const offsets = new Set<number>([0]);
+  for (const point of history) {
+    if (point.at_ms > nowMs) continue;
+    const offset = periodOffsetForPoint(cycleStartMs, cycleMs, point.at_ms);
+    if (offset <= 0 && offset >= -120) offsets.add(offset);
+  }
+  return [...offsets].sort((a, b) => a - b);
+}
+
+function buildPeriodNavState(
+  history: UsageHistoryPoint[],
+  currentWindow: UsageWindow | null,
+  syncedAtMs: number,
+  selectedOffset: number
+): PeriodNavState {
+  const offsets = buildAvailablePeriodOffsets(history, currentWindow, syncedAtMs);
+  const normalizedOffset = offsets.includes(selectedOffset) ? selectedOffset : 0;
+  const idx = offsets.indexOf(normalizedOffset);
+  const previousOffset = idx > 0 ? offsets[idx - 1] : null;
+  const nextOffset = normalizedOffset < 0 ? offsets.find((offset) => offset > normalizedOffset) ?? 0 : null;
+
+  let label = "Current period";
+  if (currentWindow) {
+    const referenceMs = syncedAtMs || Date.now();
+    const { cycleStartMs, cycleEndMs } = periodBoundsForOffset(currentWindow, referenceMs, normalizedOffset);
+    label = formatPeriodLabel(cycleStartMs, cycleEndMs, normalizedOffset === 0);
+  }
+
+  return {
+    offsets,
+    selectedOffset: normalizedOffset,
+    label,
+    canGoBack: previousOffset != null,
+    canGoForward: nextOffset != null && normalizedOffset < 0,
+    previousOffset,
+    nextOffset
+  };
+}
+
 function aggregateDailyUsagePoints(
   history: UsageHistoryPoint[],
-  currentUtil: number,
+  currentUtil: number | null,
   cycleStartMs: number,
   nowMs: number
 ): { at_ms: number; utilization: number; dayIndex: number }[] {
@@ -203,7 +293,9 @@ function aggregateDailyUsagePoints(
   for (const point of history) {
     upsert(point.at_ms, displayUtilization(point.utilization));
   }
-  upsert(nowMs, currentUtil);
+  if (currentUtil != null) {
+    upsert(nowMs, currentUtil);
+  }
 
   return [...byDay.values()]
     .sort((a, b) => a.at_ms - b.at_ms)
@@ -277,7 +369,18 @@ type BillingCycleChart = {
   cycleEndMs: number;
   nowMs: number;
   projectedEndUtil: number;
+  isCurrentPeriod: boolean;
   yMax: number;
+};
+
+type PeriodNavState = {
+  offsets: number[];
+  selectedOffset: number;
+  label: string;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  previousOffset: number | null;
+  nextOffset: number | null;
 };
 
 function formatUsd(value: number): string {
@@ -483,17 +586,19 @@ function buildBillingCycleChartRows(
   history: UsageHistoryPoint[],
   currentWindow: UsageWindow | null,
   syncedAtMs: number,
-  windowSeconds: number | null
+  windowSeconds: number | null,
+  periodOffset = 0
 ): BillingCycleChart | null {
   if (!currentWindow) return null;
 
   const referenceMs = syncedAtMs || Date.now();
-  const { cycleStartMs, cycleEndMs, nowMs } = resolveBillingCycleBounds(currentWindow, referenceMs);
+  const isCurrentPeriod = periodOffset === 0;
+  const { cycleStartMs, cycleEndMs, nowMs } = periodBoundsForOffset(currentWindow, referenceMs, periodOffset);
   const spanMs = Math.max(cycleEndMs - cycleStartMs, 1);
-  const currentUtil = displayUtilization(currentWindow.utilization);
+  const currentUtil = isCurrentPeriod ? displayUtilization(currentWindow.utilization) : null;
 
   const dailyPoints = aggregateDailyUsagePoints(history, currentUtil, cycleStartMs, nowMs);
-  if (dailyPoints.length === 0) {
+  if (dailyPoints.length === 0 && currentUtil != null) {
     dailyPoints.push({
       at_ms: dayChartMs(nowMs),
       utilization: currentUtil,
@@ -501,9 +606,17 @@ function buildBillingCycleChartRows(
     });
   }
 
-  const currentDayIndex = cycleDayIndex(cycleStartMs, nowMs);
-  const latestUtil = dailyPoints[dailyPoints.length - 1].utilization;
-  const dailyAverage = latestUtil / currentDayIndex;
+  const currentDayIndex = isCurrentPeriod ? cycleDayIndex(cycleStartMs, nowMs) : totalCycleDays(cycleStartMs, cycleEndMs);
+  if (isCurrentPeriod && dailyPoints.length > 0 && currentUtil != null) {
+    dailyPoints[dailyPoints.length - 1] = {
+      ...dailyPoints[dailyPoints.length - 1],
+      at_ms: nowMs,
+      utilization: currentUtil,
+      dayIndex: currentDayIndex
+    };
+  }
+  const latestUtil = dailyPoints[dailyPoints.length - 1]?.utilization ?? 0;
+  const dailyAverage = latestUtil / Math.max(1, currentDayIndex);
   const cycleDays = totalCycleDays(cycleStartMs, cycleEndMs);
   const projectedEndFromDisplay = dailyAverage * cycleDays;
 
@@ -529,16 +642,19 @@ function buildBillingCycleChartRows(
     }))
   ];
 
-  const junction: ChartRow = {
+  const junction: ChartRow | null = isCurrentPeriod
+    ? {
     at_ms: nowMs,
     label: formatChartXLabel(nowMs, spanMs, windowSeconds),
     utilization: null,
     projectedUtilization: latestUtil,
     isReading: false,
     isProjection: false
-  };
+      }
+    : null;
 
-  const projectionEnd: ChartRow = {
+  const projectionEnd: ChartRow | null = isCurrentPeriod
+    ? {
     at_ms: cycleEndMs,
     label: formatChartXLabel(cycleEndMs, spanMs, windowSeconds),
     utilization: null,
@@ -546,9 +662,10 @@ function buildBillingCycleChartRows(
     isReading: false,
     isProjection: true,
     isCycleAnchor: true
-  };
+      }
+    : null;
 
-  const rows = [...solidRows, junction, projectionEnd];
+  const rows = [...solidRows, ...(junction ? [junction] : []), ...(projectionEnd ? [projectionEnd] : [])];
   const yMax = chartYDomainMax(
     rows.flatMap((row) => [row.utilization, row.projectedUtilization].filter((v): v is number => v != null))
   );
@@ -558,7 +675,8 @@ function buildBillingCycleChartRows(
     cycleStartMs,
     cycleEndMs,
     nowMs,
-    projectedEndUtil: Math.max(0, projectedEndFromDisplay),
+    projectedEndUtil: isCurrentPeriod ? Math.max(0, projectedEndFromDisplay) : 0,
+    isCurrentPeriod,
     yMax
   };
 }
@@ -582,7 +700,7 @@ function UsageTrendChart({
   return (
     <div className="h-52 w-full sm:h-56">
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={rows} margin={{ top: 22, right: 18, bottom: 4, left: 4 }}>
+        <LineChart data={rows} margin={{ top: 22, right: 18, bottom: 4, left: 6 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
           <XAxis
             dataKey="at_ms"
@@ -598,10 +716,18 @@ function UsageTrendChart({
             domain={[0, yMax]}
             stroke="#8A8A8A"
             allowDecimals={false}
-            width={36}
+            width={52}
             tick={CHART_Y_TICK}
             ticks={chartYTicks(yMax)}
             unit="%"
+            label={{
+              value: "Token Usage",
+              angle: -90,
+              position: "insideLeft",
+              fill: "#525252",
+              fontSize: 10,
+              fontFamily: CHART_FONT_FAMILY
+            }}
           />
           <Tooltip
             contentStyle={CHART_TOOLTIP_STYLE}
@@ -637,23 +763,25 @@ function UsageTrendChart({
               fontSize: 9
             }}
           />
-          <ReferenceLine
-            x={nowMs}
-            stroke="#94a3b8"
-            strokeDasharray="2 4"
-            strokeWidth={1}
-            strokeOpacity={0.85}
-            {...(refLabels.showNowLabel
-              ? {
-                  label: {
-                    value: "Now",
-                    position: refLabels.nowLabelPosition,
-                    fill: "#64748b",
-                    fontSize: 9
+          {chart.isCurrentPeriod ? (
+            <ReferenceLine
+              x={nowMs}
+              stroke="#94a3b8"
+              strokeDasharray="2 4"
+              strokeWidth={1}
+              strokeOpacity={0.85}
+              {...(refLabels.showNowLabel
+                ? {
+                    label: {
+                      value: "Now",
+                      position: refLabels.nowLabelPosition,
+                      fill: "#64748b",
+                      fontSize: 9
+                    }
                   }
-                }
-              : {})}
-          />
+                : {})}
+            />
+          ) : null}
           <ReferenceLine y={100} stroke="#16a34a" strokeDasharray="4 4" strokeOpacity={0.75} />
           <ReferenceLine y={75} stroke="#86efac" strokeDasharray="3 6" strokeOpacity={0.35} />
           <ReferenceLine y={50} stroke="#d1d5db" strokeDasharray="3 6" strokeOpacity={0.35} />
@@ -729,6 +857,47 @@ function UsageTrendChart({
   );
 }
 
+function PeriodNavigator({
+  state,
+  onChange
+}: {
+  state: PeriodNavState;
+  onChange: (offset: number) => void;
+}) {
+  const arrowClass = (enabled: boolean) =>
+    `px-1 text-sm font-semibold transition-colors ${
+      enabled ? "text-sky-700 hover:text-sky-900" : "cursor-default text-faint/45"
+    }`;
+
+  return (
+    <div className="mt-2 flex items-center justify-center gap-2 text-xs font-medium">
+      <button
+        type="button"
+        aria-label="Previous period"
+        disabled={!state.canGoBack || state.previousOffset == null}
+        onClick={() => {
+          if (state.previousOffset != null) onChange(state.previousOffset);
+        }}
+        className={arrowClass(state.canGoBack)}
+      >
+        &lt;
+      </button>
+      <span className="min-w-[6.25rem] text-center text-sky-700">{state.label}</span>
+      <button
+        type="button"
+        aria-label="Next period"
+        disabled={!state.canGoForward || state.nextOffset == null}
+        onClick={() => {
+          if (state.nextOffset != null) onChange(state.nextOffset);
+        }}
+        className={arrowClass(state.canGoForward)}
+      >
+        &gt;
+      </button>
+    </div>
+  );
+}
+
 function SubscriptionUsageRow({
   profile,
   rangeDays
@@ -741,6 +910,7 @@ function SubscriptionUsageRow({
   const hasSecondary = Boolean(profile.secondary_window);
   const showWindowToggle = showsShortWindowToggle(profile.provider) && hasPrimary && hasSecondary;
   const [windowKind, setWindowKind] = useState<WindowKind>(() => defaultWindowKind(profile));
+  const [periodOffset, setPeriodOffset] = useState(0);
 
   const activeWindow = windowKind === "primary" ? profile.primary_window : profile.secondary_window;
   const activeHistory =
@@ -749,22 +919,40 @@ function SubscriptionUsageRow({
       : profile.usage_history?.secondary ?? [];
   const dollarsUsed =
     windowKind === "primary" ? profile.primary_dollars_used : profile.secondary_dollars_used;
+  const periodNav = useMemo(
+    () => buildPeriodNavState(activeHistory, activeWindow, profile.synced_at_ms, periodOffset),
+    [activeHistory, activeWindow, profile.synced_at_ms, periodOffset]
+  );
+
+  useEffect(() => {
+    setPeriodOffset(0);
+  }, [windowKind, profile.profile_id]);
+
+  useEffect(() => {
+    if (periodNav.selectedOffset !== periodOffset) {
+      setPeriodOffset(periodNav.selectedOffset);
+    }
+  }, [periodNav.selectedOffset, periodOffset]);
+
   const chart = useMemo(
     () =>
       buildBillingCycleChartRows(
         activeHistory,
         activeWindow,
         profile.synced_at_ms,
-        activeWindow?.window_seconds ?? null
+        activeWindow?.window_seconds ?? null,
+        periodNav.selectedOffset
       ),
-    [activeHistory, activeWindow, profile.synced_at_ms]
+    [activeHistory, activeWindow, profile.synced_at_ms, periodNav.selectedOffset]
   );
   const currentUtil = activeWindow ? displayUtilization(activeWindow.utilization) : 0;
+  const chartDisplayUtil =
+    [...(chart?.rows ?? [])].reverse().find((row) => row.utilization != null)?.utilization ?? currentUtil;
   const displayDollarsUsed =
     activeWindow && profile.plan_monthly_usd != null
       ? dollarsUsedFromUtilization(
           profile.plan_monthly_usd,
-          currentUtil,
+          chartDisplayUtil,
           activeWindow.window_seconds ?? null
         )
       : dollarsUsed;
@@ -809,6 +997,8 @@ function SubscriptionUsageRow({
         ) : null}
       </div>
 
+      {activeWindow ? <PeriodNavigator state={periodNav} onChange={setPeriodOffset} /> : null}
+
       {activeWindow ? (
         <>
           <p className="mb-3 text-sm text-muted">
@@ -823,9 +1013,18 @@ function SubscriptionUsageRow({
                 {windowLabel.toLowerCase()} limit used
               </>
             )}
-            {" · resets "}
-            {formatResetCountdown(activeWindow.resets_at)}
-            {chart && chart.projectedEndUtil > 0 ? (
+            {chart?.isCurrentPeriod ? (
+              <>
+                {" · resets "}
+                {formatResetCountdown(activeWindow.resets_at)}
+              </>
+            ) : chart ? (
+              <>
+                {" · ended "}
+                {formatCycleBoundaryLabel(chart.cycleEndMs)}
+              </>
+            ) : null}
+            {chart?.isCurrentPeriod && chart.projectedEndUtil > 0 ? (
               <>
                 {" · projected "}
                 <span className="font-medium tabular-nums text-ink">{Math.round(chart.projectedEndUtil)}%</span>
@@ -836,7 +1035,7 @@ function SubscriptionUsageRow({
           {chart ? (
             <UsageTrendChart
               chart={chart}
-              currentUtil={currentUtil}
+              currentUtil={chartDisplayUtil}
               windowSeconds={activeWindow.window_seconds}
             />
           ) : null}

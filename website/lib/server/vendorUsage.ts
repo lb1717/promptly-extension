@@ -81,7 +81,7 @@ export type VendorUsageProfileView = VendorUsageProfileSnapshot & {
   usage_history: VendorUsageWindowHistory;
 };
 
-const USAGE_HISTORY_CAP = 240;
+const USAGE_HISTORY_CAP = 720;
 const USAGE_HISTORY_MIN_GAP_MS = 5 * 60 * 1000;
 
 const DEFAULT_SETTINGS: VendorUsageSettings = {
