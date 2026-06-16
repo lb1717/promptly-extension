@@ -388,6 +388,23 @@ function formatUsd(value: number): string {
   return value >= 100 ? `$${Math.round(value)}` : `$${value.toFixed(2)}`;
 }
 
+function formatCurrency(value: number): string {
+  if (!Number.isFinite(value)) return "—";
+  return value % 1 === 0 ? `$${Math.round(value)}` : `$${value.toFixed(2)}`;
+}
+
+function planPriceLabel(monthlyUsd: number | null): string | null {
+  if (monthlyUsd == null) return null;
+  return `${formatCurrency(monthlyUsd)}/month`;
+}
+
+function resetPhrase(resetsAt: string | null, isCurrentPeriod: boolean, cycleEndMs: number | null): string {
+  if (isCurrentPeriod) {
+    return `Resets in ${formatResetCountdown(resetsAt)}`;
+  }
+  return cycleEndMs ? `Ended ${formatCycleBoundaryLabel(cycleEndMs)}` : "Ended";
+}
+
 function activeUsageWindow(profile: VendorProfile): {
   window: UsageWindow;
   history: UsageHistoryPoint[];
@@ -744,9 +761,10 @@ function UsageTrendChart({
             ticks={chartYTicks(yMax)}
             unit="%"
             label={{
-              value: "Token Usage",
+              value: "Plan Usage",
               angle: -90,
               position: "insideLeft",
+              offset: 8,
               fill: "#525252",
               fontSize: 10,
               fontFamily: CHART_FONT_FAMILY
@@ -995,21 +1013,18 @@ function SubscriptionUsageRow({
         )
       : dollarsUsed;
   const windowLabel = windowKind === "primary" ? labels.primary : labels.secondary;
+  const priceLabel = planPriceLabel(profile.plan_monthly_usd);
 
   return (
     <article className="rounded-xl border border-line bg-white p-4 sm:p-5">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-sm font-semibold text-ink">{PROVIDER_LABEL[profile.provider]}</p>
-          <p className="mt-0.5 text-sm text-muted">
-            {profile.plan_display || "Unknown plan"}
-            {profile.plan_monthly_usd != null ? (
-              <span className="text-faint"> · ${profile.plan_monthly_usd}/mo</span>
-            ) : null}
+          <p className="mt-0.5 truncate text-sm text-muted">
+            <span>{profile.plan_display || "Unknown plan"}</span>
+            {priceLabel ? <span> · {priceLabel}</span> : null}
+            {profile.vendor_email ? <span> · {profile.vendor_email}</span> : null}
           </p>
-          {profile.vendor_email ? (
-            <p className="mt-1 truncate text-xs text-faint">{profile.vendor_email}</p>
-          ) : null}
         </div>
         {activeWindow ? (
           <div className="flex shrink-0 flex-col items-center">
@@ -1043,33 +1058,22 @@ function SubscriptionUsageRow({
       {activeWindow ? (
         <>
           <p className="mb-3 text-sm text-muted">
+            <span className="font-semibold tabular-nums text-ink">{Math.round(chartDisplayUtil)}%</span>
             {displayDollarsUsed != null ? (
               <>
-                About <span className="font-semibold tabular-nums text-ink">${displayDollarsUsed.toFixed(2)}</span> of your{" "}
-                {windowLabel.toLowerCase()} plan value used
-              </>
-            ) : (
-              <>
-                <span className="font-semibold tabular-nums text-ink">{Math.round(currentUtil)}%</span> of your{" "}
-                {windowLabel.toLowerCase()} limit used
-              </>
-            )}
-            {chart?.isCurrentPeriod ? (
-              <>
-                {" · resets "}
-                {formatResetCountdown(activeWindow.resets_at)}
-              </>
-            ) : chart ? (
-              <>
-                {" · ended "}
-                {formatCycleBoundaryLabel(chart.cycleEndMs)}
+                {" ("}
+                <span className="font-semibold tabular-nums text-ink">{formatCurrency(displayDollarsUsed)}</span>
+                {")"}
               </>
             ) : null}
+            {" of your "}
+            {windowLabel.toLowerCase()} plan used,{" "}
+            {resetPhrase(activeWindow.resets_at, chart?.isCurrentPeriod ?? true, chart?.cycleEndMs ?? null)}
             {chart?.isCurrentPeriod && chart.projectedEndUtil > 0 ? (
               <>
-                {" · projected "}
+                {", projected to use "}
                 <span className="font-medium tabular-nums text-ink">{Math.round(chart.projectedEndUtil)}%</span>
-                {" at cycle end"}
+                {" this cycle"}
               </>
             ) : null}
           </p>
