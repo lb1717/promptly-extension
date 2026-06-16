@@ -573,13 +573,36 @@ function resolveChartReferenceLabels(cycleStartMs: number, cycleEndMs: number, n
 
   return {
     showNowLabel: !nearStart && !nearEnd,
-    nowLabelPosition: (startFrac < 0.3 ? "insideTopRight" : endFrac < 0.3 ? "insideTopLeft" : "insideTop") as
-      | "insideTop"
-      | "insideTopLeft"
-      | "insideTopRight",
-    startLabelPosition: (nearStart ? "insideBottomLeft" : "insideTopLeft") as "insideBottomLeft" | "insideTopLeft",
-    endLabelPosition: (nearEnd ? "insideBottomRight" : "insideTopRight") as "insideBottomRight" | "insideTopRight"
+    nowLabelDx: startFrac < 0.3 ? 14 : endFrac < 0.3 ? -14 : 0
   };
+}
+
+function TopReferenceLabel({
+  viewBox,
+  value,
+  textAnchor,
+  dx = 0
+}: {
+  viewBox?: unknown;
+  value: string;
+  textAnchor: "start" | "middle" | "end";
+  dx?: number;
+}) {
+  const box = viewBox && typeof viewBox === "object" ? (viewBox as { x?: unknown; y?: unknown }) : {};
+  const x = Number(typeof box.x === "number" ? box.x : 0) + dx;
+  const y = Number(typeof box.y === "number" ? box.y : 0) - 10;
+  return (
+    <text
+      x={x}
+      y={y}
+      textAnchor={textAnchor}
+      fill="#64748b"
+      fontSize={9}
+      fontFamily={CHART_FONT_FAMILY}
+    >
+      {value}
+    </text>
+  );
 }
 
 function buildBillingCycleChartRows(
@@ -700,7 +723,7 @@ function UsageTrendChart({
   return (
     <div className="h-52 w-full sm:h-56">
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={rows} margin={{ top: 22, right: 18, bottom: 4, left: 6 }}>
+        <LineChart data={rows} margin={{ top: 38, right: 18, bottom: 4, left: 6 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
           <XAxis
             dataKey="at_ms"
@@ -747,9 +770,14 @@ function UsageTrendChart({
             strokeWidth={1}
             label={{
               value: `Start · ${formatCycleBoundaryLabel(cycleStartMs)}`,
-              position: refLabels.startLabelPosition,
-              fill: "#64748b",
-              fontSize: 9
+              content: (props) => (
+                <TopReferenceLabel
+                  viewBox={props.viewBox}
+                  value={`Start · ${formatCycleBoundaryLabel(cycleStartMs)}`}
+                  textAnchor="start"
+                  dx={2}
+                />
+              )
             }}
           />
           <ReferenceLine
@@ -758,9 +786,14 @@ function UsageTrendChart({
             strokeWidth={1}
             label={{
               value: `End · ${formatCycleBoundaryLabel(cycleEndMs)}`,
-              position: refLabels.endLabelPosition,
-              fill: "#64748b",
-              fontSize: 9
+              content: (props) => (
+                <TopReferenceLabel
+                  viewBox={props.viewBox}
+                  value={`End · ${formatCycleBoundaryLabel(cycleEndMs)}`}
+                  textAnchor="end"
+                  dx={-2}
+                />
+              )
             }}
           />
           {chart.isCurrentPeriod ? (
@@ -774,18 +807,23 @@ function UsageTrendChart({
                 ? {
                     label: {
                       value: "Now",
-                      position: refLabels.nowLabelPosition,
-                      fill: "#64748b",
-                      fontSize: 9
+                    content: (props) => (
+                      <TopReferenceLabel
+                        viewBox={props.viewBox}
+                        value="Now"
+                        textAnchor="middle"
+                        dx={refLabels.nowLabelDx}
+                      />
+                    )
                     }
                   }
                 : {})}
             />
           ) : null}
           <ReferenceLine y={100} stroke="#16a34a" strokeDasharray="4 4" strokeOpacity={0.75} />
-          <ReferenceLine y={75} stroke="#86efac" strokeDasharray="3 6" strokeOpacity={0.35} />
-          <ReferenceLine y={50} stroke="#d1d5db" strokeDasharray="3 6" strokeOpacity={0.35} />
-          <ReferenceLine y={25} stroke="#fca5a5" strokeDasharray="3 6" strokeOpacity={0.35} />
+          <ReferenceLine y={75} stroke="#4ade80" strokeDasharray="3 6" strokeOpacity={0.58} />
+          <ReferenceLine y={50} stroke="#9ca3af" strokeDasharray="3 6" strokeOpacity={0.55} />
+          <ReferenceLine y={25} stroke="#f87171" strokeDasharray="3 6" strokeOpacity={0.58} />
           <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="4 4" strokeOpacity={0.55} />
           <Line
             type="linear"
