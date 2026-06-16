@@ -146,28 +146,9 @@ export function resolveClaudeWindowUsedPercent(
   let pct = Number(utilRaw);
   if (pct > 0 && pct <= 1) pct *= 100;
   pct = Math.max(0, Math.min(100, pct));
-  const asUsed = normalizeUtilizationPercent(pct);
 
-  const windowSeconds = Number(context.windowSeconds ?? 5 * 3600);
-  const resetsAt =
-    context.resetsAt ?? parseVendorResetsAtIso(window.resets_at ?? window.resetsAt);
-  const elapsed = resetsAtElapsedRatio(resetsAt, windowSeconds);
-
-  if (elapsed != null && elapsed <= 0.12 && pct >= 80) {
-    return normalizeUtilizationPercent(100 - pct);
-  }
-
-  if (
-    context.previousUtilization != null &&
-    context.previousResetsAt &&
-    resetsAt &&
-    context.previousResetsAt === resetsAt &&
-    asUsed < context.previousUtilization - 1
-  ) {
-    return normalizeUtilizationPercent(100 - pct);
-  }
-
-  return asUsed;
+  // Anthropic oauth/usage reports remaining quota in `utilization`, not percent used.
+  return normalizeUtilizationPercent(100 - pct);
 }
 
 /** Normalize vendor quota windows (Claude, Codex, Cursor) to percent used — not remaining. */

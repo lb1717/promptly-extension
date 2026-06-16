@@ -6,7 +6,6 @@ import {
   dollarsUsedFromUtilization,
   normalizeUtilizationPercent,
   parseVendorResetsAtIso,
-  resolveClaudeWindowUsedPercent,
   resolveVendorPlanPricing
 } from "@/lib/vendorPlanPricing";
 import { fetchLiveVendorUsageSnapshots } from "@/lib/server/vendorUsageFetch";
@@ -200,53 +199,6 @@ function readWindow(raw: unknown): VendorUsageWindow | null {
   };
 }
 
-function fixClaudeWindow(
-  window: VendorUsageWindow | null,
-  history: VendorUsageHistoryPoint[],
-  windowSeconds: number
-): VendorUsageWindow | null {
-  if (!window) return null;
-  const previousPoint = history.length > 0 ? history[history.length - 1] : null;
-  const resetsAt = parseVendorResetsAtIso(window.resets_at) ?? window.resets_at;
-  return {
-    ...window,
-    resets_at: resetsAt,
-    utilization: resolveClaudeWindowUsedPercent(
-      { utilization: window.utilization },
-      {
-        previousUtilization: previousPoint?.utilization ?? null,
-        previousResetsAt: resetsAt,
-        resetsAt,
-        windowSeconds
-      }
-    )
-  };
-}
-
-function fixClaudeHistory(
-  history: VendorUsageHistoryPoint[],
-  window: VendorUsageWindow | null,
-  windowSeconds: number
-): VendorUsageHistoryPoint[] {
-  if (!history.length || !window) return history;
-  const resetsAt = parseVendorResetsAtIso(window.resets_at) ?? window.resets_at;
-  return history.map((point, index) => {
-    const previous = index > 0 ? history[index - 1] : null;
-    return {
-      ...point,
-      utilization: resolveClaudeWindowUsedPercent(
-        { utilization: point.utilization },
-        {
-          previousUtilization: previous?.utilization ?? null,
-          previousResetsAt: resetsAt,
-          resetsAt,
-          windowSeconds
-        }
-      )
-    };
-  });
-}
-
 function enrichProfile(
   row: VendorUsageProfileSnapshot,
   usage_history: VendorUsageWindowHistory = { primary: [], secondary: [] }
@@ -261,33 +213,9 @@ function enrichProfile(
   );
   const monthly = pricing?.monthlyUsd ?? null;
   const planDisplay = row.plan_display || pricing?.displayName || null;
-  const primaryWindow =
-    row.provider === "claude_code"
-      ? fixClaudeWindow(row.primary_window, usage_history.primary, row.primary_window?.window_seconds ?? 5 * 3600)
-      : row.primary_window;
-  const secondaryWindow =
-    row.provider === "claude_code"
-      ? fixClaudeWindow(
-          row.secondary_window,
-          usage_history.secondary,
-          row.secondary_window?.window_seconds ?? 7 * 86400
-        )
-      : row.secondary_window;
-  const normalizedHistory =
-    row.provider === "claude_code"
-      ? {
-          primary: fixClaudeHistory(
-            usage_history.primary,
-            row.primary_window,
-            row.primary_window?.window_seconds ?? 5 * 3600
-          ),
-          secondary: fixClaudeHistory(
-            usage_history.secondary,
-            row.secondary_window,
-            row.secondary_window?.window_seconds ?? 7 * 86400
-          )
-        }
-      : usage_history;
+  const primaryWindow = row.primary_window;
+  const secondaryWindow = row.secondary_window;
+  const normalizedHistory = usage_history;
   return {
     ...row,
     primary_window: primaryWindow,
@@ -479,6 +407,7 @@ export async function getVendorUsagePayload(uid: string, viewerEmail: string | n
   ]);
   const settings = normalizeSettings(settingsSnap.exists ? settingsSnap.data() : null);
   const tokenStatus = await getVendorUsageTokenStatus(uid);
+  const storedTokens = tokenStatus.can_decrypt ? await getVendorUsageTokens(uid) : null;
   const rawDiagnostics = settingsSnap.exists ? settingsSnap.data()?.last_sync_diagnostics : null;
   const lastSyncDiagnostics =
     rawDiagnostics &&
@@ -500,6 +429,7 @@ export async function getVendorUsagePayload(uid: string, viewerEmail: string | n
     settings,
     profiles,
     can_live_refresh: tokenStatus.can_decrypt,
+    has_claude_tokens: Boolean(storedTokens?.claude_code?.access_token),
     vendor_tokens_updated_at_ms: tokenStatus.updated_at_ms || null,
     vendor_tokens_device_email: tokenStatus.device_email,
     account_email_mismatch,
@@ -573,6 +503,7 @@ export async function storeVendorUsageTokens(
 ): Promise<boolean> {
   const tokens = sanitizeStoredVendorTokens(rawTokens);
   if (!tokens) return false;
+  const current = await getVendorUsageSettings(uid);
   await settingsRef(uid).set(
     {
       encrypted_vendor_tokens: encryptVendorTokens(tokens),
@@ -580,7 +511,10 @@ export async function storeVendorUsageTokens(
       vendor_tokens_device_email:
         typeof meta.device_email === "string" && meta.device_email.includes("@")
           ? meta.device_email.trim().slice(0, 320)
-          : null
+          : null,
+      claude_code: { ...current.claude_code, enabled: true },
+      codex: { ...current.codex, enabled: true },
+      cursor: { ...current.cursor, enabled: true }
     },
     { merge: true }
   );
@@ -627,6 +561,48 @@ export async function getVendorUsageTokens(uid: string): Promise<StoredVendorTok
   return tokens;
 }
 
+function snapshotSucceeded(row: VendorUsageProfileSnapshot | null | undefined): row is VendorUsageProfileSnapshot {
+  return Boolean(row && !row.sync_error);
+}
+
+/** Fill missing provider snapshots from encrypted tokens (same path as live Refresh). */
+export async function mergeSnapshotsFromStoredTokens(
+  uid: string,
+  snapshots: VendorUsageProfileSnapshot[],
+  tokens: StoredVendorTokens | null
+): Promise<VendorUsageProfileSnapshot[]> {
+  if (!tokens) return snapshots;
+  const succeeded = new Set(
+    snapshots.filter((row) => snapshotSucceeded(row)).map((row) => row.provider)
+  );
+  const missing: VendorUsageProvider[] = [];
+  if (tokens.claude_code?.access_token && !succeeded.has("claude_code")) missing.push("claude_code");
+  if (tokens.codex?.access_token && !succeeded.has("codex")) missing.push("codex");
+  if (tokens.cursor?.access_token && !succeeded.has("cursor")) missing.push("cursor");
+  if (!missing.length) return snapshots;
+
+  const existing = await listVendorUsageProfiles(uid);
+  const existingIds = Object.fromEntries(existing.map((row) => [row.provider, row.profile_id])) as Partial<
+    Record<VendorUsageProvider, string>
+  >;
+  const existingProfiles = Object.fromEntries(existing.map((row) => [row.provider, row])) as Partial<
+    Record<VendorUsageProvider, VendorUsageProfileSnapshot>
+  >;
+  if (tokens.claude_code?.access_token && !existingIds.claude_code) {
+    existingIds.claude_code = CLAUDE_SUBSCRIPTION_PROFILE_ID;
+  }
+
+  const live = await fetchLiveVendorUsageSnapshots(tokens, existingIds, existingProfiles);
+  const out = [...snapshots];
+  for (const row of live) {
+    if (snapshotSucceeded(row) && !succeeded.has(row.provider)) {
+      out.push(row);
+      succeeded.add(row.provider);
+    }
+  }
+  return out;
+}
+
 export async function refreshVendorUsageLive(uid: string): Promise<{ refreshed: number; error?: string }> {
   const tokenStatus = await getVendorUsageTokenStatus(uid);
   if (!tokenStatus.has_blob) {
@@ -643,7 +619,7 @@ export async function refreshVendorUsageLive(uid: string): Promise<{ refreshed: 
   const existingProfiles = Object.fromEntries(existing.map((row) => [row.provider, row])) as Partial<
     Record<VendorUsageProvider, VendorUsageProfileSnapshot>
   >;
-  if (tokens.claude_code?.access_token) {
+  if (tokens.claude_code?.access_token && !existingIds.claude_code) {
     existingIds.claude_code = CLAUDE_SUBSCRIPTION_PROFILE_ID;
   }
   const snapshots = await fetchLiveVendorUsageSnapshots(tokens, existingIds, existingProfiles);

@@ -1,6 +1,7 @@
 "use client";
 
 import type { User } from "firebase/auth";
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CartesianGrid,
@@ -12,13 +13,7 @@ import {
   XAxis,
   YAxis
 } from "recharts";
-import { CopyBlock } from "@/components/integrations/integrationCopyBlock";
 import { dollarsUsedFromUtilization } from "@/lib/vendorPlanPricing";
-import {
-  detectVendorUsageInstallOs,
-  vendorUsageSyncCommand,
-  type VendorUsageInstallOs
-} from "@/lib/vendorUsageSyncCommand";
 
 const VENDOR_USAGE_PASSWORD = "oat123";
 const UNLOCK_KEY = "promptly_vendor_usage_unlocked";
@@ -92,6 +87,7 @@ type VendorUsagePayload = {
     skip_details?: Partial<Record<"claude_code" | "codex" | "cursor", string>>;
   } | null;
   can_live_refresh?: boolean;
+  has_claude_tokens?: boolean;
   live_refresh_hint?: string | null;
   account_email_mismatch?: boolean;
   vendor_tokens_device_email?: string | null;
@@ -577,20 +573,13 @@ export default function VendorUsageSection({
   const [passwordInput, setPasswordInput] = useState("");
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [syncBusy, setSyncBusy] = useState(false);
   const [data, setData] = useState<VendorUsagePayload | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [syncOs, setSyncOs] = useState<VendorUsageInstallOs>("mac");
-  const [showCommand, setShowCommand] = useState(false);
-  const [syncCopied, setSyncCopied] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     setUnlocked(window.sessionStorage.getItem(UNLOCK_KEY) === "1");
-    setSyncOs(detectVendorUsageInstallOs());
   }, []);
-
-  const syncCommand = useMemo(() => vendorUsageSyncCommand(syncOs), [syncOs]);
 
   const load = useCallback(async ({ live = false }: { live?: boolean } = {}) => {
     if (!user) {
@@ -618,7 +607,7 @@ export default function VendorUsageSection({
         setData(body as VendorUsagePayload);
         const refreshError = (body as { live_refresh?: { error?: string } }).live_refresh?.error;
         if (refreshError === "no_tokens" || refreshError === "tokens_unreadable") {
-          setError(body.live_refresh_hint || "Re-run the sync command from Terminal to enable live Refresh.");
+          setError(body.live_refresh_hint || "Resync subscriptions from the integrations page, then Refresh again.");
         } else if (body.live_refresh_hint) {
           setError(body.live_refresh_hint);
         } else {
@@ -643,43 +632,6 @@ export default function VendorUsageSection({
     if (unlocked && user) void load();
   }, [unlocked, user, load]);
 
-  const enableSyncAndPatch = useCallback(async () => {
-    if (!user) throw new Error("Sign in to sync subscriptions.");
-    const token = await user.getIdToken(false);
-    const res = await fetch("/api/account/vendor-usage", {
-      method: "PATCH",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        claude_code: { enabled: true },
-        codex: { enabled: true },
-        cursor: { enabled: true }
-      })
-    });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
-    setData(body as VendorUsagePayload);
-  }, [user]);
-
-  const handleSyncClick = useCallback(async () => {
-    setSyncBusy(true);
-    setError(null);
-    setSyncCopied(false);
-    try {
-      await enableSyncAndPatch();
-      await navigator.clipboard.writeText(syncCommand);
-      setShowCommand(true);
-      setSyncCopied(true);
-      window.setTimeout(() => setSyncCopied(false), 3000);
-    } catch (e) {
-      setError(String(e instanceof Error ? e.message : e));
-    } finally {
-      setSyncBusy(false);
-    }
-  }, [enableSyncAndPatch, syncCommand]);
-
   const profiles = useMemo(() => {
     const rows = (data?.profiles ?? []).filter((p) => !p.sync_error);
     return [...rows].sort(
@@ -691,6 +643,7 @@ export default function VendorUsageSection({
   const hasCursor = profiles.some((p) => p.provider === "cursor");
   const hasCodex = profiles.some((p) => p.provider === "codex");
   const hasClaude = profiles.some((p) => p.provider === "claude_code");
+  const hasClaudeTokens = data?.has_claude_tokens === true;
 
   const expenditureSummary = useMemo(
     () => computeMonthlyExpenditureSummary(profiles, rangeDays),
@@ -735,8 +688,14 @@ export default function VendorUsageSection({
     <section className="mb-8 w-full rounded-2xl border border-line bg-white p-4 shadow-card sm:p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
         <h2 className="text-base font-semibold uppercase tracking-[0.22em] text-ink">AI plan usage</h2>
-        <div className="ml-auto flex flex-wrap items-center justify-end gap-4 sm:gap-5">
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-3 sm:gap-4">
           {expenditureSummary ? <MonthlyExpenditureStats summary={expenditureSummary} /> : null}
+          <Link
+            href="/integrations#resync-subscriptions"
+            className="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-ink hover:bg-cream-dark"
+          >
+            Resync
+          </Link>
           <button
             type="button"
             disabled={loading}
@@ -748,47 +707,7 @@ export default function VendorUsageSection({
         </div>
       </div>
 
-      <div className="mb-5 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          disabled={syncBusy || !user}
-          onClick={() => void handleSyncClick()}
-          className="rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:opacity-50"
-        >
-          {syncBusy ? "Preparing…" : syncCopied ? "Command copied" : "Sync subscriptions"}
-        </button>
-        <div className="flex gap-1">
-          {(["mac", "windows"] as const).map((id) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setSyncOs(id)}
-              className={`rounded-md border px-2 py-1 text-[10px] font-medium ${
-                syncOs === id ? "border-ink bg-ink text-cream" : "border-line text-muted hover:text-ink"
-              }`}
-            >
-              {id === "mac" ? "Mac" : "Windows"}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {syncCopied ? (
-        <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50/80 px-3 py-2 text-sm text-emerald-900">
-          Command copied — paste in {syncOs === "mac" ? "Terminal.app" : "PowerShell"}, press Enter once, then use{" "}
-          <span className="font-medium">Refresh</span> to update live usage.
-        </div>
-      ) : null}
-
-      {showCommand && !hasClaude ? (
-        <div className="mb-4 rounded-xl border border-line bg-white/70 px-3 py-2 text-xs text-muted">
-          First-time Claude sync opens your browser once to connect claude.ai.
-        </div>
-      ) : null}
-
-      {showCommand ? <CopyBlock lines={[syncCommand]} label={syncOs === "mac" ? "Terminal" : "PowerShell"} /> : null}
-
-      {error ? <p className="mb-4 mt-4 text-sm text-red-700">{error}</p> : null}
+      {error ? <p className="mb-4 text-sm text-red-700">{error}</p> : null}
 
       {profiles.length > 0 ? (
         <div className="mt-5 space-y-4">
@@ -802,8 +721,18 @@ export default function VendorUsageSection({
         </div>
       ) : (
         <p className="text-sm text-muted">
-          No subscription data yet. Click <span className="font-medium text-ink">Sync subscriptions</span>, run the
-          command on your computer, then Refresh.
+          No subscription data yet. Run the{" "}
+          <Link href="/integrations" className="font-medium text-ink underline-offset-2 hover:underline">
+            integrations setup command
+          </Link>
+          , then click Refresh. If you already installed Promptly, use{" "}
+          <Link
+            href="/integrations#resync-subscriptions"
+            className="font-medium text-ink underline-offset-2 hover:underline"
+          >
+            Resync
+          </Link>
+          .
         </p>
       )}
 
@@ -821,12 +750,14 @@ export default function VendorUsageSection({
           {!hasClaude ? (
             <p>
               Claude not synced —{" "}
-              {data?.last_sync_diagnostics?.skip_details?.claude_code ||
-                "run the sync command and complete browser sign-in, then click Refresh."}
+              {hasClaudeTokens
+                ? "browser sign-in is saved. Click Refresh above to load Claude usage."
+                : data?.last_sync_diagnostics?.skip_details?.claude_code ||
+                  "complete setup or resync from the integrations page, then click Refresh."}
             </p>
           ) : null}
-          {!hasCursor ? <p>Cursor not synced — open Cursor, sign in, then sync again.</p> : null}
-          {!hasCodex ? <p>Codex not synced — sign in with ChatGPT in the Codex app, then sync again.</p> : null}
+          {!hasCursor ? <p>Cursor not synced — open Cursor, sign in, then resync from integrations.</p> : null}
+          {!hasCodex ? <p>Codex not synced — sign in with ChatGPT in the Codex app, then resync from integrations.</p> : null}
         </div>
       ) : null}
     </section>

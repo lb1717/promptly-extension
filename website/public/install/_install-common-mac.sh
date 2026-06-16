@@ -566,6 +566,26 @@ promptly_install_all_agents() {
   return 0
 }
 
+promptly_sync_subscription_usage() {
+  local integrations="${1:-${HOME}/integrations}"
+  local cli="${integrations}/packages/telemetry-cli/bin/promptly-telemetry.mjs"
+  if [[ ! -f "${cli}" ]]; then
+    echo "⚠ Subscription sync skipped — telemetry CLI missing."
+    return 0
+  fi
+  echo "→ Syncing AI subscription usage (Claude, Codex, Cursor)…"
+  echo "  First-time setup opens your browser once for claude.ai sign-in."
+  set +e
+  node "${cli}" usage-sync --login-claude
+  local code=$?
+  set -e
+  if [[ $code -ne 0 ]]; then
+    echo "⚠ Subscription sync incomplete — resync anytime at https://promptly-labs.com/integrations#resync-subscriptions"
+    return 0
+  fi
+  echo "✓ Subscription usage synced — use Refresh on your stats page anytime."
+}
+
 promptly_finalize_with_pair_code() {
   local code="$1"
   local integrations="${2:-${HOME}/integrations}"
@@ -578,6 +598,7 @@ promptly_finalize_with_pair_code() {
   node "${cli}" fix-account "${code}"
   echo "→ Syncing hooks + telemetry into Claude Code, Cursor, and Codex runtimes…"
   promptly_sync_all_agent_runtimes "${integrations}"
+  promptly_sync_subscription_usage "${integrations}"
   echo ""
   echo "✓ All set. Restart Claude Code, Cursor, and Codex if they were open, then send a test prompt."
   echo "  Stats go to the email shown above on https://promptly-labs.com/account/statistics"

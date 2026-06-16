@@ -5,9 +5,9 @@ import { Footer } from "@/components/Footer";
 import { buildPageMetadata } from "@/lib/seo";
 
 export const metadata = buildPageMetadata({
-  title: "Connect Claude Code, Cursor & Codex",
+  title: "Integrations hub — install, resync & troubleshoot",
   description:
-    "Install Promptly for Claude Code, Cursor, and Codex. Pair your account, track prompts and screen time, and view coding-agent stats on your Promptly dashboard.",
+    "Install Promptly for Claude Code, Cursor, and Codex in one command. Resync AI subscription usage and troubleshoot coding-agent integrations.",
   path: "/integrations",
   noIndex: true
 });

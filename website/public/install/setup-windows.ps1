@@ -5,7 +5,7 @@ param(
   [string]$Code = $env:PROMPTLY_PAIR_CODE
 )
 
-$PluginPackUrl = if ($env:PROMPTLY_PLUGIN_PACK_URL) { $env:PROMPTLY_PLUGIN_PACK_URL } else { "https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.7" }
+$PluginPackUrl = if ($env:PROMPTLY_PLUGIN_PACK_URL) { $env:PROMPTLY_PLUGIN_PACK_URL } else { "https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.6.8" }
 $Integrations = Join-Path $env:USERPROFILE "integrations"
 $InstallBase = if ($env:PROMPTLY_INSTALL_BASE) { $env:PROMPTLY_INSTALL_BASE } else { "https://promptly-labs.com/install" }
 
@@ -97,6 +97,15 @@ function Setup-PromptlyAgents {
 
   Write-Host "-> Syncing hooks + telemetry into Claude Code, Cursor, and Codex runtimes..."
   Sync-PromptlyAgentRuntimes -CliSrc $cliDest
+
+  Write-Host "-> Syncing AI subscription usage (Claude, Codex, Cursor)..."
+  Write-Host "  First-time setup opens your browser once for claude.ai sign-in."
+  node $cliDest usage-sync --login-claude
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "Subscription sync incomplete — resync anytime at https://promptly-labs.com/integrations#resync-subscriptions"
+  } else {
+    Write-Host "Subscription usage synced — use Refresh on your stats page anytime."
+  }
 
   Write-Host ""
   Write-Host "OK. Restart Claude Code, Cursor, and Codex if they were open, then send a test prompt."

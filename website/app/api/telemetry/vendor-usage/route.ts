@@ -6,6 +6,8 @@ import {
 } from "@/lib/server/promptlyBackend";
 import {
   getVendorUsageSettings,
+  getVendorUsageTokens,
+  mergeSnapshotsFromStoredTokens,
   persistVendorUsageSnapshots,
   storeVendorUsageTokens,
   type VendorUsageProfileSnapshot,
@@ -85,7 +87,7 @@ export async function POST(request: Request) {
         { status: 400, headers: buildPromptlyCorsHeaders(origin) }
       );
     }
-    const snapshots = rawSnapshots.map(readSnapshot).filter((row): row is VendorUsageProfileSnapshot => row !== null);
+    let snapshots = rawSnapshots.map(readSnapshot).filter((row): row is VendorUsageProfileSnapshot => row !== null);
     const rawClear = (body as { clear_providers?: unknown }).clear_providers;
     const clearProviders = Array.isArray(rawClear)
       ? rawClear.filter(
@@ -104,6 +106,10 @@ export async function POST(request: Request) {
       tokensStored = await storeVendorUsageTokens(user.uid, rawTokens, {
         device_email: user.email || null
       });
+    }
+    if (tokensStored || rawTokens) {
+      const tokens = (await getVendorUsageTokens(user.uid)) ?? null;
+      snapshots = await mergeSnapshotsFromStoredTokens(user.uid, snapshots, tokens);
     }
     const written = await persistVendorUsageSnapshots(user.uid, snapshots, clearProviders, syncDiagnostics);
     return NextResponse.json({ ok: true, written, tokens_stored: tokensStored }, { status: 200, headers: buildPromptlyCorsHeaders(origin) });

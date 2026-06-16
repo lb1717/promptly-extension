@@ -3,7 +3,7 @@
  * Promptly IDE telemetry CLI — self-contained (bundled into each agent plugin).
  * Never uploads raw prompt text; metadata only.
  */
-import { spawn } from "child_process";
+import { spawn, spawnSync } from "child_process";
 import {
   closeSync,
   existsSync,
@@ -284,7 +284,9 @@ function draftTimingPath(tool) {
 const DRAFT_MIN_MS = 500;
 const ENGAGEMENT_MIN_MS = 500;
 const RESPONSE_LATENCY_MIN_MS = 500;
-const READING_IDLE_HEARTBEAT_MS = 60_000;
+const READING_IDLE_HEARTBEAT_MS = 30_000;
+const READING_IDLE_CHUNK_MS = 30_000;
+const READING_IDLE_FINAL_CAP_MS = 90_000;
 const HOOK_TRACE_MAX_LINES = 200;
 const DRAFT_MAX_MS = 1_800_000;
 
@@ -408,17 +410,19 @@ function flushReadingIdleSegment(tool, sessionId, agentAccountEmail, modelMeta, 
   const start = entry?.reading_idle_start_ms;
   if (!start) return null;
   const rawMs = atMs - start;
+  const capMs = opts.keepAlive ? READING_IDLE_CHUNK_MS : READING_IDLE_FINAL_CAP_MS;
+  const billableMs = Math.min(rawMs, capMs, 1_800_000);
   sessions[sid] = {
     ...entry,
-    reading_idle_start_ms: opts.keepAlive ? atMs : null,
+    reading_idle_start_ms: opts.keepAlive && billableMs > 0 ? start + billableMs : null,
     updated_at: atMs
   };
   saveDraftTimingSessions(tool, sessions);
-  if (rawMs < ENGAGEMENT_MIN_MS) return null;
+  if (billableMs < ENGAGEMENT_MIN_MS) return null;
   const resolvedModel = mergeSessionScreenModelMeta(tool, sessionId, modelMeta);
   return buildReadingIdleSegment(
     tool,
-    Math.min(1_800_000, Math.floor(rawMs)),
+    billableMs,
     agentAccountEmail,
     resolvedModel
   );
@@ -715,9 +719,193 @@ function readCodexTurnBundle(transcriptPath, turnId) {
   return { userPrompt, taskComplete, turnContext };
 }
 
+function codexTurnSendPath() {
+  return join(promptlyStorageDir(), "codex-turn-sends.json");
+}
+
+function wasCodexTurnSendRecorded(sessionId, turnId) {
+  const sid = String(sessionId || "").trim();
+  const tid = String(turnId || "").trim();
+  if (!sid || !tid) return false;
+  const data = readJson(codexTurnSendPath(), { turns: {} });
+  const turns = data.turns && typeof data.turns === "object" ? data.turns : {};
+  return turns[`${sid}:${tid}`] === true;
+}
+
+function markCodexTurnSendRecorded(sessionId, turnId) {
+  const sid = String(sessionId || "").trim();
+  const tid = String(turnId || "").trim();
+  if (!sid || !tid) return;
+  const data = readJson(codexTurnSendPath(), { turns: {} });
+  const turns = data.turns && typeof data.turns === "object" ? data.turns : {};
+  turns[`${sid}:${tid}`] = true;
+  const keys = Object.keys(turns);
+  if (keys.length > 400) {
+    for (const key of keys.slice(0, keys.length - 400)) {
+      delete turns[key];
+    }
+  }
+  writeJson(codexTurnSendPath(), { turns });
+}
+
+function readCodexInFlightTurn(transcriptPath) {
+  const path = expandHomePath(transcriptPath);
+  if (!path || !existsSync(path)) return null;
+  let lines = [];
+  try {
+    lines = readFileSync(path, "utf8").split("\n").filter(Boolean);
+  } catch {
+    return null;
+  }
+  const completedTurns = new Set();
+  let lastTurn = null;
+  let lastTurnIdx = -1;
+  for (let i = 0; i < lines.length; i += 1) {
+    try {
+      const row = JSON.parse(lines[i]);
+      if (row?.type === "event_msg" && row?.payload?.type === "task_complete") {
+        const tid = typeof row.payload?.turn_id === "string" ? row.payload.turn_id.trim() : "";
+        if (tid) completedTurns.add(tid);
+      }
+      if (row?.type === "turn_context") {
+        lastTurn = row.payload;
+        lastTurnIdx = i;
+      }
+    } catch {
+      /* skip malformed transcript line */
+    }
+  }
+  const turnId = typeof lastTurn?.turn_id === "string" ? lastTurn.turn_id.trim() : "";
+  if (!turnId || completedTurns.has(turnId) || lastTurnIdx < 0) return null;
+  let userPrompt = null;
+  for (let i = lastTurnIdx + 1; i < lines.length; i += 1) {
+    try {
+      const row = JSON.parse(lines[i]);
+      if (row?.type === "event_msg" && row?.payload?.type === "task_complete" && row.payload?.turn_id === turnId) {
+        return null;
+      }
+      if (row?.type === "response_item") {
+        const payload = row.payload;
+        if (payload?.type === "message" && payload?.role === "user") {
+          const text = extractCodexMessageText(payload.content);
+          if (text && !isCodexBootstrapPrompt(text)) {
+            userPrompt = text;
+          }
+        }
+      }
+    } catch {
+      /* skip malformed transcript line */
+    }
+  }
+  if (!userPrompt) return null;
+  return { turnId, userPrompt, turnContext: lastTurn };
+}
+
+function recoverCodexInFlightSendFromTranscript(input, tool, agentAccountEmail, modelMeta, now = Date.now()) {
+  if (tool !== "codex") return null;
+  const sessionId = primarySessionId(input, tool);
+  const transcriptPath = resolveCodexTranscriptPath(input);
+  if (!sessionId || !transcriptPath) return null;
+  const bundle = readCodexInFlightTurn(transcriptPath);
+  if (!bundle?.turnId || wasCodexTurnSendRecorded(sessionId, bundle.turnId)) return null;
+  const ctxModel =
+    typeof bundle.turnContext?.model === "string" ? bundle.turnContext.model.trim() : null;
+  const mergedInput = ctxModel ? { ...input, model: ctxModel, turn_id: bundle.turnId } : { ...input, turn_id: bundle.turnId };
+  const resolvedModel = buildModelMeta(mergedInput, tool);
+  const words = countWords(bundle.userPrompt);
+  const chars = Math.min(12000, bundle.userPrompt.length);
+  markCodexTurnSendRecorded(sessionId, bundle.turnId);
+  return {
+    tool,
+    interaction_kind: "send",
+    composer_word_estimate: words || 1,
+    composer_char_estimate: chars || 1,
+    client_occurred_ms: now,
+    agent_account_email: agentAccountEmail,
+    _session_id: sessionId,
+    _turn_id: bundle.turnId,
+    ...resolvedModel
+  };
+}
+
+function codexWatchFlagPath(sessionId) {
+  return join(promptlyStorageDir(), `codex-watch-${String(sessionId || "").trim()}.json`);
+}
+
+function spawnCodexTranscriptWatcher(sessionId) {
+  const sid = String(sessionId || "").trim();
+  if (!sid) return;
+  const flagPath = codexWatchFlagPath(sid);
+  const existing = readJson(flagPath, null);
+  if (existing?.pid && existing?.at && Date.now() - existing.at < 120_000) {
+    try {
+      process.kill(existing.pid, 0);
+      return;
+    } catch {
+      /* stale pid */
+    }
+  }
+  const child = spawn(process.execPath, [TELEMETRY_SCRIPT, "codex-watch", "--session", sid], {
+    detached: true,
+    stdio: "ignore",
+    env: process.env
+  });
+  child.unref();
+  writeJson(flagPath, { pid: child.pid, at: Date.now(), session_id: sid });
+}
+
+async function maybeEmitCodexInFlightSend(input, tool) {
+  if (tool !== "codex") return false;
+  const sessionId = primarySessionId(input, tool);
+  const agentAccountEmail = resolveAgentAccountEmail(input, tool);
+  const modelMeta = buildModelMeta(input, tool);
+  const inFlightSend = recoverCodexInFlightSendFromTranscript(input, tool, agentAccountEmail, modelMeta);
+  if (!inFlightSend || isDuplicateSend(tool, { ...input, turn_id: inFlightSend._turn_id }, inFlightSend)) {
+    return false;
+  }
+  ensureSessionTimingForPromptSubmit(tool, sessionId, "userpromptsubmit");
+  enqueueEvent(tool, inFlightSend);
+  if (sessionId) {
+    recordPendingSubmit(tool, { ...input, turn_id: inFlightSend._turn_id }, {
+      agent_account_email: inFlightSend.agent_account_email || null,
+      model_label: inFlightSend.model_label || null,
+      model_bucket: inFlightSend.model_bucket || "unknown"
+    });
+  }
+  traceHook(tool, input, inFlightSend, "codex_inflight_transcript_send");
+  const creds = getCredentials(tool);
+  if (creds?.device_token) {
+    await drainTelemetryQueue(tool, TOOL_CLIENT[tool]);
+  }
+  return true;
+}
+
+async function cmdCodexWatch(flags) {
+  const sessionId = String(flags.session || flags._rest?.[0] || "").trim();
+  if (!sessionId) {
+    console.error("Usage: promptly-telemetry codex-watch --session <session_id>");
+    process.exit(1);
+  }
+  const creds = getCredentials("codex");
+  if (!creds?.device_token) {
+    process.exit(0);
+  }
+  const deadline = Date.now() + 20 * 60_000;
+  const input = { session_id: sessionId, hook_event_name: "Watch" };
+  while (Date.now() < deadline) {
+    await maybeEmitCodexInFlightSend(input, "codex");
+    await sleepMs(2000);
+  }
+  try {
+    unlinkSync(codexWatchFlagPath(sessionId));
+  } catch {
+    /* ignore */
+  }
+}
+
 function recoverCodexTurnEventsFromStop(input, tool, agentAccountEmail, modelMeta, now = Date.now()) {
   if (tool !== "codex" || !isResponseEndPayload(input)) return null;
-  if (peekPendingSubmit(tool, input)?.at) return null;
+  if (peekPendingSubmitForTurn(tool, input)?.at) return null;
   const turnId = String(input?.turn_id || input?.turnId || "").trim();
   const sessionId = primarySessionId(input, tool);
   if (!turnId || !sessionId) return null;
@@ -725,6 +913,8 @@ function recoverCodexTurnEventsFromStop(input, tool, agentAccountEmail, modelMet
   if (!transcriptPath) return null;
   const bundle = readCodexTurnBundle(transcriptPath, turnId);
   if (!bundle) return null;
+
+  markCodexTurnSendRecorded(sessionId, turnId);
 
   const completedRaw = Number(bundle.taskComplete.completed_at ?? 0);
   const completedMs =
@@ -1125,6 +1315,29 @@ function peekPendingSubmit(tool, input) {
   return null;
 }
 
+/** Pending keyed to this Codex turn only — ignore stale session-level entries. */
+function peekPendingSubmitForTurn(tool, input) {
+  if (tool !== "codex") return peekPendingSubmit(tool, input);
+  const turnId = String(input?.turn_id || input?.turnId || "").trim();
+  if (!turnId) return null;
+  const pending = readJson(pendingSubmitsPath(tool), { pending: {} }).pending || {};
+  return pending[`turn:${turnId}`] || pending[turnId] || null;
+}
+
+function pruneStalePendingSubmits(tool, maxAgeMs = 7 * 86400000) {
+  const data = readJson(pendingSubmitsPath(tool), { pending: {} });
+  const pending = data.pending && typeof data.pending === "object" ? data.pending : {};
+  const now = Date.now();
+  let changed = false;
+  for (const [key, entry] of Object.entries(pending)) {
+    if (!entry?.at || now - entry.at > maxAgeMs) {
+      delete pending[key];
+      changed = true;
+    }
+  }
+  if (changed) writeJson(pendingSubmitsPath(tool), { pending });
+}
+
 function consumePendingSubmit(tool, input) {
   const ids = hookSessionLookupIds(input, tool);
   const primary = primarySessionId(input, tool);
@@ -1367,7 +1580,9 @@ function recoverOrphanedPendingSubmits(tool, input) {
 }
 
 function shouldSpawnBackgroundFlush(tool, hookName, event) {
-  if (loadQueue(tool).length === 0) return false;
+  const queued = loadQueue(tool);
+  if (queued.length === 0) return false;
+  if (queued.some((row) => row?.interaction_kind === "send")) return true;
   const name = String(hookName || "").toLowerCase();
   if (name.includes("sessionend")) return true;
   if (name.includes("beforesubmitprompt") || name.includes("userpromptsubmit")) return true;
@@ -2052,6 +2267,7 @@ function recordFlushResult(tool, result) {
 }
 
 async function cmdHook(flags) {
+  ensureAgentTelemetryFresh();
   const tool = normalizeTool(flags.tool);
   if (!tool) {
     console.error("Missing --tool claude_code|cursor|codex");
@@ -2060,6 +2276,7 @@ async function cmdHook(flags) {
   if (tool === "claude_code") {
     sanitizeClaudeAgentEmailCache();
   }
+  pruneStalePendingSubmits(tool);
   const input = await readStdinJson();
   if (input && !hookPayloadMatchesTool(input, tool)) {
     const clientHeader = flags.client || TOOL_CLIENT[tool];
@@ -2081,6 +2298,11 @@ async function cmdHook(flags) {
   const agentAccountEmail = resolveAgentAccountEmail(input, tool);
   const modelMeta = buildModelMeta(input, tool);
   ensureSessionTimingForPromptSubmit(tool, sessionId, hookName);
+
+  if (tool === "codex") {
+    await maybeEmitCodexInFlightSend(input, tool);
+  }
+
   if (sessionId) {
     const staleIdle = maybeFlushStaleReadingIdle(tool, sessionId, agentAccountEmail, modelMeta);
     if (staleIdle) {
@@ -2089,6 +2311,9 @@ async function cmdHook(flags) {
   }
   if (hookName.includes("sessionstart") && sessionId) {
     markSessionStarted(tool, sessionId);
+    if (tool === "codex") {
+      spawnCodexTranscriptWatcher(sessionId);
+    }
   }
   if (hookName.includes("sessionend") && sessionId) {
     const sessionIdle = flushReadingIdleSegment(tool, sessionId, agentAccountEmail, modelMeta);
@@ -2177,6 +2402,9 @@ async function cmdHook(flags) {
   try {
     await awaitFlushHookQueue(tool, clientHeader, hookName, event);
     await maybeSyncVendorUsage(tool, clientHeader);
+    if (tool === "codex") {
+      syncAgentRuntimeTelemetry();
+    }
   } catch (err) {
     const message = String(err?.message || err);
     recordFlushResult(tool, { ok: false, error: message });
@@ -2923,6 +3151,80 @@ async function cmdLoginClaude(flags) {
   console.log(JSON.stringify(result, null, 2));
 }
 
+function syncAgentRuntimeTelemetry() {
+  const home = homedir();
+  const integrationsRoot = join(home, "integrations");
+  const telemetrySrc = existsSync(join(integrationsRoot, "packages/telemetry-cli/bin/promptly-telemetry.mjs"))
+    ? join(integrationsRoot, "packages/telemetry-cli/bin/promptly-telemetry.mjs")
+    : TELEMETRY_SCRIPT;
+  let copied = 0;
+
+  const copyInto = (dest) => {
+    if (!dest) return;
+    try {
+      mkdirSync(dirname(dest), { recursive: true });
+      writeFileSync(dest, readFileSync(telemetrySrc));
+      copied += 1;
+    } catch {
+      /* ignore unreadable cache paths */
+    }
+  };
+
+  for (const agent of ["claude-code", "cursor", "codex"]) {
+    copyInto(join(integrationsRoot, agent, "bin/promptly-telemetry.mjs"));
+  }
+
+  const claudeCache = join(home, ".claude/plugins/cache/promptly-labs/promptly-claude-code");
+  if (existsSync(claudeCache)) {
+    for (const entry of readdirSync(claudeCache)) {
+      copyInto(join(claudeCache, entry, "bin/promptly-telemetry.mjs"));
+      const hooksSrc = join(integrationsRoot, "claude-code/hooks/hooks.json");
+      if (existsSync(hooksSrc)) copyInto(join(claudeCache, entry, "hooks/hooks.json"));
+    }
+  }
+
+  const codexCache = join(home, ".codex/plugins/cache/promptly-labs/promptly-codex");
+  if (existsSync(codexCache)) {
+    for (const entry of readdirSync(codexCache)) {
+      for (const rel of ["bin/promptly-telemetry.mjs", "codex/bin/promptly-telemetry.mjs"]) {
+        copyInto(join(codexCache, entry, rel));
+      }
+      const hooksSrc = join(integrationsRoot, "codex/hooks/hooks.json");
+      for (const rel of ["hooks/hooks.json", "codex/hooks/hooks.json"]) {
+        if (existsSync(hooksSrc)) copyInto(join(codexCache, entry, rel));
+      }
+    }
+  }
+
+  return { copied, telemetry_source: telemetrySrc };
+}
+
+function cmdSyncRuntimes() {
+  const result = syncAgentRuntimeTelemetry();
+  console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+}
+
+/** Re-exec from ~/integrations when the plugin cache binary is stale (Codex keeps old hooks until restart). */
+function ensureAgentTelemetryFresh() {
+  const integrationsBin = join(homedir(), "integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs");
+  if (!existsSync(integrationsBin)) return;
+  let srcMtime = 0;
+  let runMtime = 0;
+  try {
+    srcMtime = statSync(integrationsBin).mtimeMs;
+    runMtime = statSync(TELEMETRY_SCRIPT).mtimeMs;
+  } catch {
+    return;
+  }
+  if (srcMtime <= runMtime) return;
+  const args = process.argv.slice(2);
+  const result = spawnSync(process.execPath, [integrationsBin, ...args], {
+    stdio: "inherit",
+    env: process.env
+  });
+  process.exit(typeof result.status === "number" ? result.status : 0);
+}
+
 async function cmdUsageSync(flags) {
   const syncFlags = {
     force: flags.force === true || flags.force === "true",
@@ -2967,6 +3269,9 @@ async function cmdUsageSync(flags) {
       process.exit(1);
     }
   }
+  if (!syncFlags.debug) {
+    syncAgentRuntimeTelemetry();
+  }
   const result = await runVendorUsageSync({
     creds,
     clientHeader,
@@ -3003,6 +3308,12 @@ async function main() {
     case "usage-sync":
       await cmdUsageSync(flags);
       break;
+    case "sync-runtimes":
+      cmdSyncRuntimes();
+      break;
+    case "codex-watch":
+      await cmdCodexWatch(flags);
+      break;
     case "login-claude":
       await cmdLoginClaude(flags);
       break;
@@ -3037,6 +3348,7 @@ Commands:
   align-device --set-primary <CODE>  Same as fix-account (legacy alias)
   test-send --tool <tool>     Upload one test prompt (verify stats pipeline)
   usage-sync [--login-claude] [--debug] [--no-login] [--tool <tool>]  Sync Claude, Codex, and Cursor subscription usage
+  sync-runtimes                               Copy latest telemetry CLI into Codex/Claude plugin caches
   login-claude [--callback <url>]                  Browser sign-in for Claude subscription usage
   diagnostics [--tool <tool>] Simulate hook payloads and show local timing state
   status [--tool <tool>]      Show connection status for one or all tools

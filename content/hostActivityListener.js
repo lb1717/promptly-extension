@@ -806,6 +806,20 @@
       }
     });
 
+    const onEngagementActivity = () => {
+      window.PromptlyHostEngagementTracker?.noteUserActivity?.();
+    };
+    window.addEventListener("focus", () => {
+      window.PromptlyHostEngagementTracker?.onWindowFocus?.();
+      onEngagementActivity();
+    });
+    window.addEventListener("blur", () => {
+      window.PromptlyHostEngagementTracker?.onWindowBlur?.();
+    });
+    document.addEventListener("scroll", onEngagementActivity, { capture: true, passive: true });
+    window.addEventListener("wheel", onEngagementActivity, { capture: true, passive: true });
+    document.addEventListener("pointerdown", onEngagementActivity, { capture: true, passive: true });
+
     window.addEventListener(
       "pageshow",
       (ev) => {

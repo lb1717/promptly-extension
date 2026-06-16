@@ -1,7 +1,7 @@
 export type OsId = "mac" | "windows";
 export type IdeToolId = "claude_code" | "cursor" | "codex";
 
-export const PLUGIN_PACK_VERSION = "1.6.5";
+export const PLUGIN_PACK_VERSION = "1.6.8";
 export const PLUGIN_PACK_URL = `https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=${PLUGIN_PACK_VERSION}`;
 export const INSTALL_BASE_URL = "https://promptly-labs.com/install";
 export const NODE_INSTALL_URL = "https://nodejs.org/";
@@ -21,7 +21,16 @@ export function setupScriptUrl(os: OsId): string {
     : `${INSTALL_BASE_URL}/${SETUP_SCRIPT_SLUG}-windows.ps1`;
 }
 
-/** One curl command: full install + pair all agents + merge stats + sync live hooks. */
+/** Re-sync subscription usage after new logins or plan changes (integrations already installed). */
+export function subscriptionResyncCommand(os: OsId): string {
+  if (os === "mac") {
+    return `${telemetryCli("mac")} sync-runtimes && ${telemetryCli("mac")} usage-sync --login-claude`;
+  }
+  const cli = telemetryCliPowerShell();
+  return `${cli} sync-runtimes; if ($LASTEXITCODE -eq 0) { ${cli} usage-sync --login-claude }`;
+}
+
+/** One curl command: install + pair + merge stats + sync hooks + subscription usage. */
 export function setupCurlCommand(os: OsId, code: string): string {
   const url = setupScriptUrl(os);
   if (os === "mac") {
@@ -169,6 +178,7 @@ export function allAgentsSetupValidationItems(): string[] {
     "Promptly all-agents install summary",
     '"Promptly installed for Cursor" (or skipped if that CLI is missing)',
     'fix-account output shows "ok": true and live_tracking all ok',
+    "Subscription usage synced (browser may open once for Claude)",
     "All three tools show matches_primary: true in status"
   ];
 }

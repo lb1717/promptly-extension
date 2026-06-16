@@ -772,16 +772,16 @@ export function AccountClient({
 
               <div className="col-start-3 row-span-2 row-start-1 flex min-w-[9.25rem] flex-col gap-2 self-stretch justify-self-end sm:min-w-[11rem]">
                 <Link
-                  href="/account/install-integrations"
+                  href="/integrations"
                   className="inline-flex items-center justify-center rounded-lg bg-ink px-3 py-2.5 text-center text-sm font-semibold text-cream hover:bg-neutral-800"
                 >
-                  Install more integrations
+                  Integrations hub
                 </Link>
                 <Link
-                  href="/account/troubleshoot-integrations"
+                  href="/integrations#resync-subscriptions"
                   className="inline-flex items-center justify-center rounded-lg border border-line px-3 py-2.5 text-center text-sm font-medium text-muted hover:bg-cream-dark hover:text-ink"
                 >
-                  Troubleshoot integrations
+                  Resync subscriptions
                 </Link>
                 <button
                   type="button"

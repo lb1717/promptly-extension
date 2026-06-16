@@ -481,28 +481,9 @@ function resolveClaudeWindowUsedPercent(window, context = {}) {
   let pct = Number(utilRaw);
   if (pct > 0 && pct <= 1) pct *= 100;
   pct = Math.max(0, Math.min(100, pct));
-  const asUsed = normalizeUtilizationPercent(pct);
 
-  const windowSeconds = Number(context.windowSeconds ?? 5 * 3600);
-  const resetsAt =
-    context.resetsAt ?? parseClaudeResetsAtIso(window.resets_at ?? window.resetsAt);
-  const elapsed = resetsAtElapsedRatio(resetsAt, windowSeconds);
-
-  if (elapsed != null && elapsed <= 0.12 && pct >= 80) {
-    return normalizeUtilizationPercent(100 - pct);
-  }
-
-  if (
-    context.previousUtilization != null &&
-    context.previousResetsAt &&
-    resetsAt &&
-    context.previousResetsAt === resetsAt &&
-    asUsed < context.previousUtilization - 1
-  ) {
-    return normalizeUtilizationPercent(100 - pct);
-  }
-
-  return asUsed;
+  // Anthropic oauth/usage reports remaining quota in `utilization`, not percent used.
+  return normalizeUtilizationPercent(100 - pct);
 }
 
 function extractClaudeUsageWindow(usage, ...keys) {
@@ -898,8 +879,16 @@ export async function runVendorUsageSync({ creds, clientHeader, flags = {} }) {
   const vendorTokens = collectVendorTokensForUpload();
   let successful = snapshots.filter((row) => row && !row.sync_error);
   if (vendorTokens?.claude_code && !successful.some((row) => row.provider === "claude_code")) {
-    const retry = await fetchClaudeProfileUsage(defaultClaudeConfigDir());
-    if (!retry.sync_error) successful.push(retry);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const retry = await fetchClaudeProfileUsage(defaultClaudeConfigDir());
+      if (!retry.sync_error) {
+        successful.push(retry);
+        break;
+      }
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+      }
+    }
   }
   const succeededProviders = new Set(successful.map((row) => row.provider));
   let clearProviders = [...attempted].filter((provider) => !succeededProviders.has(provider));
@@ -917,6 +906,14 @@ export async function runVendorUsageSync({ creds, clientHeader, flags = {} }) {
       provider === "claude_code" ? claudeSkipReason : "Not signed in on this Mac."
     ])
   );
+  if (!successful.some((row) => row.provider === "claude_code")) {
+    if (vendorTokens?.claude_code) {
+      skipDetails.claude_code =
+        "Browser sign-in saved. Click Refresh on the stats page to load Claude usage from saved tokens.";
+    } else if (!skipDetails.claude_code) {
+      skipDetails.claude_code = claudeSkipReason;
+    }
+  }
   const syncDiagnostics = {
     at_ms: Date.now(),
     skipped: clearProviders,
