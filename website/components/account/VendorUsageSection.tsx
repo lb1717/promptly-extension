@@ -451,6 +451,36 @@ function windowLabels(provider: VendorProfile["provider"]): { primary: string; s
   return { primary: "5-hour", secondary: "Weekly" };
 }
 
+function showsShortWindowToggle(provider: VendorProfile["provider"]): boolean {
+  return provider === "claude_code" || provider === "codex";
+}
+
+function defaultWindowKind(profile: VendorProfile): WindowKind {
+  const hasPrimary = Boolean(profile.primary_window);
+  const hasSecondary = Boolean(profile.secondary_window);
+  if (profile.provider === "cursor" && hasSecondary) return "secondary";
+  if (hasPrimary) return "primary";
+  return "secondary";
+}
+
+function resolveChartReferenceLabels(cycleStartMs: number, cycleEndMs: number, nowMs: number) {
+  const span = Math.max(cycleEndMs - cycleStartMs, 1);
+  const startFrac = (nowMs - cycleStartMs) / span;
+  const endFrac = (cycleEndMs - nowMs) / span;
+  const nearStart = startFrac < 0.14;
+  const nearEnd = endFrac < 0.14;
+
+  return {
+    showNowLabel: !nearStart && !nearEnd,
+    nowLabelPosition: (startFrac < 0.3 ? "insideTopRight" : endFrac < 0.3 ? "insideTopLeft" : "insideTop") as
+      | "insideTop"
+      | "insideTopLeft"
+      | "insideTopRight",
+    startLabelPosition: (nearStart ? "insideBottomLeft" : "insideTopLeft") as "insideBottomLeft" | "insideTopLeft",
+    endLabelPosition: (nearEnd ? "insideBottomRight" : "insideTopRight") as "insideBottomRight" | "insideTopRight"
+  };
+}
+
 function buildBillingCycleChartRows(
   provider: VendorProfile["provider"],
   history: UsageHistoryPoint[],
@@ -547,6 +577,7 @@ function UsageTrendChart({
 }) {
   const { rows, cycleStartMs, cycleEndMs, nowMs, yMax } = chart;
   const spanMs = Math.max(cycleEndMs - cycleStartMs, 1);
+  const refLabels = resolveChartReferenceLabels(cycleStartMs, cycleEndMs, nowMs);
   const lineColor =
     currentUtil >= 75 ? "#059669" : currentUtil >= 40 ? "#d97706" : currentUtil >= 15 ? "#ea580c" : "#dc2626";
   const projectionColor = "#64748b";
@@ -593,7 +624,7 @@ function UsageTrendChart({
             strokeWidth={1}
             label={{
               value: `Start · ${formatCycleBoundaryLabel(cycleStartMs)}`,
-              position: "insideTopLeft",
+              position: refLabels.startLabelPosition,
               fill: "#64748b",
               fontSize: 9
             }}
@@ -604,7 +635,7 @@ function UsageTrendChart({
             strokeWidth={1}
             label={{
               value: `End · ${formatCycleBoundaryLabel(cycleEndMs)}`,
-              position: "insideTopRight",
+              position: refLabels.endLabelPosition,
               fill: "#64748b",
               fontSize: 9
             }}
@@ -615,9 +646,18 @@ function UsageTrendChart({
             strokeDasharray="2 4"
             strokeWidth={1}
             strokeOpacity={0.85}
-            label={{ value: "Now", position: "insideTop", fill: "#64748b", fontSize: 9 }}
+            {...(refLabels.showNowLabel
+              ? {
+                  label: {
+                    value: "Now",
+                    position: refLabels.nowLabelPosition,
+                    fill: "#64748b",
+                    fontSize: 9
+                  }
+                }
+              : {})}
           />
-          <ReferenceLine y={100} stroke="#16a34a" strokeDasharray="4 4" strokeOpacity={0.75} label={{ value: "100%", position: "insideTopLeft", fill: "#16a34a", fontSize: 10 }} />
+          <ReferenceLine y={100} stroke="#16a34a" strokeDasharray="4 4" strokeOpacity={0.75} />
           <ReferenceLine y={75} stroke="#86efac" strokeDasharray="3 6" strokeOpacity={0.35} />
           <ReferenceLine y={50} stroke="#d1d5db" strokeDasharray="3 6" strokeOpacity={0.35} />
           <ReferenceLine y={25} stroke="#fca5a5" strokeDasharray="3 6" strokeOpacity={0.35} />
@@ -702,7 +742,8 @@ function SubscriptionUsageRow({
   const labels = windowLabels(profile.provider);
   const hasPrimary = Boolean(profile.primary_window);
   const hasSecondary = Boolean(profile.secondary_window);
-  const [windowKind, setWindowKind] = useState<WindowKind>(hasPrimary ? "primary" : "secondary");
+  const showWindowToggle = showsShortWindowToggle(profile.provider) && hasPrimary && hasSecondary;
+  const [windowKind, setWindowKind] = useState<WindowKind>(() => defaultWindowKind(profile));
 
   const activeWindow = windowKind === "primary" ? profile.primary_window : profile.secondary_window;
   const activeHistory =
@@ -748,7 +789,7 @@ function SubscriptionUsageRow({
             <p className="mt-1 truncate text-xs text-faint">{profile.vendor_email}</p>
           ) : null}
         </div>
-        {hasPrimary && hasSecondary ? (
+        {showWindowToggle ? (
           <div className="inline-flex shrink-0 rounded-lg border border-line bg-cream-dark p-0.5">
             <button
               type="button"
