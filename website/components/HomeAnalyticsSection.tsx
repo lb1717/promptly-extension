@@ -414,22 +414,24 @@ export function HomeAnalyticsSection() {
           ))}
         </div>
 
-        <SectionHeader
-          className="mt-8 mb-8 sm:mt-0"
-          eyebrow="AI observability"
-          title="Track your AI usage"
-          subtitle="Get statistics on your prompt volume, time spent on AI and your subscription expenditure. One dashboard for individuals, firm leaders, or operations teams."
-        />
+        <div className="mt-2.5">
+          <SectionHeader
+            className="mt-8 mb-8 sm:mt-0"
+            eyebrow="AI observability"
+            title="Track your AI usage"
+            subtitle="Get statistics on your prompt volume, time spent on AI and your subscription expenditure. One dashboard for individuals, firm leaders, or operations teams."
+          />
 
-        <div className="mx-auto mt-10 max-w-3xl space-y-4 text-center text-sm leading-relaxed text-muted sm:text-base">
-          <p>
-            Promptly gives you a shared picture of how AI is actually used: which models people reach for, how long
-            they stay in each tool, and where subscription spend drifts above budget.
-          </p>
-          <p>
-            Use it to justify licenses, coach teams on structure and intent, and cut wasted tokens before they show up
-            on the invoice.
-          </p>
+          <div className="mx-auto mt-10 max-w-3xl space-y-4 text-center text-sm leading-relaxed text-muted sm:text-base">
+            <p>
+              Promptly gives you a shared picture of how AI is actually used: which models people reach for, how long
+              they stay in each tool, and where subscription spend drifts above budget.
+            </p>
+            <p>
+              Use it to justify licenses, coach teams on structure and intent, and cut wasted tokens before they show up
+              on the invoice.
+            </p>
+          </div>
         </div>
       </div>
     </section>
