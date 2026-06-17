@@ -35,6 +35,7 @@ export function Hero() {
 
   return (
     <section className="relative overflow-hidden bg-transparent px-4 pb-0 pt-3 sm:pt-7">
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-2 bg-page" aria-hidden />
       <div className="mx-auto max-w-6xl">
         <div className="mx-auto max-w-3xl text-center">
           <div className="mb-3 flex justify-center">
