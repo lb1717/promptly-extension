@@ -69,17 +69,20 @@ function Promptly-RunNode {
 
 function Promptly-PatchHookNodeInFiles {
   param([Parameter(Mandatory)][string[]]$Paths)
-  $integrations = Join-Path $env:USERPROFILE "integrations"
-  $patchScript = Join-Path $integrations "scripts\patch-windows-hooks.mjs"
   $nodeExe = Promptly-GetNodeExe
   $env:PROMPTLY_NODE_EXE = $nodeExe
-  if (-not (Test-Path -LiteralPath $patchScript)) {
-    $installBase = if ($env:PROMPTLY_INSTALL_BASE) { $env:PROMPTLY_INSTALL_BASE } else { "https://promptly-labs.com/install" }
-    New-Item -ItemType Directory -Force -Path (Split-Path $patchScript) | Out-Null
-    try {
-      Invoke-WebRequest -Uri "$installBase/patch-windows-hooks.mjs" -OutFile $patchScript -UseBasicParsing
-    } catch {
-      Write-Host "WARN patch-windows-hooks.mjs missing — re-download the plugin pack"
+  $installBase = if ($script:InstallBase) { $script:InstallBase } elseif ($InstallBase) { $InstallBase } elseif ($env:PROMPTLY_INSTALL_BASE) { $env:PROMPTLY_INSTALL_BASE } else { "https://promptly-labs.com/install" }
+  $patchDir = Join-Path $env:TEMP "promptly-install"
+  New-Item -ItemType Directory -Force -Path $patchDir | Out-Null
+  $patchScript = Join-Path $patchDir "patch-windows-hooks.mjs"
+  try {
+    Invoke-WebRequest -Uri "$installBase/patch-windows-hooks.mjs" -OutFile $patchScript -UseBasicParsing
+  } catch {
+    $bundled = Join-Path $env:USERPROFILE "integrations\scripts\patch-windows-hooks.mjs"
+    if (Test-Path -LiteralPath $bundled) {
+      Copy-Item -Force $bundled $patchScript
+    } else {
+      Write-Host "WARN Could not download patch-windows-hooks.mjs"
       return
     }
   }
@@ -97,16 +100,20 @@ function Promptly-TestHooksJsonOk {
   )
   if (-not (Test-Path -LiteralPath $HooksPath)) { return $false }
   $nodeExe = if ($NodeExe) { $NodeExe } else { Promptly-GetNodeExe }
-  $verify = @'
+  $verifyPath = Join-Path $env:TEMP "promptly-verify-hooks.mjs"
+  @'
 import { readFileSync } from "node:fs";
-const raw = readFileSync(process.argv[1], "utf8");
+const file = process.argv[1];
+const nodeExe = process.argv[2];
+const raw = readFileSync(file, "utf8");
 JSON.parse(raw);
-const nodeExe = process.argv[2].toLowerCase();
-if (!raw.toLowerCase().includes(nodeExe) && !raw.toLowerCase().includes(nodeExe.replace(/\\/g, "\\\\"))) {
+const low = raw.toLowerCase();
+const target = nodeExe.toLowerCase();
+if (!low.includes(target) && !low.includes(target.replace(/\\/g, "\\\\"))) {
   process.exit(2);
 }
-'@
-  & $nodeExe --input-type=module -e $verify $HooksPath $nodeExe 2>$null
+'@ | Set-Content -LiteralPath $verifyPath -Encoding utf8
+  & $nodeExe $verifyPath $HooksPath $nodeExe 2>$null
   return $LASTEXITCODE -eq 0
 }
 
@@ -145,21 +152,6 @@ function Promptly-CollectHookJsonPaths {
     }
   }
   return ,$paths.ToArray()
-}
-
-function Promptly-EnsureHooksUseNodeExe {
-  param([Parameter(Mandatory)][string]$HooksPath)
-  if (-not (Test-Path -LiteralPath $HooksPath)) { return $false }
-  Promptly-PatchHookNodeInFiles -Paths @($HooksPath)
-  try {
-    $raw = [System.IO.File]::ReadAllText($HooksPath)
-    $null = $raw | ConvertFrom-Json
-    $nodeExe = Promptly-GetNodeExe
-    return $raw.Contains($nodeExe)
-  } catch {
-    Write-Host "X Invalid hooks JSON: $HooksPath"
-    return $false
-  }
 }
 
 function Promptly-ApplyWindowsHookPaths {

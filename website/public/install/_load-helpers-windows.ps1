@@ -3,6 +3,7 @@
 if (-not $InstallBase) {
   $InstallBase = if ($env:PROMPTLY_INSTALL_BASE) { $env:PROMPTLY_INSTALL_BASE } else { "https://promptly-labs.com/install" }
 }
+$script:InstallBase = $InstallBase
 
 function __Promptly-FetchScriptText {
   param([Parameter(Mandatory)][string]$Uri)
