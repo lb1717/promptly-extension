@@ -2039,9 +2039,14 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
       if (!res.ok) {
         throw new Error(data?.error || `Request failed (${res.status})`);
       }
-      setIdeStats(data as IdeStatsPayload);
-      if (captureCatalog && Array.isArray(data.model_buckets)) {
-        setModelCatalogIde(data.model_buckets.filter((row) => !isInternalTelemetryModelBucket(row.bucket)));
+      const payload = data as IdeStatsPayload;
+      setIdeStats(payload);
+      if (captureCatalog && Array.isArray(payload.model_buckets)) {
+        setModelCatalogIde(
+          payload.model_buckets.filter(
+            (row: IdeStatsPayload["model_buckets"][number]) => !isInternalTelemetryModelBucket(row.bucket)
+          )
+        );
       }
     } catch (e) {
       const raw = String(e instanceof Error ? e.message : e);
