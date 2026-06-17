@@ -16,6 +16,12 @@ if (-not (Get-Command Promptly-UnzipPluginPack -ErrorAction SilentlyContinue)) {
 if (-not (Get-Command Promptly-InstallForCursor -ErrorAction SilentlyContinue)) {
   throw "Promptly-InstallForCursor was not defined in session scope"
 }
+if (-not (Get-Command Promptly-FinalizeWithPairCode -ErrorAction SilentlyContinue)) {
+  throw "Promptly-FinalizeWithPairCode was not defined in session scope"
+}
+if (-not (Get-Command Promptly-InstallAllAgents -ErrorAction SilentlyContinue)) {
+  throw "Promptly-InstallAllAgents was not defined in session scope"
+}
 
 $setupText = Get-Content -Raw -Path (Join-Path $installDir "setup-windows.ps1")
 if ($setupText -notmatch '_load-helpers-windows\.ps1') {

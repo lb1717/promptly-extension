@@ -32,79 +32,103 @@ function Promptly-SyncTelemetryCli {
   exit 1
 }
 
-function Promptly-MakeCodexHookEntry {
-  param([string]$Command)
-  return @{ hooks = @(@{ type = "command"; command = $Command; timeout = 15 }) }
+function Promptly-WriteUtf8File {
+  param(
+    [Parameter(Mandatory)][string]$Path,
+    [Parameter(Mandatory)][string]$Content
+  )
+  $dir = Split-Path $Path
+  if ($dir) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+  [System.IO.File]::WriteAllText($Path, $Content, [System.Text.UTF8Encoding]::new($false))
 }
 
-function Promptly-WriteCodexHooksJson {
-  param([Parameter(Mandatory)][string]$HooksPath)
-  $node = Promptly-GetHookNodePrefix
-  $cmd = $node + ' "${PLUGIN_ROOT}/bin/promptly-telemetry.mjs" hook --tool codex'
-  $payload = @{
-    hooks = @{
-      UserPromptSubmit = @(Promptly-MakeCodexHookEntry -Command $cmd)
-      Stop = @(Promptly-MakeCodexHookEntry -Command $cmd)
-      SessionStart = @(Promptly-MakeCodexHookEntry -Command $cmd)
-      SessionEnd = @(Promptly-MakeCodexHookEntry -Command $cmd)
-    }
+function Promptly-GetNodeExe {
+  $nodeExe = (Get-Command node.exe -ErrorAction SilentlyContinue).Source
+  if (-not $nodeExe) {
+    $nodeExe = (Get-Command node -ErrorAction SilentlyContinue).Source
   }
-  New-Item -ItemType Directory -Force -Path (Split-Path $HooksPath) | Out-Null
-  ($payload | ConvertTo-Json -Depth 8) + "`n" | Set-Content -LiteralPath $HooksPath -Encoding utf8
+  if (-not $nodeExe) {
+    Write-Host "X Node.js executable not found"
+    exit 1
+  }
+  return $nodeExe
 }
 
-function Promptly-WriteCursorHooksJson {
-  param([Parameter(Mandatory)][string]$HooksPath)
-  $node = Promptly-GetHookNodePrefix
-  $cmd = $node + ' "${CURSOR_PLUGIN_ROOT}/bin/promptly-telemetry.mjs" hook --tool cursor'
-  $entry = @{ command = $cmd }
-  $payload = @{
-    version = 1
-    hooks = @{
-      beforeSubmitPrompt = @($entry)
-      afterAgentResponse = @($entry)
-      stop = @($entry)
-      sessionStart = @($entry)
-      sessionEnd = @($entry)
-    }
+function Promptly-RunNode {
+  param(
+    [Parameter(Mandatory)][string[]]$Args,
+    [switch]$AllowFailure
+  )
+  $nodeExe = Promptly-GetNodeExe
+  & $nodeExe @Args 2>&1 | Write-Host
+  if (-not $AllowFailure -and $LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
   }
-  New-Item -ItemType Directory -Force -Path (Split-Path $HooksPath) | Out-Null
-  ($payload | ConvertTo-Json -Depth 8) + "`n" | Set-Content -LiteralPath $HooksPath -Encoding utf8
+  return $LASTEXITCODE
 }
 
-function Promptly-WriteClaudeHooksJson {
-  param([Parameter(Mandatory)][string]$HooksPath)
-  $node = Promptly-GetHookNodePrefix
-  $cmd = $node + ' "${CLAUDE_PLUGIN_ROOT}/bin/promptly-telemetry.mjs" hook --tool claude_code'
-  $payload = @{
-    hooks = @{
-      UserPromptSubmit = @(Promptly-MakeCodexHookEntry -Command $cmd)
-      Stop = @(Promptly-MakeCodexHookEntry -Command $cmd)
-      SessionStart = @(Promptly-MakeCodexHookEntry -Command $cmd)
-      SessionEnd = @(Promptly-MakeCodexHookEntry -Command $cmd)
+function Promptly-PatchHookNodeInFiles {
+  param([Parameter(Mandatory)][string[]]$Paths)
+  $nodePrefix = Promptly-GetHookNodePrefix
+  foreach ($file in $Paths) {
+    if (-not (Test-Path -LiteralPath $file)) { continue }
+    $raw = [System.IO.File]::ReadAllText($file)
+    if ($raw -notmatch '"node \\"\$\{') { continue }
+    $patched = $raw -replace '("command":\s*)"node ', "`${1}$nodePrefix "
+    if ($patched -ne $raw) {
+      Promptly-WriteUtf8File -Path $file -Content $patched
+      Write-Host "    Patched hook runner: $file"
     }
   }
-  New-Item -ItemType Directory -Force -Path (Split-Path $HooksPath) | Out-Null
-  ($payload | ConvertTo-Json -Depth 8) + "`n" | Set-Content -LiteralPath $HooksPath -Encoding utf8
+}
+
+function Promptly-CollectHookJsonPaths {
+  param([string]$Integrations = (Join-Path $env:USERPROFILE "integrations"))
+  $paths = [System.Collections.Generic.List[string]]::new()
+  foreach ($candidate in @(
+    (Join-Path $Integrations "codex\hooks\hooks.json"),
+    (Join-Path $Integrations "cursor\hooks\hooks.json"),
+    (Join-Path $Integrations "claude-code\hooks\hooks.json"),
+    (Join-Path $env:USERPROFILE ".cursor\plugins\local\promptly-cursor\hooks\hooks.json")
+  )) {
+    if ($candidate -and (Test-Path -LiteralPath $candidate)) { [void]$paths.Add($candidate) }
+  }
+  foreach ($cacheRoot in @(
+    (Join-Path $env:USERPROFILE ".codex\plugins\cache\promptly-labs\promptly-codex"),
+    (Join-Path $env:USERPROFILE ".claude\plugins\cache\promptly-labs\promptly-claude-code")
+  )) {
+    if (-not (Test-Path -LiteralPath $cacheRoot)) { continue }
+    Get-ChildItem -Path $cacheRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+      foreach ($rel in @("hooks\hooks.json", "codex\hooks\hooks.json")) {
+        $candidate = Join-Path $_.FullName $rel
+        if (Test-Path -LiteralPath $candidate) { [void]$paths.Add($candidate) }
+      }
+    }
+  }
+  return ,$paths.ToArray()
+}
+
+function Promptly-EnsureHooksUseNodeExe {
+  param([Parameter(Mandatory)][string]$HooksPath)
+  if (-not (Test-Path -LiteralPath $HooksPath)) { return $false }
+  $nodeExe = Promptly-GetNodeExe
+  if (Select-String -Path $HooksPath -Pattern ([regex]::Escape($nodeExe)) -Quiet) { return $true }
+  Promptly-PatchHookNodeInFiles -Paths @($HooksPath)
+  return (Select-String -Path $HooksPath -Pattern ([regex]::Escape($nodeExe)) -Quiet)
 }
 
 function Promptly-ApplyWindowsHookPaths {
   param([string]$Integrations)
-  Promptly-WriteCodexHooksJson -HooksPath (Join-Path $Integrations "codex\hooks\hooks.json")
-  Promptly-WriteCursorHooksJson -HooksPath (Join-Path $Integrations "cursor\hooks\hooks.json")
-  Promptly-WriteClaudeHooksJson -HooksPath (Join-Path $Integrations "claude-code\hooks\hooks.json")
+  Promptly-PatchHookNodeInFiles -Paths (Promptly-CollectHookJsonPaths -Integrations $Integrations)
 }
 
 function Promptly-PreparePluginPack {
   param([string]$Integrations)
   $syncScript = Join-Path $Integrations "scripts\sync-plugin-pack.mjs"
-  $nodeExe = (Get-Command node.exe -ErrorAction SilentlyContinue).Source
-  if (-not $nodeExe) {
-    $nodeExe = (Get-Command node -ErrorAction SilentlyContinue).Source
-  }
-  if ($syncScript -and (Test-Path $syncScript) -and $nodeExe) {
+  $nodeExe = Promptly-GetNodeExe
+  if ($syncScript -and (Test-Path $syncScript)) {
     Write-Host "-> Syncing plugin pack hooks and CLIs..."
-    & $nodeExe $syncScript 2>&1 | Out-Null
+    & $nodeExe $syncScript 2>&1 | Write-Host
   }
   Promptly-ApplyWindowsHookPaths -Integrations $Integrations
 }
@@ -112,49 +136,57 @@ function Promptly-PreparePluginPack {
 function Promptly-SyncClaudePluginCache {
   $src = Join-Path $env:USERPROFILE "integrations\packages\telemetry-cli\bin\promptly-telemetry.mjs"
   $hooksSrc = Join-Path $env:USERPROFILE "integrations\claude-code\hooks\hooks.json"
-  if (-not (Test-Path $src)) { return }
+  if (-not (Test-Path $src)) { return 0 }
   $cacheRoot = Join-Path $env:USERPROFILE ".claude\plugins\cache\promptly-labs\promptly-claude-code"
-  if (-not (Test-Path $cacheRoot)) { return }
+  if (-not (Test-Path $cacheRoot)) {
+    Write-Host "  Note: Claude plugin cache not created yet (open Claude Code once if hooks do not run)"
+    return 0
+  }
+  $count = 0
   Get-ChildItem -Path $cacheRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
     $binDir = Join-Path $_.FullName "bin"
-    if (Test-Path (Split-Path $binDir)) {
-      New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-      Copy-Item -Force $src (Join-Path $binDir "promptly-telemetry.mjs")
-    }
+    New-Item -ItemType Directory -Force -Path $binDir | Out-Null
+    Copy-Item -Force $src (Join-Path $binDir "promptly-telemetry.mjs")
     if (Test-Path $hooksSrc) {
       $hooksDir = Join-Path $_.FullName "hooks"
       New-Item -ItemType Directory -Force -Path $hooksDir | Out-Null
       Copy-Item -Force $hooksSrc (Join-Path $hooksDir "hooks.json")
     }
+    $count++
+    Write-Host "  Synced Claude Code plugin cache: $($_.FullName)"
   }
+  Promptly-PatchHookNodeInFiles -Paths (Promptly-CollectHookJsonPaths)
+  return $count
 }
 
 function Promptly-SyncCodexPluginCache {
   $src = Join-Path $env:USERPROFILE "integrations\packages\telemetry-cli\bin\promptly-telemetry.mjs"
   $hooksSrc = Join-Path $env:USERPROFILE "integrations\codex\hooks\hooks.json"
-  if (-not (Test-Path $src)) { return }
+  if (-not (Test-Path $src)) { return 0 }
   $cacheRoot = Join-Path $env:USERPROFILE ".codex\plugins\cache\promptly-labs\promptly-codex"
-  if (-not (Test-Path $cacheRoot)) { return }
+  if (-not (Test-Path $cacheRoot)) {
+    Write-Host "  Note: Codex plugin cache not created yet (open Codex once, then rerun setup or sync-runtimes)"
+    return 0
+  }
+  $count = 0
   Get-ChildItem -Path $cacheRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
     foreach ($binRel in @("bin", "codex\bin")) {
       $binDir = Join-Path $_.FullName $binRel
-      $parent = Split-Path $binDir
-      if (Test-Path $parent) {
-        New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-        Copy-Item -Force $src (Join-Path $binDir "promptly-telemetry.mjs")
-      }
+      New-Item -ItemType Directory -Force -Path $binDir | Out-Null
+      Copy-Item -Force $src (Join-Path $binDir "promptly-telemetry.mjs")
     }
     if (Test-Path $hooksSrc) {
       foreach ($hooksRel in @("hooks", "codex\hooks")) {
         $hooksDir = Join-Path $_.FullName $hooksRel
-        $parent = Split-Path $hooksDir
-        if (Test-Path $parent) {
-          New-Item -ItemType Directory -Force -Path $hooksDir | Out-Null
-          Copy-Item -Force $hooksSrc (Join-Path $hooksDir "hooks.json")
-        }
+        New-Item -ItemType Directory -Force -Path $hooksDir | Out-Null
+        Copy-Item -Force $hooksSrc (Join-Path $hooksDir "hooks.json")
       }
     }
+    $count++
+    Write-Host "  Synced Codex plugin cache: $($_.FullName)"
   }
+  Promptly-PatchHookNodeInFiles -Paths (Promptly-CollectHookJsonPaths)
+  return $count
 }
 
 function Promptly-SyncAllAgentRuntimes {
@@ -162,6 +194,7 @@ function Promptly-SyncAllAgentRuntimes {
   $cliSrc = Join-Path $env:USERPROFILE "integrations\packages\telemetry-cli\bin\promptly-telemetry.mjs"
   if (-not (Test-Path $cliSrc)) { return }
 
+  Write-Host "-> Syncing telemetry CLI into agent plugin folders..."
   foreach ($plugin in @("claude-code", "cursor", "codex")) {
     $pluginDir = Join-Path $Integrations $plugin
     if (Test-Path $pluginDir) {
@@ -169,25 +202,138 @@ function Promptly-SyncAllAgentRuntimes {
     }
   }
 
-  Promptly-SyncClaudePluginCache
-  Promptly-SyncCodexPluginCache
+  Promptly-SyncClaudePluginCache | Out-Null
+  Promptly-SyncCodexPluginCache | Out-Null
 
   $cursorDest = Join-Path $env:USERPROFILE ".cursor\plugins\local\promptly-cursor"
   $cursorSrc = Join-Path $Integrations "cursor"
   if (Test-Path $cursorSrc) {
+    Write-Host "-> Refreshing local Cursor plugin copy..."
     if (Test-Path $cursorDest) { Remove-Item -Recurse -Force $cursorDest }
     New-Item -ItemType Directory -Force -Path (Split-Path $cursorDest) | Out-Null
     Copy-Item -Recurse -Force $cursorSrc $cursorDest
   }
 
-  $nodeExe = (Get-Command node.exe -ErrorAction SilentlyContinue).Source
-  if (-not $nodeExe) {
-    $nodeExe = (Get-Command node -ErrorAction SilentlyContinue).Source
+  Promptly-ApplyWindowsHookPaths -Integrations $Integrations
+  Promptly-RunNode -Args @($cliSrc, "sync-runtimes") -AllowFailure
+  Write-Host "OK Synced live hooks + telemetry CLI for Claude Code, Cursor, and Codex"
+}
+
+function Promptly-PrintHookDiagnostics {
+  param(
+    [Parameter(Mandatory)][string]$CliPath,
+    [Parameter(Mandatory)][string]$Tool,
+    [Parameter(Mandatory)][string]$Label
+  )
+  Write-Host ""
+  Write-Host "Hook diagnostics: $Label"
+  Promptly-RunNode -Args @($CliPath, "diagnostics", "--tool", $Tool) -AllowFailure
+}
+
+function Promptly-PrintInstallSummary {
+  param(
+    [string[]]$Installed,
+    [string[]]$Skipped,
+    [string[]]$Failed
+  )
+  Write-Host ""
+  Write-Host "========================================"
+  Write-Host "Promptly all-agents install summary"
+  if ($Installed.Count) { Write-Host "  OK Installed: $($Installed -join ', ')" }
+  if ($Skipped.Count) { Write-Host "  WARN Skipped (CLI not available): $($Skipped -join ', ')" }
+  if ($Failed.Count) { Write-Host "  X Failed: $($Failed -join ', ')" }
+  Write-Host "========================================"
+}
+
+function Promptly-CoerceExitCode {
+  param($Value)
+  if ($Value -is [int]) { return $Value }
+  foreach ($item in @($Value)) {
+    if ($item -is [int]) { return $item }
   }
-  if ($nodeExe) {
-    & $nodeExe $cliSrc sync-runtimes 2>&1 | Write-Host
+  return 1
+}
+
+function Promptly-InstallAllAgents {
+  param([string]$Integrations)
+  $installed = @()
+  $skipped = @()
+  $failed = @()
+
+  foreach ($entry in @(
+    @{ Label = "Cursor"; Fn = { Promptly-InstallForCursor -Integrations $Integrations } },
+    @{ Label = "Claude Code"; Fn = { Promptly-InstallForClaudeCode -Integrations $Integrations } },
+    @{ Label = "Codex"; Fn = { Promptly-InstallForCodex -Integrations $Integrations } }
+  )) {
+    $code = Promptly-CoerceExitCode (& $entry.Fn)
+    if ($code -eq 0) { $installed += $entry.Label }
+    elseif ($code -eq 2) { $skipped += $entry.Label }
+    else { $failed += $entry.Label }
   }
-  Write-Host "Synced live hooks + telemetry CLI for Claude Code, Cursor, and Codex"
+
+  Promptly-PrintInstallSummary -Installed $installed -Skipped $skipped -Failed $failed
+  if (-not $installed.Count) { return 1 }
+  return 0
+}
+
+function Promptly-SyncSubscriptionUsage {
+  param([string]$Integrations = (Join-Path $env:USERPROFILE "integrations"))
+  $cli = Join-Path $Integrations "packages\telemetry-cli\bin\promptly-telemetry.mjs"
+  if (-not (Test-Path $cli)) {
+    Write-Host "WARN Subscription sync skipped - telemetry CLI missing."
+    return
+  }
+  Write-Host "-> Syncing AI subscription usage (Claude, Codex, Cursor)..."
+  Write-Host "  First-time setup opens your browser once for claude.ai sign-in."
+  Promptly-RunNode -Args @($cli, "usage-sync", "--login-claude") -AllowFailure
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "WARN Subscription sync incomplete - resync anytime at https://promptly-labs.com/integrations#resync-subscriptions"
+  } else {
+    Write-Host "OK Subscription usage synced - use Refresh on your stats page anytime."
+  }
+}
+
+function Promptly-FinalizeWithPairCode {
+  param(
+    [Parameter(Mandatory)][string]$Code,
+    [string]$Integrations = (Join-Path $env:USERPROFILE "integrations")
+  )
+  $cli = Join-Path $Integrations "packages\telemetry-cli\bin\promptly-telemetry.mjs"
+  if (-not (Test-Path $cli)) {
+    Write-Host "X Could not install telemetry CLI from plugin pack."
+    exit 1
+  }
+
+  Write-Host "-> Pairing all agents, merging stats, and verifying live uploads..."
+  Promptly-RunNode -Args @($cli, "fix-account", $Code)
+
+  Write-Host "-> Syncing hooks + telemetry into Claude Code, Cursor, and Codex runtimes..."
+  Promptly-SyncAllAgentRuntimes -Integrations $Integrations
+
+  foreach ($tool in @(
+    @{ Tool = "codex"; Label = "Codex" },
+    @{ Tool = "claude_code"; Label = "Claude Code" },
+    @{ Tool = "cursor"; Label = "Cursor" }
+  )) {
+    Promptly-PrintHookDiagnostics -CliPath $cli -Tool $tool.Tool -Label $tool.Label
+    Write-Host "-> Live upload test: $($tool.Label)"
+    Promptly-RunNode -Args @($cli, "test-send", "--tool", $tool.Tool) -AllowFailure
+    Write-Host "-> Connection status: $($tool.Label)"
+    Promptly-RunNode -Args @($cli, "status", "--tool", $tool.Tool) -AllowFailure
+  }
+
+  Promptly-SyncSubscriptionUsage -Integrations $Integrations
+
+  Write-Host ""
+  Write-Host "OK All set. Restart Claude Code, Cursor, and Codex if they were open, then send a test prompt."
+  Write-Host ""
+  Write-Host "Enable hooks after reopening:"
+  Write-Host "  Codex (terminal): run codex, open a trusted project, type /hooks, trust Promptly"
+  Write-Host "  Codex (desktop app): quit and reopen the app; trust hooks when prompted in settings"
+  Write-Host "  Cursor: reload the window and allow hooks when prompted"
+  Write-Host "  Claude Code: run /reload-plugins once"
+  Write-Host ""
+  Write-Host "Stats: https://promptly-labs.com/account/statistics"
 }
 
 function Promptly-ClaudeMarketplaceRefresh {
@@ -358,7 +504,11 @@ function Promptly-InstallForCursor {
     Write-Host "Cursor hooks must use `${CURSOR_PLUGIN_ROOT}/bin"
     return 1
   }
-  Write-Host "Promptly installed for Cursor"
+  if (-not (Promptly-EnsureHooksUseNodeExe -HooksPath $hooksPath)) {
+    Write-Host "X Cursor hooks must use full node.exe path"
+    return 1
+  }
+  Write-Host "OK Promptly installed for Cursor"
   return 0
 }
 
@@ -387,7 +537,11 @@ function Promptly-InstallForClaudeCode {
     Write-Host "Hooks not configured for Claude Code"
     return 1
   }
-  Write-Host "Promptly installed for Claude Code"
+  if (-not (Promptly-EnsureHooksUseNodeExe -HooksPath $hooksPath)) {
+    Write-Host "X Claude Code hooks must use full node.exe path"
+    return 1
+  }
+  Write-Host "OK Promptly installed for Claude Code"
   return 0
 }
 
@@ -420,7 +574,12 @@ function Promptly-InstallForCodex {
     Write-Host "Codex hooks must use `${PLUGIN_ROOT}/bin"
     return 1
   }
-  Write-Host "Promptly installed for Codex"
-  Write-Host "  After reopening Codex, type /hooks in your project and trust Promptly hooks"
+  if (-not (Promptly-EnsureHooksUseNodeExe -HooksPath $hooksPath)) {
+    Write-Host "X Codex hooks must use full node.exe path (required for Codex Desktop)"
+    return 1
+  }
+  Write-Host "OK Promptly installed for Codex"
+  Write-Host "  Codex terminal: type /hooks in your project and trust Promptly hooks"
+  Write-Host "  Codex desktop app: quit and reopen; trust hooks when prompted (no /hooks command)"
   return 0
 }
