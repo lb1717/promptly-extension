@@ -398,7 +398,7 @@ export function GeneralOnboardingClient() {
   }
 
   const stepTitle = useMemo(() => {
-    if (step === 1) return "Get Started in 1 minute";
+    if (step === 1) return "Welcome to Promptly, set up in 2 minutes";
     if (step === 2) return "Create your account";
     if (step === 3) return "What AI platforms do you use?";
     if (step === 4) return "Install Promptly";
@@ -453,7 +453,7 @@ export function GeneralOnboardingClient() {
               onClick={() => goToStep(welcomeContinueStep(user, ACCOUNT_STEP, CHOOSE_AI_STEP))}
               className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-cream hover:bg-neutral-800"
             >
-              Get started
+              Get Started
             </button>
           </div>
         ) : null}

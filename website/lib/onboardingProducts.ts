@@ -9,9 +9,9 @@ export type OnboardingProductSelection = {
 
 export const DEFAULT_ONBOARDING_PRODUCT_SELECTION: OnboardingProductSelection = {
   web: true,
-  claude_code: false,
-  cursor: false,
-  codex: false
+  claude_code: true,
+  cursor: true,
+  codex: true
 };
 
 export function hasAnyCodingAgent(selected: OnboardingProductSelection): boolean {
@@ -39,11 +39,6 @@ export const ONBOARDING_PRODUCT_OPTIONS: Array<{
   accent?: string;
 }> = [
   {
-    key: "web",
-    label: "Web AI Browsers",
-    description: "ChatGPT, Claude, and Gemini in Chrome or Edge"
-  },
-  {
     key: "claude_code",
     label: "Claude Code",
     description: "Anthropic’s coding agent in your terminal",
@@ -54,6 +49,11 @@ export const ONBOARDING_PRODUCT_OPTIONS: Array<{
     label: "Codex",
     description: "OpenAI Codex desktop app",
     accent: "#22c997"
+  },
+  {
+    key: "web",
+    label: "Web AI Browsers",
+    description: "ChatGPT, Claude, and Gemini in Chrome or Edge"
   },
   {
     key: "cursor",
