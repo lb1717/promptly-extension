@@ -3229,7 +3229,7 @@ function syncAgentRuntimeTelemetry() {
     : TELEMETRY_SCRIPT;
   let copied = 0;
 
-  const copyInto = (dest) => {
+  const copyTelemetryInto = (dest) => {
     if (!dest) return;
     try {
       mkdirSync(dirname(dest), { recursive: true });
@@ -3240,28 +3240,39 @@ function syncAgentRuntimeTelemetry() {
     }
   };
 
+  const copyHooksInto = (dest, hooksSrc) => {
+    if (!dest || !hooksSrc || !existsSync(hooksSrc)) return;
+    try {
+      mkdirSync(dirname(dest), { recursive: true });
+      writeFileSync(dest, readFileSync(hooksSrc));
+      copied += 1;
+    } catch {
+      /* ignore unreadable cache paths */
+    }
+  };
+
   for (const agent of ["claude-code", "cursor", "codex"]) {
-    copyInto(join(integrationsRoot, agent, "bin/promptly-telemetry.mjs"));
+    copyTelemetryInto(join(integrationsRoot, agent, "bin/promptly-telemetry.mjs"));
   }
 
   const claudeCache = join(home, ".claude/plugins/cache/promptly-labs/promptly-claude-code");
   if (existsSync(claudeCache)) {
+    const hooksSrc = join(integrationsRoot, "claude-code/hooks/hooks.json");
     for (const entry of readdirSync(claudeCache)) {
-      copyInto(join(claudeCache, entry, "bin/promptly-telemetry.mjs"));
-      const hooksSrc = join(integrationsRoot, "claude-code/hooks/hooks.json");
-      if (existsSync(hooksSrc)) copyInto(join(claudeCache, entry, "hooks/hooks.json"));
+      copyTelemetryInto(join(claudeCache, entry, "bin/promptly-telemetry.mjs"));
+      copyHooksInto(join(claudeCache, entry, "hooks/hooks.json"), hooksSrc);
     }
   }
 
   const codexCache = join(home, ".codex/plugins/cache/promptly-labs/promptly-codex");
   if (existsSync(codexCache)) {
+    const hooksSrc = join(integrationsRoot, "codex/hooks/hooks.json");
     for (const entry of readdirSync(codexCache)) {
       for (const rel of ["bin/promptly-telemetry.mjs", "codex/bin/promptly-telemetry.mjs"]) {
-        copyInto(join(codexCache, entry, rel));
+        copyTelemetryInto(join(codexCache, entry, rel));
       }
-      const hooksSrc = join(integrationsRoot, "codex/hooks/hooks.json");
       for (const rel of ["hooks/hooks.json", "codex/hooks/hooks.json"]) {
-        if (existsSync(hooksSrc)) copyInto(join(codexCache, entry, rel));
+        copyHooksInto(join(codexCache, entry, rel), hooksSrc);
       }
     }
   }

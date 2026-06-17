@@ -71,6 +71,12 @@ function analyzeHookFile(filePath) {
   if (!row.exists) return row;
   const raw = readFileSync(filePath, "utf8");
   row.bytes = raw.length;
+  if (raw.trimStart().startsWith("#!")) {
+    row.json_valid = false;
+    row.json_error = "hooks.json contains script content instead of JSON (re-run setup)";
+    row.ok = false;
+    return row;
+  }
   row.has_bare_node_runner = /node \\"/.test(raw);
   const target = nodeExe.toLowerCase();
   row.has_node_exe_path =

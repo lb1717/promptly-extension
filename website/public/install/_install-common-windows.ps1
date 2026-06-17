@@ -68,7 +68,7 @@ function Promptly-RunNode {
 }
 
 function Promptly-PatchHookNodeInFiles {
-  param([Parameter(Mandatory)][string[]]$Paths)
+  param([string[]]$Paths = @())
   $nodeExe = Promptly-GetNodeExe
   $env:PROMPTLY_NODE_EXE = $nodeExe
   $installBase = if ($script:InstallBase) { $script:InstallBase } elseif ($InstallBase) { $InstallBase } elseif ($env:PROMPTLY_INSTALL_BASE) { $env:PROMPTLY_INSTALL_BASE } else { "https://promptly-labs.com/install" }
@@ -100,21 +100,16 @@ function Promptly-TestHooksJsonOk {
   )
   if (-not (Test-Path -LiteralPath $HooksPath)) { return $false }
   $nodeExe = if ($NodeExe) { $NodeExe } else { Promptly-GetNodeExe }
-  $verifyPath = Join-Path $env:TEMP "promptly-verify-hooks.mjs"
-  @'
-import { readFileSync } from "node:fs";
-const file = process.argv[1];
-const nodeExe = process.argv[2];
-const raw = readFileSync(file, "utf8");
-JSON.parse(raw);
-const low = raw.toLowerCase();
-const target = nodeExe.toLowerCase();
-if (!low.includes(target) && !low.includes(target.replace(/\\/g, "\\\\"))) {
-  process.exit(2);
-}
-'@ | Set-Content -LiteralPath $verifyPath -Encoding utf8
-  & $nodeExe $verifyPath $HooksPath $nodeExe 2>$null
-  return $LASTEXITCODE -eq 0
+  try {
+    $raw = [System.IO.File]::ReadAllText($HooksPath)
+    if ($raw.TrimStart().StartsWith("#!")) { return $false }
+    $null = $raw | ConvertFrom-Json
+    $escaped = $nodeExe.Replace('\', '\\')
+    if ($raw.Contains($nodeExe) -or $raw.Contains($escaped)) { return $true }
+    return $raw.ToLower().Contains("node.exe")
+  } catch {
+    return $false
+  }
 }
 
 function Promptly-EnsureHooksUseNodeExe {
@@ -342,10 +337,8 @@ function Promptly-SyncSubscriptionUsage {
 
 function Promptly-ValidateHookJson {
   param([string]$Integrations = (Join-Path $env:USERPROFILE "integrations"))
-  $patchScript = Join-Path $Integrations "scripts\patch-windows-hooks.mjs"
-  if (-not (Test-Path -LiteralPath $patchScript)) { return }
   Write-Host "-> Validating and patching Windows hook JSON..."
-  Promptly-PatchHookNodeInFiles -Paths @()
+  Promptly-PatchHookNodeInFiles
 }
 
 function Promptly-PrintInstallDebugReport {
@@ -391,7 +384,7 @@ function Promptly-PrintInstallDebugReport {
     $ok = Promptly-TestHooksJsonOk -HooksPath $hooksPath -NodeExe $nodeExe
     $bareNode = Select-String -Path $hooksPath -Pattern 'node \\"\$\{' -Quiet
     $status = if ($ok) { "OK" } else { "FAIL" }
-    Write-Host "  [$status] $label (bare_node=$bareNode)"
+    Write-Host "  [$status] $label (bare_node=$bareNode json=$ok)"
   }
   Write-Host ""
 
