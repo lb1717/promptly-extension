@@ -266,7 +266,7 @@ function AnalyticsFanCard({
 
   return (
     <article
-      className="absolute left-1/2 top-0 w-[min(94vw,400px)] cursor-pointer transition-[transform,opacity,box-shadow] duration-500 ease-out lg:w-[440px]"
+      className="absolute left-1/2 top-8 w-[min(94vw,400px)] cursor-pointer transition-[transform,opacity,box-shadow] duration-500 ease-out sm:top-10 lg:w-[440px]"
       style={{
         transform: `translate(calc(-50% + ${config.baseX}px), ${y}px) rotate(${rotate}deg) scale(${scale})`,
         zIndex,
@@ -351,9 +351,9 @@ export function HomeAnalyticsSection() {
   });
 
   return (
-    <section id="analytics" className="-mt-1 px-4 pb-16 pt-0 sm:pb-20">
+    <section id="analytics" className="relative z-10 px-4 pb-16 pt-3 sm:pb-20 sm:pt-5">
       <div className="mx-auto max-w-6xl">
-        <div className="relative mx-auto hidden h-[min(50vw,340px)] max-h-[340px] min-h-[280px] w-full max-w-6xl sm:block sm:min-h-[300px]">
+        <div className="relative mx-auto hidden h-[min(52vw,360px)] max-h-[360px] min-h-[300px] w-full max-w-6xl sm:block sm:min-h-[320px]">
           {cards.map((card) => {
             const isFocused = focusedId === card.id;
             const dimmed = !isFocused;

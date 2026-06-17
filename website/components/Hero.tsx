@@ -34,10 +34,9 @@ export function Hero() {
     "relative overflow-hidden px-8 py-4 text-base font-bold uppercase tracking-wide sm:px-10 sm:py-4 sm:text-lg";
 
   return (
-    <section className="relative overflow-hidden bg-transparent px-4 pb-0 pt-3 sm:pt-7">
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-2 bg-page" aria-hidden />
+    <section className="relative overflow-hidden bg-transparent px-4 pb-4 pt-3 sm:pb-5 sm:pt-7">
       <div className="mx-auto max-w-6xl">
-        <div className="mx-auto max-w-3xl text-center">
+        <div className="relative z-20 mx-auto max-w-3xl text-center">
           <div className="mb-3 flex justify-center">
             <div className="group relative grid h-[78px] w-[78px] place-items-center rounded-2xl border border-line bg-cream p-2.5 transition-all duration-300 hover:shadow-card">
               <img
