@@ -72,15 +72,53 @@ function Promptly-PatchHookNodeInFiles {
   $integrations = Join-Path $env:USERPROFILE "integrations"
   $patchScript = Join-Path $integrations "scripts\patch-windows-hooks.mjs"
   $nodeExe = Promptly-GetNodeExe
-  if (Test-Path -LiteralPath $patchScript) {
-    if ($Paths -and $Paths.Count) {
-      & $nodeExe $patchScript @Paths 2>&1 | Write-Host
-    } else {
-      & $nodeExe $patchScript 2>&1 | Write-Host
+  $env:PROMPTLY_NODE_EXE = $nodeExe
+  if (-not (Test-Path -LiteralPath $patchScript)) {
+    $installBase = if ($env:PROMPTLY_INSTALL_BASE) { $env:PROMPTLY_INSTALL_BASE } else { "https://promptly-labs.com/install" }
+    New-Item -ItemType Directory -Force -Path (Split-Path $patchScript) | Out-Null
+    try {
+      Invoke-WebRequest -Uri "$installBase/patch-windows-hooks.mjs" -OutFile $patchScript -UseBasicParsing
+    } catch {
+      Write-Host "WARN patch-windows-hooks.mjs missing — re-download the plugin pack"
+      return
     }
-    return
   }
-  Write-Host "WARN patch-windows-hooks.mjs missing — re-download the plugin pack"
+  if ($Paths -and $Paths.Count) {
+    & $nodeExe $patchScript @Paths 2>&1 | Write-Host
+  } else {
+    & $nodeExe $patchScript 2>&1 | Write-Host
+  }
+}
+
+function Promptly-TestHooksJsonOk {
+  param(
+    [Parameter(Mandatory)][string]$HooksPath,
+    [string]$NodeExe
+  )
+  if (-not (Test-Path -LiteralPath $HooksPath)) { return $false }
+  $nodeExe = if ($NodeExe) { $NodeExe } else { Promptly-GetNodeExe }
+  $verify = @'
+import { readFileSync } from "node:fs";
+const raw = readFileSync(process.argv[1], "utf8");
+JSON.parse(raw);
+const nodeExe = process.argv[2].toLowerCase();
+if (!raw.toLowerCase().includes(nodeExe) && !raw.toLowerCase().includes(nodeExe.replace(/\\/g, "\\\\"))) {
+  process.exit(2);
+}
+'@
+  & $nodeExe --input-type=module -e $verify $HooksPath $nodeExe 2>$null
+  return $LASTEXITCODE -eq 0
+}
+
+function Promptly-EnsureHooksUseNodeExe {
+  param([Parameter(Mandatory)][string]$HooksPath)
+  $nodeExe = Promptly-GetNodeExe
+  Promptly-PatchHookNodeInFiles -Paths @($HooksPath)
+  if (Promptly-TestHooksJsonOk -HooksPath $HooksPath -NodeExe $nodeExe) {
+    return $true
+  }
+  Write-Host "X Hooks must use full node.exe path: $HooksPath"
+  return $false
 }
 
 function Promptly-CollectHookJsonPaths {
