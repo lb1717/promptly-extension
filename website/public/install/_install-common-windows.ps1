@@ -124,6 +124,16 @@ function Promptly-EnsureHooksUseNodeExe {
   if (Promptly-TestHooksJsonOk -HooksPath $HooksPath -NodeExe $nodeExe) {
     return $true
   }
+  try {
+    $raw = [System.IO.File]::ReadAllText($HooksPath)
+    $jsonOk = $true
+    try { $null = $raw | ConvertFrom-Json } catch { $jsonOk = $false }
+    Write-Host "  DEBUG hook check failed: json_valid=$jsonOk has_node_exe=$($raw.Contains($nodeExe)) has_escaped=$($raw.Contains($nodeExe.Replace('\','\\')))"
+    if ($raw.Length -lt 800) { Write-Host "  DEBUG hook file preview: $raw" }
+    else { Write-Host "  DEBUG hook file preview: $($raw.Substring(0, 400))..." }
+  } catch {
+    Write-Host "  DEBUG could not read hooks file: $_"
+  }
   Write-Host "X Hooks must use full node.exe path: $HooksPath"
   return $false
 }
@@ -336,6 +346,118 @@ function Promptly-ValidateHookJson {
   if (-not (Test-Path -LiteralPath $patchScript)) { return }
   Write-Host "-> Validating and patching Windows hook JSON..."
   Promptly-PatchHookNodeInFiles -Paths @()
+}
+
+function Promptly-PrintInstallDebugReport {
+  param(
+    [string]$Integrations = (Join-Path $env:USERPROFILE "integrations"),
+    [string]$PairCode = "",
+    [hashtable]$InstallSummary = @{}
+  )
+  $nodeExe = Promptly-GetNodeExe
+  $env:PROMPTLY_NODE_EXE = $nodeExe
+  $installBase = if ($script:InstallBase) { $script:InstallBase } elseif ($InstallBase) { $InstallBase } else { "https://promptly-labs.com/install" }
+  $debugDir = Join-Path $env:TEMP "promptly-install"
+  New-Item -ItemType Directory -Force -Path $debugDir | Out-Null
+  $debugScript = Join-Path $debugDir "windows-install-debug.mjs"
+  $cli = Join-Path $Integrations "packages\telemetry-cli\bin\promptly-telemetry.mjs"
+
+  Write-Host ""
+  Write-Host "################################################################################"
+  Write-Host "# PROMPTLY WINDOWS INSTALL DEBUG REPORT (temporary — copy everything below)   #"
+  Write-Host "################################################################################"
+  Write-Host ""
+  Write-Host "generated_at: $((Get-Date).ToUniversalTime().ToString('o'))"
+  Write-Host "pair_code_used: $(if ($PairCode) { $PairCode.Substring(0, [Math]::Min(4, $PairCode.Length)) + '****' } else { 'none' })"
+  Write-Host "install_base: $installBase"
+  Write-Host "userprofile: $env:USERPROFILE"
+  Write-Host "node_exe: $nodeExe"
+  Write-Host "node_version: $(& $nodeExe -v 2>&1 | Out-String | ForEach-Object { $_.Trim() })"
+  Write-Host "powershell_version: $($PSVersionTable.PSVersion)"
+  if ($InstallSummary.Count) {
+    Write-Host "install_summary_installed: $($InstallSummary.Installed -join ', ')"
+    Write-Host "install_summary_skipped: $($InstallSummary.Skipped -join ', ')"
+    Write-Host "install_summary_failed: $($InstallSummary.Failed -join ', ')"
+  }
+  Write-Host ""
+
+  Write-Host "--- hook_files (quick scan) ---"
+  foreach ($hooksPath in (Promptly-CollectHookJsonPaths -Integrations $Integrations)) {
+    $label = $hooksPath.Replace($env:USERPROFILE, '~')
+    if (-not (Test-Path -LiteralPath $hooksPath)) {
+      Write-Host "  [MISSING] $label"
+      continue
+    }
+    $ok = Promptly-TestHooksJsonOk -HooksPath $hooksPath -NodeExe $nodeExe
+    $bareNode = Select-String -Path $hooksPath -Pattern 'node \\"\$\{' -Quiet
+    $status = if ($ok) { "OK" } else { "FAIL" }
+    Write-Host "  [$status] $label (bare_node=$bareNode)"
+  }
+  Write-Host ""
+
+  try {
+    Invoke-WebRequest -Uri "$installBase/windows-install-debug.mjs" -OutFile $debugScript -UseBasicParsing
+    Write-Host "--- full_analytics_json (copy from next line through END PROMPTLY DEBUG) ---"
+    & $nodeExe $debugScript $Integrations 2>&1 | Write-Host
+  } catch {
+    Write-Host "WARN Could not run windows-install-debug.mjs: $_"
+    if (Test-Path -LiteralPath $cli) {
+      Write-Host "--- fallback: per-tool diagnostics ---"
+      foreach ($tool in @("claude_code", "cursor", "codex")) {
+        Write-Host "== diagnostics --tool $tool =="
+        & $nodeExe $cli diagnostics --tool $tool 2>&1 | Write-Host
+        Write-Host "== status --tool $tool =="
+        & $nodeExe $cli status --tool $tool 2>&1 | Write-Host
+      }
+    }
+  }
+
+  Write-Host ""
+  Write-Host "################################################################################"
+  Write-Host "# END PROMPTLY DEBUG — send this block if install or live tracking still fails  #"
+  Write-Host "################################################################################"
+  Write-Host ""
+}
+
+function Promptly-FinalizeWithPairCodeAndDebug {
+  param(
+    [Parameter(Mandatory)][string]$Code,
+    [string]$Integrations = (Join-Path $env:USERPROFILE "integrations"),
+    [hashtable]$InstallSummary = @{}
+  )
+  $cli = Join-Path $Integrations "packages\telemetry-cli\bin\promptly-telemetry.mjs"
+  if (Test-Path -LiteralPath $cli) {
+    Promptly-FinalizeWithPairCode -Code $Code -Integrations $Integrations
+  } else {
+    Write-Host "WARN Skipping finalize — telemetry CLI missing at $cli"
+  }
+  Promptly-PrintInstallDebugReport -Integrations $Integrations -PairCode $Code -InstallSummary $InstallSummary
+}
+
+function Promptly-InstallAllAgentsWithSummary {
+  param([string]$Integrations)
+  $installed = @()
+  $skipped = @()
+  $failed = @()
+
+  foreach ($entry in @(
+    @{ Label = "Cursor"; Fn = { Promptly-InstallForCursor -Integrations $Integrations } },
+    @{ Label = "Claude Code"; Fn = { Promptly-InstallForClaudeCode -Integrations $Integrations } },
+    @{ Label = "Codex"; Fn = { Promptly-InstallForCodex -Integrations $Integrations } }
+  )) {
+    $code = Promptly-CoerceExitCode (& $entry.Fn)
+    if ($code -eq 0) { $installed += $entry.Label }
+    elseif ($code -eq 2) { $skipped += $entry.Label }
+    else { $failed += $entry.Label }
+  }
+
+  Promptly-PrintInstallSummary -Installed $installed -Skipped $skipped -Failed $failed
+  return @{
+    Installed = $installed
+    Skipped = $skipped
+    Failed = $failed
+    ExitCode = if ($installed.Count) { 0 } else { 1 }
+  }
 }
 
 function Promptly-FinalizeWithPairCode {
