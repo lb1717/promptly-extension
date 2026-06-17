@@ -351,7 +351,7 @@ export function HomeAnalyticsSection() {
   });
 
   return (
-    <section id="analytics" className="border-t border-line px-4 pb-16 pt-4 sm:pb-20 sm:pt-6">
+    <section id="analytics" className="px-4 pb-16 pt-0 sm:pb-20 sm:pt-1">
       <div className="mx-auto max-w-6xl">
         <div className="relative mx-auto hidden h-[min(68vw,520px)] max-h-[520px] min-h-[400px] w-full max-w-6xl sm:block sm:min-h-[440px]">
           {cards.map((card) => {
