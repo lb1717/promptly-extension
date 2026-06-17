@@ -574,25 +574,25 @@ export function GeneralOnboardingClient() {
 
         {step === 4 ? (
           <div className="mt-6 space-y-4">
-            {wantsWeb ? (
-              <OnboardingBrowserExtensionInstall
+            {wantsCodingAgents ? (
+              <GetStartedAllAgentsInstall
                 stepNumber={1}
-                extensionDetected={extensionDetected}
-                onStoreClick={() => setBrowserStoreClicked(true)}
+                onCommandCopy={noteAgentCommandCopy}
               />
             ) : null}
 
-            {wantsCodingAgents ? (
-              <GetStartedAllAgentsInstall
-                stepNumber={wantsWeb ? 2 : 1}
-                onCommandCopy={noteAgentCommandCopy}
+            {wantsWeb ? (
+              <OnboardingBrowserExtensionInstall
+                stepNumber={wantsCodingAgents ? 2 : 1}
+                extensionDetected={extensionDetected}
+                onStoreClick={() => setBrowserStoreClicked(true)}
               />
             ) : null}
 
             {!canFinishInstall ? (
               <p className="text-center text-xs text-faint">
                 {wantsWeb && wantsCodingAgents
-                  ? "Add the browser extension and copy the coding-agents command to continue."
+                  ? "Copy the coding-agents command and add the browser extension to continue."
                   : wantsWeb
                     ? "Add to Chrome or Edge to continue."
                     : "Copy the coding-agents install command to continue."}

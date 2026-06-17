@@ -495,7 +495,13 @@ function resolveClaudeWindowUsedPercent(window, context = {}) {
   if (pct > 0 && pct <= 1) pct *= 100;
   pct = Math.max(0, Math.min(100, pct));
 
-  // Anthropic oauth/usage reports remaining quota in `utilization`, not percent used.
+  const windowSeconds = Number(context.windowSeconds ?? window.limit_window_seconds ?? 0);
+  const isWeeklyWindow = windowSeconds >= 6 * 86400;
+
+  // Five-hour Claude windows report remaining quota in `utilization`; seven-day reports percent used.
+  if (isWeeklyWindow) {
+    return normalizeUtilizationPercent(pct);
+  }
   return normalizeUtilizationPercent(100 - pct);
 }
 

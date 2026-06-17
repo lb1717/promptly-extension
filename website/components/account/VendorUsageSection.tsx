@@ -15,8 +15,6 @@ import {
 } from "recharts";
 import { dollarsUsedFromUtilization, normalizeUtilizationPercent } from "@/lib/vendorPlanPricing";
 
-const VENDOR_USAGE_PASSWORD = "oat123";
-const UNLOCK_KEY = "promptly_vendor_usage_unlocked";
 const MIN_PERIODS_WHEN_RANGE_SHORT = 5;
 
 const CHART_FONT_FAMILY = "var(--font-roboto-chart), Roboto, sans-serif";
@@ -580,10 +578,8 @@ function showsShortWindowToggle(provider: VendorProfile["provider"]): boolean {
 }
 
 function defaultWindowKind(profile: VendorProfile): WindowKind {
-  const hasPrimary = Boolean(profile.primary_window);
-  const hasSecondary = Boolean(profile.secondary_window);
-  if (profile.provider === "cursor" && hasSecondary) return "secondary";
-  if (hasPrimary) return "primary";
+  if (profile.secondary_window) return "secondary";
+  if (profile.primary_window) return "primary";
   return "secondary";
 }
 
@@ -1111,17 +1107,9 @@ export default function VendorUsageSection({
   user: User | null;
   rangeDays?: number;
 }) {
-  const [unlocked, setUnlocked] = useState(false);
-  const [passwordInput, setPasswordInput] = useState("");
-  const [passwordError, setPasswordError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<VendorUsagePayload | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    setUnlocked(window.sessionStorage.getItem(UNLOCK_KEY) === "1");
-  }, []);
 
   const load = useCallback(async ({ live = false }: { live?: boolean } = {}) => {
     if (!user) {
@@ -1171,8 +1159,8 @@ export default function VendorUsageSection({
   }, [user]);
 
   useEffect(() => {
-    if (unlocked && user) void load();
-  }, [unlocked, user, load]);
+    if (user) void load();
+  }, [user, load]);
 
   const profiles = useMemo(() => {
     const rows = (data?.profiles ?? []).filter((p) => !p.sync_error);
@@ -1191,40 +1179,6 @@ export default function VendorUsageSection({
     () => computeMonthlyExpenditureSummary(profiles, rangeDays),
     [profiles, rangeDays]
   );
-
-  if (!unlocked) {
-    return (
-      <section className="mb-8 w-full rounded-2xl border border-line bg-white p-4 shadow-card sm:p-5">
-        <h2 className="text-base font-semibold uppercase tracking-[0.22em] text-ink">AI plan usage</h2>
-        <p className="mt-2 text-sm text-muted">Enter the preview password to view subscription usage.</p>
-        <form
-          className="mt-4 flex max-w-sm flex-wrap items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (passwordInput === VENDOR_USAGE_PASSWORD) {
-              window.sessionStorage.setItem(UNLOCK_KEY, "1");
-              setUnlocked(true);
-              setPasswordError(null);
-            } else {
-              setPasswordError("Incorrect password.");
-            }
-          }}
-        >
-          <input
-            type="password"
-            value={passwordInput}
-            onChange={(e) => setPasswordInput(e.target.value)}
-            placeholder="Password"
-            className="min-w-[10rem] flex-1 rounded-lg border border-line bg-cream px-3 py-2 text-sm text-ink"
-          />
-          <button type="submit" className="rounded-lg bg-ink px-3 py-2 text-sm font-medium text-cream hover:bg-neutral-800">
-            Unlock
-          </button>
-        </form>
-        {passwordError ? <p className="mt-2 text-xs text-red-700">{passwordError}</p> : null}
-      </section>
-    );
-  }
 
   return (
     <section className="mb-8 w-full rounded-2xl border border-line bg-white p-4 shadow-card sm:p-5">

@@ -74,15 +74,15 @@ export function InstallMoreIntegrationsClient({ user }: { user: User }) {
         </div>
       ) : (
         <div className="mt-8 space-y-4">
-          {wantsWeb ? (
-            <OnboardingBrowserExtensionInstall
-              stepNumber={1}
-              extensionDetected={extensionDetected}
-            />
+          {wantsCodingAgents ? (
+            <GetStartedAllAgentsInstall stepNumber={1} />
           ) : null}
 
-          {wantsCodingAgents ? (
-            <GetStartedAllAgentsInstall stepNumber={wantsWeb ? 2 : 1} />
+          {wantsWeb ? (
+            <OnboardingBrowserExtensionInstall
+              stepNumber={wantsCodingAgents ? 2 : 1}
+              extensionDetected={extensionDetected}
+            />
           ) : null}
 
           <Link
