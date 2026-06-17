@@ -188,6 +188,9 @@ const report = {
     codex: safe(() => sanitizeTerminalText(runCmd(process.platform === "win32" ? "chcp 65001 >nul & codex plugin list" : "codex plugin list")))
   },
   codex_hook_trust: safe(() => runCli(["diagnostics", "--tool", "codex"]).json?.codex_hook_trust),
+  codex_watch_daemon: safe(() => runCli(["diagnostics", "--tool", "codex"]).json?.codex_watch_daemon),
+  codex_sessions: safe(() => runCli(["diagnostics", "--tool", "codex"]).json?.codex_sessions),
+  codex_features: safe(() => runCmd(process.platform === "win32" ? "chcp 65001 >nul & codex features list" : "codex features list")),
   telemetry: {
     status_all: runCli(["status"]),
     diagnostics: {

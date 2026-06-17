@@ -251,11 +251,37 @@ function Promptly-TrustCodexHooks {
   Write-Host "-> Installing Promptly hooks to ~/.codex/hooks.json (Codex does not load plugin hooks)..."
   Promptly-RunNode -Args @($cli, "codex-trust-hooks") -AllowFailure
   if ($LASTEXITCODE -eq 0) {
-    Write-Host "  OK Codex user hooks installed and trusted - quit and reopen Codex, then check /hooks"
+    Write-Host "  OK Codex user hooks installed and trusted"
+    Promptly-StartCodexWatchDaemon -Integrations $Integrations | Out-Null
+    Write-Host "  OK Codex transcript watcher started (tracks prompts even when hooks do not fire)"
+    Write-Host "  Quit and reopen Codex, then send a test prompt"
     return $true
   }
   Write-Host "  WARN Codex hook install failed - rerun: node `"$cli`" codex-trust-hooks"
   return $false
+}
+
+function Promptly-StartCodexWatchDaemon {
+  param([string]$Integrations = (Join-Path $env:USERPROFILE "integrations"))
+  $cli = Join-Path $Integrations "packages\telemetry-cli\bin\promptly-telemetry.mjs"
+  if (-not (Test-Path -LiteralPath $cli)) { return $false }
+  $daemonFlag = Join-Path $env:USERPROFILE ".promptly\codex-watch-daemon.json"
+  if (Test-Path -LiteralPath $daemonFlag) {
+    try {
+      $state = Get-Content -LiteralPath $daemonFlag -Raw | ConvertFrom-Json
+      if ($state.pid -and $state.at -and (([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - [int64]$state.at) -lt 300000)) {
+        $proc = Get-Process -Id $state.pid -ErrorAction SilentlyContinue
+        if ($proc) { return $true }
+      }
+    } catch { }
+  }
+  $nodeExe = $env:PROMPTLY_NODE_EXE
+  if (-not $nodeExe) {
+    $nodeExe = (Get-Command node -ErrorAction SilentlyContinue).Source
+  }
+  if (-not $nodeExe) { return $false }
+  Start-Process -FilePath $nodeExe -ArgumentList @("`"$cli`"", "codex-watch-daemon") -WindowStyle Hidden | Out-Null
+  return $true
 }
 
 function Promptly-SyncCodexPluginCache {

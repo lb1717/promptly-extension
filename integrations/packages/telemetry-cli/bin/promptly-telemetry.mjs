@@ -882,6 +882,153 @@ async function maybeEmitCodexInFlightSend(input, tool) {
   return true;
 }
 
+const CODEX_SESSION_ID_RE = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
+
+function parseCodexTranscriptSessionId(filename) {
+  const match = String(filename || "").match(CODEX_SESSION_ID_RE);
+  return match ? match[1] : null;
+}
+
+function listCodexSessionTranscripts(maxAgeMs = 48 * 3600000) {
+  const root = join(homedir(), ".codex", "sessions");
+  const results = [];
+  const now = Date.now();
+  const walk = (dir, depth = 0) => {
+    if (depth > 5 || !existsSync(dir)) return;
+    let entries = [];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const path = join(dir, entry.name);
+      if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+        const sessionId = parseCodexTranscriptSessionId(entry.name);
+        if (!sessionId) continue;
+        let mtime = 0;
+        try {
+          mtime = statSync(path).mtimeMs;
+        } catch {
+          continue;
+        }
+        if (now - mtime > maxAgeMs) continue;
+        results.push({ sessionId, path, mtime });
+      } else if (entry.isDirectory()) {
+        walk(path, depth + 1);
+      }
+    }
+  };
+  walk(root);
+  return results;
+}
+
+function collectCodexCompletedTurnIds(transcriptPath) {
+  const path = expandHomePath(transcriptPath);
+  if (!path || !existsSync(path)) return [];
+  let lines = [];
+  try {
+    lines = readFileSync(path, "utf8").split("\n").filter(Boolean);
+  } catch {
+    return [];
+  }
+  const turnIds = [];
+  const seen = new Set();
+  for (const line of lines) {
+    try {
+      const row = JSON.parse(line);
+      if (row?.type === "event_msg" && row?.payload?.type === "task_complete") {
+        const turnId = String(row.payload?.turn_id || "").trim();
+        if (turnId && !seen.has(turnId)) {
+          seen.add(turnId);
+          turnIds.push(turnId);
+        }
+      }
+    } catch {
+      /* skip malformed transcript line */
+    }
+  }
+  return turnIds;
+}
+
+async function processCodexTranscriptPoll(sessionId, transcriptPath) {
+  const tool = "codex";
+  const baseInput = {
+    session_id: sessionId,
+    transcript_path: transcriptPath,
+    hook_event_name: "Watch"
+  };
+  await maybeEmitCodexInFlightSend(baseInput, tool);
+  const agentAccountEmail = resolveAgentAccountEmail(baseInput, tool);
+  const modelMeta = buildModelMeta(baseInput, tool);
+  for (const turnId of collectCodexCompletedTurnIds(transcriptPath)) {
+    const stopInput = { ...baseInput, turn_id: turnId, hook_event_name: "Stop" };
+    const pending = peekPendingSubmitForTurn(tool, stopInput);
+    if (pending?.at) {
+      const response = emitResponseEndEvents(tool, stopInput, agentAccountEmail, modelMeta);
+      if (response.recoveredSend && !isDuplicateSend(tool, stopInput, response.recoveredSend)) {
+        enqueueEvent(tool, response.recoveredSend);
+      }
+      if (response.event) {
+        enqueueEvent(tool, response.event);
+      }
+    } else if (!wasCodexTurnSendRecorded(sessionId, turnId)) {
+      const recovered = recoverCodexTurnEventsFromStop(stopInput, tool, agentAccountEmail, modelMeta);
+      if (recovered?.send) enqueueEvent(tool, recovered.send);
+      if (recovered?.latency) enqueueEvent(tool, recovered.latency);
+    }
+  }
+}
+
+function codexWatchDaemonFlagPath() {
+  return join(promptlyStorageDir(), "codex-watch-daemon.json");
+}
+
+function spawnCodexWatchDaemonIfNeeded() {
+  const creds = getCredentials("codex");
+  if (!creds?.device_token) return false;
+  const flagPath = codexWatchDaemonFlagPath();
+  const existing = readJson(flagPath, null);
+  if (existing?.pid && existing?.at && Date.now() - existing.at < 300_000) {
+    try {
+      process.kill(existing.pid, 0);
+      return true;
+    } catch {
+      /* stale pid */
+    }
+  }
+  const child = spawn(process.execPath, [TELEMETRY_SCRIPT, "codex-watch-daemon"], {
+    detached: true,
+    stdio: "ignore",
+    env: process.env
+  });
+  child.unref();
+  writeJson(flagPath, { pid: child.pid, at: Date.now(), started: Date.now() });
+  return true;
+}
+
+function readCodexWatchDaemonStatus() {
+  const flagPath = codexWatchDaemonFlagPath();
+  const state = readJson(flagPath, null);
+  if (!state?.pid) {
+    return { running: false, flag_path: flagPath, state: state || null };
+  }
+  let alive = false;
+  try {
+    process.kill(state.pid, 0);
+    alive = true;
+  } catch {
+    alive = false;
+  }
+  return {
+    running: alive,
+    flag_path: flagPath,
+    pid: state.pid,
+    last_heartbeat_ms: state.at || null,
+    started_ms: state.started || null
+  };
+}
+
 async function cmdCodexWatch(flags) {
   const sessionId = String(flags.session || flags._rest?.[0] || "").trim();
   if (!sessionId) {
@@ -895,13 +1042,49 @@ async function cmdCodexWatch(flags) {
   const deadline = Date.now() + 20 * 60_000;
   const input = { session_id: sessionId, hook_event_name: "Watch" };
   while (Date.now() < deadline) {
-    await maybeEmitCodexInFlightSend(input, "codex");
+    const transcriptPath = resolveCodexTranscriptPath(input);
+    if (transcriptPath) {
+      await processCodexTranscriptPoll(sessionId, transcriptPath);
+      try {
+        await drainTelemetryQueue("codex", TOOL_CLIENT.codex);
+      } catch {
+        /* ignore */
+      }
+    } else {
+      await maybeEmitCodexInFlightSend(input, "codex");
+    }
     await sleepMs(2000);
   }
   try {
     unlinkSync(codexWatchFlagPath(sessionId));
   } catch {
     /* ignore */
+  }
+}
+
+async function cmdCodexWatchDaemon(flags) {
+  const creds = getCredentials("codex");
+  if (!creds?.device_token) {
+    process.exit(0);
+  }
+  const pollMs = Math.max(1000, Number(flags.interval || 2000) || 2000);
+  const flagPath = codexWatchDaemonFlagPath();
+  const started = Date.now();
+  while (true) {
+    writeJson(flagPath, { pid: process.pid, at: Date.now(), started });
+    for (const row of listCodexSessionTranscripts()) {
+      try {
+        await processCodexTranscriptPoll(row.sessionId, row.path);
+      } catch {
+        /* ignore per-session poll errors */
+      }
+    }
+    try {
+      await drainTelemetryQueue("codex", TOOL_CLIENT.codex);
+    } catch {
+      /* ignore flush errors; queue retries later */
+    }
+    await sleepMs(pollMs);
   }
 }
 
@@ -2173,9 +2356,8 @@ function hookPayloadMatchesTool(input, tool) {
   if (tool === "codex") {
     if (isCursorHostPayload(input)) return false;
     if (/^composer-/.test(hookModelToken(input))) return false;
-    if (input?.transcript_path) return false;
     if (hookModelToken(input).startsWith("claude")) return false;
-    // UserPromptSubmit is wired per-tool; accept Codex stdin unless clearly another host.
+    // Real Codex UserPromptSubmit payloads include transcript_path — do not reject them.
     return true;
   }
   if (tool === "claude_code") {
@@ -2315,6 +2497,7 @@ async function cmdHook(flags) {
     markSessionStarted(tool, sessionId);
     if (tool === "codex") {
       spawnCodexTranscriptWatcher(sessionId);
+      spawnCodexWatchDaemonIfNeeded();
     }
   }
   if (hookName.includes("sessionend") && sessionId) {
@@ -3057,6 +3240,18 @@ function cmdDiagnostics(flags) {
       }
     },
     {
+      label: "UserPromptSubmit (codex with transcript_path)",
+      input: {
+        hook_event_name: "UserPromptSubmit",
+        session_id: sessionId,
+        turn_id: "turn-tx",
+        prompt: "diagnostics hello",
+        transcript_path: join(homedir(), ".codex", "sessions", "diagnostics", `thread-${sessionId}.jsonl`),
+        model: "gpt-5.5",
+        effort: "xhigh"
+      }
+    },
+    {
       label: "UserPromptSubmit (codex bare - no model in hook)",
       input: {
         hook_event_name: "UserPromptSubmit",
@@ -3142,11 +3337,22 @@ function cmdDiagnostics(flags) {
       "pending_orphans that grow after each prompt mean response-end hooks are not firing; reinstall the plugin pack.",
       "Cursor stop/sessionEnd hooks run from the project root - hooks must use ${CURSOR_PLUGIN_ROOT}/bin/promptly-telemetry.mjs, not ./bin.",
       "Codex plugin hooks are not loaded in current Codex builds (plugin_hooks removed). Hooks live in ~/.codex/hooks.json.",
+      "Codex UserPromptSubmit payloads include transcript_path — rejecting them silently breaks all tracking.",
+      "A background codex-watch-daemon polls ~/.codex/sessions when hooks do not fire (started by install/codex-trust-hooks).",
       "Run: promptly-telemetry codex-trust-hooks to install user hooks and trust them (Windows install does this automatically).",
       "After updating Codex hooks, quit and reopen Codex Desktop or terminal Codex.",
       "Run with --simulate to exercise submit -> draft -> response on a fake session."
     ],
-    codex_hook_trust: tool === "codex" ? safeCodexHookTrustStatus() : undefined
+    codex_hook_trust: tool === "codex" ? safeCodexHookTrustStatus() : undefined,
+    codex_watch_daemon: tool === "codex" ? readCodexWatchDaemonStatus() : undefined,
+    codex_sessions:
+      tool === "codex"
+        ? listCodexSessionTranscripts().slice(0, 8).map((row) => ({
+            session_id: row.sessionId,
+            path: row.path,
+            mtime: new Date(row.mtime).toISOString()
+          }))
+        : undefined
   };
   console.log(JSON.stringify(output, null, 2));
 }
@@ -3455,7 +3661,20 @@ function cmdCodexTrustHooks(flags) {
   repairCodexConfigTomlFile();
   const installed = installCodexUserHooks(integrationsRoot);
   const result = mergeCodexUserHookTrustIntoConfig(installed.hooks_path);
-  console.log(JSON.stringify({ ...result, installed, plugin_hooks_note: "Codex loads ~/.codex/hooks.json, not plugin hooks" }, null, 2));
+  const daemonStarted = spawnCodexWatchDaemonIfNeeded();
+  console.log(
+    JSON.stringify(
+      {
+        ...result,
+        installed,
+        codex_watch_daemon: readCodexWatchDaemonStatus(),
+        daemon_started: daemonStarted,
+        plugin_hooks_note: "Codex loads ~/.codex/hooks.json, not plugin hooks"
+      },
+      null,
+      2
+    )
+  );
   if (!result.ok) process.exit(1);
 }
 
@@ -3728,6 +3947,9 @@ async function main() {
     case "codex-watch":
       await cmdCodexWatch(flags);
       break;
+    case "codex-watch-daemon":
+      await cmdCodexWatchDaemon(flags);
+      break;
     case "login-claude":
       await cmdLoginClaude(flags);
       break;
@@ -3764,6 +3986,7 @@ Commands:
   usage-sync [--login-claude] [--debug] [--no-login] [--tool <tool>]  Sync Claude, Codex, and Cursor subscription usage
   sync-runtimes                               Copy latest telemetry CLI into Codex/Claude plugin caches
   codex-trust-hooks                           Install ~/.codex/hooks.json and trust Promptly hooks in config.toml
+  codex-watch-daemon                          Poll ~/.codex/sessions and emit telemetry when hooks do not fire
   codex-repair-config                         Remove broken Promptly hook trust entries from ~/.codex/config.toml
   login-claude [--callback <url>]                  Browser sign-in for Claude subscription usage
   diagnostics [--tool <tool>] Simulate hook payloads and show local timing state
