@@ -74,8 +74,10 @@ export function GetStartedAllAgentsInstall({
           <CopyBlock lines={commandLines} label={terminalLabel} onCopy={onCommandCopy} />
           <StepValidation items={allAgentsSetupValidationItems()} />
           <p className="mt-3 text-xs text-muted">
-            <span className="font-medium text-ink">Hooks:</span> Allow Promptly hooks when each agent asks. In Codex,
-            run <code className="rounded bg-cream px-1 text-[11px]">/hooks</code> and trust Promptly if needed.
+            <span className="font-medium text-ink">Hooks:</span>{" "}
+            {os === "windows"
+              ? "Allow Promptly hooks when Claude Code or Cursor ask. Codex on Windows has no /hooks command — hooks are pre-trusted during install."
+              : "Allow Promptly hooks when each agent asks. In Codex, run /hooks and trust Promptly if needed."}
           </p>
         </>
       ) : null}

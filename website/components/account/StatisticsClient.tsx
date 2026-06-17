@@ -1,6 +1,7 @@
 "use client";
 
 import { getFirebaseAuth } from "@/lib/firebaseClient";
+import { isInternalTelemetryModelBucket } from "@/lib/internalTelemetryModels";
 import { onAuthStateChanged, signInWithCustomToken } from "firebase/auth";
 import Link from "next/link";
 import type { User } from "firebase/auth";
@@ -60,7 +61,6 @@ const IDE_AGENT_LABELS: Record<string, string> = {
 function formatIdeModelLabel(row: { bucket: string; label: string | null }): string {
   if (row.label?.trim()) return row.label.trim();
   if (row.bucket === "unknown") return "Unknown model";
-  if (row.bucket === "test-send") return "Connection test";
   return row.bucket.replace(/-/g, " ");
 }
 
@@ -2041,7 +2041,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
       }
       setIdeStats(data as IdeStatsPayload);
       if (captureCatalog && Array.isArray(data.model_buckets)) {
-        setModelCatalogIde(data.model_buckets);
+        setModelCatalogIde(data.model_buckets.filter((row) => !isInternalTelemetryModelBucket(row.bucket)));
       }
     } catch (e) {
       const raw = String(e instanceof Error ? e.message : e);
@@ -2147,6 +2147,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
     if (isIdeServiceKey(selectedModelService)) {
       for (const row of modelCatalogIde) {
         if (row.tool !== selectedModelService) continue;
+        if (isInternalTelemetryModelBucket(row.bucket)) continue;
         if (row.prompts <= 0 && (row.draft_samples ?? 0) <= 0 && (row.word_samples ?? 0) <= 0) {
           const engagement = engagementRows.find((entry) => entry.bucket === row.bucket);
           if (!engagement || engagement.total_minutes <= 0) continue;
@@ -2166,6 +2167,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
     }
 
     for (const row of engagementRows) {
+      if (isInternalTelemetryModelBucket(row.bucket)) continue;
       if (row.total_minutes <= 0 || byBucket.has(row.bucket)) continue;
       byBucket.set(row.bucket, {
         bucket: row.bucket,
@@ -2178,6 +2180,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
     }
 
     for (const [bucket, label] of Object.entries(seriesLabels)) {
+      if (isInternalTelemetryModelBucket(bucket)) continue;
       if (byBucket.has(bucket)) continue;
       byBucket.set(bucket, {
         bucket,
@@ -2578,7 +2581,9 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
   }, [ideConnectionByTool]);
 
   const ideModelsByTool = useMemo(() => {
-    const rows = displayIdeStats?.model_buckets ?? [];
+    const rows = (displayIdeStats?.model_buckets ?? []).filter(
+      (row) => !isInternalTelemetryModelBucket(row.bucket)
+    );
     const grouped = new Map<string, typeof rows>();
     for (const row of rows) {
       const list = grouped.get(row.tool) ?? [];
@@ -2596,7 +2601,8 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
 
   const ideHasKnownModels = useMemo(() => {
     return (displayIdeStats?.model_buckets ?? []).some(
-      (row) => row.prompts > 0 && row.bucket !== "unknown" && row.bucket !== "test-send"
+      (row) =>
+        row.prompts > 0 && row.bucket !== "unknown" && !isInternalTelemetryModelBucket(row.bucket)
     );
   }, [displayIdeStats]);
 
@@ -2625,7 +2631,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
         (row) =>
           row.word_samples > 0 &&
           row.bucket !== "unknown" &&
-          row.bucket !== "test-send" &&
+          !isInternalTelemetryModelBucket(row.bucket) &&
           (row.avg_words ?? 0) > 0
       )
       .slice(0, 10)

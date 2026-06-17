@@ -5,25 +5,18 @@ param(
   [string]$Code = $env:PROMPTLY_PAIR_CODE
 )
 
-$PluginPackUrl = if ($env:PROMPTLY_PLUGIN_PACK_URL) { $env:PROMPTLY_PLUGIN_PACK_URL } else { "https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.7" }
+$PluginPackUrl = if ($env:PROMPTLY_PLUGIN_PACK_URL) { $env:PROMPTLY_PLUGIN_PACK_URL } else { "https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.9" }
 $InstallBase = if ($env:PROMPTLY_INSTALL_BASE) { $env:PROMPTLY_INSTALL_BASE } else { "https://promptly-labs.com/install" }
 
-function Sync-PromptlyAgentBins {
-  param([string]$CliSrc)
-  $paths = @(
-    (Join-Path $env:USERPROFILE "integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs"),
-    (Join-Path $env:USERPROFILE "integrations/claude-code/bin/promptly-telemetry.mjs"),
-    (Join-Path $env:USERPROFILE "integrations/cursor/bin/promptly-telemetry.mjs"),
-    (Join-Path $env:USERPROFILE "integrations/codex/bin/promptly-telemetry.mjs"),
-    (Join-Path $env:USERPROFILE ".cursor/plugins/local/promptly-cursor/bin/promptly-telemetry.mjs")
-  )
-  foreach ($dest in $paths) {
-    $dir = Split-Path $dest
-    if (Test-Path $dir) {
-      New-Item -ItemType Directory -Force -Path $dir | Out-Null
-      Copy-Item -Force $CliSrc $dest
-    }
-  }
+$__loaderRes = Invoke-WebRequest -Uri "$InstallBase/_load-helpers-windows.ps1" -UseBasicParsing
+$__loaderText = $__loaderRes.Content
+if ($__loaderText -is [byte[]]) {
+  $__loaderText = [System.Text.Encoding]::UTF8.GetString($__loaderText)
+}
+Invoke-Expression ([string]$__loaderText.TrimStart([char]0xFEFF))
+if (-not (Get-Command Promptly-SyncAllAgentRuntimes -ErrorAction SilentlyContinue)) {
+  Write-Host "X Failed to load Promptly install helpers from $InstallBase"
+  exit 1
 }
 
 function Fix-PromptlyAccount {
@@ -58,22 +51,18 @@ function Fix-PromptlyAccount {
     exit 1
   }
 
+  Ensure-NodeJs
+  Promptly-RefreshNpmPath
+
   Write-Host "-> Fixing Promptly account (pair all agents + merge stats + verify live uploads)..."
-  node $cliDest fix-account $Code
+  Promptly-RunNode -Args @($cliDest, "fix-account", $Code)
 
-  Write-Host "-> Syncing telemetry CLI into agent install paths..."
-  Sync-PromptlyAgentBins -CliSrc $cliDest
-
-  $cursorSrc = Join-Path $env:USERPROFILE "integrations/cursor"
-  $cursorDest = Join-Path $env:USERPROFILE ".cursor/plugins/local/promptly-cursor"
-  if (Test-Path $cursorSrc) {
-    if (Test-Path $cursorDest) { Remove-Item -Recurse -Force $cursorDest }
-    New-Item -ItemType Directory -Force -Path (Split-Path $cursorDest) | Out-Null
-    Copy-Item -Recurse -Force $cursorSrc $cursorDest
-  }
+  Write-Host "-> Syncing hooks, Codex transcript watcher, and telemetry CLIs..."
+  Promptly-SyncAllAgentRuntimes -Integrations $integrationsDest
 
   Write-Host ""
   Write-Host "OK. Restart Claude Code, Cursor, and Codex if they were open, then send a test prompt."
+  Write-Host "Codex Windows: no /hooks command — hooks are pre-trusted; transcript watcher runs in background."
   Write-Host "Stats: https://promptly-labs.com/account/statistics"
 }
 

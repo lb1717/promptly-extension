@@ -81,6 +81,21 @@ function LiveTrackingStep({ n, tool, os }: { n: number; tool: IdeToolId; os: OsI
   );
 
   if (tool === "codex") {
+    if (os === "windows") {
+      return (
+        <Step n={n} title="Start tracking" where="cursor_app" whereLabel="Codex">
+          <ol className="list-decimal space-y-1.5 pl-5">
+            <li>Quit and reopen Codex.</li>
+            <li>
+              Hooks are pre-trusted during install — Codex on Windows does not have a <code className="text-ink">/hooks</code>{" "}
+              command.
+            </li>
+            <li>Send a prompt — check Statistics → Coding agents.</li>
+          </ol>
+          {improveHint}
+        </Step>
+      );
+    }
     return (
       <Step n={n} title="Trust hooks" where="cursor_app" whereLabel="Codex">
         <ol className="list-decimal space-y-1.5 pl-5">

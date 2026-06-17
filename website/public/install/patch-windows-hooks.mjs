@@ -56,6 +56,7 @@ export function collectWindowsHookJsonPaths(integrations = join(homedir(), "inte
   ]) {
     paths.add(join(integrations, rel));
   }
+  paths.add(join(homedir(), ".codex/hooks.json"));
   paths.add(join(homedir(), ".cursor/plugins/local/promptly-cursor/hooks/hooks.json"));
 
   for (const [cacheRoot, rels] of [

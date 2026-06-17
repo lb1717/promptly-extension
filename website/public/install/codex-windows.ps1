@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-$PluginPackUrl = if ($env:PROMPTLY_PLUGIN_PACK_URL) { $env:PROMPTLY_PLUGIN_PACK_URL } else { "https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.6.17" }
+$PluginPackUrl = if ($env:PROMPTLY_PLUGIN_PACK_URL) { $env:PROMPTLY_PLUGIN_PACK_URL } else { "https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.9" }
 $Integrations = Join-Path $env:USERPROFILE "integrations"
 $ZipPath = Join-Path $env:USERPROFILE "promptly.zip"
 $InstallBase = if ($env:PROMPTLY_INSTALL_BASE) { $env:PROMPTLY_INSTALL_BASE } else { "https://promptly-labs.com/install" }
@@ -31,13 +31,16 @@ Invoke-WebRequest -Uri $PluginPackUrl -OutFile $ZipPath -UseBasicParsing
 Promptly-UnzipPluginPack -ZipPath $ZipPath -Dest $env:USERPROFILE
 
 $CodexPlugin = Join-Path $Integrations "codex"
+Promptly-PreparePluginPack -Integrations $Integrations
 Promptly-SyncTelemetryCli -PluginDir $CodexPlugin
 try { Promptly-SyncImproveCli -PluginDir $CodexPlugin } catch { }
 Promptly-InstallCodexSkill -PluginDir $CodexPlugin
 
 Write-Host "-> Installing Promptly in Codex..."
+Promptly-RepairCodexConfigToml | Out-Null
 Promptly-CodexMarketplaceAdd -IntegrationsPath $Integrations
 Promptly-CodexPluginReinstall
+$null = Promptly-SyncCodexPluginCache
 
 $pluginList = & $codex plugin list 2>&1 | Out-String
 if ($pluginList -notmatch "promptly-codex") {
@@ -47,4 +50,6 @@ if ($pluginList -notmatch "promptly-codex") {
 
 Write-Host ""
 Write-Host "Promptly installed for Codex"
-Write-Host "  Quit and reopen Codex, trust this project folder, enable Promptly hooks (/hooks), then send a prompt"
+Write-Host "  Run get-started on promptly-labs.com (or setup-windows.ps1) with your pairing code to enable live stats."
+Write-Host "  Codex Windows has no /hooks command — after pairing, hooks are pre-trusted and a background watcher tracks prompts."
+Write-Host "  Quit and reopen Codex after pairing, then send a test prompt."

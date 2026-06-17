@@ -3814,6 +3814,7 @@ function syncAgentRuntimeTelemetry() {
   try {
     const installed = installCodexUserHooks(integrationsRoot);
     codex_hook_trust = mergeCodexUserHookTrustIntoConfig(installed.hooks_path);
+    spawnCodexWatchDaemonIfNeeded();
   } catch (err) {
     codex_hook_trust = { ok: false, error: String(err?.message || err) };
   }

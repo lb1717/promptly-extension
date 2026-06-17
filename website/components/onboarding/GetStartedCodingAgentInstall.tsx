@@ -36,6 +36,13 @@ function installSuccessHint(tool: IdeToolId): string {
   return "Promptly installed for Cursor";
 }
 
+function hooksHint(tool: IdeToolId, os: OsId): string {
+  if (tool === "codex" && os === "windows") {
+    return "Quit & reopen Codex — hooks are pre-trusted during install (no /hooks on Windows). Send a prompt.";
+  }
+  return TOOLS.find((t) => t.id === tool)!.hooks;
+}
+
 function CodingAgentPanel({
   tool,
   os,
@@ -85,7 +92,7 @@ function CodingAgentPanel({
       )}
 
       <p className="text-xs text-muted">
-        <span className="font-medium text-ink">Hooks:</span> {meta.hooks}
+        <span className="font-medium text-ink">Hooks:</span> {hooksHint(tool, os)}
       </p>
       <p className="text-xs text-muted">
         <span className="font-medium text-ink">Improve:</span>{" "}

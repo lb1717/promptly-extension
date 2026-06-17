@@ -20,6 +20,7 @@ import {
   resolveOptimizeEngineMode,
   type OptimizeEngineMode
 } from "./promptOptimizeEngine";
+import { isInternalTelemetryModelBucket } from "@/lib/internalTelemetryModels";
 
 export { PROMPTLY_USER_CONTENT_TOKEN } from "./promptEngineeringConstants";
 
@@ -2562,6 +2563,10 @@ export async function getAccountIdeUsageStats(
     if (!passesIdeScopeFilter(tool, raw, scopeFilter)) return;
     if (!eventPassesEmailFilter(tool, readEventAgentEmail(raw))) return;
     const ik = String(raw.interactionKind ?? raw.interaction_kind ?? "send").toLowerCase();
+    if (ik === "send" || ik === "response_latency" || ik === "engagement_segment" || ik === "engagement") {
+      const { mb } = readEffectiveIdeEventModel(tool, raw);
+      if (isInternalTelemetryModelBucket(mb)) return;
+    }
     let screenMs = 0;
     if (ik === "engagement_segment" || ik === "engagement") {
       const catRaw = raw.engagementCategory ?? raw.engagement_category;
@@ -2616,6 +2621,11 @@ export async function getAccountIdeUsageStats(
     const ik = String(raw.interactionKind ?? raw.interaction_kind ?? "send").toLowerCase();
     const isEngagement = ik === "engagement_segment" || ik === "engagement";
     const isResponseLatency = ik === "response_latency";
+
+    if (ik === "send" || isResponseLatency || isEngagement) {
+      const { mb } = readEffectiveIdeEventModel(tool, raw);
+      if (isInternalTelemetryModelBucket(mb)) continue;
+    }
 
     if (isResponseLatency || isEngagement || ik === "send") {
       const { mb, label } = readEffectiveIdeEventModel(tool, raw);
@@ -2958,12 +2968,13 @@ export async function getAccountIdeUsageStats(
     })()
       .filter(
         (row) =>
-          row.prompts > 0 ||
-          row.draftSamples > 0 ||
-          row.wordSamples > 0 ||
-          row.latencySamples > 0 ||
-          (trackModelSeries &&
-            (modelEngagementMsByModel.get(row.bucket)?.screen_ms ?? 0) > 0)
+          !isInternalTelemetryModelBucket(row.bucket) &&
+          (row.prompts > 0 ||
+            row.draftSamples > 0 ||
+            row.wordSamples > 0 ||
+            row.latencySamples > 0 ||
+            (trackModelSeries &&
+              (modelEngagementMsByModel.get(row.bucket)?.screen_ms ?? 0) > 0))
       )
       .sort((a, b) => b.prompts - a.prompts || a.tool.localeCompare(b.tool))
       .map((row) => ({
@@ -3045,14 +3056,16 @@ export async function getAccountIdeUsageStats(
               reading_idle_minutes: msToStatMinutes(row.reading_idle_ms),
               total_minutes: msToStatMinutes(row.screen_ms)
             }))
-            .filter((row) => row.total_minutes > 0)
+            .filter((row) => !isInternalTelemetryModelBucket(row.bucket) && row.total_minutes > 0)
             .sort((a, b) => b.total_minutes - a.total_minutes || a.bucket.localeCompare(b.bucket)),
           model_screen_time_prev: prevWindowCovered
             ? [...prevModelScreenMsByModel.entries()]
                 .map(([modelSlug, ms]) => ({ bucket: modelSlug, total_minutes: msToStatMinutes(ms) }))
                 .filter((row) => row.total_minutes > 0)
             : null,
-          model_series_labels: Object.fromEntries(modelSeriesLabels.entries())
+          model_series_labels: Object.fromEntries(
+            [...modelSeriesLabels.entries()].filter(([slug]) => !isInternalTelemetryModelBucket(slug))
+          )
         }
       : {})
   };

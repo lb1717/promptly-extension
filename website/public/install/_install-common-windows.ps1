@@ -140,6 +140,7 @@ function Promptly-CollectHookJsonPaths {
     (Join-Path $Integrations "codex\hooks\hooks.json"),
     (Join-Path $Integrations "cursor\hooks\hooks.json"),
     (Join-Path $Integrations "claude-code\hooks\hooks.json"),
+    (Join-Path $env:USERPROFILE ".codex\hooks.json"),
     (Join-Path $env:USERPROFILE ".cursor\plugins\local\promptly-cursor\hooks\hooks.json")
   )) {
     if ($candidate -and (Test-Path -LiteralPath $candidate)) { [void]$paths.Add($candidate) }
@@ -248,12 +249,15 @@ function Promptly-TrustCodexHooks {
     Write-Host "  WARN Codex hook trust skipped - telemetry CLI missing"
     return $false
   }
-  Write-Host "-> Installing Promptly hooks to ~/.codex/hooks.json (Codex does not load plugin hooks)..."
+  $nodeExe = Promptly-GetNodeExe
+  if ($nodeExe) { $env:PROMPTLY_NODE_EXE = $nodeExe }
+  Write-Host "-> Installing Promptly hooks to ~/.codex/hooks.json (Codex Windows has no /hooks command)..."
   Promptly-RunNode -Args @($cli, "codex-trust-hooks") -AllowFailure
   if ($LASTEXITCODE -eq 0) {
-    Write-Host "  OK Codex user hooks installed and trusted"
+    Write-Host "  OK Codex hooks installed and pre-trusted in config.toml"
     Promptly-StartCodexWatchDaemon -Integrations $Integrations | Out-Null
-    Write-Host "  OK Codex transcript watcher started (tracks prompts even when hooks do not fire)"
+    Promptly-RegisterCodexWatchDaemonStartup -Integrations $Integrations | Out-Null
+    Write-Host "  OK Codex transcript watcher started (tracks prompts without /hooks)"
     Write-Host "  Quit and reopen Codex, then send a test prompt"
     return $true
   }
@@ -277,10 +281,40 @@ function Promptly-StartCodexWatchDaemon {
   }
   $nodeExe = $env:PROMPTLY_NODE_EXE
   if (-not $nodeExe) {
-    $nodeExe = (Get-Command node -ErrorAction SilentlyContinue).Source
+    $nodeExe = Promptly-GetNodeExe
   }
   if (-not $nodeExe) { return $false }
-  Start-Process -FilePath $nodeExe -ArgumentList @("`"$cli`"", "codex-watch-daemon") -WindowStyle Hidden | Out-Null
+  $env:PROMPTLY_NODE_EXE = $nodeExe
+  Start-Process -FilePath $nodeExe -ArgumentList @($cli, "codex-watch-daemon") -WindowStyle Hidden | Out-Null
+  Start-Sleep -Seconds 2
+  if (Test-Path -LiteralPath $daemonFlag) {
+    try {
+      $state = Get-Content -LiteralPath $daemonFlag -Raw | ConvertFrom-Json
+      if ($state.pid -and (Get-Process -Id $state.pid -ErrorAction SilentlyContinue)) {
+        return $true
+      }
+    } catch { }
+  }
+  return $false
+}
+
+function Promptly-RegisterCodexWatchDaemonStartup {
+  param([string]$Integrations = (Join-Path $env:USERPROFILE "integrations"))
+  $cli = Join-Path $Integrations "packages\telemetry-cli\bin\promptly-telemetry.mjs"
+  if (-not (Test-Path -LiteralPath $cli)) { return $false }
+  $nodeExe = $env:PROMPTLY_NODE_EXE
+  if (-not $nodeExe) { $nodeExe = Promptly-GetNodeExe }
+  if (-not $nodeExe) { return $false }
+  $startup = [Environment]::GetFolderPath("Startup")
+  if (-not $startup) { return $false }
+  $vbsPath = Join-Path $startup "PromptlyCodexWatch.vbs"
+  $escapedNode = $nodeExe.Replace('"', '""')
+  $escapedCli = $cli.Replace('"', '""')
+  $vbs = @"
+Set WshShell = CreateObject("WScript.Shell")
+WshShell.Run """$escapedNode"" ""$escapedCli"" codex-watch-daemon", 0, False
+"@
+  Set-Content -LiteralPath $vbsPath -Value $vbs -Encoding ASCII
   return $true
 }
 
@@ -573,7 +607,7 @@ function Promptly-FinalizeWithPairCode {
   Write-Host "OK All set. Restart Claude Code, Cursor, and Codex if they were open, then send a test prompt."
   Write-Host ""
   Write-Host "Hooks:"
-  Write-Host "  Codex: hooks are in ~/.codex/hooks.json (not the plugin) - quit and reopen Codex, then /hooks should list Promptly"
+  Write-Host "  Codex: hooks pre-trusted in ~/.codex/config.toml — quit and reopen Codex (no /hooks command on Windows)"
   Write-Host "  Cursor: reload the window and allow hooks when prompted"
   Write-Host "  Claude Code: run /reload-plugins once"
   Write-Host ""
@@ -831,9 +865,8 @@ function Promptly-InstallForCodex {
     Write-Host "X Codex hooks must use full node.exe path (required for Codex Desktop)"
     return 1
   }
-  Promptly-TrustCodexHooks -Integrations $Integrations | Out-Null
   Write-Host "OK Promptly installed for Codex"
-  Write-Host "  Hooks are in ~/.codex/hooks.json (Codex ignores plugin hooks in current builds)"
-  Write-Host "  Quit and reopen Codex, run /hooks to confirm Promptly hooks appear, then send a test prompt"
+  Write-Host "  Pair with a code via get-started or setup-windows.ps1 to enable live tracking"
+  Write-Host "  Codex Windows has no /hooks command — install will pre-trust hooks and start a transcript watcher"
   return 0
 }

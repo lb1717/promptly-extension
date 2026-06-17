@@ -125,7 +125,10 @@ export function TroubleshootIntegrationsClient() {
           <ul className="mt-3 space-y-2 text-sm text-muted">
             <li>Quit and reopen Claude Code, Cursor, or Codex after running the install command.</li>
             <li>Allow Promptly hooks when each agent prompts you.</li>
-            <li>In Codex, run <code className="text-ink">/hooks</code> and trust Promptly if needed.</li>
+            <li>
+              In Codex on Mac, run <code className="text-ink">/hooks</code> and trust Promptly if needed. On Windows,
+              hooks are pre-trusted during install (no /hooks command).
+            </li>
             <li>Send a test prompt, then check status commands in step 1.</li>
           </ul>
         </section>

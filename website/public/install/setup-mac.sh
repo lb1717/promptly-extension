@@ -3,7 +3,7 @@
 # Usage: curl -fsSL https://promptly-labs.com/install/setup-mac.sh | bash -s -- YOUR_CODE
 set -euo pipefail
 
-PLUGIN_PACK_URL="${PROMPTLY_PLUGIN_PACK_URL:-https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.6.17}"
+PLUGIN_PACK_URL="${PROMPTLY_PLUGIN_PACK_URL:-https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.9}"
 INTEGRATIONS="${HOME}/integrations"
 PROMPTLY_INSTALL_BASE="${PROMPTLY_INSTALL_BASE:-https://promptly-labs.com/install}"
 CODE="${1:-${PROMPTLY_PAIR_CODE:-}}"
