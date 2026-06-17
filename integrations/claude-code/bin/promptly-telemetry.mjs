@@ -474,6 +474,45 @@ function buildDraftingSegment(tool, sessionId, draftMs, agentAccountEmail, model
   };
 }
 
+function emitCodexSendEngagementSegments(tool, sessionId, sendEvent, atMs = null) {
+  if (tool !== "codex") return;
+  const sid = String(sessionId || "").trim();
+  if (!sid || !sendEvent) return;
+  const when = typeof atMs === "number" ? atMs : sendEvent.client_occurred_ms || Date.now();
+  const sendModel = mergeSessionScreenModelMeta(tool, sid, {
+    model_label: sendEvent.model_label || null,
+    model_bucket: sendEvent.model_bucket || "unknown"
+  });
+  rememberSessionScreenModel(tool, sid, sendModel);
+  const agentAccountEmail = sendEvent.agent_account_email || null;
+  const readingIdle = flushReadingIdleSegment(tool, sid, agentAccountEmail, sendModel, when);
+  if (readingIdle) {
+    readingIdle.client_occurred_ms = when;
+    enqueueEvent(tool, readingIdle);
+  }
+  const draftMs = consumeDraftDurationMs(tool, sid, when);
+  if (draftMs) {
+    const draft = buildDraftingSegment(tool, sid, draftMs, agentAccountEmail, sendModel);
+    draft.client_occurred_ms = when;
+    enqueueEvent(tool, draft);
+  }
+}
+
+function finalizeCodexResponseEngagement(tool, sessionId, latencyEvent) {
+  if (tool !== "codex") return;
+  const sid = String(sessionId || "").trim();
+  if (!sid) return;
+  const atMs = latencyEvent?.client_occurred_ms || Date.now();
+  if (latencyEvent?.model_bucket) {
+    rememberSessionScreenModel(tool, sid, {
+      model_label: latencyEvent.model_label || null,
+      model_bucket: latencyEvent.model_bucket || "unknown"
+    });
+  }
+  markDraftWindowStart(tool, sid, atMs);
+  markReadingIdleStart(tool, sid, atMs);
+}
+
 function agentSessionMetaPath(tool) {
   return join(promptlyStorageDir(), `agent-session-meta-${tool}.json`);
 }
@@ -867,6 +906,7 @@ async function maybeEmitCodexInFlightSend(input, tool) {
   }
   ensureSessionTimingForPromptSubmit(tool, sessionId, "userpromptsubmit");
   enqueueEvent(tool, inFlightSend);
+  emitCodexSendEngagementSegments(tool, sessionId, inFlightSend);
   if (sessionId) {
     recordPendingSubmit(tool, { ...input, turn_id: inFlightSend._turn_id }, {
       agent_account_email: inFlightSend.agent_account_email || null,
@@ -968,14 +1008,22 @@ async function processCodexTranscriptPoll(sessionId, transcriptPath) {
       const response = emitResponseEndEvents(tool, stopInput, agentAccountEmail, modelMeta);
       if (response.recoveredSend && !isDuplicateSend(tool, stopInput, response.recoveredSend)) {
         enqueueEvent(tool, response.recoveredSend);
+        emitCodexSendEngagementSegments(tool, sessionId, response.recoveredSend);
       }
       if (response.event) {
         enqueueEvent(tool, response.event);
+        finalizeCodexResponseEngagement(tool, sessionId, response.event);
       }
     } else if (!wasCodexTurnSendRecorded(sessionId, turnId)) {
       const recovered = recoverCodexTurnEventsFromStop(stopInput, tool, agentAccountEmail, modelMeta);
-      if (recovered?.send) enqueueEvent(tool, recovered.send);
-      if (recovered?.latency) enqueueEvent(tool, recovered.latency);
+      if (recovered?.send) {
+        enqueueEvent(tool, recovered.send);
+        emitCodexSendEngagementSegments(tool, sessionId, recovered.send, recovered.send.client_occurred_ms);
+      }
+      if (recovered?.latency) {
+        enqueueEvent(tool, recovered.latency);
+        finalizeCodexResponseEngagement(tool, sessionId, recovered.latency);
+      }
     }
   }
 }

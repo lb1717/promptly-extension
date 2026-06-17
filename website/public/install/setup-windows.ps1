@@ -46,7 +46,9 @@ function Setup-PromptlyAgents {
   Invoke-WebRequest -Uri $PluginPackUrl -OutFile $zipPath -UseBasicParsing
   Promptly-UnzipPluginPack -ZipPath $zipPath -Dest $env:USERPROFILE
   if (-not (Promptly-VerifyPluginPack -Integrations $Integrations)) {
-    Promptly-PrintInstallDebugReport -Integrations $Integrations -PairCode $Code
+    if ($env:PROMPTLY_INSTALL_DEBUG -eq "1") {
+      Promptly-PrintInstallDebugReport -Integrations $Integrations -PairCode $Code
+    }
     exit 1
   }
 

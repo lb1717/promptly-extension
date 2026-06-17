@@ -123,11 +123,13 @@ function Promptly-EnsureHooksUseNodeExe {
     $raw = [System.IO.File]::ReadAllText($HooksPath)
     $jsonOk = $true
     try { $null = $raw | ConvertFrom-Json } catch { $jsonOk = $false }
-    Write-Host "  DEBUG hook check failed: json_valid=$jsonOk has_node_exe=$($raw.Contains($nodeExe)) has_escaped=$($raw.Contains($nodeExe.Replace('\','\\')))"
-    if ($raw.Length -lt 800) { Write-Host "  DEBUG hook file preview: $raw" }
-    else { Write-Host "  DEBUG hook file preview: $($raw.Substring(0, 400))..." }
+    if ($env:PROMPTLY_INSTALL_DEBUG -eq "1") {
+      Write-Host "  DEBUG hook check failed: json_valid=$jsonOk has_node_exe=$($raw.Contains($nodeExe))"
+    }
   } catch {
-    Write-Host "  DEBUG could not read hooks file: $_"
+    if ($env:PROMPTLY_INSTALL_DEBUG -eq "1") {
+      Write-Host "  DEBUG could not read hooks file: $_"
+    }
   }
   Write-Host "X Hooks must use full node.exe path: $HooksPath"
   return $false
@@ -536,13 +538,10 @@ function Promptly-FinalizeWithPairCodeAndDebug {
     [string]$Integrations = (Join-Path $env:USERPROFILE "integrations"),
     [hashtable]$InstallSummary = @{}
   )
-  $cli = Join-Path $Integrations "packages\telemetry-cli\bin\promptly-telemetry.mjs"
-  if (Test-Path -LiteralPath $cli) {
-    Promptly-FinalizeWithPairCode -Code $Code -Integrations $Integrations
-  } else {
-    Write-Host "WARN Skipping finalize — telemetry CLI missing at $cli"
+  Promptly-FinalizeWithPairCode -Code $Code -Integrations $Integrations
+  if ($env:PROMPTLY_INSTALL_DEBUG -eq "1") {
+    Promptly-PrintInstallDebugReport -Integrations $Integrations -PairCode $Code -InstallSummary $InstallSummary
   }
-  Promptly-PrintInstallDebugReport -Integrations $Integrations -PairCode $Code -InstallSummary $InstallSummary
 }
 
 function Promptly-InstallAllAgentsWithSummary {
@@ -589,16 +588,8 @@ function Promptly-FinalizeWithPairCode {
   Promptly-SyncAllAgentRuntimes -Integrations $Integrations
   Promptly-ValidateHookJson -Integrations $Integrations
 
-  foreach ($tool in @(
-    @{ Tool = "codex"; Label = "Codex" },
-    @{ Tool = "claude_code"; Label = "Claude Code" },
-    @{ Tool = "cursor"; Label = "Cursor" }
-  )) {
-    Promptly-PrintHookDiagnostics -CliPath $cli -Tool $tool.Tool -Label $tool.Label
-    Write-Host "-> Live upload test: $($tool.Label)"
-    Promptly-RunNode -Args @($cli, "test-send", "--tool", $tool.Tool) -AllowFailure
-    Write-Host "-> Connection status: $($tool.Label)"
-    Promptly-RunNode -Args @($cli, "status", "--tool", $tool.Tool) -AllowFailure
+  foreach ($tool in @("codex", "claude_code", "cursor")) {
+    Promptly-RunNode -Args @($cli, "test-send", "--tool", $tool) -AllowFailure | Out-Null
   }
 
   Promptly-SyncSubscriptionUsage -Integrations $Integrations
