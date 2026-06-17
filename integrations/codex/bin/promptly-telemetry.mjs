@@ -2895,6 +2895,15 @@ function auditInstalledHooks(tool) {
       }
     }
   }
+  if (tool === "claude_code") {
+    const cacheRoot = join(homedir(), ".claude/plugins/cache/promptly-labs/promptly-claude-code");
+    if (existsSync(cacheRoot)) {
+      for (const entry of readdirSync(cacheRoot)) {
+        const filePath = join(cacheRoot, entry, "hooks/hooks.json");
+        if (existsSync(filePath)) paths.claude_code.push(filePath);
+      }
+    }
+  }
   const required = {
     cursor: ["beforeSubmitPrompt", "afterAgentResponse", "stop"],
     codex: ["UserPromptSubmit", "Stop", "SessionStart", "SessionEnd"],
@@ -2914,13 +2923,23 @@ function auditInstalledHooks(tool) {
         : tool !== "codex" || raw.includes("PLUGIN_ROOT");
     const usesRelativeBin =
       (tool === "codex" || tool === "cursor") && /node \.\/bin\/promptly-telemetry/.test(raw);
+    let jsonValid = true;
+    let jsonError = null;
+    try {
+      JSON.parse(raw);
+    } catch (err) {
+      jsonValid = false;
+      jsonError = String(err?.message || err);
+    }
     out.push({
       path: filePath,
       exists: true,
-      ok: missing.length === 0 && usesPluginRoot && !usesRelativeBin,
+      ok: missing.length === 0 && usesPluginRoot && !usesRelativeBin && jsonValid,
       missing_hooks: missing,
       uses_plugin_root: usesPluginRoot,
-      uses_relative_bin: usesRelativeBin
+      uses_relative_bin: usesRelativeBin,
+      json_valid: jsonValid,
+      json_error: jsonError
     });
   }
   return out;
@@ -3154,6 +3173,54 @@ async function cmdLoginClaude(flags) {
   console.log(JSON.stringify(result, null, 2));
 }
 
+function patchWindowsHookFile(filePath, nodeExe = process.execPath) {
+  if (process.platform !== "win32" || !existsSync(filePath)) {
+    return { path: filePath, patched: false };
+  }
+  const raw = readFileSync(filePath, "utf8");
+  if (!/node \\"/.test(raw)) {
+    return { path: filePath, patched: false };
+  }
+  const jsonFragment = `\\"${nodeExe.replace(/\\/g, "\\\\")}\\" `;
+  const patched = raw.replace(/node /g, jsonFragment);
+  if (patched === raw) {
+    return { path: filePath, patched: false };
+  }
+  JSON.parse(patched);
+  writeFileSync(filePath, patched, "utf8");
+  return { path: filePath, patched: true };
+}
+
+function collectWindowsHookJsonPaths(integrationsRoot) {
+  const home = homedir();
+  const paths = new Set();
+  for (const rel of ["codex/hooks/hooks.json", "cursor/hooks/hooks.json", "claude-code/hooks/hooks.json"]) {
+    paths.add(join(integrationsRoot, rel));
+  }
+  paths.add(join(home, ".cursor/plugins/local/promptly-cursor/hooks/hooks.json"));
+  for (const [cacheRoot, rels] of [
+    [join(home, ".codex/plugins/cache/promptly-labs/promptly-codex"), ["hooks/hooks.json", "codex/hooks/hooks.json"]],
+    [join(home, ".claude/plugins/cache/promptly-labs/promptly-claude-code"), ["hooks/hooks.json"]]
+  ]) {
+    if (!existsSync(cacheRoot)) continue;
+    for (const entry of readdirSync(cacheRoot)) {
+      for (const rel of rels) {
+        paths.add(join(cacheRoot, entry, rel));
+      }
+    }
+  }
+  return [...paths];
+}
+
+function patchAllWindowsHookRunners(integrationsRoot) {
+  if (process.platform !== "win32") return [];
+  const results = [];
+  for (const filePath of collectWindowsHookJsonPaths(integrationsRoot)) {
+    results.push(patchWindowsHookFile(filePath));
+  }
+  return results;
+}
+
 function syncAgentRuntimeTelemetry() {
   const home = homedir();
   const integrationsRoot = join(home, "integrations");
@@ -3199,7 +3266,10 @@ function syncAgentRuntimeTelemetry() {
     }
   }
 
-  return { copied, telemetry_source: telemetrySrc };
+  const hooksPatched =
+    process.platform === "win32" ? patchAllWindowsHookRunners(integrationsRoot).filter((row) => row.patched) : [];
+
+  return { copied, telemetry_source: telemetrySrc, hooks_patched: hooksPatched.map((row) => row.path) };
 }
 
 function cmdSyncRuntimes() {

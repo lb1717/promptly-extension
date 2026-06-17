@@ -309,6 +309,19 @@ function cursorGlobalStatePath() {
 
 function readSqliteItemValue(dbPath, key) {
   if (!existsSync(dbPath)) return null;
+  if (platform() === "win32") {
+    try {
+      const script =
+        "import{DatabaseSync}from'node:sqlite';const db=new DatabaseSync(process.argv[1],{readOnly:true});const row=db.prepare('SELECT value FROM ItemTable WHERE key=? LIMIT 1').get(process.argv[2]);if(row?.value!=null)process.stdout.write(String(row.value));db.close();";
+      const out = execSync(
+        `node --input-type=module -e ${JSON.stringify(script)} ${JSON.stringify(dbPath)} ${JSON.stringify(key)}`,
+        { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
+      ).trim();
+      if (out) return out;
+    } catch {
+      /* fall through */
+    }
+  }
   const safeKey = key.replace(/'/g, "''");
   try {
     const out = execSync(`sqlite3 ${JSON.stringify(dbPath)} ${JSON.stringify(`SELECT value FROM ItemTable WHERE key='${safeKey}' LIMIT 1;`)}`, {
@@ -900,10 +913,18 @@ export async function runVendorUsageSync({ creds, clientHeader, flags = {} }) {
     claudeRows.find((row) => row.sync_error)?.sync_error ||
     claudeAuth.failure ||
     "Claude subscription sync failed.";
+  const cursorRow = snapshots.find((row) => row?.provider === "cursor");
+  const cursorSkipReason = cursorRow?.sync_error || "Cursor subscription sync failed on this computer.";
+  const codexRow = snapshots.find((row) => row?.provider === "codex");
+  const codexSkipReason = codexRow?.sync_error || "Codex subscription sync failed on this computer.";
   const skipDetails = Object.fromEntries(
     clearProviders.map((provider) => [
       provider,
-      provider === "claude_code" ? claudeSkipReason : "Not signed in on this Mac."
+      provider === "claude_code"
+        ? claudeSkipReason
+        : provider === "cursor"
+          ? cursorSkipReason
+          : codexSkipReason
     ])
   );
   if (!successful.some((row) => row.provider === "claude_code")) {

@@ -324,12 +324,11 @@ export async function ensureClaudeOAuthLogin({
           finish(reject, new Error("OAuth state mismatch"));
           return;
         }
-        const callbackForExchange = `http://${host}${url.pathname}${url.search}`;
         const exchanged = await exchangeCode({
           code,
           state: returnedState || state,
           verifier,
-          redirectUri: callbackForExchange.split("?")[0]
+          redirectUri
         });
         savePromptlyClaudeAuth(exchanged);
         res.writeHead(302, { Location: SUCCESS_URL });

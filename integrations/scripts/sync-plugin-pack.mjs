@@ -11,6 +11,8 @@ const pkg = (name) => join(root, "packages", name);
 
 const copies = [
   [join(pkg("telemetry-cli"), "bin/promptly-telemetry.mjs"), "bin/promptly-telemetry.mjs"],
+  [join(pkg("telemetry-cli"), "lib/vendor-usage-sync.mjs"), "lib/vendor-usage-sync.mjs"],
+  [join(pkg("telemetry-cli"), "lib/claude-oauth-login.mjs"), "lib/claude-oauth-login.mjs"],
   [join(pkg("promptly-improve"), "bin/promptly-improve.mjs"), "bin/promptly-improve.mjs"],
   [join(pkg("mcp-server"), "index.mjs"), "mcp/server.mjs"]
 ];

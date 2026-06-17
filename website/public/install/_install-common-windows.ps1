@@ -69,17 +69,18 @@ function Promptly-RunNode {
 
 function Promptly-PatchHookNodeInFiles {
   param([Parameter(Mandatory)][string[]]$Paths)
-  $nodePrefix = Promptly-GetHookNodePrefix
-  foreach ($file in $Paths) {
-    if (-not (Test-Path -LiteralPath $file)) { continue }
-    $raw = [System.IO.File]::ReadAllText($file)
-    if ($raw -notmatch '"node \\"\$\{') { continue }
-    $patched = $raw -replace '("command":\s*)"node ', "`${1}$nodePrefix "
-    if ($patched -ne $raw) {
-      Promptly-WriteUtf8File -Path $file -Content $patched
-      Write-Host "    Patched hook runner: $file"
+  $integrations = Join-Path $env:USERPROFILE "integrations"
+  $patchScript = Join-Path $integrations "scripts\patch-windows-hooks.mjs"
+  $nodeExe = Promptly-GetNodeExe
+  if (Test-Path -LiteralPath $patchScript) {
+    if ($Paths -and $Paths.Count) {
+      & $nodeExe $patchScript @Paths 2>&1 | Write-Host
+    } else {
+      & $nodeExe $patchScript 2>&1 | Write-Host
     }
+    return
   }
+  Write-Host "WARN patch-windows-hooks.mjs missing — re-download the plugin pack"
 }
 
 function Promptly-CollectHookJsonPaths {
@@ -111,10 +112,16 @@ function Promptly-CollectHookJsonPaths {
 function Promptly-EnsureHooksUseNodeExe {
   param([Parameter(Mandatory)][string]$HooksPath)
   if (-not (Test-Path -LiteralPath $HooksPath)) { return $false }
-  $nodeExe = Promptly-GetNodeExe
-  if (Select-String -Path $HooksPath -Pattern ([regex]::Escape($nodeExe)) -Quiet) { return $true }
   Promptly-PatchHookNodeInFiles -Paths @($HooksPath)
-  return (Select-String -Path $HooksPath -Pattern ([regex]::Escape($nodeExe)) -Quiet)
+  try {
+    $raw = [System.IO.File]::ReadAllText($HooksPath)
+    $null = $raw | ConvertFrom-Json
+    $nodeExe = Promptly-GetNodeExe
+    return $raw.Contains($nodeExe)
+  } catch {
+    Write-Host "X Invalid hooks JSON: $HooksPath"
+    return $false
+  }
 }
 
 function Promptly-ApplyWindowsHookPaths {
@@ -293,6 +300,14 @@ function Promptly-SyncSubscriptionUsage {
   }
 }
 
+function Promptly-ValidateHookJson {
+  param([string]$Integrations = (Join-Path $env:USERPROFILE "integrations"))
+  $patchScript = Join-Path $Integrations "scripts\patch-windows-hooks.mjs"
+  if (-not (Test-Path -LiteralPath $patchScript)) { return }
+  Write-Host "-> Validating and patching Windows hook JSON..."
+  Promptly-PatchHookNodeInFiles -Paths @()
+}
+
 function Promptly-FinalizeWithPairCode {
   param(
     [Parameter(Mandatory)][string]$Code,
@@ -309,6 +324,7 @@ function Promptly-FinalizeWithPairCode {
 
   Write-Host "-> Syncing hooks + telemetry into Claude Code, Cursor, and Codex runtimes..."
   Promptly-SyncAllAgentRuntimes -Integrations $Integrations
+  Promptly-ValidateHookJson -Integrations $Integrations
 
   foreach ($tool in @(
     @{ Tool = "codex"; Label = "Codex" },
@@ -525,7 +541,7 @@ function Promptly-InstallForClaudeCode {
   Promptly-SyncClaudeCodeCommandFiles -PluginDir $plugin
   Promptly-ClaudeMarketplaceRefresh -IntegrationsPath $Integrations
   Promptly-ClaudePluginReinstall
-  Promptly-SyncClaudePluginCache
+  $null = Promptly-SyncClaudePluginCache
   $claude = Promptly-GetAgentCliPath -Name claude
   $pluginList = & $claude plugin list 2>&1 | Out-String
   if ($pluginList -notmatch "promptly-claude-code") {
@@ -558,7 +574,7 @@ function Promptly-InstallForCodex {
   Promptly-InstallCodexSkill -PluginDir $plugin
   Promptly-CodexMarketplaceAdd -IntegrationsPath $Integrations
   Promptly-CodexPluginReinstall
-  Promptly-SyncCodexPluginCache
+  $null = Promptly-SyncCodexPluginCache
   $codex = Promptly-GetAgentCliPath -Name codex
   $pluginList = & $codex plugin list 2>&1 | Out-String
   if ($pluginList -notmatch "promptly-codex") {
