@@ -3440,7 +3440,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                     type="button"
                     disabled={statsLoading || ideStatsLoading || !user}
                     onClick={refreshAllStats}
-                    className={`w-[5.5rem] rounded-md border border-line px-2 py-0.5 text-center hover:bg-cream-dark disabled:opacity-50 ${STATS_FILTER_LABEL_CLASS}`}
+                    className={`min-w-[5.5rem] shrink-0 whitespace-nowrap rounded-md border border-line px-3 py-0.5 text-center hover:bg-cream-dark disabled:opacity-50 ${STATS_FILTER_LABEL_CLASS}`}
                   >
                     {statsLoading || ideStatsLoading ? "Refreshing…" : "Refresh"}
                   </button>

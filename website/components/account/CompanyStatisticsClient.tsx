@@ -254,7 +254,7 @@ export function CompanyStatisticsClient({ user }: { user: User | null }) {
               type="button"
               onClick={() => void load()}
               disabled={loading}
-              className="rounded-lg border border-line px-3 py-2 text-xs font-semibold text-muted hover:bg-cream-dark disabled:opacity-60"
+              className="shrink-0 whitespace-nowrap rounded-lg border border-line px-3 py-2 text-xs font-semibold text-muted hover:bg-cream-dark disabled:opacity-60"
             >
               {loading ? "Refreshing…" : "Refresh"}
             </button>
