@@ -79,9 +79,12 @@ if [[ ! -f "${HOME}/.codex/skills/promptly/SKILL.md" ]]; then
 fi
 echo "✓ Hooks, MCP, and /promptly verified for Codex"
 
+TELEMETRY_CLI="${INTEGRATIONS}/packages/telemetry-cli/bin/promptly-telemetry.mjs"
+if [[ -f "${TELEMETRY_CLI}" ]]; then
+  echo "→ Installing Promptly hooks to ~/.codex/hooks.json (Codex does not load plugin hooks)…"
+  node "${TELEMETRY_CLI}" codex-trust-hooks >/dev/null || true
+fi
+
 echo ""
 echo "✓ Promptly installed for Codex"
-echo "  Quit and reopen Codex (desktop app or terminal)."
-echo "  Hooks are trusted in Terminal Codex with: codex   then type /hooks"
-echo "  (The Codex desktop app has no /hooks slash command — use Terminal for hook review.)"
-echo "  Open a trusted project folder, then send a prompt to test telemetry."
+echo "  Hooks live in ~/.codex/hooks.json — quit and reopen Codex, then check /hooks."

@@ -5,6 +5,11 @@ if (-not $InstallBase) {
 }
 $script:InstallBase = $InstallBase
 
+try {
+  [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+  $OutputEncoding = [System.Text.Encoding]::UTF8
+} catch { }
+
 function __Promptly-FetchScriptText {
   param([Parameter(Mandatory)][string]$Uri)
   $response = Invoke-WebRequest -Uri $Uri -UseBasicParsing

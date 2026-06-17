@@ -41,7 +41,41 @@ function runCli(args) {
 }
 
 function runCmd(cmd) {
-  return safe(() => execSync(cmd, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 4 * 1024 * 1024 }).trim());
+  return safe(() => {
+    const opts = {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      maxBuffer: 4 * 1024 * 1024,
+      env: { ...process.env, PYTHONIOENCODING: "utf-8" }
+    };
+    if (process.platform === "win32") {
+      opts.env.CHCP = "65001";
+    }
+    return execSync(cmd, opts).trim();
+  });
+}
+
+function sanitizeTerminalText(text) {
+  if (!text || typeof text !== "string") return text;
+  return text
+    .replace(/\u00e2\u20ac\u201d/g, "-")
+    .replace(/\u00e2\u20ac\u201c/g, '"')
+    .replace(/\u00e2\u20ac\u2019/g, "'")
+    .replace(/\u00e2\u20ac\u201c/g, '"')
+    .replace(/\u00e2\u20ac\u00a2/g, "-")
+    .replace(/\u00e2\u2020\u2019/g, "->")
+    .replace(/\u00e2\u2020\u2018/g, "<-")
+    .replace(/\u00c3\u00b7/g, " ")
+    .replace(/\u00e2\u0153\u201c/g, "[enabled]")
+    .replace(/\u00e2\u009d\u00bb/g, "*")
+    .replace(/[\u0080-\u009f]/g, "")
+    .replace(/[^\x09\x0a\x0d\x20-\x7e]/g, (ch) => {
+      if (ch === "\u2014" || ch === "\u2013") return "-";
+      if (ch === "\u2192") return "->";
+      if (ch === "\u2190") return "<-";
+      if (ch === "\u00b7") return " ";
+      return "";
+    });
 }
 
 function collectHookPaths() {
@@ -53,6 +87,7 @@ function collectHookPaths() {
   ]) {
     paths.add(join(integrations, rel));
   }
+  paths.add(join(homedir(), ".codex/hooks.json"));
   paths.add(join(homedir(), ".cursor/plugins/local/promptly-cursor/hooks/hooks.json"));
   for (const [cacheRoot, rels] of [
     [join(homedir(), ".codex/plugins/cache/promptly-labs/promptly-codex"), ["hooks/hooks.json", "codex/hooks/hooks.json"]],
@@ -132,6 +167,8 @@ const report = {
     pathRow("cursor_plugin", join(homedir(), ".cursor/plugins/local/promptly-cursor")),
     pathRow("codex_cache", join(homedir(), ".codex/plugins/cache/promptly-labs/promptly-codex")),
     pathRow("claude_cache", join(homedir(), ".claude/plugins/cache/promptly-labs/promptly-claude-code")),
+    pathRow("codex_config", join(homedir(), ".codex/config.toml")),
+    pathRow("codex_user_hooks", join(homedir(), ".codex/hooks.json")),
     pathRow("promptly_dir", join(homedir(), ".promptly")),
     pathRow("cursor_state_db", join(process.env.APPDATA || "", "Cursor/User/globalStorage/state.vscdb"))
   ],
@@ -147,9 +184,10 @@ const report = {
     return out;
   }),
   plugin_lists: {
-    claude: safe(() => runCmd("claude plugin list")),
-    codex: safe(() => runCmd("codex plugin list"))
+    claude: safe(() => sanitizeTerminalText(runCmd(process.platform === "win32" ? "chcp 65001 >nul & claude plugin list" : "claude plugin list"))),
+    codex: safe(() => sanitizeTerminalText(runCmd(process.platform === "win32" ? "chcp 65001 >nul & codex plugin list" : "codex plugin list")))
   },
+  codex_hook_trust: safe(() => runCli(["diagnostics", "--tool", "codex"]).json?.codex_hook_trust),
   telemetry: {
     status_all: runCli(["status"]),
     diagnostics: {

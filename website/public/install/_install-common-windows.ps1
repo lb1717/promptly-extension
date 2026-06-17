@@ -201,6 +201,23 @@ function Promptly-SyncClaudePluginCache {
   return $count
 }
 
+function Promptly-TrustCodexHooks {
+  param([string]$Integrations = (Join-Path $env:USERPROFILE "integrations"))
+  $cli = Join-Path $Integrations "packages\telemetry-cli\bin\promptly-telemetry.mjs"
+  if (-not (Test-Path -LiteralPath $cli)) {
+    Write-Host "  WARN Codex hook trust skipped - telemetry CLI missing"
+    return $false
+  }
+  Write-Host "-> Installing Promptly hooks to ~/.codex/hooks.json (Codex does not load plugin hooks)..."
+  Promptly-RunNode -Args @($cli, "codex-trust-hooks") -AllowFailure
+  if ($LASTEXITCODE -eq 0) {
+    Write-Host "  OK Codex user hooks installed and trusted - quit and reopen Codex, then check /hooks"
+    return $true
+  }
+  Write-Host "  WARN Codex hook install failed - rerun: node `"$cli`" codex-trust-hooks"
+  return $false
+}
+
 function Promptly-SyncCodexPluginCache {
   $src = Join-Path $env:USERPROFILE "integrations\packages\telemetry-cli\bin\promptly-telemetry.mjs"
   $hooksSrc = Join-Path $env:USERPROFILE "integrations\codex\hooks\hooks.json"
@@ -258,6 +275,7 @@ function Promptly-SyncAllAgentRuntimes {
 
   Promptly-ApplyWindowsHookPaths -Integrations $Integrations
   Promptly-RunNode -Args @($cliSrc, "sync-runtimes") -AllowFailure
+  Promptly-TrustCodexHooks -Integrations $Integrations | Out-Null
   Write-Host "OK Synced live hooks + telemetry CLI for Claude Code, Cursor, and Codex"
 }
 
@@ -357,7 +375,7 @@ function Promptly-PrintInstallDebugReport {
 
   Write-Host ""
   Write-Host "################################################################################"
-  Write-Host "# PROMPTLY WINDOWS INSTALL DEBUG REPORT (temporary — copy everything below)   #"
+  Write-Host "# PROMPTLY WINDOWS INSTALL DEBUG REPORT (temporary - copy everything below)   #"
   Write-Host "################################################################################"
   Write-Host ""
   Write-Host "generated_at: $((Get-Date).ToUniversalTime().ToString('o'))"
@@ -407,7 +425,7 @@ function Promptly-PrintInstallDebugReport {
 
   Write-Host ""
   Write-Host "################################################################################"
-  Write-Host "# END PROMPTLY DEBUG — send this block if install or live tracking still fails  #"
+  Write-Host "# END PROMPTLY DEBUG - send this block if install or live tracking still fails  #"
   Write-Host "################################################################################"
   Write-Host ""
 }
@@ -488,9 +506,8 @@ function Promptly-FinalizeWithPairCode {
   Write-Host ""
   Write-Host "OK All set. Restart Claude Code, Cursor, and Codex if they were open, then send a test prompt."
   Write-Host ""
-  Write-Host "Enable hooks after reopening:"
-  Write-Host "  Codex (terminal): run codex, open a trusted project, type /hooks, trust Promptly"
-  Write-Host "  Codex (desktop app): quit and reopen the app; trust hooks when prompted in settings"
+  Write-Host "Hooks:"
+  Write-Host "  Codex: hooks are in ~/.codex/hooks.json (not the plugin) - quit and reopen Codex, then /hooks should list Promptly"
   Write-Host "  Cursor: reload the window and allow hooks when prompted"
   Write-Host "  Claude Code: run /reload-plugins once"
   Write-Host ""
@@ -739,8 +756,9 @@ function Promptly-InstallForCodex {
     Write-Host "X Codex hooks must use full node.exe path (required for Codex Desktop)"
     return 1
   }
+  Promptly-TrustCodexHooks -Integrations $Integrations | Out-Null
   Write-Host "OK Promptly installed for Codex"
-  Write-Host "  Codex terminal: type /hooks in your project and trust Promptly hooks"
-  Write-Host "  Codex desktop app: quit and reopen; trust hooks when prompted (no /hooks command)"
+  Write-Host "  Hooks are in ~/.codex/hooks.json (Codex ignores plugin hooks in current builds)"
+  Write-Host "  Quit and reopen Codex, run /hooks to confirm Promptly hooks appear, then send a test prompt"
   return 0
 }

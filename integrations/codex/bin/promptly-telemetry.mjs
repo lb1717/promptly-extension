@@ -3,6 +3,7 @@
  * Promptly IDE telemetry CLI — self-contained (bundled into each agent plugin).
  * Never uploads raw prompt text; metadata only.
  */
+import { createHash } from "crypto";
 import { spawn, spawnSync } from "child_process";
 import {
   closeSync,
@@ -12,12 +13,13 @@ import {
   readdirSync,
   readFileSync,
   readSync,
+  realpathSync,
   statSync,
   unlinkSync,
   writeFileSync
 } from "fs";
 import { homedir } from "os";
-import { dirname, join } from "path";
+import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { runVendorUsageSync } from "../lib/vendor-usage-sync.mjs";
 import { runClaudeOAuthLoginOnly } from "../lib/claude-oauth-login.mjs";
@@ -2609,7 +2611,7 @@ async function verifyLiveTrackingForAllTools() {
         throw new Error(flush.error || "upload failed");
       }
       results.push({ tool, ok: true, written: flush.written ?? 1 });
-      console.log(`  ✓ ${tool}: live tracking OK`);
+      console.log(`  OK ${tool}: live tracking OK`);
     } catch (err) {
       results.push({ tool, ok: false, error: String(err?.message || err) });
       console.error(`  ✗ ${tool}: ${String(err?.message || err)}`);
@@ -2880,7 +2882,10 @@ function auditInstalledHooks(tool) {
       join(homedir(), ".cursor/plugins/local/promptly-cursor/hooks/hooks.json"),
       join(homedir(), "integrations/cursor/hooks/hooks.json")
     ],
-    codex: [join(homedir(), "integrations/codex/hooks/hooks.json")],
+    codex: [
+      join(homedir(), ".codex/hooks.json"),
+      join(homedir(), "integrations/codex/hooks/hooks.json")
+    ],
     claude_code: [join(homedir(), "integrations/claude-code/hooks/hooks.json")]
   };
   if (tool === "codex") {
@@ -2917,10 +2922,15 @@ function auditInstalledHooks(tool) {
     }
     const raw = readFileSync(filePath, "utf8");
     const missing = (required[tool] || []).filter((key) => !raw.includes(`"${key}"`));
+    const isUserCodexHooks =
+      tool === "codex" &&
+      (filePath === join(homedir(), ".codex/hooks.json") || filePath.endsWith(`${join(".codex", "hooks.json")}`));
     const usesPluginRoot =
       tool === "cursor"
         ? raw.includes("CURSOR_PLUGIN_ROOT") || raw.includes("CLAUDE_PLUGIN_ROOT")
-        : tool !== "codex" || raw.includes("PLUGIN_ROOT");
+        : tool === "codex" && isUserCodexHooks
+          ? raw.includes("promptly-telemetry.mjs")
+          : tool !== "codex" || raw.includes("PLUGIN_ROOT");
     const usesRelativeBin =
       (tool === "codex" || tool === "cursor") && /node \.\/bin\/promptly-telemetry/.test(raw);
     let jsonValid = true;
@@ -2931,10 +2941,15 @@ function auditInstalledHooks(tool) {
       jsonValid = false;
       jsonError = String(err?.message || err);
     }
+    const hookOk =
+      tool === "codex" && isUserCodexHooks
+        ? missing.length === 0 && jsonValid && raw.includes("promptly-telemetry.mjs")
+        : missing.length === 0 && usesPluginRoot && !usesRelativeBin && jsonValid;
     out.push({
       path: filePath,
       exists: true,
-      ok: missing.length === 0 && usesPluginRoot && !usesRelativeBin && jsonValid,
+      ok: hookOk,
+      is_user_hooks: isUserCodexHooks,
       missing_hooks: missing,
       uses_plugin_root: usesPluginRoot,
       uses_relative_bin: usesRelativeBin,
@@ -3042,7 +3057,7 @@ function cmdDiagnostics(flags) {
       }
     },
     {
-      label: "UserPromptSubmit (codex bare — no model in hook)",
+      label: "UserPromptSubmit (codex bare - no model in hook)",
       input: {
         hook_event_name: "UserPromptSubmit",
         session_id: sessionId,
@@ -3123,13 +3138,15 @@ function cmdDiagnostics(flags) {
       })()
     },
     notes: [
-      "response_end_without_pending_submit means the assistant finished hook ran without a matching prompt submit — usually missing afterAgentResponse/Stop hooks or session id mismatch.",
+      "response_end_without_pending_submit means the assistant finished hook ran without a matching prompt submit - usually missing afterAgentResponse/Stop hooks or session id mismatch.",
       "pending_orphans that grow after each prompt mean response-end hooks are not firing; reinstall the plugin pack.",
-      "Cursor stop/sessionEnd hooks run from the project root — hooks must use ${CURSOR_PLUGIN_ROOT}/bin/promptly-telemetry.mjs, not ./bin.",
-      "Codex hooks must use ${PLUGIN_ROOT}/bin/promptly-telemetry.mjs — relative ./bin paths fail silently in Codex Desktop.",
-      "After updating Codex hooks, quit and reopen Codex and re-trust the Promptly plugin hooks.",
-      "Run with --simulate to exercise submit → draft → response on a fake session."
-    ]
+      "Cursor stop/sessionEnd hooks run from the project root - hooks must use ${CURSOR_PLUGIN_ROOT}/bin/promptly-telemetry.mjs, not ./bin.",
+      "Codex plugin hooks are not loaded in current Codex builds (plugin_hooks removed). Hooks live in ~/.codex/hooks.json.",
+      "Run: promptly-telemetry codex-trust-hooks to install user hooks and trust them (Windows install does this automatically).",
+      "After updating Codex hooks, quit and reopen Codex Desktop or terminal Codex.",
+      "Run with --simulate to exercise submit -> draft -> response on a fake session."
+    ],
+    codex_hook_trust: tool === "codex" ? safeCodexHookTrustStatus() : undefined
   };
   console.log(JSON.stringify(output, null, 2));
 }
@@ -3160,7 +3177,7 @@ async function cmdTestSend(flags) {
     console.error(result.error || "Upload failed");
     process.exit(1);
   }
-  console.log(`Test prompt uploaded for ${tool}. Check Statistics → Coding agents on promptly-labs.com.`);
+  console.log(`Test prompt uploaded for ${tool}. Check Statistics on promptly-labs.com.`);
 }
 
 async function cmdLoginClaude(flags) {
@@ -3191,12 +3208,282 @@ function patchWindowsHookFile(filePath, nodeExe = process.execPath) {
   return { path: filePath, patched: true };
 }
 
+const CODEX_HOOK_EVENT_LABELS = {
+  UserPromptSubmit: "user_prompt_submit",
+  SessionStart: "session_start",
+  SessionEnd: "session_end",
+  Stop: "stop",
+  PreToolUse: "pre_tool_use",
+  PostToolUse: "post_tool_use",
+  PermissionRequest: "permission_request",
+  PreCompact: "pre_compact",
+  PostCompact: "post_compact",
+  SubagentStart: "subagent_start",
+  SubagentStop: "subagent_stop"
+};
+
+function canonicalJsonForHash(value) {
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(canonicalJsonForHash);
+  const sorted = {};
+  for (const key of Object.keys(value).sort()) {
+    sorted[key] = canonicalJsonForHash(value[key]);
+  }
+  return sorted;
+}
+
+/** Match Codex codex-rs/config fingerprint::version_for_toml for hook trust hashes. */
+function versionForTomlIdentity(identity) {
+  const serialized = JSON.stringify(canonicalJsonForHash(identity));
+  const hex = createHash("sha256").update(serialized).digest("hex");
+  return `sha256:${hex}`;
+}
+
+function commandHookTrustHash(eventLabel, command, timeoutSec = 600) {
+  return versionForTomlIdentity({
+    event_name: eventLabel,
+    hooks: [
+      {
+        type: "command",
+        command,
+        timeout: timeoutSec,
+        async: false
+      }
+    ]
+  });
+}
+
+function codexConfigTomlPath() {
+  return join(homedir(), ".codex", "config.toml");
+}
+
+function codexUserHooksPath() {
+  return join(homedir(), ".codex", "hooks.json");
+}
+
+function resolveNodeExeForHooks() {
+  return String(process.env.PROMPTLY_NODE_EXE || process.execPath).trim();
+}
+
+function resolveCodexTelemetryPath(integrationsRoot = join(homedir(), "integrations")) {
+  for (const rel of ["codex/bin/promptly-telemetry.mjs", "packages/telemetry-cli/bin/promptly-telemetry.mjs"]) {
+    const path = join(integrationsRoot, rel);
+    if (existsSync(path)) return path;
+  }
+  return join(integrationsRoot, "codex/bin/promptly-telemetry.mjs");
+}
+
+function buildCodexUserHooksCommand(nodeExe, telemetryPath) {
+  if (process.platform === "win32") {
+    return `"${nodeExe}" "${telemetryPath}" hook --tool codex`;
+  }
+  return `node "${telemetryPath}" hook --tool codex`;
+}
+
+function buildCodexUserHooksDocument(command) {
+  const handler = { type: "command", command, timeout: 15 };
+  const group = { hooks: [handler] };
+  return {
+    hooks: {
+      UserPromptSubmit: [group],
+      Stop: [group],
+      SessionStart: [group],
+      SessionEnd: [group]
+    }
+  };
+}
+
+function installCodexUserHooks(integrationsRoot = join(homedir(), "integrations")) {
+  const telemetryPath = resolveCodexTelemetryPath(integrationsRoot);
+  const nodeExe = resolveNodeExeForHooks();
+  const command = buildCodexUserHooksCommand(nodeExe, telemetryPath);
+  const hooksPath = codexUserHooksPath();
+  mkdirSync(dirname(hooksPath), { recursive: true });
+  writeFileSync(hooksPath, `${JSON.stringify(buildCodexUserHooksDocument(command), null, 2)}\n`, "utf8");
+  return { hooks_path: hooksPath, command, telemetry_path: telemetryPath, node_exe: nodeExe };
+}
+
+function codexUserHookKeySources(hooksPath) {
+  const sources = new Set();
+  const absolute = resolve(hooksPath);
+  sources.add(absolute);
+  try {
+    sources.add(realpathSync.native(absolute));
+  } catch {
+    /* keep resolved path */
+  }
+  if (process.platform === "win32") {
+    for (const path of [...sources]) {
+      sources.add(path.replace(/\//g, "\\"));
+      sources.add(path.replace(/\\/g, "/"));
+    }
+  }
+  return [...sources];
+}
+
+function collectCodexHookTrustEntries(hooksPath, keySourcePrefix) {
+  if (!existsSync(hooksPath)) {
+    return { error: "hooks_missing", path: hooksPath, entries: [] };
+  }
+  const raw = readFileSync(hooksPath, "utf8");
+  if (raw.trimStart().startsWith("#!")) {
+    return { error: "hooks_corrupted", path: hooksPath, entries: [] };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    return { error: String(err?.message || err), path: hooksPath, entries: [] };
+  }
+  const events = parsed?.hooks || {};
+  const entries = [];
+  for (const [eventName, groups] of Object.entries(events)) {
+    const eventLabel = CODEX_HOOK_EVENT_LABELS[eventName] || eventName.toLowerCase();
+    if (!Array.isArray(groups)) continue;
+    groups.forEach((group, groupIndex) => {
+      const handlers = Array.isArray(group?.hooks) ? group.hooks : [];
+      handlers.forEach((handler, handlerIndex) => {
+        if (handler?.type !== "command") return;
+        const command = String(handler.command || "").trim();
+        if (!command) return;
+        const timeoutSec = Number(handler.timeout ?? handler.timeout_sec ?? 600) || 600;
+        const key = `${keySourcePrefix}:${eventLabel}:${groupIndex}:${handlerIndex}`;
+        entries.push({
+          key,
+          event: eventLabel,
+          command,
+          timeout_sec: timeoutSec,
+          trusted_hash: commandHookTrustHash(eventLabel, command, timeoutSec)
+        });
+      });
+    });
+  }
+  return { path: hooksPath, entries };
+}
+
+function stripCodexHookStateFromConfig(text) {
+  return String(text || "")
+    .replace(/\[hooks\.state\."[^"]*hooks\.json:[^"]+"\]\r?\ntrusted_hash = "[^"]+"\r?\n?/g, "")
+    .replace(
+      /\[hooks\.state\."promptly-codex@promptly-labs:hooks\/hooks\.json:[^"]+"\]\r?\ntrusted_hash = "[^"]+"\r?\n?/g,
+      ""
+    )
+    .replace(/\n{3,}/g, "\n\n")
+    .trimEnd();
+}
+
+function ensureCodexFeaturesInConfig(text) {
+  let next = String(text || "");
+  if (!/\[features\]/m.test(next)) {
+    next = `${next}${next && !next.endsWith("\n") ? "\n" : ""}\n[features]\nhooks = true\n`;
+    return next;
+  }
+  if (!/\bhooks\s*=\s*true\b/m.test(next)) {
+    next = next.replace(/\[features\]\r?\n/, "[features]\nhooks = true\n");
+  }
+  return next;
+}
+
+function mergeCodexUserHookTrustIntoConfig(hooksPath) {
+  const configPath = codexConfigTomlPath();
+  const keySources = codexUserHookKeySources(hooksPath);
+  const primary = keySources[0];
+  const collected = collectCodexHookTrustEntries(hooksPath, primary);
+  if (!collected.entries.length) {
+    return { ok: false, config_path: configPath, hooks_path: hooksPath, error: collected.error || "no_hook_entries" };
+  }
+
+  const allEntries = [];
+  const seenKeys = new Set();
+  for (const keySource of keySources) {
+    for (const entry of collectCodexHookTrustEntries(hooksPath, keySource).entries) {
+      if (seenKeys.has(entry.key)) continue;
+      seenKeys.add(entry.key);
+      allEntries.push(entry);
+    }
+  }
+
+  mkdirSync(dirname(configPath), { recursive: true });
+  let text = existsSync(configPath) ? readFileSync(configPath, "utf8") : "";
+  text = stripCodexHookStateFromConfig(text);
+  text = ensureCodexFeaturesInConfig(text);
+
+  if (!/\[hooks\.state\]/m.test(text)) {
+    text = `${text}${text && !text.endsWith("\n") ? "\n" : ""}\n[hooks.state]\n`;
+  }
+
+  const blocks = allEntries.map(
+    (entry) => `[hooks.state."${entry.key}"]\ntrusted_hash = "${entry.trusted_hash}"`
+  );
+  text = `${text.trimEnd()}\n\n${blocks.join("\n\n")}\n`;
+  writeFileSync(configPath, text, "utf8");
+
+  return {
+    ok: true,
+    config_path: configPath,
+    hooks_path: hooksPath,
+    hook_key_source: primary,
+    trusted: allEntries.map((entry) => ({ key: entry.key, trusted_hash: entry.trusted_hash }))
+  };
+}
+
+function cmdCodexTrustHooks(flags) {
+  const integrationsRoot = flags.integrations || join(homedir(), "integrations");
+  const installed = installCodexUserHooks(integrationsRoot);
+  const result = mergeCodexUserHookTrustIntoConfig(installed.hooks_path);
+  console.log(JSON.stringify({ ...result, installed, plugin_hooks_note: "Codex loads ~/.codex/hooks.json, not plugin hooks" }, null, 2));
+  if (!result.ok) process.exit(1);
+}
+
+function readCodexHookTrustFromConfig() {
+  const configPath = codexConfigTomlPath();
+  if (!existsSync(configPath)) return { config_path: configPath, trusted_keys: [] };
+  const text = readFileSync(configPath, "utf8");
+  const trusted = [];
+  const re = /\[hooks\.state\."([^"]+)"\]\r?\ntrusted_hash = "(sha256:[a-f0-9]+)"/g;
+  let match;
+  while ((match = re.exec(text))) {
+    if (match[1].includes("hooks.json") || match[1].includes("promptly-codex@promptly-labs")) {
+      trusted.push({ key: match[1], trusted_hash: match[2] });
+    }
+  }
+  return { config_path: configPath, trusted_keys: trusted };
+}
+
+function safeCodexHookTrustStatus() {
+  try {
+    const hooksPath = codexUserHooksPath();
+    const keySource = codexUserHookKeySources(hooksPath)[0];
+    const expected = collectCodexHookTrustEntries(hooksPath, keySource);
+    const stored = readCodexHookTrustFromConfig();
+    const storedByKey = new Map(stored.trusted_keys.map((row) => [row.key, row.trusted_hash]));
+    const rows = expected.entries.map((entry) => ({
+      key: entry.key,
+      trusted_in_config: storedByKey.get(entry.key) === entry.trusted_hash,
+      expected_hash: entry.trusted_hash,
+      stored_hash: storedByKey.get(entry.key) || null
+    }));
+    return {
+      hooks_path: hooksPath,
+      hooks_exists: existsSync(hooksPath),
+      hook_key_source: keySource,
+      config_path: stored.config_path,
+      plugin_hooks_loaded: false,
+      all_trusted: rows.length > 0 && rows.every((row) => row.trusted_in_config),
+      hooks: rows
+    };
+  } catch (err) {
+    return { error: String(err?.message || err) };
+  }
+}
+
 function collectWindowsHookJsonPaths(integrationsRoot) {
   const home = homedir();
   const paths = new Set();
   for (const rel of ["codex/hooks/hooks.json", "cursor/hooks/hooks.json", "claude-code/hooks/hooks.json"]) {
     paths.add(join(integrationsRoot, rel));
   }
+  paths.add(join(home, ".codex/hooks.json"));
   paths.add(join(home, ".cursor/plugins/local/promptly-cursor/hooks/hooks.json"));
   for (const [cacheRoot, rels] of [
     [join(home, ".codex/plugins/cache/promptly-labs/promptly-codex"), ["hooks/hooks.json", "codex/hooks/hooks.json"]],
@@ -3280,7 +3567,20 @@ function syncAgentRuntimeTelemetry() {
   const hooksPatched =
     process.platform === "win32" ? patchAllWindowsHookRunners(integrationsRoot).filter((row) => row.patched) : [];
 
-  return { copied, telemetry_source: telemetrySrc, hooks_patched: hooksPatched.map((row) => row.path) };
+  let codex_hook_trust = null;
+  try {
+    const installed = installCodexUserHooks(integrationsRoot);
+    codex_hook_trust = mergeCodexUserHookTrustIntoConfig(installed.hooks_path);
+  } catch (err) {
+    codex_hook_trust = { ok: false, error: String(err?.message || err) };
+  }
+
+  return {
+    copied,
+    telemetry_source: telemetrySrc,
+    hooks_patched: hooksPatched.map((row) => row.path),
+    codex_hook_trust
+  };
 }
 
 function cmdSyncRuntimes() {
@@ -3395,6 +3695,9 @@ async function main() {
     case "sync-runtimes":
       cmdSyncRuntimes();
       break;
+    case "codex-trust-hooks":
+      cmdCodexTrustHooks(flags);
+      break;
     case "codex-watch":
       await cmdCodexWatch(flags);
       break;
@@ -3433,6 +3736,7 @@ Commands:
   test-send --tool <tool>     Upload one test prompt (verify stats pipeline)
   usage-sync [--login-claude] [--debug] [--no-login] [--tool <tool>]  Sync Claude, Codex, and Cursor subscription usage
   sync-runtimes                               Copy latest telemetry CLI into Codex/Claude plugin caches
+  codex-trust-hooks                           Install ~/.codex/hooks.json and trust Promptly hooks in config.toml
   login-claude [--callback <url>]                  Browser sign-in for Claude subscription usage
   diagnostics [--tool <tool>] Simulate hook payloads and show local timing state
   status [--tool <tool>]      Show connection status for one or all tools
