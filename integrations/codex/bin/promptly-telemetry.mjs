@@ -3318,16 +3318,23 @@ function tomlQuotedKey(value) {
   return String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
+function isPromptlyBrokenHookStateLine(line) {
+  if (!/^\[hooks\.state\./.test(line)) return false;
+  return (
+    line.includes("hooks.json") ||
+    line.includes("promptly-codex@promptly-labs") ||
+    /\\/.test(line)
+  );
+}
+
 function stripCodexHookStateFromConfig(text) {
   const lines = String(text || "").split(/\r?\n/);
   const out = [];
   let skippingHookStateEntry = false;
   for (const line of lines) {
-    if (/^\[hooks\.state\./.test(line)) {
-      if (line.includes("hooks.json") || line.includes("promptly-codex@promptly-labs")) {
-        skippingHookStateEntry = true;
-        continue;
-      }
+    if (isPromptlyBrokenHookStateLine(line)) {
+      skippingHookStateEntry = true;
+      continue;
     }
     if (skippingHookStateEntry) {
       if (/^trusted_hash\s*=/.test(line)) {
@@ -3338,6 +3345,25 @@ function stripCodexHookStateFromConfig(text) {
     out.push(line);
   }
   return out.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd();
+}
+
+function repairCodexConfigTomlFile() {
+  const configPath = codexConfigTomlPath();
+  if (!existsSync(configPath)) {
+    return { ok: true, repaired: false, config_path: configPath, reason: "missing" };
+  }
+  const before = readFileSync(configPath, "utf8");
+  const after = stripCodexHookStateFromConfig(before);
+  const repaired = after !== before;
+  if (repaired) {
+    writeFileSync(configPath, `${after}\n`, "utf8");
+  }
+  return { ok: true, repaired, config_path: configPath };
+}
+
+function cmdCodexRepairConfig() {
+  const result = repairCodexConfigTomlFile();
+  console.log(JSON.stringify(result, null, 2));
 }
 
 function collectCodexHookTrustEntries(hooksPath, keySourcePrefix) {
@@ -3426,6 +3452,7 @@ function mergeCodexUserHookTrustIntoConfig(hooksPath) {
 
 function cmdCodexTrustHooks(flags) {
   const integrationsRoot = flags.integrations || join(homedir(), "integrations");
+  repairCodexConfigTomlFile();
   const installed = installCodexUserHooks(integrationsRoot);
   const result = mergeCodexUserHookTrustIntoConfig(installed.hooks_path);
   console.log(JSON.stringify({ ...result, installed, plugin_hooks_note: "Codex loads ~/.codex/hooks.json, not plugin hooks" }, null, 2));
@@ -3695,6 +3722,9 @@ async function main() {
     case "codex-trust-hooks":
       cmdCodexTrustHooks(flags);
       break;
+    case "codex-repair-config":
+      cmdCodexRepairConfig();
+      break;
     case "codex-watch":
       await cmdCodexWatch(flags);
       break;
@@ -3734,6 +3764,7 @@ Commands:
   usage-sync [--login-claude] [--debug] [--no-login] [--tool <tool>]  Sync Claude, Codex, and Cursor subscription usage
   sync-runtimes                               Copy latest telemetry CLI into Codex/Claude plugin caches
   codex-trust-hooks                           Install ~/.codex/hooks.json and trust Promptly hooks in config.toml
+  codex-repair-config                         Remove broken Promptly hook trust entries from ~/.codex/config.toml
   login-claude [--callback <url>]                  Browser sign-in for Claude subscription usage
   diagnostics [--tool <tool>] Simulate hook payloads and show local timing state
   status [--tool <tool>]      Show connection status for one or all tools

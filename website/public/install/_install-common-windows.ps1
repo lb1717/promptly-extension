@@ -201,6 +201,46 @@ function Promptly-SyncClaudePluginCache {
   return $count
 }
 
+function Promptly-RepairCodexConfigToml {
+  param([string]$Integrations = (Join-Path $env:USERPROFILE "integrations"))
+  $config = Join-Path $env:USERPROFILE ".codex\config.toml"
+  if (-not (Test-Path -LiteralPath $config)) { return $false }
+
+  $cli = Join-Path $Integrations "packages\telemetry-cli\bin\promptly-telemetry.mjs"
+  if (Test-Path -LiteralPath $cli) {
+    $node = Promptly-GetNodeExe
+    $out = & $node $cli codex-repair-config 2>&1 | Out-String
+    if ($out -match '"repaired"\s*:\s*true') {
+      Write-Host "  OK Repaired Codex config.toml (removed invalid Promptly hook entries)"
+      return $true
+    }
+    if ($LASTEXITCODE -eq 0) { return $false }
+  }
+
+  $raw = Get-Content -LiteralPath $config -Raw
+  if ($raw -notmatch '\[hooks\.state\..*(hooks\.json|promptly-codex|\\)') { return $false }
+
+  Write-Host "-> Repairing broken Codex config.toml..."
+  $lines = Get-Content -LiteralPath $config
+  $outLines = New-Object System.Collections.Generic.List[string]
+  $skip = $false
+  foreach ($line in $lines) {
+    if ($line -match '^\[hooks\.state\.' -and ($line -match 'hooks\.json' -or $line -match 'promptly-codex' -or $line -match '\\')) {
+      $skip = $true
+      continue
+    }
+    if ($skip) {
+      if ($line -match '^trusted_hash\s*=') { $skip = $false }
+      continue
+    }
+    $outLines.Add($line)
+  }
+  $text = ($outLines -join "`n").TrimEnd() + "`n"
+  [System.IO.File]::WriteAllText($config, $text, [System.Text.UTF8Encoding]::new($false))
+  Write-Host "  OK Repaired Codex config.toml"
+  return $true
+}
+
 function Promptly-TrustCodexHooks {
   param([string]$Integrations = (Join-Path $env:USERPROFILE "integrations"))
   $cli = Join-Path $Integrations "packages\telemetry-cli\bin\promptly-telemetry.mjs"
@@ -546,6 +586,7 @@ function Promptly-ClaudePluginReinstall {
 
 function Promptly-CodexMarketplaceAdd {
   param([string]$IntegrationsPath)
+  $null = Promptly-RepairCodexConfigToml -Integrations $IntegrationsPath
   $codex = Promptly-GetAgentCliPath -Name codex
   if (-not $codex) {
     Write-Host "Codex CLI not found"
@@ -554,6 +595,13 @@ function Promptly-CodexMarketplaceAdd {
   $out = & $codex plugin marketplace add $IntegrationsPath 2>&1 | Out-String
   if ($LASTEXITCODE -eq 0) { return }
   if ($out -match 'already installed|already exists') { return }
+  if ($out -match 'TOML parse error|failed to parse user config|unicode value digits') {
+    Write-Host "  Codex config.toml is invalid - repairing and retrying..."
+    Promptly-RepairCodexConfigToml -Integrations $IntegrationsPath | Out-Null
+    $out = & $codex plugin marketplace add $IntegrationsPath 2>&1 | Out-String
+    if ($LASTEXITCODE -eq 0) { return }
+    if ($out -match 'already installed|already exists') { return }
+  }
   Write-Host "Failed to add marketplace: $out"
   exit 1
 }
@@ -727,6 +775,7 @@ function Promptly-InstallForCodex {
   param([string]$Integrations)
   Write-Host ""
   Write-Host "=== Codex ==="
+  Promptly-RepairCodexConfigToml -Integrations $Integrations | Out-Null
   if (-not (Promptly-EnsureCodexCli)) { return 2 }
   $plugin = Join-Path $Integrations "codex"
   if (-not (Test-Path $plugin)) { Write-Host "Codex plugin files missing"; return 1 }
