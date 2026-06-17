@@ -3303,22 +3303,41 @@ function installCodexUserHooks(integrationsRoot = join(homedir(), "integrations"
   return { hooks_path: hooksPath, command, telemetry_path: telemetryPath, node_exe: nodeExe };
 }
 
-function codexUserHookKeySources(hooksPath) {
-  const sources = new Set();
-  const absolute = resolve(hooksPath);
-  sources.add(absolute);
+function codexUserHookKeySource(hooksPath) {
+  let path = resolve(hooksPath);
   try {
-    sources.add(realpathSync.native(absolute));
+    path = realpathSync.native(path);
   } catch {
     /* keep resolved path */
   }
-  if (process.platform === "win32") {
-    for (const path of [...sources]) {
-      sources.add(path.replace(/\//g, "\\"));
-      sources.add(path.replace(/\\/g, "/"));
+  // TOML double-quoted keys treat backslash as escape (C:\Users breaks on \U).
+  return String(path).replace(/\\/g, "/");
+}
+
+function tomlQuotedKey(value) {
+  return String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function stripCodexHookStateFromConfig(text) {
+  const lines = String(text || "").split(/\r?\n/);
+  const out = [];
+  let skippingHookStateEntry = false;
+  for (const line of lines) {
+    if (/^\[hooks\.state\./.test(line)) {
+      if (line.includes("hooks.json") || line.includes("promptly-codex@promptly-labs")) {
+        skippingHookStateEntry = true;
+        continue;
+      }
     }
+    if (skippingHookStateEntry) {
+      if (/^trusted_hash\s*=/.test(line)) {
+        skippingHookStateEntry = false;
+      }
+      continue;
+    }
+    out.push(line);
   }
-  return [...sources];
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd();
 }
 
 function collectCodexHookTrustEntries(hooksPath, keySourcePrefix) {
@@ -3361,17 +3380,6 @@ function collectCodexHookTrustEntries(hooksPath, keySourcePrefix) {
   return { path: hooksPath, entries };
 }
 
-function stripCodexHookStateFromConfig(text) {
-  return String(text || "")
-    .replace(/\[hooks\.state\."[^"]*hooks\.json:[^"]+"\]\r?\ntrusted_hash = "[^"]+"\r?\n?/g, "")
-    .replace(
-      /\[hooks\.state\."promptly-codex@promptly-labs:hooks\/hooks\.json:[^"]+"\]\r?\ntrusted_hash = "[^"]+"\r?\n?/g,
-      ""
-    )
-    .replace(/\n{3,}/g, "\n\n")
-    .trimEnd();
-}
-
 function ensureCodexFeaturesInConfig(text) {
   let next = String(text || "");
   if (!/\[features\]/m.test(next)) {
@@ -3386,21 +3394,10 @@ function ensureCodexFeaturesInConfig(text) {
 
 function mergeCodexUserHookTrustIntoConfig(hooksPath) {
   const configPath = codexConfigTomlPath();
-  const keySources = codexUserHookKeySources(hooksPath);
-  const primary = keySources[0];
-  const collected = collectCodexHookTrustEntries(hooksPath, primary);
+  const keySource = codexUserHookKeySource(hooksPath);
+  const collected = collectCodexHookTrustEntries(hooksPath, keySource);
   if (!collected.entries.length) {
     return { ok: false, config_path: configPath, hooks_path: hooksPath, error: collected.error || "no_hook_entries" };
-  }
-
-  const allEntries = [];
-  const seenKeys = new Set();
-  for (const keySource of keySources) {
-    for (const entry of collectCodexHookTrustEntries(hooksPath, keySource).entries) {
-      if (seenKeys.has(entry.key)) continue;
-      seenKeys.add(entry.key);
-      allEntries.push(entry);
-    }
   }
 
   mkdirSync(dirname(configPath), { recursive: true });
@@ -3412,8 +3409,8 @@ function mergeCodexUserHookTrustIntoConfig(hooksPath) {
     text = `${text}${text && !text.endsWith("\n") ? "\n" : ""}\n[hooks.state]\n`;
   }
 
-  const blocks = allEntries.map(
-    (entry) => `[hooks.state."${entry.key}"]\ntrusted_hash = "${entry.trusted_hash}"`
+  const blocks = collected.entries.map(
+    (entry) => `[hooks.state."${tomlQuotedKey(entry.key)}"]\ntrusted_hash = "${entry.trusted_hash}"`
   );
   text = `${text.trimEnd()}\n\n${blocks.join("\n\n")}\n`;
   writeFileSync(configPath, text, "utf8");
@@ -3422,8 +3419,8 @@ function mergeCodexUserHookTrustIntoConfig(hooksPath) {
     ok: true,
     config_path: configPath,
     hooks_path: hooksPath,
-    hook_key_source: primary,
-    trusted: allEntries.map((entry) => ({ key: entry.key, trusted_hash: entry.trusted_hash }))
+    hook_key_source: keySource,
+    trusted: collected.entries.map((entry) => ({ key: entry.key, trusted_hash: entry.trusted_hash }))
   };
 }
 
@@ -3453,7 +3450,7 @@ function readCodexHookTrustFromConfig() {
 function safeCodexHookTrustStatus() {
   try {
     const hooksPath = codexUserHooksPath();
-    const keySource = codexUserHookKeySources(hooksPath)[0];
+    const keySource = codexUserHookKeySource(hooksPath);
     const expected = collectCodexHookTrustEntries(hooksPath, keySource);
     const stored = readCodexHookTrustFromConfig();
     const storedByKey = new Map(stored.trusted_keys.map((row) => [row.key, row.trusted_hash]));
