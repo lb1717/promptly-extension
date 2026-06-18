@@ -386,7 +386,13 @@ copyBtn.addEventListener("click", async () => {
   }, 1200);
 });
 
-newBtn.addEventListener("click", startNewSession);
+newBtn.addEventListener("click", () => {
+  if (window.promptlyCompanion?.openNewWindow) {
+    void window.promptlyCompanion.openNewWindow();
+    return;
+  }
+  startNewSession();
+});
 newPromptBtn.addEventListener("click", startNewSession);
 settingsBtn.addEventListener("click", openSettings);
 settingsCancel.addEventListener("click", () => settingsDialog.close());
