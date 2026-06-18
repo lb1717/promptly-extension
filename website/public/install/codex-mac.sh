@@ -18,13 +18,13 @@ fi
 ensure_unzip_mac
 ensure_node_mac
 
-export PATH="$(npm prefix -g)/bin:${PATH}"
+promptly_setup_npm_global_path
 
 echo "→ Checking Codex CLI…"
 if ! command -v codex >/dev/null 2>&1; then
   echo "  Installing @openai/codex…"
   npm install -g @openai/codex
-  export PATH="$(npm prefix -g)/bin:${PATH}"
+  promptly_setup_npm_global_path
 fi
 codex --version
 echo "✓ Codex CLI ready"

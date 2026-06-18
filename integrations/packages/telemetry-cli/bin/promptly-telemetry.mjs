@@ -2244,6 +2244,7 @@ function hookModelToken(input) {
 function isCursorHostPayload(input) {
   const event = hookEventName(input);
   if (event.includes("beforesubmitprompt")) return true;
+  if (input?.conversation_id && extractPromptText(input).length > 0) return true;
   if (input?.conversation_id && !input?.session_id && !input?.transcript_path) return true;
   const model = hookModelToken(input);
   if (/^composer-/.test(model)) return true;
@@ -2417,6 +2418,7 @@ function hookPayloadMatchesTool(input, tool) {
   if (tool === "cursor") {
     if (isCodexHostPayload(input) && !isCursorHostPayload(input)) return false;
     if (isClaudeCodeHostPayload(input) && !isCursorHostPayload(input)) return false;
+    if (isPromptSubmitPayload(input) && !isCursorHostPayload(input)) return false;
     return true;
   }
   return true;

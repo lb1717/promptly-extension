@@ -18,13 +18,13 @@ fi
 ensure_unzip_mac
 ensure_node_mac
 
-export PATH="$(npm prefix -g)/bin:${PATH}"
+promptly_setup_npm_global_path
 
 echo "→ Checking Claude Code CLI…"
 if ! command -v claude >/dev/null 2>&1; then
   echo "  Installing @anthropic-ai/claude-code…"
   npm install -g @anthropic-ai/claude-code
-  export PATH="$(npm prefix -g)/bin:${PATH}"
+  promptly_setup_npm_global_path
 fi
 claude --version
 echo "✓ Claude Code CLI ready"

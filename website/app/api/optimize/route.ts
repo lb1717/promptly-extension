@@ -117,6 +117,7 @@ export async function POST(request: Request) {
     }
 
     const service = normalizePromptlyService(request.headers.get("x-promptly-service"));
+    const recordWebOptimizeTelemetry = !auth.deviceTool;
     const optimizeStartedAt = Date.now();
     const optimized = await optimizePrompt(prompt, userInstruction, optimizeMode, {
       forceConfigRefresh: true,
@@ -144,7 +145,8 @@ export async function POST(request: Request) {
       day: getUtcWeekKey(),
       tokenCost,
       service,
-      responseTimeMs: optimizeElapsedMs
+      responseTimeMs: optimizeElapsedMs,
+      skipServicePromptCount: !recordWebOptimizeTelemetry
     });
 
     if (!usageResult.ok) {
@@ -157,25 +159,27 @@ export async function POST(request: Request) {
       );
     }
 
-    recordOptimizeTelemetryEventSafe({
-      user: auth.user,
-      service,
-      optimizeMode,
-      utcDay: getUtcDay(),
-      billedPromptlyTokens: tokenCost,
-      optimizeLatencyMs: optimizeElapsedMs,
-      billingBasis,
-      telemetry: telemetrySnapshot,
-      serverComposerCharTotal: Math.min(
-        CREDIT_MAX_PROMPT_CHARS,
-        prompt.length + userInstruction.length + (optimizeMode === "refine" ? promptFeedback.length : 0)
-      ),
-      serverComposerWordTotal: countComposerWordsRough(
-        prompt,
-        optimizeMode === "refine" ? promptFeedback : userInstruction
-      ),
-      serverOptimizedWordTotal: countComposerWordsRough(optimized_prompt)
-    });
+    if (recordWebOptimizeTelemetry) {
+      recordOptimizeTelemetryEventSafe({
+        user: auth.user,
+        service,
+        optimizeMode,
+        utcDay: getUtcDay(),
+        billedPromptlyTokens: tokenCost,
+        optimizeLatencyMs: optimizeElapsedMs,
+        billingBasis,
+        telemetry: telemetrySnapshot,
+        serverComposerCharTotal: Math.min(
+          CREDIT_MAX_PROMPT_CHARS,
+          prompt.length + userInstruction.length + (optimizeMode === "refine" ? promptFeedback.length : 0)
+        ),
+        serverComposerWordTotal: countComposerWordsRough(
+          prompt,
+          optimizeMode === "refine" ? promptFeedback : userInstruction
+        ),
+        serverOptimizedWordTotal: countComposerWordsRough(optimized_prompt)
+      });
+    }
 
     return NextResponse.json(
       {

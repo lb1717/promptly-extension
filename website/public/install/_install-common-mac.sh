@@ -210,8 +210,29 @@ promptly_cursor_plugin_reinstall() {
   cp -R "${integrations}/cursor" "${dest}"
 }
 
+promptly_setup_npm_global_path() {
+  local global_prefix user_prefix profile="${HOME}/.zprofile"
+  global_prefix="$(npm prefix -g 2>/dev/null || echo /usr/local)"
+  if [[ -w "${global_prefix}" ]] && [[ -w "${global_prefix}/lib" || ! -e "${global_prefix}/lib" ]]; then
+    export PATH="${global_prefix}/bin:${PATH}"
+    return 0
+  fi
+  user_prefix="${HOME}/.npm-global"
+  mkdir -p "${user_prefix}/bin"
+  export NPM_CONFIG_PREFIX="${user_prefix}"
+  export PATH="${user_prefix}/bin:${PATH}"
+  if ! grep -qF "${user_prefix}/bin" "${profile}" 2>/dev/null; then
+    {
+      echo ""
+      echo "# Promptly install — user-level npm global packages"
+      echo "export PATH=\"${user_prefix}/bin:\$PATH\""
+    } >>"${profile}"
+  fi
+  echo "  Using user-level npm prefix (${user_prefix}) — global /usr/local is not writable"
+}
+
 promptly_ensure_claude_cli() {
-  export PATH="$(npm prefix -g)/bin:${PATH}"
+  promptly_setup_npm_global_path
   if command -v claude >/dev/null 2>&1; then
     claude --version
     return 0
@@ -221,7 +242,7 @@ promptly_ensure_claude_cli() {
     echo "⚠ Could not install Claude Code CLI — skip Claude Code or install it manually"
     return 1
   fi
-  export PATH="$(npm prefix -g)/bin:${PATH}"
+  promptly_setup_npm_global_path
   if ! command -v claude >/dev/null 2>&1; then
     echo "⚠ Claude Code CLI still not on PATH after install"
     return 1
@@ -231,7 +252,7 @@ promptly_ensure_claude_cli() {
 }
 
 promptly_ensure_codex_cli() {
-  export PATH="$(npm prefix -g)/bin:${PATH}"
+  promptly_setup_npm_global_path
   if command -v codex >/dev/null 2>&1; then
     codex --version
     return 0
@@ -241,7 +262,7 @@ promptly_ensure_codex_cli() {
     echo "⚠ Could not install Codex CLI — skip Codex or install it manually"
     return 1
   fi
-  export PATH="$(npm prefix -g)/bin:${PATH}"
+  promptly_setup_npm_global_path
   if ! command -v codex >/dev/null 2>&1; then
     echo "⚠ Codex CLI still not on PATH after install"
     return 1

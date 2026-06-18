@@ -7295,6 +7295,8 @@ export async function consumeDailyUsage(params: {
   tokenCost: number;
   service: PromptlyService;
   responseTimeMs?: number;
+  /** IDE agents (/promptly in Cursor, Claude Code, Codex) — skip web service breakdown. */
+  skipServicePromptCount?: boolean;
 }): Promise<{ ok: true; usage: DailyUsage } | { ok: false; usage: DailyUsage }> {
   const db = getFirebaseAdminDb();
   const usageRef = db.collection(DAILY_USAGE_COLLECTION).doc(`${params.user.uid}_${params.day}`);
@@ -7349,10 +7351,10 @@ export async function consumeDailyUsage(params: {
       auto: currentAuto,
       manual: currentManual,
       generated: currentGenerated + (params.optimizeMode === "generate" ? 1 : 0),
-      chatgpt: currentChatgpt + (params.service === "chatgpt" ? 1 : 0),
-      claude: currentClaude + (params.service === "claude" ? 1 : 0),
-      gemini: currentGemini + (params.service === "gemini" ? 1 : 0),
-      unknown: currentUnknown + (params.service === "unknown" ? 1 : 0),
+      chatgpt: currentChatgpt + (!params.skipServicePromptCount && params.service === "chatgpt" ? 1 : 0),
+      claude: currentClaude + (!params.skipServicePromptCount && params.service === "claude" ? 1 : 0),
+      gemini: currentGemini + (!params.skipServicePromptCount && params.service === "gemini" ? 1 : 0),
+      unknown: currentUnknown + (!params.skipServicePromptCount && params.service === "unknown" ? 1 : 0),
       responseTimeTotalMs: currentResponseTimeTotalMs + (countsTowardResponseAverage ? responseTimeMs : 0),
       responseTimeCount: currentResponseTimeCount + (countsTowardResponseAverage ? 1 : 0)
     };
