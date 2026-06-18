@@ -1,5 +1,6 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { getFirebaseAdminDb } from "@/lib/server/firebaseAdmin";
+import { buildRefineUserSlot } from "@/lib/server/promptlyBackend";
 import {
   extractFrameworkInstructionsFromTemplate,
   fillPromptTemplateWithUserSlot
@@ -274,13 +275,13 @@ Plain text only. Use blank lines between sections where helpful.
 ${tok}`,
     refine_template: `Companion refine mode — edit an existing prompt document in place.
 
-WHAT YOU RECEIVE in the user content slot (two parts separated by a line containing only ⬥⬥⬥):
+WHAT YOU RECEIVE in the user content slot (two labeled blocks — input only, never repeat these markers in output):
 
-PART 1 — PROMPT
-The full text of an existing AI prompt.
+<<<REFINE_INPUT_PROMPT>>> … <<<END_REFINE_INPUT_PROMPT>>>
+The full existing PROMPT document.
 
-PART 2 — PROMPT-FEEDBACK
-The user's instructions for how to change that PROMPT text.
+<<<REFINE_INPUT_FEEDBACK>>> … <<<END_REFINE_INPUT_FEEDBACK>>>
+The user's edit instructions (PROMPT-FEEDBACK).
 
 YOUR ONLY JOB
 1. Apply PROMPT-FEEDBACK to the PROMPT: edit that text throughout so the feedback is reflected inline.
@@ -289,12 +290,13 @@ YOUR ONLY JOB
 
 YOU ARE NOT
 - Answering or executing the task inside the PROMPT.
-- Appending a separate note block — change the PROMPT body directly.
+- Appending PROMPT-FEEDBACK as a trailing note — change the PROMPT body directly.
+- Echoing ⬥⬥⬥, <<<REFINE_INPUT_*>>>, or raw feedback in your output.
 
 HOW TO EDIT
-- Replace bracket placeholders with concrete values from PROMPT-FEEDBACK.
-- Do NOT append lines like "Your teacher is Mr. John" — weave facts into existing sentences.
-- Do not invent facts the user did not provide.
+- Find the bullets/sentences PROMPT-FEEDBACK targets and rewrite them.
+- Example: feedback "deliverable should be a full runnable game, not a scaffold" → change Deliverables to require a complete runnable game/app.
+- Do NOT paste feedback after the prompt.
 
 OUTPUT FORMAT (exact markers only):
 
@@ -570,7 +572,7 @@ export function pickCompanionSuggestions(
 }
 
 export function buildCompanionRefineUserSlot(prompt: string, promptFeedback: string): string {
-  return `${String(prompt || "").trim()}\n\n⬥⬥⬥\n\n${String(promptFeedback || "").trim()}`;
+  return buildRefineUserSlot(prompt, promptFeedback);
 }
 
 export function fillCompanionTemplate(template: string, userSlot: string): string {

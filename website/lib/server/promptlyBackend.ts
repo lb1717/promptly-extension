@@ -5592,24 +5592,96 @@ function stripComposeMetaForbiddenSections(s: string): string {
   return t.replace(/\n{3,}/g, "\n\n").trim();
 }
 
-/** Unlikely to appear in user prompts; separates prompt from feedback in refine user slot. */
+/** Internal input markers — must never appear in model output. */
+const REFINE_INPUT_PROMPT_OPEN = "<<<REFINE_INPUT_PROMPT>>>";
+const REFINE_INPUT_PROMPT_CLOSE = "<<<END_REFINE_INPUT_PROMPT>>>";
+const REFINE_INPUT_FEEDBACK_OPEN = "<<<REFINE_INPUT_FEEDBACK>>>";
+const REFINE_INPUT_FEEDBACK_CLOSE = "<<<END_REFINE_INPUT_FEEDBACK>>>";
+/** Legacy delimiter — strip if echoed in output. */
 const REFINE_FEEDBACK_DELIMITER = "\n\n⬥⬥⬥\n\n";
 const REFINE_PROMPT_OPEN = "<<<PROMPTLY_REFINED_PROMPT>>>";
 const REFINE_PROMPT_CLOSE = "<<<END_PROMPTLY_REFINED_PROMPT>>>";
 const REFINE_SUMMARY_OPEN = "<<<PROMPTLY_REFINE_SUMMARY>>>";
 const REFINE_SUMMARY_CLOSE = "<<<END_PROMPTLY_REFINE_SUMMARY>>>";
 
-function buildRefineUserSlot(prompt: string, promptFeedback: string): string {
-  return `${String(prompt || "").trim()}${REFINE_FEEDBACK_DELIMITER}${String(promptFeedback || "").trim()}`;
+export function buildRefineUserSlot(prompt: string, promptFeedback: string): string {
+  return `${REFINE_INPUT_PROMPT_OPEN}
+${String(prompt || "").trim()}
+${REFINE_INPUT_PROMPT_CLOSE}
+${REFINE_INPUT_FEEDBACK_OPEN}
+${String(promptFeedback || "").trim()}
+${REFINE_INPUT_FEEDBACK_CLOSE}`;
 }
 
-function looksLikeRefineEcho(output: string, sourcePrompt: string): boolean {
+function collapseRefineWhitespace(text: string): string {
+  return String(text || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function sanitizeRefinedPromptOutput(prompt: string, sourcePrompt: string, feedback: string): string {
+  let t = String(prompt || "")
+    .replace(/\r\n/g, "\n")
+    .trim();
+  if (!t) {
+    return "";
+  }
+
+  const leakPatterns = [
+    /\n⬥⬥⬥[\s\S]*$/i,
+    /\n<<<REFINE_INPUT_FEEDBACK>>>[\s\S]*$/i,
+    /\n<<<END_REFINE_INPUT_PROMPT>>>[\s\S]*$/i,
+    /\n<<<REFINE_INPUT_PROMPT>>>[\s\S]*$/i,
+    /\n---BEGIN FEEDBACK---[\s\S]*$/i
+  ];
+  for (const pattern of leakPatterns) {
+    t = t.replace(pattern, "").trim();
+  }
+
+  const delimIdx = t.indexOf("⬥⬥⬥");
+  if (delimIdx > 0) {
+    t = t.slice(0, delimIdx).trim();
+  }
+
+  const fb = String(feedback || "").trim();
+  if (fb) {
+    if (t.endsWith(fb)) {
+      t = t.slice(0, -fb.length).trim();
+    }
+    const tailIdx = t.lastIndexOf(`\n\n${fb}`);
+    if (tailIdx > 80) {
+      t = t.slice(0, tailIdx).trim();
+    }
+  }
+
+  t = t.replace(/\n*⬥⬥⬥\s*$/g, "").trim();
+  t = postFormatPlainTextForApi(t);
+  return t.slice(0, 100_000);
+}
+
+function looksLikeRefineEcho(output: string, sourcePrompt: string, feedback = ""): boolean {
   const o = String(output || "").trim();
   if (!o) {
     return true;
   }
-  if (/CURRENT PROMPT:|USER FEEDBACK:|⬥⬥⬥|Personalization for the user:|Rewrite the entire current prompt/i.test(o)) {
+  if (
+    /CURRENT PROMPT:|USER FEEDBACK:|⬥⬥⬥|<<<REFINE_INPUT_|Personalization for the user:|Rewrite the entire current prompt/i.test(
+      o
+    )
+  ) {
     return true;
+  }
+  const fb = String(feedback || "").trim();
+  if (fb.length >= 10) {
+    const normalizedOut = collapseRefineWhitespace(o);
+    const normalizedFb = collapseRefineWhitespace(fb);
+    if (normalizedOut.endsWith(normalizedFb)) {
+      return true;
+    }
+    if (normalizedOut.includes(normalizedFb) && normalizedOut.includes("⬥⬥⬥")) {
+      return true;
+    }
   }
   const head = String(sourcePrompt || "")
     .trim()
@@ -5620,7 +5692,36 @@ function looksLikeRefineEcho(output: string, sourcePrompt: string): boolean {
   return false;
 }
 
-function parseRefineDelimitedOutput(rawText: string): { prompt: string; summary: string } {
+function looksLikeUnintegratedRefine(prompt: string, sourcePrompt: string, feedback: string): boolean {
+  const p = collapseRefineWhitespace(prompt);
+  const s = collapseRefineWhitespace(sourcePrompt);
+  const fb = collapseRefineWhitespace(feedback);
+  if (!p) {
+    return true;
+  }
+  if (/⬥⬥⬥|<<<refine_input_/i.test(prompt)) {
+    return true;
+  }
+  if (fb && p.includes(fb)) {
+    return true;
+  }
+  if (fb && p === s) {
+    return true;
+  }
+  if (s.length > 120 && p.startsWith(s.slice(0, Math.min(400, s.length)))) {
+    const growth = Math.abs(p.length - s.length) / Math.max(1, s.length);
+    if (growth < 0.12 && fb) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function parseRefineDelimitedOutput(
+  rawText: string,
+  sourcePrompt = "",
+  feedback = ""
+): { prompt: string; summary: string } {
   const t = String(rawText || "");
   let prompt = "";
   let summary = "";
@@ -5637,8 +5738,80 @@ function parseRefineDelimitedOutput(rawText: string): { prompt: string; summary:
   if (!prompt) {
     prompt = normalizeRefinePlainOutput(t);
   }
+  prompt = sanitizeRefinedPromptOutput(prompt, sourcePrompt, feedback);
   summary = summary.replace(/^["']|["']$/g, "").trim();
   return { prompt, summary };
+}
+
+const REFINE_RETRY_INSTRUCTION = `Wrong output. You must EDIT the existing PROMPT document in place.
+
+FORBIDDEN:
+- Copying input markers (<<<REFINE_INPUT_*>>>, ⬥⬥⬥) into your answer
+- Appending PROMPT-FEEDBACK as a trailing paragraph or note
+- Returning the PROMPT unchanged with feedback pasted at the end
+
+REQUIRED:
+- Find the bullets/sentences PROMPT-FEEDBACK targets and rewrite them
+- Example: feedback "deliverable should be a full runnable game, not a scaffold" → change the Deliverables bullet to require a complete runnable game/app
+
+Output only:
+
+${REFINE_PROMPT_OPEN}
+(edited PROMPT with feedback woven throughout)
+${REFINE_PROMPT_CLOSE}
+${REFINE_SUMMARY_OPEN}
+(one sentence: what you changed)
+${REFINE_SUMMARY_CLOSE}`;
+
+async function runRefineWithRetries(params: {
+  messages: Array<{ role: string; content: string }>;
+  requestMode: "rewrite" | "create";
+  requestOptions: {
+    model: string;
+    timeoutMs: number;
+    maxCompletionTokens: number;
+    createContinuationMaxRounds: number;
+  };
+  sourcePrompt: string;
+  feedback: string;
+  maxRetries?: number;
+  initialResult?: { rawText: string; usage: OptimizerResult["usage"] };
+}): Promise<{ rawText: string; usage: OptimizerResult["usage"] }> {
+  const maxRetries = Math.max(0, Math.min(3, params.maxRetries ?? 2));
+  let result =
+    params.initialResult ??
+    (await callOpenAi({
+      messages: params.messages,
+      requestMode: params.requestMode,
+      model: params.requestOptions.model,
+      timeoutMs: params.requestOptions.timeoutMs,
+      maxCompletionTokens: params.requestOptions.maxCompletionTokens,
+      createContinuationMaxRounds: params.requestOptions.createContinuationMaxRounds
+    }));
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const parsed = parseRefineDelimitedOutput(result.rawText, params.sourcePrompt, params.feedback);
+    const bad =
+      looksLikeRefineEcho(result.rawText, params.sourcePrompt, params.feedback) ||
+      looksLikeUnintegratedRefine(parsed.prompt, params.sourcePrompt, params.feedback);
+    if (!bad) {
+      break;
+    }
+    result = await callOpenAi({
+      messages: [
+        ...params.messages,
+        { role: "assistant", content: result.rawText },
+        { role: "user", content: REFINE_RETRY_INSTRUCTION }
+      ],
+      requestMode: "create",
+      model: params.requestOptions.model,
+      timeoutMs: params.requestOptions.timeoutMs,
+      maxCompletionTokens: params.requestOptions.maxCompletionTokens,
+      createContinuationMaxRounds: params.requestOptions.createContinuationMaxRounds
+    });
+  }
+
+  return result;
 }
 
 function normalizeRefinePlainOutput(rawText: string): string {
@@ -5892,13 +6065,13 @@ ${tok}
 Infer only reasonable defaults from the description. Target ~220–600 words for rich tasks; shorter for trivial asks; hard max ~900 words. Do not chat.`,
     refine_template: `Refine mode — edit an existing prompt document in place.
 
-WHAT YOU RECEIVE in the user content slot (two parts separated by a line containing only ⬥⬥⬥):
+WHAT YOU RECEIVE in the user content slot (two labeled blocks — input only, never repeat these markers in output):
 
-PART 1 — PROMPT
-The full text of an existing AI prompt. This is plain document text the user already has. It tells some other AI what to do later.
+<<<REFINE_INPUT_PROMPT>>> … <<<END_REFINE_INPUT_PROMPT>>>
+The full existing PROMPT document.
 
-PART 2 — PROMPT-FEEDBACK
-The user's instructions for how to change that PROMPT text (add, remove, rephrase, shorten, fill in names, etc.).
+<<<REFINE_INPUT_FEEDBACK>>> … <<<END_REFINE_INPUT_FEEDBACK>>>
+The user's edit instructions (PROMPT-FEEDBACK).
 
 YOUR ONLY JOB
 1. Apply PROMPT-FEEDBACK to the PROMPT: edit that text throughout so the feedback is reflected inline.
@@ -5914,15 +6087,16 @@ YOU ARE NOT
 HOW TO EDIT
 - If PROMPT-FEEDBACK removes something, delete it from the PROMPT everywhere it appears.
 - If it adds facts or names, weave them into the relevant bullets and sentences; replace bracket placeholders with concrete values.
-- Do NOT append a new paragraph like "Your teacher is Mr. John" or "Additional note:" — change the existing PROMPT sentences in place.
+- Do NOT append a new paragraph like "Your teacher is Mr. John" or paste PROMPT-FEEDBACK after the prompt — change the existing PROMPT sentences in place.
+- Do NOT echo ⬥⬥⬥, <<<REFINE_INPUT_*>>>, or the raw feedback text in your output.
 - Keep similar formatting (paragraph breaks, bullets, labels) unless PROMPT-FEEDBACK says otherwise.
 - Do not invent facts the user did not provide.
 
 EXAMPLE
 PROMPT: "Write an email to [Teacher Name] about homework."
 PROMPT-FEEDBACK: "My teacher is Mr. John"
-WRONG: keeping "[Teacher Name]" and adding "Your teacher is Mr. John." at the end.
-RIGHT: "Write an email to Mr. John about homework."
+WRONG: keeping "project scaffold" in Deliverables and appending "have the deliverable be a full game" at the end.
+RIGHT: change Deliverables to require a complete, runnable game application.
 
 OUTPUT FORMAT (exact markers only):
 
@@ -5933,7 +6107,7 @@ ${REFINE_SUMMARY_OPEN}
 (one sentence, max 25 words, stating what you changed in the PROMPT)
 ${REFINE_SUMMARY_CLOSE}
 
-Nothing before ${REFINE_PROMPT_OPEN}. Nothing after ${REFINE_SUMMARY_CLOSE}. No markdown fences. Do not echo ⬥⬥⬥ or input labels.
+Nothing before ${REFINE_PROMPT_OPEN}. Nothing after ${REFINE_SUMMARY_CLOSE}. No markdown fences. Do not echo input markers or raw PROMPT-FEEDBACK.
 
 ${tok}`
   };
@@ -6679,32 +6853,26 @@ export async function optimizePrompt(
     });
   }
 
-  if (isRefine && looksLikeRefineEcho(firstResult.rawText, trimmedPrompt)) {
-    const retryResult = await callOpenAi({
-      messages: [
-        ...messages,
-        { role: "assistant", content: firstResult.rawText },
-        {
-          role: "user",
-          content: `Wrong format. Remember: you are editing the PROMPT document text — not answering it, not writing meta-instructions about improving prompts. Output only:
-
-${REFINE_PROMPT_OPEN}
-(edited PROMPT text with PROMPT-FEEDBACK applied inline)
-${REFINE_PROMPT_CLOSE}
-${REFINE_SUMMARY_OPEN}
-(one sentence: what you changed)
-${REFINE_SUMMARY_CLOSE}`
-        }
-      ],
-      requestMode: providerRequestMode,
-      ...requestOptions
+  if (isRefine) {
+    firstResult = await runRefineWithRetries({
+      messages,
+      requestMode: "create",
+      requestOptions: {
+        model,
+        timeoutMs: requestOptions.timeoutMs,
+        maxCompletionTokens: requestOptions.maxCompletionTokens,
+        createContinuationMaxRounds: requestOptions.createContinuationMaxRounds
+      },
+      sourcePrompt: trimmedPrompt,
+      feedback: trimmedFeedback,
+      maxRetries: 2,
+      initialResult: firstResult
     });
-    firstResult = retryResult;
   }
 
   let normalized = isRefine
     ? (() => {
-        const parsed = parseRefineDelimitedOutput(firstResult.rawText);
+        const parsed = parseRefineDelimitedOutput(firstResult.rawText, trimmedPrompt, trimmedFeedback);
         return {
           optimized_prompt: parsed.prompt,
           refine_summary: parsed.summary
@@ -6733,6 +6901,11 @@ ${REFINE_SUMMARY_CLOSE}`
       : undefined;
   if (isRefine && !optimized_prompt.trim()) {
     throw new Error("Refine returned an empty prompt");
+  }
+  if (isRefine && looksLikeUnintegratedRefine(optimized_prompt, trimmedPrompt, trimmedFeedback)) {
+    throw new Error(
+      "Refine did not integrate your feedback into the prompt. Try shorter, specific feedback (e.g. change the Deliverables bullet to require a runnable game)."
+    );
   }
   if (!isGenerate && !isRefine && !optimized_prompt.trim() && userSlot.trim()) {
     optimized_prompt = postFormatPlainTextForApi(userSlot);
@@ -6817,32 +6990,26 @@ export async function optimizeCompanionPrompt(
     });
   }
 
-  if (isRefine && looksLikeRefineEcho(firstResult.rawText, trimmedPrompt)) {
-    firstResult = await callOpenAi({
-      messages: [
-        ...messages,
-        { role: "assistant", content: firstResult.rawText },
-        {
-          role: "user",
-          content: `Wrong format. Remember: you are editing the PROMPT document text — not answering it, not writing meta-instructions about improving prompts. Output only:
-
-${REFINE_PROMPT_OPEN}
-(edited PROMPT text with PROMPT-FEEDBACK applied inline)
-${REFINE_PROMPT_CLOSE}
-${REFINE_SUMMARY_OPEN}
-(one sentence: what you changed)
-${REFINE_SUMMARY_CLOSE}`
-        }
-      ],
+  if (isRefine) {
+    firstResult = await runRefineWithRetries({
+      messages,
       requestMode: "create",
-      ...requestOptions,
-      model
+      requestOptions: {
+        model,
+        timeoutMs: requestOptions.timeoutMs,
+        maxCompletionTokens: requestOptions.maxCompletionTokens,
+        createContinuationMaxRounds: requestOptions.createContinuationMaxRounds
+      },
+      sourcePrompt: trimmedPrompt,
+      feedback: trimmedFeedback,
+      maxRetries: 2,
+      initialResult: firstResult
     });
   }
 
   let normalized = isRefine
     ? (() => {
-        const parsed = parseRefineDelimitedOutput(firstResult.rawText);
+        const parsed = parseRefineDelimitedOutput(firstResult.rawText, trimmedPrompt, trimmedFeedback);
         return {
           optimized_prompt: parsed.prompt,
           refine_summary: parsed.summary
@@ -6858,6 +7025,14 @@ ${REFINE_SUMMARY_CLOSE}`
 
   if (isRefine && !optimized_prompt.trim()) {
     throw new Error("Refine returned an empty prompt");
+  }
+  if (
+    isRefine &&
+    looksLikeUnintegratedRefine(optimized_prompt, trimmedPrompt, trimmedFeedback)
+  ) {
+    throw new Error(
+      "Refine did not integrate your feedback into the prompt. Try shorter, specific feedback (e.g. change the Deliverables bullet to require a runnable game)."
+    );
   }
   if (!isRefine && !optimized_prompt.trim() && userSlot.trim()) {
     optimized_prompt = postFormatPlainTextForApi(userSlot);
