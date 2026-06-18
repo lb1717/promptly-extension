@@ -66,12 +66,14 @@ let suggestionOptions = [];
 const draftDictation = createDictationController({
   textarea: draftInput,
   micButton: draftMicBtn,
+  getConfig: () => config,
   onError: showError
 });
 
 const followUpDictation = createDictationController({
   textarea: followUpInput,
   micButton: followUpMicBtn,
+  getConfig: () => config,
   onError: showError
 });
 

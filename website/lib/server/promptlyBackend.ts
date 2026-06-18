@@ -7291,6 +7291,51 @@ export async function optimizeCompanionPrompt(
   };
 }
 
+const COMPANION_TRANSCRIBE_MAX_BYTES = 12 * 1024 * 1024;
+
+export async function transcribeCompanionAudio(
+  audioBytes: Uint8Array,
+  mimeType: string
+): Promise<{ text: string; model: string }> {
+  if (!audioBytes?.length) {
+    throw new Error("audio is required");
+  }
+  if (audioBytes.length > COMPANION_TRANSCRIBE_MAX_BYTES) {
+    throw new Error("audio exceeds maximum upload size");
+  }
+
+  const apiKey = getOpenAiApiKey();
+  const type = String(mimeType || "audio/webm").toLowerCase();
+  const filename = type.includes("mp4") ? "speech.m4a" : type.includes("ogg") ? "speech.ogg" : "speech.webm";
+  const model = "whisper-1";
+
+  const form = new FormData();
+  form.append("file", new Blob([audioBytes], { type: type || "audio/webm" }), filename);
+  form.append("model", model);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort("timeout"), 30000);
+  try {
+    const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: form,
+      signal: controller.signal
+    });
+    const body = (await response.json().catch(() => ({}))) as { text?: string; error?: { message?: string } };
+    if (!response.ok) {
+      throw new Error(String(body.error?.message || `Transcription failed (${response.status})`));
+    }
+    const text = String(body.text || "").trim();
+    if (!text) {
+      throw new Error("No speech detected in audio");
+    }
+    return { text, model };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function consumeDailyUsage(params: {
   user: PromptlyUser;
   optimizeMode: OptimizeEngineMode;

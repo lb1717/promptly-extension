@@ -1,8 +1,5 @@
 const { clipboard } = require("electron");
 const { execFile } = require("child_process");
-const { writeFileSync, unlinkSync } = require("fs");
-const { tmpdir } = require("os");
-const { join } = require("path");
 const { promisify } = require("util");
 
 const execFileAsync = promisify(execFile);
@@ -21,76 +18,17 @@ function escapeAppleScriptString(value) {
 function buildPasteScript(processName) {
   const safeProcess = escapeAppleScriptString(processName);
 
-  return `tell application "System Events"
-  if not (exists process "${safeProcess}") then
-    return "missing_process"
-  end if
+  // Fast path: activate host, select all, paste. Clipboard is already set in JS.
+  return `tell application "${safeProcess}" to activate
+tell application "System Events"
+  if not (exists process "${safeProcess}") then return "missing_process"
   tell process "${safeProcess}"
     set frontmost to true
-    delay 0.25
-    if (count of windows) is 0 then
-      return "no_window"
-    end if
-    set clipText to (the clipboard as text)
-    set targetField to my findBestInput(front window)
-    if targetField is not missing value then
-      set focused of targetField to true
-      delay 0.08
-      try
-        set value of targetField to clipText
-        return "set_value"
-      end try
-    end if
-    set frontmost to true
-    delay 0.12
     keystroke "a" using command down
-    delay 0.05
     keystroke "v" using command down
-    return "clipboard_paste"
   end tell
 end tell
-
-on findBestInput(parentElement)
-  set bestElement to missing value
-  set bestY to -1
-  tell application "System Events"
-    try
-      repeat with e in UI elements of parentElement
-        try
-          set elementRole to role of e
-          if elementRole is "AXTextArea" then
-            set elementPos to position of e
-            set elementY to item 2 of elementPos
-            if elementY > bestY then
-              set bestY to elementY
-              set bestElement to e
-            end if
-          else if elementRole is "AXTextField" then
-            set elementPos to position of e
-            set elementY to item 2 of elementPos
-            if elementY > bestY then
-              set bestY to elementY
-              set bestElement to e
-            end if
-          end if
-        end try
-        try
-          set deeperElement to my findBestInput(e)
-          if deeperElement is not missing value then
-            set deeperPos to position of deeperElement
-            set deeperY to item 2 of deeperPos
-            if deeperY > bestY then
-              set bestY to deeperY
-              set bestElement to deeperElement
-            end if
-          end if
-        end try
-      end repeat
-    end try
-  end tell
-  return bestElement
-end findBestInput
-`;
+return "clipboard_paste"`;
 }
 
 function mapPasteError(raw) {
@@ -129,11 +67,9 @@ async function pasteToHostProcess(processName, text) {
   }
 
   clipboard.writeText(content);
-  const scriptPath = join(tmpdir(), `promptly-paste-${process.pid}-${Date.now()}.applescript`);
 
   try {
-    writeFileSync(scriptPath, buildPasteScript(host), "utf8");
-    const { stdout } = await execFileAsync("/usr/bin/osascript", [scriptPath]);
+    const { stdout } = await execFileAsync("/usr/bin/osascript", ["-e", buildPasteScript(host)]);
     const method = String(stdout || "").trim();
     if (!method || method.startsWith("error:") || method === "missing_process" || method === "no_window") {
       return { ok: false, error: mapPasteError(method), method: null };
@@ -142,12 +78,6 @@ async function pasteToHostProcess(processName, text) {
   } catch (err) {
     const stderr = String(err.stderr || err.message || err);
     return { ok: false, error: mapPasteError(stderr), method: null };
-  } finally {
-    try {
-      unlinkSync(scriptPath);
-    } catch {
-      /* ignore */
-    }
   }
 }
 

@@ -110,3 +110,58 @@ export async function refineWithFeedback(config, currentPrompt, promptFeedback) 
     credits
   };
 }
+
+const TRANSCRIBE_TIMEOUT_MS = 45000;
+const MAX_AUDIO_BYTES = 12 * 1024 * 1024;
+
+export async function transcribeAudio(config, audioBlob) {
+  const base = String(config.apiUrl || "").replace(/\/$/, "");
+  const auth = String(config.token || "").trim();
+  if (!base) throw new Error("API URL is required.");
+  if (!auth) throw new Error("Auth token is required.");
+  if (!audioBlob || audioBlob.size < 1) throw new Error("No audio to transcribe.");
+  if (audioBlob.size > MAX_AUDIO_BYTES) {
+    throw new Error("Recording is too long. Stop dictation sooner and try again.");
+  }
+
+  const formData = new FormData();
+  const filename = audioBlob.type?.includes("mp4")
+    ? "speech.m4a"
+    : audioBlob.type?.includes("ogg")
+      ? "speech.ogg"
+      : "speech.webm";
+  formData.append("audio", audioBlob, filename);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TRANSCRIBE_TIMEOUT_MS);
+  let response;
+  try {
+    response = await fetch(`${base}/api/companion/transcribe`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${auth}`,
+        "x-promptly-client": config.client || config.clientHeader || "promptly-cursor",
+        "x-promptly-live-config": "1"
+      },
+      body: formData,
+      signal: controller.signal
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error("Transcription timed out — try a shorter recording.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(String(body.error || `Transcription failed (${response.status})`));
+  }
+  const text = String(body.text || "").trim();
+  if (!text) {
+    throw new Error("No speech detected in the recording.");
+  }
+  return text;
+}

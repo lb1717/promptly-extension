@@ -255,23 +255,8 @@ function startAnchorWatch(win, anchorAppBundleId, anchorProcessName) {
 }
 
 function handleCompanionBlur(win) {
-  void (async () => {
-    await new Promise((resolve) => setTimeout(resolve, 120));
-    if (!win || win.isDestroyed() || win.isFocused()) {
-      return;
-    }
-    const frontProcess = await getFrontmostProcessName();
-    const frontBundle = await getFrontmostAppBundleId();
-    if (isCompanionAppBundle(frontBundle)) {
-      return;
-    }
-    const state = getLayerState(win);
-    if (processNameMatchesAnchor(frontProcess, state)) {
-      return;
-    }
-    setCompanionOnTop(win, false);
-    startAnchorWatch(win, frontBundle, frontProcess);
-  })();
+  // Keep the companion window visible and floating — do not demote behind other apps.
+  void win;
 }
 
 function getChromeState(win) {
@@ -544,7 +529,11 @@ ipcMain.handle("promptly:close-window", (event) => {
   if (!win || win.isDestroyed()) {
     return { ok: false };
   }
-  win.close();
+  if (process.platform === "darwin") {
+    win.hide();
+  } else {
+    win.close();
+  }
   return { ok: true };
 });
 ipcMain.handle("promptly:set-collapsed", (event, collapsed) => {
@@ -610,8 +599,13 @@ app.whenReady().then(() => {
   setupApplicationMenu();
 
   const iconPath = resolveAppIconPath();
-  if (process.platform === "darwin" && iconPath && app.dock) {
-    app.dock.setIcon(iconPath);
+  if (process.platform === "darwin") {
+    if (app.dock) {
+      app.dock.show();
+      if (iconPath) {
+        app.dock.setIcon(iconPath);
+      }
+    }
   }
 
   restartHostWatcher();
@@ -623,7 +617,14 @@ app.whenReady().then(() => {
   }
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0 && !hasEnabledAutoOpenTarget()) {
+    const windows = BrowserWindow.getAllWindows().filter((win) => !win.isDestroyed());
+    const hidden = windows.filter((win) => !win.isVisible());
+    if (hidden.length > 0) {
+      hidden[0].show();
+      hidden[0].focus();
+      return;
+    }
+    if (windows.length === 0 && !hasEnabledAutoOpenTarget()) {
       createCompanionWindow();
     }
   });

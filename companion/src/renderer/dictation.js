@@ -1,9 +1,7 @@
+import { transcribeAudio } from "./api.js";
+
 /** @type {ReturnType<typeof createDictationController> | null} */
 let activeController = null;
-
-function getSpeechRecognitionCtor() {
-  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
-}
 
 async function ensureMicrophoneAccess(onError) {
   const appInfo = window.promptlyCompanion?.getAppInfo
@@ -28,7 +26,8 @@ async function ensureMicrophoneAccess(onError) {
   }
 
   if (!navigator.mediaDevices?.getUserMedia) {
-    return true;
+    onError?.("Microphone capture is not available in this environment.");
+    return false;
   }
 
   try {
@@ -38,57 +37,72 @@ async function ensureMicrophoneAccess(onError) {
     }
     return true;
   } catch {
-    if (window.promptlyCompanion?.requestMicrophoneAccess) {
-      const access = await window.promptlyCompanion.requestMicrophoneAccess();
-      if (access?.openedSettings) {
-        onError?.(
-          "Microphone access is required. Allow Promptly Companion in the System Settings window that just opened, then tap the mic again."
-        );
-      } else {
-        onError?.("Microphone access is required for dictation.");
-      }
-    } else {
-      onError?.("Microphone access is required for dictation.");
-    }
+    onError?.("Microphone access is required for dictation.");
     return false;
   }
+}
+
+function pickRecorderMimeType() {
+  if (typeof MediaRecorder === "undefined" || !MediaRecorder.isTypeSupported) {
+    return "";
+  }
+  for (const type of ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg"]) {
+    if (MediaRecorder.isTypeSupported(type)) {
+      return type;
+    }
+  }
+  return "";
 }
 
 /**
  * @param {{
  *   textarea: HTMLTextAreaElement | null;
  *   micButton: HTMLButtonElement | null;
+ *   getConfig: () => { apiUrl: string; token: string; client: string };
  *   onError?: (message: string) => void;
  *   onStateChange?: (active: boolean) => void;
  * }} options
  */
 export function createDictationController(options) {
-  const { textarea, micButton, onError, onStateChange } = options;
-  /** @type {SpeechRecognition | null} */
-  let recognition = null;
+  const { textarea, micButton, getConfig, onError, onStateChange } = options;
+  /** @type {MediaRecorder | null} */
+  let recorder = null;
+  /** @type {MediaStream | null} */
+  let stream = null;
+  /** @type {Blob[]} */
+  let chunks = [];
   let active = false;
+  let transcribing = false;
   let baseText = "";
-  let committed = "";
 
   function isSupported() {
-    return Boolean(getSpeechRecognitionCtor() && textarea && micButton);
+    return Boolean(
+      textarea &&
+      micButton &&
+      navigator.mediaDevices?.getUserMedia &&
+      typeof MediaRecorder !== "undefined" &&
+      getConfig
+    );
   }
 
   function setRecordingUi(recording) {
     if (!micButton) return;
     micButton.classList.toggle("dictation-active", recording);
     micButton.setAttribute("aria-pressed", recording ? "true" : "false");
-    micButton.title = recording ? "Stop dictation" : "Start dictation";
-    onStateChange?.(recording);
+    if (transcribing) {
+      micButton.title = "Transcribing…";
+    } else {
+      micButton.title = recording ? "Stop and transcribe" : "Start dictation";
+    }
+    onStateChange?.(recording || transcribing);
   }
 
-  function renderTranscript(finalText, interimText) {
+  function appendTranscript(text) {
     if (!textarea) return;
+    const spoken = String(text || "").trim();
+    if (!spoken) return;
     const prefix = baseText.trimEnd();
-    const spoken = [committed, finalText, interimText].filter(Boolean).join(" ").trim();
-    if (!spoken) {
-      textarea.value = prefix;
-    } else if (!prefix) {
+    if (!prefix) {
       textarea.value = spoken;
     } else {
       const joiner = prefix.endsWith("\n") ? "" : " ";
@@ -97,40 +111,83 @@ export function createDictationController(options) {
     textarea.dispatchEvent(new Event("input", { bubbles: true }));
   }
 
-  function stop() {
-    if (!active) return;
-    active = false;
-    if (recognition) {
-      try {
-        recognition.onend = null;
-        recognition.stop();
-      } catch {
-        /* ignore */
+  function cleanupStream() {
+    if (stream) {
+      for (const track of stream.getTracks()) {
+        track.stop();
       }
-      recognition = null;
+      stream = null;
     }
-    if (activeController === api) {
-      activeController = null;
-    }
-    setRecordingUi(false);
+    recorder = null;
+    chunks = [];
   }
 
-  function handleError(errorCode) {
-    const code = String(errorCode || "").trim();
-    if (!code || code === "aborted" || code === "no-speech") {
+  function stop() {
+    if (recorder && recorder.state !== "inactive") {
+      try {
+        recorder.stop();
+      } catch {
+        cleanupStream();
+      }
+    } else {
+      cleanupStream();
+    }
+    active = false;
+    if (!transcribing && activeController === api) {
+      activeController = null;
+    }
+    if (!transcribing) {
+      setRecordingUi(false);
+    }
+  }
+
+  async function transcribeRecording() {
+    if (!chunks.length) {
+      onError?.("No audio captured. Try speaking a little longer.");
       return;
     }
-    if (code === "not-allowed" || code === "service-not-allowed") {
-      void ensureMicrophoneAccess(onError);
+
+    const mimeType = recorder?.mimeType || chunks[0]?.type || "audio/webm";
+    const blob = new Blob(chunks, { type: mimeType });
+    cleanupStream();
+
+    if (blob.size < 800) {
+      onError?.("No speech detected. Try again closer to the mic.");
       return;
     }
-    onError?.(`Dictation error: ${code}`);
+
+    const config = getConfig();
+    if (!config?.token) {
+      onError?.("Connect in Settings before using dictation.");
+      return;
+    }
+
+    transcribing = true;
+    setRecordingUi(false);
+    if (micButton) {
+      micButton.disabled = true;
+    }
+
+    try {
+      const text = await transcribeAudio(config, blob);
+      appendTranscript(text);
+    } catch (error) {
+      onError?.(String(error?.message || error || "Transcription failed."));
+    } finally {
+      transcribing = false;
+      if (micButton) {
+        micButton.disabled = false;
+      }
+      if (activeController === api) {
+        activeController = null;
+      }
+      setRecordingUi(false);
+    }
   }
 
   async function start() {
-    const Ctor = getSpeechRecognitionCtor();
-    if (!Ctor || !textarea || !micButton) {
-      onError?.("Dictation is not supported in this environment.");
+    if (!textarea || !micButton) {
+      onError?.("Dictation is not available.");
       return;
     }
     if (textarea.readOnly || textarea.disabled) {
@@ -146,60 +203,44 @@ export function createDictationController(options) {
       activeController.stop();
     }
 
-    baseText = textarea.value;
-    committed = "";
-    recognition = new Ctor();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = navigator.language || "en-US";
-
-    recognition.onresult = (event) => {
-      let interim = "";
-      let finalChunk = "";
-      for (let i = event.resultIndex; i < event.results.length; i += 1) {
-        const result = event.results[i];
-        const transcript = String(result[0]?.transcript || "");
-        if (result.isFinal) {
-          finalChunk += transcript;
-        } else {
-          interim += transcript;
-        }
-      }
-      if (finalChunk.trim()) {
-        committed = `${committed} ${finalChunk}`.trim();
-      }
-      renderTranscript(committed, interim.trim());
-    };
-
-    recognition.onerror = (event) => {
-      handleError(event.error);
-      stop();
-    };
-
-    recognition.onend = () => {
-      if (!active) {
-        setRecordingUi(false);
-        return;
-      }
-      try {
-        recognition?.start();
-      } catch {
-        stop();
-      }
-    };
+    const mimeType = pickRecorderMimeType();
+    if (!mimeType) {
+      onError?.("Audio recording is not supported in this environment.");
+      return;
+    }
 
     try {
-      recognition.start();
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      chunks = [];
+      baseText = textarea.value;
+      recorder = new MediaRecorder(stream, { mimeType });
+      recorder.ondataavailable = (event) => {
+        if (event.data?.size > 0) {
+          chunks.push(event.data);
+        }
+      };
+      recorder.onstop = () => {
+        void transcribeRecording();
+      };
+      recorder.onerror = () => {
+        onError?.("Recording failed. Try the mic again.");
+        stop();
+      };
+      recorder.start();
       active = true;
       activeController = api;
       setRecordingUi(true);
     } catch (error) {
-      onError?.(String(error?.message || error || "Could not start dictation."));
+      cleanupStream();
+      onError?.(String(error?.message || error || "Could not start recording."));
       stop();
     }
   }
 
   async function toggle() {
+    if (transcribing) {
+      return;
+    }
     if (active) {
       stop();
       return;
@@ -212,7 +253,7 @@ export function createDictationController(options) {
     toggle,
     stop,
     get isActive() {
-      return active;
+      return active || transcribing;
     }
   };
 
