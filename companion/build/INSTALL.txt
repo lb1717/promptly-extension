@@ -1,0 +1,16 @@
+Promptly Companion — first-time Mac install
+==========================================
+
+1. Drag "Promptly Companion" to Applications.
+
+2. Open Terminal and run:
+   xattr -cr "/Applications/Promptly Companion.app"
+
+3. Do NOT double-click the app. In Finder → Applications:
+   RIGHT-CLICK "Promptly Companion" → Open → Open
+
+   (Fixes: "Apple cannot check it for malicious software")
+
+4. Or: System Settings → Privacy & Security → Open Anyway
+
+After the first launch, open normally from Applications or Spotlight.

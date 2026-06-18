@@ -19,16 +19,24 @@ mac:
     - dmg
     - zip
   icon: build/icon.png
-  # Unsigned distribution — ad-hoc signed in scripts/after-pack.cjs after pack.
-  # Users: if macOS says "damaged", run: xattr -cr "/Applications/Promptly Companion.app"
+  # Unsigned — electron-builder skips formal signing when identity is null.
   identity: null
   gatekeeperAssess: false
   hardenedRuntime: false
-  entitlements: build/entitlements.mac.plist
-  entitlementsInherit: build/entitlements.mac.plist
 afterPack: ./scripts/after-pack.cjs
 dmg:
   title: Promptly Companion
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+    - x: 280
+      y: 120
+      type: file
+      path: build/INSTALL.txt
 win:
   target:
     - nsis
