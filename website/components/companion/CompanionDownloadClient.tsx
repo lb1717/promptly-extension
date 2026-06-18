@@ -29,7 +29,6 @@ export function CompanionDownloadClient({ download }: Props) {
         {hasMac && download.macUrl ? (
           <a
             href={download.macUrl}
-            download
             className="inline-flex items-center justify-center rounded-xl border border-ink bg-blue-800 px-6 py-3 text-sm font-semibold text-white hover:bg-blue-900"
           >
             {download.macLabel || "Download for Mac"}
@@ -38,13 +37,37 @@ export function CompanionDownloadClient({ download }: Props) {
         {hasWin && download.winUrl ? (
           <a
             href={download.winUrl}
-            download
             className="inline-flex items-center justify-center rounded-xl border border-line bg-page px-6 py-3 text-sm font-semibold text-ink hover:bg-cream-dark"
           >
             {download.winLabel || "Download for Windows"}
           </a>
         ) : null}
       </div>
+
+      {hasMac || hasWin ? (
+        <section className="mt-6 rounded-2xl border border-line bg-page p-5 text-sm text-muted">
+          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-ink">Verify you have the latest build</h2>
+          <p className="mb-2">
+            Open <strong className="text-ink">⚙ Settings</strong> in the app. The top line must say{" "}
+            <strong className="text-ink">Version {download.version || "…"} · installed</strong>.
+          </p>
+          <p className="mb-2">You should also see:</p>
+          <ul className="list-disc space-y-1 pl-5">
+            <li>
+              <strong className="text-ink">▁</strong> collapse, <strong className="text-ink">×</strong> close, and mic
+              buttons in the top bar / prompt boxes
+            </li>
+            <li>
+              <strong className="text-ink">Paste</strong> next to Copy after you click Improve
+            </li>
+          </ul>
+          <p className="mt-3 text-xs">
+            If those are missing, delete <code className="text-ink">/Applications/Promptly Companion.app</code>, remove
+            old <code className="text-ink">Promptly-Companion-0.1.0-mac.dmg</code> files from Downloads, then install
+            again from the button above.
+          </p>
+        </section>
+      ) : null}
 
       {!hasMac && !hasWin ? (
         <p className="mt-6 text-center text-sm text-muted">

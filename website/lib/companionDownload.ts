@@ -103,18 +103,18 @@ export async function resolveCompanionAssetUrls(): Promise<CompanionAssetUrls> {
   return FALLBACK_ASSETS;
 }
 
-/** Page-facing download links — same-origin paths that redirect to the real installer. */
+/** Page-facing download links — direct GitHub release URLs with versioned filenames. */
 export async function getCompanionDownloadInfo(): Promise<CompanionDownloadInfo> {
   const assets = await resolveCompanionAssetUrls();
-  const hasMac = Boolean(assets.macDmg || assets.macZip);
-  const hasWin = Boolean(assets.winExe);
+  const macUrl = assets.macDmg || assets.macZip || null;
+  const winUrl = assets.winExe || null;
 
   return {
     version: assets.version,
-    macUrl: hasMac ? "/downloads/companion/mac" : null,
-    winUrl: hasWin ? "/downloads/companion/windows" : null,
-    macLabel: "Download for Mac (.dmg)",
-    winLabel: "Download for Windows (.exe)"
+    macUrl,
+    winUrl,
+    macLabel: macUrl ? `Download for Mac (v${assets.version} .dmg)` : null,
+    winLabel: winUrl ? `Download for Windows (v${assets.version} .exe)` : null
   };
 }
 
