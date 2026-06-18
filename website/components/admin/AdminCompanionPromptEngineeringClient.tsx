@@ -28,6 +28,7 @@ type EngineeringResponse = {
     categories: Array<{ id: string; label: string; count: number }>;
   };
   default_improve_template?: string;
+  default_refine_template?: string;
   error?: string;
 };
 
@@ -51,6 +52,7 @@ export function AdminCompanionPromptEngineeringClient() {
   const [suggestionMaxPerCategory, setSuggestionMaxPerCategory] = useState(2);
   const [catalogStats, setCatalogStats] = useState<EngineeringResponse["catalog_stats"]>();
   const [defaultImproveTemplate, setDefaultImproveTemplate] = useState("");
+  const [defaultRefineTemplate, setDefaultRefineTemplate] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -101,6 +103,7 @@ export function AdminCompanionPromptEngineeringClient() {
       );
       setCatalogStats(data.catalog_stats);
       setDefaultImproveTemplate(String(data.default_improve_template || "").trim());
+      setDefaultRefineTemplate(String(data.default_refine_template || "").trim());
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));
     } finally {
@@ -200,9 +203,9 @@ export function AdminCompanionPromptEngineeringClient() {
           <section className="rounded-2xl border border-violet-500/20 bg-[#221830]/60 p-5">
             <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-violet-300/90">Improve mode</h2>
             <p className="mb-3 text-xs text-violet-200/70">
-              First pass when the user clicks Improve in Companion (<span className="font-mono">improve</span>).
-              One stateless API call: your template + the user&apos;s draft are merged into a single message—no chat
-              history. The model must return only the rewritten prompt, not these instructions.
+              User input is an <span className="font-medium text-violet-100">EXTERNAL AI REQUEST</span> — text for
+              another AI to execute. Output must be an improved EXTERNAL AI REQUEST only (not instructions about
+              improving, not an answer to the request).
             </p>
             <p className="mb-3 text-xs text-violet-200/70">
               Template must include{" "}
@@ -283,9 +286,26 @@ export function AdminCompanionPromptEngineeringClient() {
           <section className="rounded-2xl border border-violet-500/20 bg-[#221830]/60 p-5">
             <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-violet-300/90">Refine mode</h2>
             <p className="mb-3 text-xs text-violet-200/70">
-              Apply feedback pass (<span className="font-mono">refine</span>). User slot is prompt + labeled blocks +
-              feedback. Output must be an edited prompt plus a one-sentence summary (delimiter markers).
+              Apply feedback pass (<span className="font-mono">refine</span>). Input slot uses{" "}
+              <span className="font-mono text-violet-100">EXTERNAL_AI_REQUEST</span> +{" "}
+              <span className="font-mono text-violet-100">MODIFICATION_FEEDBACK</span> blocks. Output: revised
+              EXTERNAL AI REQUEST + one-sentence summary (delimiter markers).
             </p>
+            <div className="mb-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (defaultRefineTemplate) {
+                    setRefineT(defaultRefineTemplate);
+                    setMessage("Loaded default refine template — click Save to apply in production.");
+                  }
+                }}
+                disabled={!defaultRefineTemplate}
+                className="rounded-lg border border-violet-500/40 px-3 py-1.5 text-xs text-violet-100 hover:bg-violet-500/10 disabled:opacity-50"
+              >
+                Reset refine template to default
+              </button>
+            </div>
             <p className="mb-3 text-xs text-violet-200/70">
               A validation check round confirms feedback was integrated (not pasted at the end) and the summary is one
               sentence. Failed checks trigger an automatic correction retry.

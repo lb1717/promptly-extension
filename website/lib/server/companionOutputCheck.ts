@@ -30,34 +30,42 @@ export function assessCompanionImproveOutput(output: string, sourcePrompt: strin
   if (!out) {
     return { ok: false, reason: "Output is empty." };
   }
-  if (/^please provide a prompt to rewrite\.?$/i.test(out) && src.length >= 8) {
-    return { ok: false, reason: "Model refused to rewrite a valid draft." };
+  if (/^please provide an external ai request to improve\.?$/i.test(out) && src.length >= 8) {
+    return { ok: false, reason: "Model refused to improve a valid EXTERNAL AI REQUEST." };
   }
-  if (/⬥⬥⬥|<<<refine_input_|<<<promptly_refined/i.test(out)) {
-    return { ok: false, reason: "Output contains internal refine markers." };
+  if (/⬥⬥⬥|<<<external_ai_request|<<<refine_input_|<<<promptly_refined/i.test(out)) {
+    return { ok: false, reason: "Output contains internal input markers." };
   }
 
   const low = out.toLowerCase();
   const echoPhrases = [
     "companion improve mode",
+    "companion — improve",
+    "external ai request =",
+    "terminology:",
     "your job",
+    "you must not",
     "hard rules (violating",
-    "output only the improved prompt text",
     "do not echo these instructions",
-    "rewrite the user's draft prompt"
+    "rewrite the user's draft prompt",
+    "improve an external ai request",
+    "output only the improved"
   ];
   const echoHits = echoPhrases.filter((p) => low.includes(p)).length;
   if (echoHits >= 1) {
-    return { ok: false, reason: "Output echoes improve-template instructions instead of rewriting the draft." };
+    return {
+      ok: false,
+      reason: "Output echoes improve instructions instead of returning a revised EXTERNAL AI REQUEST."
+    };
   }
 
   if (src && normalizeCompare(out) === normalizeCompare(src)) {
-    return { ok: false, reason: "Output is identical to the source draft — not rewritten." };
+    return { ok: false, reason: "Output is identical to the source — EXTERNAL AI REQUEST was not improved." };
   }
   if (src && out.startsWith(src)) {
     const tail = out.slice(src.length).trim().toLowerCase();
-    if (tail.includes("your job") || /^-\s/.test(tail)) {
-      return { ok: false, reason: "Output pastes the draft unchanged and appends template bullets." };
+    if (tail.includes("your job") || tail.includes("you must not") || /^-\s/.test(tail)) {
+      return { ok: false, reason: "Output pastes the original unchanged and appends instruction bullets." };
     }
   }
 
@@ -76,19 +84,19 @@ export function assessCompanionRefineOutput(
   const fb = String(feedback || "").trim();
 
   if (!p) {
-    return { ok: false, reason: "Refine output is missing the edited prompt." };
+    return { ok: false, reason: "Refine output is missing the revised EXTERNAL AI REQUEST." };
   }
   if (!s) {
     return { ok: false, reason: "Refine output is missing a one-sentence summary." };
   }
-  if (/⬥⬥⬥|<<<refine_input_/i.test(p)) {
-    return { ok: false, reason: "Edited prompt still contains input markers." };
+  if (/⬥⬥⬥|<<<external_ai_request|<<<modification_feedback|<<<refine_input_/i.test(p)) {
+    return { ok: false, reason: "Revised request still contains input markers." };
   }
   if (fb && normalizeCompare(p) === normalizeCompare(src)) {
-    return { ok: false, reason: "Prompt was not modified — feedback was not integrated." };
+    return { ok: false, reason: "EXTERNAL AI REQUEST was not modified — feedback was not integrated." };
   }
   if (fb && p.includes(fb)) {
-    return { ok: false, reason: "Feedback was pasted into the prompt instead of integrated." };
+    return { ok: false, reason: "MODIFICATION FEEDBACK was pasted into the request instead of integrated." };
   }
   if (wordCount(s) > REFINE_SUMMARY_MAX_WORDS) {
     return { ok: false, reason: "Summary must be one sentence (too long)." };
@@ -97,12 +105,12 @@ export function assessCompanionRefineOutput(
     return { ok: false, reason: "Summary must be exactly one sentence." };
   }
   if (normalizeCompare(s) === normalizeCompare(p)) {
-    return { ok: false, reason: "Summary duplicates the full prompt instead of describing the change." };
+    return { ok: false, reason: "Summary duplicates the full request instead of describing the change." };
   }
   if (src.length > 120 && p.startsWith(src.slice(0, Math.min(400, src.length)))) {
     const growth = Math.abs(p.length - src.length) / Math.max(1, src.length);
     if (growth < 0.08 && fb) {
-      return { ok: false, reason: "Prompt barely changed — feedback likely not applied." };
+      return { ok: false, reason: "EXTERNAL AI REQUEST barely changed — feedback likely not applied." };
     }
   }
 
@@ -128,21 +136,21 @@ function parseCheckJson(raw: string): CompanionOutputVerdict | null {
 }
 
 function buildImproveCheckMessage(sourcePrompt: string, candidate: string): string {
-  return `You validate Companion improve-mode output.
+  return `You validate Companion IMPROVE output.
 
-SOURCE DRAFT (user input):
+SOURCE EXTERNAL AI REQUEST (user input):
 ${String(sourcePrompt || "").trim().slice(0, 4000)}
 
 CANDIDATE OUTPUT:
 ${String(candidate || "").trim().slice(0, 6000)}
 
-Valid ONLY if CANDIDATE is a single cohesive improved prompt the user can paste into another AI — rewritten from the draft, preserving requirements.
+Valid ONLY if CANDIDATE is a single improved EXTERNAL AI REQUEST the user can paste into another AI — rewritten from the source, preserving requirements.
 
 Invalid if CANDIDATE:
-- Echoes rewrite instructions (YOUR JOB, Companion improve mode, hard rules)
-- Is the draft unchanged or draft + appended rubric bullets
-- Answers or executes the task instead of improving the prompt
-- Contains meta commentary about rewriting
+- Echoes improve instructions (YOUR JOB, EXTERNAL AI REQUEST =, Terminology, YOU MUST NOT)
+- Is the source unchanged or source + appended rubric bullets
+- Answers or executes the request instead of improving it
+- Contains meta commentary about improving prompts
 
 Return ONLY JSON:
 {"valid":true}
@@ -156,22 +164,22 @@ function buildRefineCheckMessage(
   candidatePrompt: string,
   candidateSummary: string
 ): string {
-  return `You validate Companion refine-mode output.
+  return `You validate Companion MODIFY output.
 
-ORIGINAL PROMPT:
+ORIGINAL EXTERNAL AI REQUEST:
 ${String(sourcePrompt || "").trim().slice(0, 3500)}
 
-USER FEEDBACK:
+MODIFICATION FEEDBACK:
 ${String(feedback || "").trim().slice(0, 1500)}
 
-CANDIDATE EDITED PROMPT:
+CANDIDATE REVISED REQUEST:
 ${String(candidatePrompt || "").trim().slice(0, 5000)}
 
 CANDIDATE SUMMARY:
 ${String(candidateSummary || "").trim().slice(0, 500)}
 
 Valid ONLY if:
-1. CANDIDATE EDITED PROMPT is the original prompt modified in place with feedback woven in (not feedback pasted at the end)
+1. CANDIDATE REVISED REQUEST is the original modified in place with feedback woven in (not pasted at the end)
 2. CANDIDATE SUMMARY is exactly one sentence describing what changed
 
 Return ONLY JSON:
@@ -234,22 +242,22 @@ export async function runCompanionOutputCheckRound(params: {
 }
 
 export function buildCompanionImproveCheckRetry(reason: string): string {
-  const issue = String(reason || "").trim() || "Output was not a valid improved prompt.";
+  const issue = String(reason || "").trim() || "Output was not a valid improved EXTERNAL AI REQUEST.";
   return `Validation failed: ${issue}
 
-Reply with ONLY the improved prompt — one cohesive rewrite. No template rubric, no YOUR JOB section, no unchanged draft with bullets appended.`;
+Reply with ONLY the improved EXTERNAL AI REQUEST — one cohesive rewrite the user pastes into another AI. No YOUR JOB section, no Terminology block, no instructions about improving — just the revised request text.`;
 }
 
 export const COMPANION_REFINE_CHECK_RETRY = `Validation failed.
 
 Output must contain:
-1. The PROMPT edited in place (feedback woven into the body — not pasted at the end)
+1. The EXTERNAL AI REQUEST edited in place (MODIFICATION FEEDBACK woven into the body — not pasted at the end)
 2. Exactly one sentence summary of what you changed
 
 Use the required delimiter markers only:
 
 <<<PROMPTLY_REFINED_PROMPT>>>
-(edited prompt)
+(revised EXTERNAL AI REQUEST)
 <<<END_PROMPTLY_REFINED_PROMPT>>>
 <<<PROMPTLY_REFINE_SUMMARY>>>
 (one sentence)

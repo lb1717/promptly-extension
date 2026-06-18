@@ -3,6 +3,7 @@ import {
   adminGetCompanionPromptEngineering,
   adminSaveCompanionPromptEngineering,
   getDefaultCompanionImproveTemplate,
+  getDefaultCompanionRefineTemplate,
   type CompanionPromptEngineeringConfig,
   type CompanionSuggestionGroup
 } from "@/lib/server/companionPromptEngineering";
@@ -20,7 +21,8 @@ export async function GET() {
     {
       ...data,
       catalog_stats: getCompanionSuggestionCatalogStats(),
-      default_improve_template: getDefaultCompanionImproveTemplate()
+      default_improve_template: getDefaultCompanionImproveTemplate(),
+      default_refine_template: getDefaultCompanionRefineTemplate()
     },
     { status: 200 }
   );

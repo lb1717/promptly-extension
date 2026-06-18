@@ -5635,6 +5635,9 @@ function sanitizeRefinedPromptOutput(prompt: string, sourcePrompt: string, feedb
 
   const leakPatterns = [
     /\n⬥⬥⬥[\s\S]*$/i,
+    /\n<<<MODIFICATION_FEEDBACK>>>[\s\S]*$/i,
+    /\n<<<END_EXTERNAL_AI_REQUEST>>>[\s\S]*$/i,
+    /\n<<<EXTERNAL_AI_REQUEST>>>[\s\S]*$/i,
     /\n<<<REFINE_INPUT_FEEDBACK>>>[\s\S]*$/i,
     /\n<<<END_REFINE_INPUT_PROMPT>>>[\s\S]*$/i,
     /\n<<<REFINE_INPUT_PROMPT>>>[\s\S]*$/i,
@@ -5671,7 +5674,7 @@ function looksLikeRefineEcho(output: string, sourcePrompt: string, feedback = ""
     return true;
   }
   if (
-    /CURRENT PROMPT:|USER FEEDBACK:|⬥⬥⬥|<<<REFINE_INPUT_|Personalization for the user:|Rewrite the entire current prompt/i.test(
+    /CURRENT PROMPT:|USER FEEDBACK:|⬥⬥⬥|<<<EXTERNAL_AI_REQUEST|<<<MODIFICATION_FEEDBACK|<<<REFINE_INPUT_|Personalization for the user:|Rewrite the entire current prompt/i.test(
       o
     )
   ) {
@@ -5704,7 +5707,7 @@ function looksLikeUnintegratedRefine(prompt: string, sourcePrompt: string, feedb
   if (!p) {
     return true;
   }
-  if (/⬥⬥⬥|<<<refine_input_/i.test(prompt)) {
+  if (/⬥⬥⬥|<<<refine_input_|<<<external_ai_request|<<<modification_feedback/i.test(prompt)) {
     return true;
   }
   if (fb && p.includes(fb)) {
@@ -5881,7 +5884,7 @@ function normalizeRefinePlainOutput(rawText: string): string {
 }
 
 const COMPANION_IMPROVE_RETRY_MSG =
-  "Wrong output. You echoed rewrite instructions (e.g. YOUR JOB, Companion improve mode) or pasted the draft unchanged. Reply with ONLY the improved prompt—one cohesive rewrite the user can paste into another AI. No rubric bullets, no meta commentary, no repeating these rules.";
+  "Wrong output. You returned instructions about improving (YOUR JOB, Terminology, EXTERNAL AI REQUEST =) or pasted the source unchanged. Reply with ONLY the improved EXTERNAL AI REQUEST text — the revised request the user pastes into another AI. No rubric, no meta commentary.";
 
 function looksLikeCompanionImproveEcho(text: string, sourcePrompt: string): boolean {
   const t = String(text || "").trim();
@@ -5891,16 +5894,21 @@ function looksLikeCompanionImproveEcho(text: string, sourcePrompt: string): bool
   const low = t.toLowerCase();
   const echoPhrases = [
     "companion improve mode",
+    "companion — improve",
+    "external ai request =",
+    "terminology:",
     "your job",
+    "you must not",
     "the user content slot below",
     "treat it as plain text to improve",
-    "output only the improved prompt text",
+    "output only the improved prompt",
     "preserve every substantive requirement",
     "re-phrase and re-order",
-    "plain text only. use blank lines between sections"
+    "plain text only. use blank lines between sections",
+    "improve an external ai request"
   ];
   const hits = echoPhrases.filter((p) => low.includes(p)).length;
-  if (hits >= 1 && (low.includes("preserve every substantive") || low.includes("no preamble, labels"))) {
+  if (hits >= 1 && (low.includes("you must not") || low.includes("terminology:"))) {
     return true;
   }
   if (hits >= 2) {
@@ -5911,7 +5919,8 @@ function looksLikeCompanionImproveEcho(text: string, sourcePrompt: string): bool
     const tail = t.slice(src.length).trim().toLowerCase();
     if (
       tail.includes("your job") ||
-      tail.includes("preserve every substantive") ||
+      tail.includes("you must not") ||
+      tail.includes("terminology:") ||
       /^-\s/.test(tail)
     ) {
       return true;
@@ -5940,8 +5949,11 @@ function sanitizeCompanionImproveOutput(raw: string, sourcePrompt: string): stri
 
   const rubricStarts = [
     /\n\nYOUR JOB\b/i,
+    /\n\nYOU MUST NOT\b/i,
+    /\n\nTerminology:\b/i,
     /\n\nHard rules\b/i,
     /\n\nCompanion improve mode\b/i,
+    /\n\nCompanion — IMPROVE\b/i,
     /\n\nPlain text only\. Use blank lines/i,
     /\n\nDo not answer the source/i
   ];
