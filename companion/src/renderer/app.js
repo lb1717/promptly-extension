@@ -196,8 +196,9 @@ async function loadSuggestionsForPrompt(text) {
     renderChips();
     return;
   }
+  chipGrid.innerHTML = '<span class="chip-loading">Loading suggestions…</span>';
   try {
-    suggestionOptions = await fetchSuggestions(config, countWords(text));
+    suggestionOptions = await fetchSuggestions(config, text);
   } catch {
     suggestionOptions = [];
   }
@@ -378,10 +379,7 @@ followUpInput.addEventListener("keydown", (ev) => {
 });
 
 draftInput.addEventListener("input", syncDraftStrength);
-promptInput.addEventListener("input", () => {
-  promptAiEnhanced = false;
-  syncPromptStrength();
-});
+promptInput.addEventListener("input", syncPromptStrength);
 
 void bootstrapConfig().then(() => {
   syncDraftStrength();

@@ -20,6 +20,11 @@ import {
   resolveOptimizeEngineMode,
   type OptimizeEngineMode
 } from "./promptOptimizeEngine";
+import {
+  buildCompanionImproveCheckRetry,
+  buildCompanionRefineCheckRetry,
+  runCompanionOutputCheckRound
+} from "./companionOutputCheck";
 import { isInternalTelemetryModelBucket } from "@/lib/internalTelemetryModels";
 
 export { PROMPTLY_USER_CONTENT_TOKEN } from "./promptEngineeringConstants";
@@ -5875,6 +5880,91 @@ function normalizeRefinePlainOutput(rawText: string): string {
   return t.slice(0, 100_000);
 }
 
+const COMPANION_IMPROVE_RETRY_MSG =
+  "Wrong output. You echoed rewrite instructions (e.g. YOUR JOB, Companion improve mode) or pasted the draft unchanged. Reply with ONLY the improved prompt—one cohesive rewrite the user can paste into another AI. No rubric bullets, no meta commentary, no repeating these rules.";
+
+function looksLikeCompanionImproveEcho(text: string, sourcePrompt: string): boolean {
+  const t = String(text || "").trim();
+  if (!t) {
+    return false;
+  }
+  const low = t.toLowerCase();
+  const echoPhrases = [
+    "companion improve mode",
+    "your job",
+    "the user content slot below",
+    "treat it as plain text to improve",
+    "output only the improved prompt text",
+    "preserve every substantive requirement",
+    "re-phrase and re-order",
+    "plain text only. use blank lines between sections"
+  ];
+  const hits = echoPhrases.filter((p) => low.includes(p)).length;
+  if (hits >= 1 && (low.includes("preserve every substantive") || low.includes("no preamble, labels"))) {
+    return true;
+  }
+  if (hits >= 2) {
+    return true;
+  }
+  const src = String(sourcePrompt || "").trim();
+  if (src && t.startsWith(src)) {
+    const tail = t.slice(src.length).trim().toLowerCase();
+    if (
+      tail.includes("your job") ||
+      tail.includes("preserve every substantive") ||
+      /^-\s/.test(tail)
+    ) {
+      return true;
+    }
+  }
+  return looksLikeRewriteInstructionEcho(t);
+}
+
+function sanitizeCompanionImproveOutput(raw: string, sourcePrompt: string): string {
+  let out = String(raw || "").trim();
+  if (!out) {
+    return out;
+  }
+
+  const src = String(sourcePrompt || "").trim();
+  if (src.length >= 20) {
+    out = stripVerbatimSourceAppend(out, src);
+  }
+
+  if (src && out.startsWith(src)) {
+    const tail = out.slice(src.length).trim();
+    if (looksLikeCompanionImproveEcho(tail, "") || /^your job\b/i.test(tail)) {
+      return "";
+    }
+  }
+
+  const rubricStarts = [
+    /\n\nYOUR JOB\b/i,
+    /\n\nHard rules\b/i,
+    /\n\nCompanion improve mode\b/i,
+    /\n\nPlain text only\. Use blank lines/i,
+    /\n\nDo not answer the source/i
+  ];
+  for (const re of rubricStarts) {
+    const match = out.match(re);
+    if (match && match.index !== undefined && match.index > 20) {
+      const candidate = out.slice(0, match.index).trim();
+      if (candidate.length >= 20 && !looksLikeCompanionImproveEcho(candidate, src)) {
+        out = candidate;
+        break;
+      }
+    }
+  }
+
+  if (src && normalizePromptTextForCompare(out) === normalizePromptTextForCompare(src)) {
+    return "";
+  }
+  if (looksLikeCompanionImproveEcho(out, src)) {
+    return "";
+  }
+  return out.trim();
+}
+
 function normalizePlainRewriteOutput(
   rawText: string,
   fallbackPrompt: string,
@@ -6925,6 +7015,13 @@ export async function validateOpenAiModelExistsForCompanionAdmin(model: string):
   return validateOpenAiModelExists(model);
 }
 
+/** Lightweight OpenAI call for companion suggestion picking (separate from improve/refine). */
+export async function executeOpenAiOptimizerCall(
+  options: Parameters<typeof callOpenAi>[0]
+): Promise<Awaited<ReturnType<typeof callOpenAi>>> {
+  return callOpenAi(options);
+}
+
 export async function optimizeCompanionPrompt(
   prompt: string,
   promptFeedback: string,
@@ -7017,11 +7114,143 @@ export async function optimizeCompanionPrompt(
       })()
     : normalizePlainRewriteOutput(firstResult.rawText, trimmedPrompt, { create: false });
 
+  if (!isRefine) {
+    let out = sanitizeCompanionImproveOutput(String(normalized.optimized_prompt || "").trim(), trimmedPrompt);
+    if (!out.trim() || looksLikeCompanionImproveEcho(out, trimmedPrompt)) {
+      try {
+        const retryResult = await callOpenAi({
+          messages: [
+            ...messages,
+            { role: "assistant", content: firstResult.rawText },
+            { role: "user", content: COMPANION_IMPROVE_RETRY_MSG }
+          ],
+          requestMode: "rewrite",
+          model,
+          timeoutMs: Math.max(12_000, requestOptions.timeoutMs),
+          maxCompletionTokens: requestOptions.maxCompletionTokens,
+          createContinuationMaxRounds: 1
+        });
+        firstResult = {
+          rawText: retryResult.rawText,
+          usage: mergeTokenUsage(firstResult.usage, retryResult.usage)
+        };
+        const retryNormalized = normalizePlainRewriteOutput(retryResult.rawText, trimmedPrompt, { create: false });
+        const retryOut = sanitizeCompanionImproveOutput(
+          String(retryNormalized.optimized_prompt || "").trim(),
+          trimmedPrompt
+        );
+        if (retryOut.trim() && !looksLikeCompanionImproveEcho(retryOut, trimmedPrompt)) {
+          out = retryOut;
+        }
+      } catch {
+        /* keep first pass if retry fails */
+      }
+    }
+
+    const improveCheck = await runCompanionOutputCheckRound({
+      mode: "improve",
+      model,
+      timeoutMs: requestOptions.timeoutMs,
+      sourcePrompt: trimmedPrompt,
+      candidatePrompt: out
+    });
+    if (!improveCheck.ok) {
+      try {
+        const checkRetry = await callOpenAi({
+          messages: [
+            ...messages,
+            { role: "assistant", content: firstResult.rawText },
+            { role: "user", content: buildCompanionImproveCheckRetry(improveCheck.reason) }
+          ],
+          requestMode: "rewrite",
+          model,
+          timeoutMs: Math.max(12_000, requestOptions.timeoutMs),
+          maxCompletionTokens: requestOptions.maxCompletionTokens,
+          createContinuationMaxRounds: 1
+        });
+        firstResult = {
+          rawText: checkRetry.rawText,
+          usage: mergeTokenUsage(firstResult.usage, checkRetry.usage)
+        };
+        const checkNormalized = normalizePlainRewriteOutput(checkRetry.rawText, trimmedPrompt, { create: false });
+        const checkOut = sanitizeCompanionImproveOutput(
+          String(checkNormalized.optimized_prompt || "").trim(),
+          trimmedPrompt
+        );
+        const recheck = await runCompanionOutputCheckRound({
+          mode: "improve",
+          model,
+          timeoutMs: requestOptions.timeoutMs,
+          sourcePrompt: trimmedPrompt,
+          candidatePrompt: checkOut
+        });
+        if (checkOut.trim() && recheck.ok) {
+          out = checkOut;
+        }
+      } catch {
+        /* return best effort from prior pass */
+      }
+    }
+
+    if (!out.trim() && trimmedPrompt.trim()) {
+      out = trimmedPrompt.trim();
+    }
+    normalized = { optimized_prompt: out };
+  }
+
   let optimized_prompt = postFormatPlainTextForApi(normalized.optimized_prompt);
-  const refine_summary =
+  let refine_summary =
     isRefine && typeof (normalized as { refine_summary?: string }).refine_summary === "string"
       ? String((normalized as { refine_summary?: string }).refine_summary || "").trim()
       : undefined;
+
+  if (isRefine) {
+    const refineCheck = await runCompanionOutputCheckRound({
+      mode: "refine",
+      model,
+      timeoutMs: requestOptions.timeoutMs,
+      sourcePrompt: trimmedPrompt,
+      feedback: trimmedFeedback,
+      candidatePrompt: optimized_prompt,
+      candidateSummary: refine_summary || ""
+    });
+    if (!refineCheck.ok) {
+      try {
+        const refineRetry = await callOpenAi({
+          messages: [
+            ...messages,
+            { role: "assistant", content: firstResult.rawText },
+            { role: "user", content: buildCompanionRefineCheckRetry(refineCheck.reason) }
+          ],
+          requestMode: "create",
+          model,
+          timeoutMs: requestOptions.timeoutMs,
+          maxCompletionTokens: requestOptions.maxCompletionTokens,
+          createContinuationMaxRounds: requestOptions.createContinuationMaxRounds
+        });
+        firstResult = {
+          rawText: refineRetry.rawText,
+          usage: mergeTokenUsage(firstResult.usage, refineRetry.usage)
+        };
+        const reparsed = parseRefineDelimitedOutput(refineRetry.rawText, trimmedPrompt, trimmedFeedback);
+        const recheck = await runCompanionOutputCheckRound({
+          mode: "refine",
+          model,
+          timeoutMs: requestOptions.timeoutMs,
+          sourcePrompt: trimmedPrompt,
+          feedback: trimmedFeedback,
+          candidatePrompt: reparsed.prompt,
+          candidateSummary: reparsed.summary
+        });
+        if (reparsed.prompt.trim() && recheck.ok) {
+          optimized_prompt = postFormatPlainTextForApi(reparsed.prompt);
+          refine_summary = reparsed.summary.trim() || refine_summary;
+        }
+      } catch {
+        /* keep prior refine output */
+      }
+    }
+  }
 
   if (isRefine && !optimized_prompt.trim()) {
     throw new Error("Refine returned an empty prompt");

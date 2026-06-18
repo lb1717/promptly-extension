@@ -1,0 +1,2158 @@
+[
+  {
+    "id": "brevity-remove-repetition-1",
+    "categoryId": "brevity",
+    "categoryLabel": "Brevity",
+    "label": "Remove Repetition",
+    "snippet": "<<Avoid repeating the same points; consolidate duplicate ideas.>>"
+  },
+  {
+    "id": "brevity-omit-redundant-asks-2",
+    "categoryId": "brevity",
+    "categoryLabel": "Brevity",
+    "label": "Omit Redundant Asks",
+    "snippet": "<<Remove overlapping requirements that ask for the same thing twice.>>"
+  },
+  {
+    "id": "brevity-cut-filler-phrases-3",
+    "categoryId": "brevity",
+    "categoryLabel": "Brevity",
+    "label": "Cut Filler Phrases",
+    "snippet": "<<Strip filler language and keep only substantive instructions.>>"
+  },
+  {
+    "id": "brevity-shorten-bullets-4",
+    "categoryId": "brevity",
+    "categoryLabel": "Brevity",
+    "label": "Shorten Bullets",
+    "snippet": "<<Keep each bullet to one clear idea without extra clauses.>>"
+  },
+  {
+    "id": "brevity-tighten-opening-5",
+    "categoryId": "brevity",
+    "categoryLabel": "Brevity",
+    "label": "Tighten Opening",
+    "snippet": "<<Make the opening line state the task in one sentence.>>"
+  },
+  {
+    "id": "brevity-drop-duplicate-constraints-6",
+    "categoryId": "brevity",
+    "categoryLabel": "Brevity",
+    "label": "Drop Duplicate Constraints",
+    "snippet": "<<Remove constraints that restate the same limit elsewhere.>>"
+  },
+  {
+    "id": "brevity-one-ask-per-bullet-7",
+    "categoryId": "brevity",
+    "categoryLabel": "Brevity",
+    "label": "One Ask Per Bullet",
+    "snippet": "<<Split bullets that combine multiple unrelated asks.>>"
+  },
+  {
+    "id": "brevity-trim-examples-section-8",
+    "categoryId": "brevity",
+    "categoryLabel": "Brevity",
+    "label": "Trim Examples Section",
+    "snippet": "<<Keep at most one short example unless examples are essential.>>"
+  },
+  {
+    "id": "brevity-reduce-preamble-9",
+    "categoryId": "brevity",
+    "categoryLabel": "Brevity",
+    "label": "Reduce Preamble",
+    "snippet": "<<Remove throat-clearing before the actual task.>>"
+  },
+  {
+    "id": "brevity-limit-scope-verbiage-10",
+    "categoryId": "brevity",
+    "categoryLabel": "Brevity",
+    "label": "Limit Scope Verbiage",
+    "snippet": "<<State scope once; do not restate it in multiple sections.>>"
+  },
+  {
+    "id": "brevity-compress-deliverables-11",
+    "categoryId": "brevity",
+    "categoryLabel": "Brevity",
+    "label": "Compress Deliverables",
+    "snippet": "<<List deliverables without repeating format instructions.>>"
+  },
+  {
+    "id": "brevity-avoid-restating-goal-12",
+    "categoryId": "brevity",
+    "categoryLabel": "Brevity",
+    "label": "Avoid Restating Goal",
+    "snippet": "<<Do not repeat the goal after it is already stated clearly.>>"
+  },
+  {
+    "id": "brevity-remove-redundant-adjectives-13",
+    "categoryId": "brevity",
+    "categoryLabel": "Brevity",
+    "label": "Remove Redundant Adjectives",
+    "snippet": "<<Cut stacked adjectives that do not change meaning.>>"
+  },
+  {
+    "id": "brevity-simplify-nested-lists-14",
+    "categoryId": "brevity",
+    "categoryLabel": "Brevity",
+    "label": "Simplify Nested Lists",
+    "snippet": "<<Flatten nested lists where a single level suffices.>>"
+  },
+  {
+    "id": "brevity-cut-meta-commentary-15",
+    "categoryId": "brevity",
+    "categoryLabel": "Brevity",
+    "label": "Cut Meta Commentary",
+    "snippet": "<<Remove instructions about how to write the answer unless needed.>>"
+  },
+  {
+    "id": "brevity-minimize-qualifiers-16",
+    "categoryId": "brevity",
+    "categoryLabel": "Brevity",
+    "label": "Minimize Qualifiers",
+    "snippet": "<<Replace long qualifier chains with direct requirements.>>"
+  },
+  {
+    "id": "brevity-drop-repeated-audience-notes-17",
+    "categoryId": "brevity",
+    "categoryLabel": "Brevity",
+    "label": "Drop Repeated Audience Notes",
+    "snippet": "<<Mention audience once, not in every section.>>"
+  },
+  {
+    "id": "brevity-concise-success-criteria-18",
+    "categoryId": "brevity",
+    "categoryLabel": "Brevity",
+    "label": "Concise Success Criteria",
+    "snippet": "<<State success criteria in one compact block.>>"
+  },
+  {
+    "id": "clarity-define-key-terms-1",
+    "categoryId": "clarity",
+    "categoryLabel": "Clarity",
+    "label": "Define Key Terms",
+    "snippet": "<<Define specialized terms on first use.>>"
+  },
+  {
+    "id": "clarity-disambiguate-pronouns-2",
+    "categoryId": "clarity",
+    "categoryLabel": "Clarity",
+    "label": "Disambiguate Pronouns",
+    "snippet": "<<Replace vague 'it/this/that' with explicit nouns.>>"
+  },
+  {
+    "id": "clarity-name-the-deliverable-3",
+    "categoryId": "clarity",
+    "categoryLabel": "Clarity",
+    "label": "Name the Deliverable",
+    "snippet": "<<State exactly what artifact format is expected.>>"
+  },
+  {
+    "id": "clarity-clarify-success-4",
+    "categoryId": "clarity",
+    "categoryLabel": "Clarity",
+    "label": "Clarify Success",
+    "snippet": "<<Spell out what a successful response looks like.>>"
+  },
+  {
+    "id": "clarity-specify-input-assumptions-5",
+    "categoryId": "clarity",
+    "categoryLabel": "Clarity",
+    "label": "Specify Input Assumptions",
+    "snippet": "<<State what inputs or context are available.>>"
+  },
+  {
+    "id": "clarity-separate-must-vs-nice-6",
+    "categoryId": "clarity",
+    "categoryLabel": "Clarity",
+    "label": "Separate Must vs Nice",
+    "snippet": "<<Label requirements as must-have vs optional.>>"
+  },
+  {
+    "id": "clarity-remove-ambiguous-verbs-7",
+    "categoryId": "clarity",
+    "categoryLabel": "Clarity",
+    "label": "Remove Ambiguous Verbs",
+    "snippet": "<<Replace vague verbs like 'handle' with specific actions.>>"
+  },
+  {
+    "id": "clarity-state-primary-objective-8",
+    "categoryId": "clarity",
+    "categoryLabel": "Clarity",
+    "label": "State Primary Objective",
+    "snippet": "<<Lead with the single primary objective before details.>>"
+  },
+  {
+    "id": "clarity-clarify-time-horizon-9",
+    "categoryId": "clarity",
+    "categoryLabel": "Clarity",
+    "label": "Clarify Time Horizon",
+    "snippet": "<<Specify timeframe or deadline if relevant.>>"
+  },
+  {
+    "id": "clarity-name-stakeholders-10",
+    "categoryId": "clarity",
+    "categoryLabel": "Clarity",
+    "label": "Name Stakeholders",
+    "snippet": "<<Identify who the output is for when it matters.>>"
+  },
+  {
+    "id": "clarity-explicit-output-length-11",
+    "categoryId": "clarity",
+    "categoryLabel": "Clarity",
+    "label": "Explicit Output Length",
+    "snippet": "<<Give a target length or depth when helpful.>>"
+  },
+  {
+    "id": "clarity-clarify-edge-cases-12",
+    "categoryId": "clarity",
+    "categoryLabel": "Clarity",
+    "label": "Clarify Edge Cases",
+    "snippet": "<<Note how to handle missing data or edge cases.>>"
+  },
+  {
+    "id": "clarity-unify-terminology-13",
+    "categoryId": "clarity",
+    "categoryLabel": "Clarity",
+    "label": "Unify Terminology",
+    "snippet": "<<Use one term per concept throughout the prompt.>>"
+  },
+  {
+    "id": "clarity-add-acceptance-checklist-14",
+    "categoryId": "clarity",
+    "categoryLabel": "Clarity",
+    "label": "Add Acceptance Checklist",
+    "snippet": "<<Include a short checklist for completion.>>"
+  },
+  {
+    "id": "clarity-clarify-comparison-baseline-15",
+    "categoryId": "clarity",
+    "categoryLabel": "Clarity",
+    "label": "Clarify Comparison Baseline",
+    "snippet": "<<State what to compare against if evaluation is implied.>>"
+  },
+  {
+    "id": "clarity-remove-double-negatives-16",
+    "categoryId": "clarity",
+    "categoryLabel": "Clarity",
+    "label": "Remove Double Negatives",
+    "snippet": "<<Rewrite double negatives into plain affirmative rules.>>"
+  },
+  {
+    "id": "clarity-state-decision-criteria-17",
+    "categoryId": "clarity",
+    "categoryLabel": "Clarity",
+    "label": "State Decision Criteria",
+    "snippet": "<<Explain how to choose between options when applicable.>>"
+  },
+  {
+    "id": "clarity-clarify-units-and-scale-18",
+    "categoryId": "clarity",
+    "categoryLabel": "Clarity",
+    "label": "Clarify Units and Scale",
+    "snippet": "<<Specify units, scale, or measurement conventions.>>"
+  },
+  {
+    "id": "structure-use-clear-sections-1",
+    "categoryId": "structure",
+    "categoryLabel": "Structure",
+    "label": "Use Clear Sections",
+    "snippet": "<<Organize the prompt into labeled sections with blank lines between.>>"
+  },
+  {
+    "id": "structure-step-by-step-flow-2",
+    "categoryId": "structure",
+    "categoryLabel": "Structure",
+    "label": "Step-by-Step Flow",
+    "snippet": "<<Present multi-step tasks as numbered steps.>>"
+  },
+  {
+    "id": "structure-bullet-key-requirements-3",
+    "categoryId": "structure",
+    "categoryLabel": "Structure",
+    "label": "Bullet Key Requirements",
+    "snippet": "<<Convert dense paragraphs into scannable bullets.>>"
+  },
+  {
+    "id": "structure-separate-context-and-task-4",
+    "categoryId": "structure",
+    "categoryLabel": "Structure",
+    "label": "Separate Context and Task",
+    "snippet": "<<Put background context before the explicit task block.>>"
+  },
+  {
+    "id": "structure-add-output-template-5",
+    "categoryId": "structure",
+    "categoryLabel": "Structure",
+    "label": "Add Output Template",
+    "snippet": "<<Provide a template or outline for the expected response.>>"
+  },
+  {
+    "id": "structure-group-related-constraints-6",
+    "categoryId": "structure",
+    "categoryLabel": "Structure",
+    "label": "Group Related Constraints",
+    "snippet": "<<Group constraints by theme instead of scattering them.>>"
+  },
+  {
+    "id": "structure-lead-with-task-7",
+    "categoryId": "structure",
+    "categoryLabel": "Structure",
+    "label": "Lead With Task",
+    "snippet": "<<Place the core task before background details.>>"
+  },
+  {
+    "id": "structure-end-with-deliverables-8",
+    "categoryId": "structure",
+    "categoryLabel": "Structure",
+    "label": "End With Deliverables",
+    "snippet": "<<Close with a deliverables section summarizing outputs.>>"
+  },
+  {
+    "id": "structure-use-numbered-priorities-9",
+    "categoryId": "structure",
+    "categoryLabel": "Structure",
+    "label": "Use Numbered Priorities",
+    "snippet": "<<Rank requirements when tradeoffs exist.>>"
+  },
+  {
+    "id": "structure-add-section-headers-10",
+    "categoryId": "structure",
+    "categoryLabel": "Structure",
+    "label": "Add Section Headers",
+    "snippet": "<<Add short headers for Audience, Task, Constraints, Output.>>"
+  },
+  {
+    "id": "structure-separate-examples-block-11",
+    "categoryId": "structure",
+    "categoryLabel": "Structure",
+    "label": "Separate Examples Block",
+    "snippet": "<<Put examples in their own clearly labeled block.>>"
+  },
+  {
+    "id": "structure-table-for-criteria-12",
+    "categoryId": "structure",
+    "categoryLabel": "Structure",
+    "label": "Table For Criteria",
+    "snippet": "<<Use a table layout when comparing multiple criteria.>>"
+  },
+  {
+    "id": "structure-phased-plan-structure-13",
+    "categoryId": "structure",
+    "categoryLabel": "Structure",
+    "label": "Phased Plan Structure",
+    "snippet": "<<Break work into phases with milestones.>>"
+  },
+  {
+    "id": "structure-input-output-blocks-14",
+    "categoryId": "structure",
+    "categoryLabel": "Structure",
+    "label": "Input Output Blocks",
+    "snippet": "<<Separate INPUT and OUTPUT sections explicitly.>>"
+  },
+  {
+    "id": "structure-checklist-format-15",
+    "categoryId": "structure",
+    "categoryLabel": "Structure",
+    "label": "Checklist Format",
+    "snippet": "<<Format final requirements as a checklist.>>"
+  },
+  {
+    "id": "structure-hierarchy-of-headings-16",
+    "categoryId": "structure",
+    "categoryLabel": "Structure",
+    "label": "Hierarchy of Headings",
+    "snippet": "<<Use consistent heading levels for nested topics.>>"
+  },
+  {
+    "id": "structure-move-constraints-last-17",
+    "categoryId": "structure",
+    "categoryLabel": "Structure",
+    "label": "Move Constraints Last",
+    "snippet": "<<Place hard constraints after the task description.>>"
+  },
+  {
+    "id": "structure-single-column-flow-18",
+    "categoryId": "structure",
+    "categoryLabel": "Structure",
+    "label": "Single Column Flow",
+    "snippet": "<<Avoid side-by-side instructions; use vertical flow.>>"
+  },
+  {
+    "id": "depth-in-depth-explanation-1",
+    "categoryId": "depth",
+    "categoryLabel": "Depth",
+    "label": "In-Depth Explanation",
+    "snippet": "<<Provide thorough explanations with nuance and reasoning.>>"
+  },
+  {
+    "id": "depth-add-supporting-rationale-2",
+    "categoryId": "depth",
+    "categoryLabel": "Depth",
+    "label": "Add Supporting Rationale",
+    "snippet": "<<Include why each requirement matters when non-obvious.>>"
+  },
+  {
+    "id": "depth-expand-thin-sections-3",
+    "categoryId": "depth",
+    "categoryLabel": "Depth",
+    "label": "Expand Thin Sections",
+    "snippet": "<<Add detail where the prompt is underspecified.>>"
+  },
+  {
+    "id": "depth-cover-tradeoffs-4",
+    "categoryId": "depth",
+    "categoryLabel": "Depth",
+    "label": "Cover Tradeoffs",
+    "snippet": "<<Discuss tradeoffs among reasonable approaches.>>"
+  },
+  {
+    "id": "depth-add-implementation-notes-5",
+    "categoryId": "depth",
+    "categoryLabel": "Depth",
+    "label": "Add Implementation Notes",
+    "snippet": "<<Include practical implementation considerations.>>"
+  },
+  {
+    "id": "depth-deep-dive-subtopics-6",
+    "categoryId": "depth",
+    "categoryLabel": "Depth",
+    "label": "Deep Dive Subtopics",
+    "snippet": "<<Break complex subtopics into dedicated sub-bullets.>>"
+  },
+  {
+    "id": "depth-more-examples-7",
+    "categoryId": "depth",
+    "categoryLabel": "Depth",
+    "label": "More Examples",
+    "snippet": "<<Add multiple varied examples of desired output.>>"
+  },
+  {
+    "id": "depth-explain-assumptions-8",
+    "categoryId": "depth",
+    "categoryLabel": "Depth",
+    "label": "Explain Assumptions",
+    "snippet": "<<State assumptions the responder should rely on.>>"
+  },
+  {
+    "id": "depth-add-failure-modes-9",
+    "categoryId": "depth",
+    "categoryLabel": "Depth",
+    "label": "Add Failure Modes",
+    "snippet": "<<Describe common failure modes to avoid.>>"
+  },
+  {
+    "id": "depth-richer-context-10",
+    "categoryId": "depth",
+    "categoryLabel": "Depth",
+    "label": "Richer Context",
+    "snippet": "<<Add context needed to interpret ambiguous requirements.>>"
+  },
+  {
+    "id": "depth-technical-detail-11",
+    "categoryId": "depth",
+    "categoryLabel": "Depth",
+    "label": "Technical Detail",
+    "snippet": "<<Increase technical specificity where the task allows.>>"
+  },
+  {
+    "id": "depth-expand-success-metrics-12",
+    "categoryId": "depth",
+    "categoryLabel": "Depth",
+    "label": "Expand Success Metrics",
+    "snippet": "<<Add measurable success metrics beyond basics.>>"
+  },
+  {
+    "id": "depth-historical-context-13",
+    "categoryId": "depth",
+    "categoryLabel": "Depth",
+    "label": "Historical Context",
+    "snippet": "<<Add brief context if prior art or background helps.>>"
+  },
+  {
+    "id": "depth-alternative-approaches-14",
+    "categoryId": "depth",
+    "categoryLabel": "Depth",
+    "label": "Alternative Approaches",
+    "snippet": "<<Ask for brief notes on alternative valid approaches.>>"
+  },
+  {
+    "id": "depth-layered-detail-15",
+    "categoryId": "depth",
+    "categoryLabel": "Depth",
+    "label": "Layered Detail",
+    "snippet": "<<Use summary line plus expandable detail bullets.>>"
+  },
+  {
+    "id": "depth-domain-nuance-16",
+    "categoryId": "depth",
+    "categoryLabel": "Depth",
+    "label": "Domain Nuance",
+    "snippet": "<<Add domain-specific nuance the task depends on.>>"
+  },
+  {
+    "id": "depth-thorough-edge-cases-17",
+    "categoryId": "depth",
+    "categoryLabel": "Depth",
+    "label": "Thorough Edge Cases",
+    "snippet": "<<Expand edge-case handling beyond a single line.>>"
+  },
+  {
+    "id": "tone-professional-tone-1",
+    "categoryId": "tone",
+    "categoryLabel": "Tone",
+    "label": "Professional Tone",
+    "snippet": "<<Use a formal, professional tone suitable for business.>>"
+  },
+  {
+    "id": "tone-conversational-tone-2",
+    "categoryId": "tone",
+    "categoryLabel": "Tone",
+    "label": "Conversational Tone",
+    "snippet": "<<Use a friendly conversational tone without slang.>>"
+  },
+  {
+    "id": "tone-academic-tone-3",
+    "categoryId": "tone",
+    "categoryLabel": "Tone",
+    "label": "Academic Tone",
+    "snippet": "<<Use precise academic tone with careful wording.>>"
+  },
+  {
+    "id": "tone-direct-tone-4",
+    "categoryId": "tone",
+    "categoryLabel": "Tone",
+    "label": "Direct Tone",
+    "snippet": "<<Use direct, imperative instructions without hedging.>>"
+  },
+  {
+    "id": "tone-empathetic-tone-5",
+    "categoryId": "tone",
+    "categoryLabel": "Tone",
+    "label": "Empathetic Tone",
+    "snippet": "<<Use warm, empathetic language where appropriate.>>"
+  },
+  {
+    "id": "tone-neutral-tone-6",
+    "categoryId": "tone",
+    "categoryLabel": "Tone",
+    "label": "Neutral Tone",
+    "snippet": "<<Keep tone neutral and avoid persuasive framing.>>"
+  },
+  {
+    "id": "tone-confident-tone-7",
+    "categoryId": "tone",
+    "categoryLabel": "Tone",
+    "label": "Confident Tone",
+    "snippet": "<<Phrase requirements confidently without excessive qualifiers.>>"
+  },
+  {
+    "id": "tone-supportive-tone-8",
+    "categoryId": "tone",
+    "categoryLabel": "Tone",
+    "label": "Supportive Tone",
+    "snippet": "<<Use supportive coaching language for learning tasks.>>"
+  },
+  {
+    "id": "tone-executive-brief-tone-9",
+    "categoryId": "tone",
+    "categoryLabel": "Tone",
+    "label": "Executive Brief Tone",
+    "snippet": "<<Write for executives: concise, decision-oriented.>>"
+  },
+  {
+    "id": "tone-technical-tone-10",
+    "categoryId": "tone",
+    "categoryLabel": "Tone",
+    "label": "Technical Tone",
+    "snippet": "<<Use precise technical tone for engineering tasks.>>"
+  },
+  {
+    "id": "tone-persuasive-tone-11",
+    "categoryId": "tone",
+    "categoryLabel": "Tone",
+    "label": "Persuasive Tone",
+    "snippet": "<<Use persuasive tone only where the deliverable requires it.>>"
+  },
+  {
+    "id": "tone-playful-tone-12",
+    "categoryId": "tone",
+    "categoryLabel": "Tone",
+    "label": "Playful Tone",
+    "snippet": "<<Allow light playful tone if the task is creative.>>"
+  },
+  {
+    "id": "tone-serious-tone-13",
+    "categoryId": "tone",
+    "categoryLabel": "Tone",
+    "label": "Serious Tone",
+    "snippet": "<<Keep tone serious for safety- or compliance-related tasks.>>"
+  },
+  {
+    "id": "tone-inclusive-language-14",
+    "categoryId": "tone",
+    "categoryLabel": "Tone",
+    "label": "Inclusive Language",
+    "snippet": "<<Use inclusive, respectful language throughout.>>"
+  },
+  {
+    "id": "tone-plain-language-15",
+    "categoryId": "tone",
+    "categoryLabel": "Tone",
+    "label": "Plain Language",
+    "snippet": "<<Prefer plain language over jargon unless jargon is required.>>"
+  },
+  {
+    "id": "tone-authoritative-tone-16",
+    "categoryId": "tone",
+    "categoryLabel": "Tone",
+    "label": "Authoritative Tone",
+    "snippet": "<<Sound authoritative when specifying non-negotiable rules.>>"
+  },
+  {
+    "id": "tone-collaborative-tone-17",
+    "categoryId": "tone",
+    "categoryLabel": "Tone",
+    "label": "Collaborative Tone",
+    "snippet": "<<Frame instructions as collaboration when co-creating.>>"
+  },
+  {
+    "id": "tone-minimal-hedging-18",
+    "categoryId": "tone",
+    "categoryLabel": "Tone",
+    "label": "Minimal Hedging",
+    "snippet": "<<Remove hedging words that weaken clear requirements.>>"
+  },
+  {
+    "id": "audience-beginner-friendly-1",
+    "categoryId": "audience",
+    "categoryLabel": "Audience",
+    "label": "Beginner-Friendly",
+    "snippet": "<<Explain simply and define terms for beginners.>>"
+  },
+  {
+    "id": "audience-expert-audience-2",
+    "categoryId": "audience",
+    "categoryLabel": "Audience",
+    "label": "Expert Audience",
+    "snippet": "<<Assume expert knowledge and skip basic definitions.>>"
+  },
+  {
+    "id": "audience-mixed-audience-3",
+    "categoryId": "audience",
+    "categoryLabel": "Audience",
+    "label": "Mixed Audience",
+    "snippet": "<<Layer content for both beginners and experts.>>"
+  },
+  {
+    "id": "audience-student-audience-4",
+    "categoryId": "audience",
+    "categoryLabel": "Audience",
+    "label": "Student Audience",
+    "snippet": "<<Tailor depth and tone for a student learner.>>"
+  },
+  {
+    "id": "audience-client-facing-5",
+    "categoryId": "audience",
+    "categoryLabel": "Audience",
+    "label": "Client-Facing",
+    "snippet": "<<Optimize wording for external client communication.>>"
+  },
+  {
+    "id": "audience-internal-team-6",
+    "categoryId": "audience",
+    "categoryLabel": "Audience",
+    "label": "Internal Team",
+    "snippet": "<<Optimize for an internal team with shared context.>>"
+  },
+  {
+    "id": "audience-non-technical-reader-7",
+    "categoryId": "audience",
+    "categoryLabel": "Audience",
+    "label": "Non-Technical Reader",
+    "snippet": "<<Avoid jargon or define it for non-technical readers.>>"
+  },
+  {
+    "id": "audience-developer-audience-8",
+    "categoryId": "audience",
+    "categoryLabel": "Audience",
+    "label": "Developer Audience",
+    "snippet": "<<Target software developers with appropriate specificity.>>"
+  },
+  {
+    "id": "audience-executive-audience-9",
+    "categoryId": "audience",
+    "categoryLabel": "Audience",
+    "label": "Executive Audience",
+    "snippet": "<<Summarize for executives who need decisions fast.>>"
+  },
+  {
+    "id": "audience-educator-audience-10",
+    "categoryId": "audience",
+    "categoryLabel": "Audience",
+    "label": "Educator Audience",
+    "snippet": "<<Frame for educators designing lessons or rubrics.>>"
+  },
+  {
+    "id": "audience-general-public-11",
+    "categoryId": "audience",
+    "categoryLabel": "Audience",
+    "label": "General Public",
+    "snippet": "<<Write for a general audience with broad accessibility.>>"
+  },
+  {
+    "id": "audience-stakeholder-update-12",
+    "categoryId": "audience",
+    "categoryLabel": "Audience",
+    "label": "Stakeholder Update",
+    "snippet": "<<Format for stakeholders who need status, not detail.>>"
+  },
+  {
+    "id": "audience-reviewer-audience-13",
+    "categoryId": "audience",
+    "categoryLabel": "Audience",
+    "label": "Reviewer Audience",
+    "snippet": "<<Write for a reviewer evaluating quality or compliance.>>"
+  },
+  {
+    "id": "audience-child-appropriate-14",
+    "categoryId": "audience",
+    "categoryLabel": "Audience",
+    "label": "Child-Appropriate",
+    "snippet": "<<Keep language age-appropriate when relevant.>>"
+  },
+  {
+    "id": "audience-international-audience-15",
+    "categoryId": "audience",
+    "categoryLabel": "Audience",
+    "label": "International Audience",
+    "snippet": "<<Avoid idioms and culturally narrow references.>>"
+  },
+  {
+    "id": "audience-practitioner-audience-16",
+    "categoryId": "audience",
+    "categoryLabel": "Audience",
+    "label": "Practitioner Audience",
+    "snippet": "<<Target practitioners who will execute the task.>>"
+  },
+  {
+    "id": "audience-novice-onboarding-17",
+    "categoryId": "audience",
+    "categoryLabel": "Audience",
+    "label": "Novice Onboarding",
+    "snippet": "<<Include onboarding context for first-time users.>>"
+  },
+  {
+    "id": "accuracy-strict-no-hallucination-1",
+    "categoryId": "accuracy",
+    "categoryLabel": "Accuracy",
+    "label": "Strict No Hallucination",
+    "snippet": "<<Do not invent facts; state uncertainty explicitly.>>"
+  },
+  {
+    "id": "accuracy-verify-before-claiming-2",
+    "categoryId": "accuracy",
+    "categoryLabel": "Accuracy",
+    "label": "Verify Before Claiming",
+    "snippet": "<<Verify claims and flag unverified statements.>>"
+  },
+  {
+    "id": "accuracy-cite-uncertainty-3",
+    "categoryId": "accuracy",
+    "categoryLabel": "Accuracy",
+    "label": "Cite Uncertainty",
+    "snippet": "<<Mark uncertain points rather than guessing.>>"
+  },
+  {
+    "id": "accuracy-stick-to-prompt-facts-4",
+    "categoryId": "accuracy",
+    "categoryLabel": "Accuracy",
+    "label": "Stick To Prompt Facts",
+    "snippet": "<<Use only facts provided in the prompt unless asked to research.>>"
+  },
+  {
+    "id": "accuracy-no-fabricated-sources-5",
+    "categoryId": "accuracy",
+    "categoryLabel": "Accuracy",
+    "label": "No Fabricated Sources",
+    "snippet": "<<Never fabricate citations, URLs, or data.>>"
+  },
+  {
+    "id": "accuracy-distinguish-fact-opinion-6",
+    "categoryId": "accuracy",
+    "categoryLabel": "Accuracy",
+    "label": "Distinguish Fact Opinion",
+    "snippet": "<<Separate factual statements from interpretation.>>"
+  },
+  {
+    "id": "accuracy-confidence-labels-7",
+    "categoryId": "accuracy",
+    "categoryLabel": "Accuracy",
+    "label": "Confidence Labels",
+    "snippet": "<<Label confidence levels on non-obvious claims.>>"
+  },
+  {
+    "id": "accuracy-cross-check-consistency-8",
+    "categoryId": "accuracy",
+    "categoryLabel": "Accuracy",
+    "label": "Cross-Check Consistency",
+    "snippet": "<<Ensure internal consistency across sections.>>"
+  },
+  {
+    "id": "accuracy-avoid-overclaiming-9",
+    "categoryId": "accuracy",
+    "categoryLabel": "Accuracy",
+    "label": "Avoid Overclaiming",
+    "snippet": "<<Do not overstate what the output can guarantee.>>"
+  },
+  {
+    "id": "accuracy-data-integrity-10",
+    "categoryId": "accuracy",
+    "categoryLabel": "Accuracy",
+    "label": "Data Integrity",
+    "snippet": "<<Preserve numeric and named entities exactly when given.>>"
+  },
+  {
+    "id": "accuracy-sanity-check-outputs-11",
+    "categoryId": "accuracy",
+    "categoryLabel": "Accuracy",
+    "label": "Sanity Check Outputs",
+    "snippet": "<<Sanity-check outputs against constraints before finishing.>>"
+  },
+  {
+    "id": "accuracy-flag-missing-info-12",
+    "categoryId": "accuracy",
+    "categoryLabel": "Accuracy",
+    "label": "Flag Missing Info",
+    "snippet": "<<List missing information instead of filling gaps silently.>>"
+  },
+  {
+    "id": "accuracy-no-false-precision-13",
+    "categoryId": "accuracy",
+    "categoryLabel": "Accuracy",
+    "label": "No False Precision",
+    "snippet": "<<Avoid false precision in estimates or numbers.>>"
+  },
+  {
+    "id": "accuracy-quote-exact-strings-14",
+    "categoryId": "accuracy",
+    "categoryLabel": "Accuracy",
+    "label": "Quote Exact Strings",
+    "snippet": "<<Preserve quoted strings and code identifiers exactly.>>"
+  },
+  {
+    "id": "accuracy-validate-assumptions-15",
+    "categoryId": "accuracy",
+    "categoryLabel": "Accuracy",
+    "label": "Validate Assumptions",
+    "snippet": "<<Validate assumptions before relying on them.>>"
+  },
+  {
+    "id": "accuracy-correct-obvious-errors-16",
+    "categoryId": "accuracy",
+    "categoryLabel": "Accuracy",
+    "label": "Correct Obvious Errors",
+    "snippet": "<<Fix obvious internal contradictions in the draft.>>"
+  },
+  {
+    "id": "accuracy-evidence-based-claims-17",
+    "categoryId": "accuracy",
+    "categoryLabel": "Accuracy",
+    "label": "Evidence Based Claims",
+    "snippet": "<<Ground factual claims in provided or cited evidence.>>"
+  },
+  {
+    "id": "citations-cite-all-sources-1",
+    "categoryId": "citations",
+    "categoryLabel": "Citations",
+    "label": "Cite All Sources",
+    "snippet": "<<Cite sources for factual claims when sources are used.>>"
+  },
+  {
+    "id": "citations-inline-citations-2",
+    "categoryId": "citations",
+    "categoryLabel": "Citations",
+    "label": "Inline Citations",
+    "snippet": "<<Use inline citations for specific claims.>>"
+  },
+  {
+    "id": "citations-reference-list-3",
+    "categoryId": "citations",
+    "categoryLabel": "Citations",
+    "label": "Reference List",
+    "snippet": "<<Include a reference list at the end when citing.>>"
+  },
+  {
+    "id": "citations-link-primary-sources-4",
+    "categoryId": "citations",
+    "categoryLabel": "Citations",
+    "label": "Link Primary Sources",
+    "snippet": "<<Prefer links to primary sources when available.>>"
+  },
+  {
+    "id": "citations-quote-with-attribution-5",
+    "categoryId": "citations",
+    "categoryLabel": "Citations",
+    "label": "Quote With Attribution",
+    "snippet": "<<Attribute quoted material clearly.>>"
+  },
+  {
+    "id": "citations-distinguish-paraphrase-6",
+    "categoryId": "citations",
+    "categoryLabel": "Citations",
+    "label": "Distinguish Paraphrase",
+    "snippet": "<<Mark paraphrased vs directly quoted content.>>"
+  },
+  {
+    "id": "citations-citation-format-apa-7",
+    "categoryId": "citations",
+    "categoryLabel": "Citations",
+    "label": "Citation Format APA",
+    "snippet": "<<Use APA-style citations if academic tone applies.>>"
+  },
+  {
+    "id": "citations-citation-format-mla-8",
+    "categoryId": "citations",
+    "categoryLabel": "Citations",
+    "label": "Citation Format MLA",
+    "snippet": "<<Use MLA-style citations if humanities tone applies.>>"
+  },
+  {
+    "id": "citations-footnote-style-9",
+    "categoryId": "citations",
+    "categoryLabel": "Citations",
+    "label": "Footnote Style",
+    "snippet": "<<Use footnotes for dense reference-heavy outputs.>>"
+  },
+  {
+    "id": "citations-no-uncited-statistics-10",
+    "categoryId": "citations",
+    "categoryLabel": "Citations",
+    "label": "No Uncited Statistics",
+    "snippet": "<<Do not state statistics without a source.>>"
+  },
+  {
+    "id": "citations-source-date-stamps-11",
+    "categoryId": "citations",
+    "categoryLabel": "Citations",
+    "label": "Source Date Stamps",
+    "snippet": "<<Include publication or access dates for web sources.>>"
+  },
+  {
+    "id": "citations-prefer-authoritative-sources-12",
+    "categoryId": "citations",
+    "categoryLabel": "Citations",
+    "label": "Prefer Authoritative Sources",
+    "snippet": "<<Prefer authoritative sources over blogs.>>"
+  },
+  {
+    "id": "citations-flag-unsourced-claims-13",
+    "categoryId": "citations",
+    "categoryLabel": "Citations",
+    "label": "Flag Unsourced Claims",
+    "snippet": "<<Flag any claim that lacks a supporting source.>>"
+  },
+  {
+    "id": "citations-bibliography-section-14",
+    "categoryId": "citations",
+    "categoryLabel": "Citations",
+    "label": "Bibliography Section",
+    "snippet": "<<Add a bibliography section when multiple sources are used.>>"
+  },
+  {
+    "id": "citations-cite-prompt-materials-15",
+    "categoryId": "citations",
+    "categoryLabel": "Citations",
+    "label": "Cite Prompt Materials",
+    "snippet": "<<Reference materials explicitly provided in the prompt.>>"
+  },
+  {
+    "id": "citations-minimal-citation-set-16",
+    "categoryId": "citations",
+    "categoryLabel": "Citations",
+    "label": "Minimal Citation Set",
+    "snippet": "<<Cite only what is necessary without citation clutter.>>"
+  },
+  {
+    "id": "reasoning-step-by-step-logic-1",
+    "categoryId": "reasoning",
+    "categoryLabel": "Reasoning",
+    "label": "Step-by-Step Logic",
+    "snippet": "<<Show reasoning in clear sequential steps.>>"
+  },
+  {
+    "id": "reasoning-show-your-work-2",
+    "categoryId": "reasoning",
+    "categoryLabel": "Reasoning",
+    "label": "Show Your Work",
+    "snippet": "<<Show intermediate reasoning before the final answer.>>"
+  },
+  {
+    "id": "reasoning-explain-tradeoffs-3",
+    "categoryId": "reasoning",
+    "categoryLabel": "Reasoning",
+    "label": "Explain Tradeoffs",
+    "snippet": "<<Explain tradeoffs among viable options.>>"
+  },
+  {
+    "id": "reasoning-chain-of-thought-4",
+    "categoryId": "reasoning",
+    "categoryLabel": "Reasoning",
+    "label": "Chain of Thought",
+    "snippet": "<<Think through the problem stepwise internally; output concise result.>>"
+  },
+  {
+    "id": "reasoning-justify-key-choices-5",
+    "categoryId": "reasoning",
+    "categoryLabel": "Reasoning",
+    "label": "Justify Key Choices",
+    "snippet": "<<Briefly justify non-obvious choices.>>"
+  },
+  {
+    "id": "reasoning-outline-decision-tree-6",
+    "categoryId": "reasoning",
+    "categoryLabel": "Reasoning",
+    "label": "Outline Decision Tree",
+    "snippet": "<<Use a decision-tree style for branching logic.>>"
+  },
+  {
+    "id": "reasoning-anticipate-objections-7",
+    "categoryId": "reasoning",
+    "categoryLabel": "Reasoning",
+    "label": "Anticipate Objections",
+    "snippet": "<<Address likely objections or counterarguments.>>"
+  },
+  {
+    "id": "reasoning-reason-from-constraints-8",
+    "categoryId": "reasoning",
+    "categoryLabel": "Reasoning",
+    "label": "Reason From Constraints",
+    "snippet": "<<Derive recommendations from stated constraints.>>"
+  },
+  {
+    "id": "reasoning-compare-alternatives-9",
+    "categoryId": "reasoning",
+    "categoryLabel": "Reasoning",
+    "label": "Compare Alternatives",
+    "snippet": "<<Compare at least two alternatives when choosing.>>"
+  },
+  {
+    "id": "reasoning-explicit-assumptions-list-10",
+    "categoryId": "reasoning",
+    "categoryLabel": "Reasoning",
+    "label": "Explicit Assumptions List",
+    "snippet": "<<List assumptions used in reasoning.>>"
+  },
+  {
+    "id": "reasoning-sanity-check-logic-11",
+    "categoryId": "reasoning",
+    "categoryLabel": "Reasoning",
+    "label": "Sanity Check Logic",
+    "snippet": "<<Verify logic does not contradict requirements.>>"
+  },
+  {
+    "id": "reasoning-decompose-problem-12",
+    "categoryId": "reasoning",
+    "categoryLabel": "Reasoning",
+    "label": "Decompose Problem",
+    "snippet": "<<Decompose the problem before solving.>>"
+  },
+  {
+    "id": "reasoning-highlight-critical-path-13",
+    "categoryId": "reasoning",
+    "categoryLabel": "Reasoning",
+    "label": "Highlight Critical Path",
+    "snippet": "<<Identify the critical path in multi-step work.>>"
+  },
+  {
+    "id": "reasoning-risk-reasoning-14",
+    "categoryId": "reasoning",
+    "categoryLabel": "Reasoning",
+    "label": "Risk Reasoning",
+    "snippet": "<<Explain risks tied to each major recommendation.>>"
+  },
+  {
+    "id": "reasoning-first-principles-15",
+    "categoryId": "reasoning",
+    "categoryLabel": "Reasoning",
+    "label": "First Principles",
+    "snippet": "<<Reason from first principles where helpful.>>"
+  },
+  {
+    "id": "reasoning-map-cause-effect-16",
+    "categoryId": "reasoning",
+    "categoryLabel": "Reasoning",
+    "label": "Map Cause Effect",
+    "snippet": "<<Map cause-and-effect for complex recommendations.>>"
+  },
+  {
+    "id": "reasoning-summarize-reasoning-17",
+    "categoryId": "reasoning",
+    "categoryLabel": "Reasoning",
+    "label": "Summarize Reasoning",
+    "snippet": "<<End with a one-line summary of why the answer fits.>>"
+  },
+  {
+    "id": "actionability-actionable-steps-1",
+    "categoryId": "actionability",
+    "categoryLabel": "Actionability",
+    "label": "Actionable Steps",
+    "snippet": "<<Provide concrete next steps the user can execute.>>"
+  },
+  {
+    "id": "actionability-checklist-output-2",
+    "categoryId": "actionability",
+    "categoryLabel": "Actionability",
+    "label": "Checklist Output",
+    "snippet": "<<Deliver a checklist of actions with clear owners if applicable.>>"
+  },
+  {
+    "id": "actionability-executable-guidance-3",
+    "categoryId": "actionability",
+    "categoryLabel": "Actionability",
+    "label": "Executable Guidance",
+    "snippet": "<<Avoid abstract advice; give executable instructions.>>"
+  },
+  {
+    "id": "actionability-timeline-suggestions-4",
+    "categoryId": "actionability",
+    "categoryLabel": "Actionability",
+    "label": "Timeline Suggestions",
+    "snippet": "<<Suggest a realistic timeline when planning tasks.>>"
+  },
+  {
+    "id": "actionability-priority-order-5",
+    "categoryId": "actionability",
+    "categoryLabel": "Actionability",
+    "label": "Priority Order",
+    "snippet": "<<Order actions by priority.>>"
+  },
+  {
+    "id": "actionability-resource-list-6",
+    "categoryId": "actionability",
+    "categoryLabel": "Actionability",
+    "label": "Resource List",
+    "snippet": "<<List tools or resources needed to act.>>"
+  },
+  {
+    "id": "actionability-definition-of-done-7",
+    "categoryId": "actionability",
+    "categoryLabel": "Actionability",
+    "label": "Definition of Done",
+    "snippet": "<<Define done criteria for each major step.>>"
+  },
+  {
+    "id": "actionability-quick-wins-first-8",
+    "categoryId": "actionability",
+    "categoryLabel": "Actionability",
+    "label": "Quick Wins First",
+    "snippet": "<<Lead with quick wins before longer efforts.>>"
+  },
+  {
+    "id": "actionability-avoid-vague-verbs-9",
+    "categoryId": "actionability",
+    "categoryLabel": "Actionability",
+    "label": "Avoid Vague Verbs",
+    "snippet": "<<Replace 'consider/improve' with specific actions.>>"
+  },
+  {
+    "id": "actionability-copy-paste-ready-10",
+    "categoryId": "actionability",
+    "categoryLabel": "Actionability",
+    "label": "Copy-Paste Ready",
+    "snippet": "<<Make outputs copy-paste ready where possible.>>"
+  },
+  {
+    "id": "actionability-milestone-map-11",
+    "categoryId": "actionability",
+    "categoryLabel": "Actionability",
+    "label": "Milestone Map",
+    "snippet": "<<Map milestones for multi-week efforts.>>"
+  },
+  {
+    "id": "actionability-risk-mitigation-steps-12",
+    "categoryId": "actionability",
+    "categoryLabel": "Actionability",
+    "label": "Risk Mitigation Steps",
+    "snippet": "<<Include mitigation steps for identified risks.>>"
+  },
+  {
+    "id": "actionability-handoff-instructions-13",
+    "categoryId": "actionability",
+    "categoryLabel": "Actionability",
+    "label": "Handoff Instructions",
+    "snippet": "<<Add handoff notes if multiple people are involved.>>"
+  },
+  {
+    "id": "actionability-measurement-plan-14",
+    "categoryId": "actionability",
+    "categoryLabel": "Actionability",
+    "label": "Measurement Plan",
+    "snippet": "<<Include how to measure progress.>>"
+  },
+  {
+    "id": "actionability-rollback-plan-15",
+    "categoryId": "actionability",
+    "categoryLabel": "Actionability",
+    "label": "Rollback Plan",
+    "snippet": "<<Note rollback or undo steps when changes are risky.>>"
+  },
+  {
+    "id": "actionability-single-owner-actions-16",
+    "categoryId": "actionability",
+    "categoryLabel": "Actionability",
+    "label": "Single Owner Actions",
+    "snippet": "<<Assign each action item a clear owner role.>>"
+  },
+  {
+    "id": "actionability-immediate-next-step-17",
+    "categoryId": "actionability",
+    "categoryLabel": "Actionability",
+    "label": "Immediate Next Step",
+    "snippet": "<<State the very next step at the top.>>"
+  },
+  {
+    "id": "constraints-add-hard-limits-1",
+    "categoryId": "constraints",
+    "categoryLabel": "Constraints",
+    "label": "Add Hard Limits",
+    "snippet": "<<State non-negotiable limits clearly.>>"
+  },
+  {
+    "id": "constraints-budget-constraints-2",
+    "categoryId": "constraints",
+    "categoryLabel": "Constraints",
+    "label": "Budget Constraints",
+    "snippet": "<<Include budget or cost constraints if relevant.>>"
+  },
+  {
+    "id": "constraints-time-constraints-3",
+    "categoryId": "constraints",
+    "categoryLabel": "Constraints",
+    "label": "Time Constraints",
+    "snippet": "<<Include time or deadline constraints explicitly.>>"
+  },
+  {
+    "id": "constraints-legal-compliance-4",
+    "categoryId": "constraints",
+    "categoryLabel": "Constraints",
+    "label": "Legal Compliance",
+    "snippet": "<<Note legal or compliance constraints that apply.>>"
+  },
+  {
+    "id": "constraints-privacy-constraints-5",
+    "categoryId": "constraints",
+    "categoryLabel": "Constraints",
+    "label": "Privacy Constraints",
+    "snippet": "<<Include privacy and data-handling constraints.>>"
+  },
+  {
+    "id": "constraints-safety-constraints-6",
+    "categoryId": "constraints",
+    "categoryLabel": "Constraints",
+    "label": "Safety Constraints",
+    "snippet": "<<Add safety constraints for risky domains.>>"
+  },
+  {
+    "id": "constraints-brand-guidelines-7",
+    "categoryId": "constraints",
+    "categoryLabel": "Constraints",
+    "label": "Brand Guidelines",
+    "snippet": "<<Reference brand or style guidelines when relevant.>>"
+  },
+  {
+    "id": "constraints-accessibility-requirements-8",
+    "categoryId": "constraints",
+    "categoryLabel": "Constraints",
+    "label": "Accessibility Requirements",
+    "snippet": "<<Include accessibility requirements when applicable.>>"
+  },
+  {
+    "id": "constraints-platform-constraints-9",
+    "categoryId": "constraints",
+    "categoryLabel": "Constraints",
+    "label": "Platform Constraints",
+    "snippet": "<<Specify platform or environment constraints.>>"
+  },
+  {
+    "id": "constraints-language-constraints-10",
+    "categoryId": "constraints",
+    "categoryLabel": "Constraints",
+    "label": "Language Constraints",
+    "snippet": "<<Require specific language or locale when needed.>>"
+  },
+  {
+    "id": "constraints-no-go-list-11",
+    "categoryId": "constraints",
+    "categoryLabel": "Constraints",
+    "label": "No-Go List",
+    "snippet": "<<List explicit things that must not be included.>>"
+  },
+  {
+    "id": "constraints-scope-boundaries-12",
+    "categoryId": "constraints",
+    "categoryLabel": "Constraints",
+    "label": "Scope Boundaries",
+    "snippet": "<<Define what is out of scope.>>"
+  },
+  {
+    "id": "constraints-resource-limits-13",
+    "categoryId": "constraints",
+    "categoryLabel": "Constraints",
+    "label": "Resource Limits",
+    "snippet": "<<Cap scope by available resources or team size.>>"
+  },
+  {
+    "id": "constraints-license-constraints-14",
+    "categoryId": "constraints",
+    "categoryLabel": "Constraints",
+    "label": "License Constraints",
+    "snippet": "<<Respect licensing constraints for code or media.>>"
+  },
+  {
+    "id": "constraints-security-constraints-15",
+    "categoryId": "constraints",
+    "categoryLabel": "Constraints",
+    "label": "Security Constraints",
+    "snippet": "<<Add security requirements for sensitive systems.>>"
+  },
+  {
+    "id": "constraints-performance-constraints-16",
+    "categoryId": "constraints",
+    "categoryLabel": "Constraints",
+    "label": "Performance Constraints",
+    "snippet": "<<State performance targets when relevant.>>"
+  },
+  {
+    "id": "constraints-compatibility-constraints-17",
+    "categoryId": "constraints",
+    "categoryLabel": "Constraints",
+    "label": "Compatibility Constraints",
+    "snippet": "<<Note compatibility requirements across versions.>>"
+  },
+  {
+    "id": "output-format-json-output-1",
+    "categoryId": "output-format",
+    "categoryLabel": "Output Format",
+    "label": "JSON Output",
+    "snippet": "<<Return structured JSON when structure matters.>>"
+  },
+  {
+    "id": "output-format-markdown-sections-2",
+    "categoryId": "output-format",
+    "categoryLabel": "Output Format",
+    "label": "Markdown Sections",
+    "snippet": "<<Use markdown sections with headings in the response.>>"
+  },
+  {
+    "id": "output-format-plain-text-only-3",
+    "categoryId": "output-format",
+    "categoryLabel": "Output Format",
+    "label": "Plain Text Only",
+    "snippet": "<<Require plain text without markdown or code fences.>>"
+  },
+  {
+    "id": "output-format-table-format-4",
+    "categoryId": "output-format",
+    "categoryLabel": "Output Format",
+    "label": "Table Format",
+    "snippet": "<<Use a table when comparing options or criteria.>>"
+  },
+  {
+    "id": "output-format-bullet-list-output-5",
+    "categoryId": "output-format",
+    "categoryLabel": "Output Format",
+    "label": "Bullet List Output",
+    "snippet": "<<Format the answer primarily as bullet lists.>>"
+  },
+  {
+    "id": "output-format-numbered-list-output-6",
+    "categoryId": "output-format",
+    "categoryLabel": "Output Format",
+    "label": "Numbered List Output",
+    "snippet": "<<Format procedural answers as numbered lists.>>"
+  },
+  {
+    "id": "output-format-code-block-output-7",
+    "categoryId": "output-format",
+    "categoryLabel": "Output Format",
+    "label": "Code Block Output",
+    "snippet": "<<Put code in fenced code blocks with language tags.>>"
+  },
+  {
+    "id": "output-format-single-paragraph-8",
+    "categoryId": "output-format",
+    "categoryLabel": "Output Format",
+    "label": "Single Paragraph",
+    "snippet": "<<Keep the answer to one cohesive paragraph if brief.>>"
+  },
+  {
+    "id": "output-format-executive-summary-first-9",
+    "categoryId": "output-format",
+    "categoryLabel": "Output Format",
+    "label": "Executive Summary First",
+    "snippet": "<<Lead with a short executive summary.>>"
+  },
+  {
+    "id": "output-format-appendix-detail-10",
+    "categoryId": "output-format",
+    "categoryLabel": "Output Format",
+    "label": "Appendix Detail",
+    "snippet": "<<Put long detail in an appendix after the main answer.>>"
+  },
+  {
+    "id": "output-format-yaml-front-matter-11",
+    "categoryId": "output-format",
+    "categoryLabel": "Output Format",
+    "label": "YAML Front Matter",
+    "snippet": "<<Use YAML front matter when metadata is needed.>>"
+  },
+  {
+    "id": "output-format-csv-compatible-12",
+    "categoryId": "output-format",
+    "categoryLabel": "Output Format",
+    "label": "CSV Compatible",
+    "snippet": "<<Make tabular output CSV-friendly when requested.>>"
+  },
+  {
+    "id": "output-format-slide-outline-13",
+    "categoryId": "output-format",
+    "categoryLabel": "Output Format",
+    "label": "Slide Outline",
+    "snippet": "<<Format as slide titles and bullet speaker notes.>>"
+  },
+  {
+    "id": "output-format-email-format-14",
+    "categoryId": "output-format",
+    "categoryLabel": "Output Format",
+    "label": "Email Format",
+    "snippet": "<<Format as a ready-to-send email when appropriate.>>"
+  },
+  {
+    "id": "output-format-report-format-15",
+    "categoryId": "output-format",
+    "categoryLabel": "Output Format",
+    "label": "Report Format",
+    "snippet": "<<Use report sections: summary, analysis, recommendations.>>"
+  },
+  {
+    "id": "output-format-q-and-a-format-16",
+    "categoryId": "output-format",
+    "categoryLabel": "Output Format",
+    "label": "Q And A Format",
+    "snippet": "<<Answer in explicit question-and-answer pairs.>>"
+  },
+  {
+    "id": "output-format-minimal-formatting-17",
+    "categoryId": "output-format",
+    "categoryLabel": "Output Format",
+    "label": "Minimal Formatting",
+    "snippet": "<<Minimize formatting unless structure helps clarity.>>"
+  },
+  {
+    "id": "examples-add-good-example-1",
+    "categoryId": "examples",
+    "categoryLabel": "Examples",
+    "label": "Add Good Example",
+    "snippet": "<<Include one strong example of desired output.>>"
+  },
+  {
+    "id": "examples-add-bad-example-2",
+    "categoryId": "examples",
+    "categoryLabel": "Examples",
+    "label": "Add Bad Example",
+    "snippet": "<<Include a counterexample of what to avoid.>>"
+  },
+  {
+    "id": "examples-before-after-example-3",
+    "categoryId": "examples",
+    "categoryLabel": "Examples",
+    "label": "Before After Example",
+    "snippet": "<<Show before/after transformation example.>>"
+  },
+  {
+    "id": "examples-edge-case-example-4",
+    "categoryId": "examples",
+    "categoryLabel": "Examples",
+    "label": "Edge Case Example",
+    "snippet": "<<Add an example covering an edge case.>>"
+  },
+  {
+    "id": "examples-minimal-example-5",
+    "categoryId": "examples",
+    "categoryLabel": "Examples",
+    "label": "Minimal Example",
+    "snippet": "<<Add a minimal small-scale example.>>"
+  },
+  {
+    "id": "examples-full-length-example-6",
+    "categoryId": "examples",
+    "categoryLabel": "Examples",
+    "label": "Full Length Example",
+    "snippet": "<<Add a fuller example matching expected length.>>"
+  },
+  {
+    "id": "examples-domain-example-7",
+    "categoryId": "examples",
+    "categoryLabel": "Examples",
+    "label": "Domain Example",
+    "snippet": "<<Add an example grounded in the prompt domain.>>"
+  },
+  {
+    "id": "examples-template-example-8",
+    "categoryId": "examples",
+    "categoryLabel": "Examples",
+    "label": "Template Example",
+    "snippet": "<<Show a filled-in template example.>>"
+  },
+  {
+    "id": "examples-multi-format-example-9",
+    "categoryId": "examples",
+    "categoryLabel": "Examples",
+    "label": "Multi Format Example",
+    "snippet": "<<Show examples in more than one acceptable format.>>"
+  },
+  {
+    "id": "examples-negative-prompt-example-10",
+    "categoryId": "examples",
+    "categoryLabel": "Examples",
+    "label": "Negative Prompt Example",
+    "snippet": "<<Show an example violating a key constraint.>>"
+  },
+  {
+    "id": "examples-step-example-11",
+    "categoryId": "examples",
+    "categoryLabel": "Examples",
+    "label": "Step Example",
+    "snippet": "<<Walk through one step with a concrete mini-example.>>"
+  },
+  {
+    "id": "examples-input-output-pair-12",
+    "categoryId": "examples",
+    "categoryLabel": "Examples",
+    "label": "Input Output Pair",
+    "snippet": "<<Provide input/output pair illustrating mapping.>>"
+  },
+  {
+    "id": "examples-annotated-example-13",
+    "categoryId": "examples",
+    "categoryLabel": "Examples",
+    "label": "Annotated Example",
+    "snippet": "<<Annotate why the example satisfies requirements.>>"
+  },
+  {
+    "id": "examples-short-snippet-example-14",
+    "categoryId": "examples",
+    "categoryLabel": "Examples",
+    "label": "Short Snippet Example",
+    "snippet": "<<Use a short snippet instead of a long sample.>>"
+  },
+  {
+    "id": "examples-replace-abstract-with-example-15",
+    "categoryId": "examples",
+    "categoryLabel": "Examples",
+    "label": "Replace Abstract With Example",
+    "snippet": "<<Replace abstract rules with a concrete example.>>"
+  },
+  {
+    "id": "examples-two-tier-examples-16",
+    "categoryId": "examples",
+    "categoryLabel": "Examples",
+    "label": "Two Tier Examples",
+    "snippet": "<<Give a simple example and an advanced example.>>"
+  },
+  {
+    "id": "examples-example-diversity-17",
+    "categoryId": "examples",
+    "categoryLabel": "Examples",
+    "label": "Example Diversity",
+    "snippet": "<<Use examples that differ in style but meet criteria.>>"
+  },
+  {
+    "id": "scope-narrow-focus-1",
+    "categoryId": "scope",
+    "categoryLabel": "Scope",
+    "label": "Narrow Focus",
+    "snippet": "<<Narrow scope to the essential task only.>>"
+  },
+  {
+    "id": "scope-broaden-scope-2",
+    "categoryId": "scope",
+    "categoryLabel": "Scope",
+    "label": "Broaden Scope",
+    "snippet": "<<Expand scope to cover adjacent concerns worth addressing.>>"
+  },
+  {
+    "id": "scope-single-objective-3",
+    "categoryId": "scope",
+    "categoryLabel": "Scope",
+    "label": "Single Objective",
+    "snippet": "<<Reduce to one primary objective.>>"
+  },
+  {
+    "id": "scope-multi-objective-ranked-4",
+    "categoryId": "scope",
+    "categoryLabel": "Scope",
+    "label": "Multi Objective Ranked",
+    "snippet": "<<Keep multiple objectives but rank them.>>"
+  },
+  {
+    "id": "scope-exclude-nice-to-have-5",
+    "categoryId": "scope",
+    "categoryLabel": "Scope",
+    "label": "Exclude Nice To Have",
+    "snippet": "<<Move nice-to-haves to optional section.>>"
+  },
+  {
+    "id": "scope-phase-one-scope-6",
+    "categoryId": "scope",
+    "categoryLabel": "Scope",
+    "label": "Phase One Scope",
+    "snippet": "<<Define phase-one scope separate from future phases.>>"
+  },
+  {
+    "id": "scope-mvp-scope-7",
+    "categoryId": "scope",
+    "categoryLabel": "Scope",
+    "label": "MVP Scope",
+    "snippet": "<<Focus on minimum viable deliverable first.>>"
+  },
+  {
+    "id": "scope-full-feature-scope-8",
+    "categoryId": "scope",
+    "categoryLabel": "Scope",
+    "label": "Full Feature Scope",
+    "snippet": "<<Include full feature scope if completeness is required.>>"
+  },
+  {
+    "id": "scope-geographic-scope-9",
+    "categoryId": "scope",
+    "categoryLabel": "Scope",
+    "label": "Geographic Scope",
+    "snippet": "<<Clarify geographic or market scope.>>"
+  },
+  {
+    "id": "scope-user-segment-scope-10",
+    "categoryId": "scope",
+    "categoryLabel": "Scope",
+    "label": "User Segment Scope",
+    "snippet": "<<Limit to a specific user segment.>>"
+  },
+  {
+    "id": "scope-time-period-scope-11",
+    "categoryId": "scope",
+    "categoryLabel": "Scope",
+    "label": "Time Period Scope",
+    "snippet": "<<Limit analysis to a defined time period.>>"
+  },
+  {
+    "id": "scope-depth-not-breadth-12",
+    "categoryId": "scope",
+    "categoryLabel": "Scope",
+    "label": "Depth Not Breadth",
+    "snippet": "<<Prefer depth on core topic over broad coverage.>>"
+  },
+  {
+    "id": "scope-breadth-survey-13",
+    "categoryId": "scope",
+    "categoryLabel": "Scope",
+    "label": "Breadth Survey",
+    "snippet": "<<Cover breadth with shallow treatment per area.>>"
+  },
+  {
+    "id": "scope-in-scope-list-14",
+    "categoryId": "scope",
+    "categoryLabel": "Scope",
+    "label": "In Scope List",
+    "snippet": "<<Explicitly list what is in scope.>>"
+  },
+  {
+    "id": "scope-out-of-scope-list-15",
+    "categoryId": "scope",
+    "categoryLabel": "Scope",
+    "label": "Out Of Scope List",
+    "snippet": "<<Explicitly list what is out of scope.>>"
+  },
+  {
+    "id": "scope-scope-guardrails-16",
+    "categoryId": "scope",
+    "categoryLabel": "Scope",
+    "label": "Scope Guardrails",
+    "snippet": "<<Add guardrails preventing scope creep in responses.>>"
+  },
+  {
+    "id": "scope-dependency-scope-17",
+    "categoryId": "scope",
+    "categoryLabel": "Scope",
+    "label": "Dependency Scope",
+    "snippet": "<<Clarify which dependencies are in scope to discuss.>>"
+  },
+  {
+    "id": "sources-use-uploaded-sources-1",
+    "categoryId": "sources",
+    "categoryLabel": "Sources",
+    "label": "Use Uploaded Sources",
+    "snippet": "<<Restrict answers to provided uploaded sources only.>>"
+  },
+  {
+    "id": "sources-enable-web-research-2",
+    "categoryId": "sources",
+    "categoryLabel": "Sources",
+    "label": "Enable Web Research",
+    "snippet": "<<Allow up-to-date external research when needed.>>"
+  },
+  {
+    "id": "sources-primary-sources-only-3",
+    "categoryId": "sources",
+    "categoryLabel": "Sources",
+    "label": "Primary Sources Only",
+    "snippet": "<<Prefer primary sources over summaries.>>"
+  },
+  {
+    "id": "sources-no-external-research-4",
+    "categoryId": "sources",
+    "categoryLabel": "Sources",
+    "label": "No External Research",
+    "snippet": "<<Do not use external knowledge beyond the prompt.>>"
+  },
+  {
+    "id": "sources-provided-docs-only-5",
+    "categoryId": "sources",
+    "categoryLabel": "Sources",
+    "label": "Provided Docs Only",
+    "snippet": "<<Ground answers in attached documents only.>>"
+  },
+  {
+    "id": "sources-cross-reference-sources-6",
+    "categoryId": "sources",
+    "categoryLabel": "Sources",
+    "label": "Cross Reference Sources",
+    "snippet": "<<Cross-reference multiple provided sources.>>"
+  },
+  {
+    "id": "sources-flag-source-gaps-7",
+    "categoryId": "sources",
+    "categoryLabel": "Sources",
+    "label": "Flag Source Gaps",
+    "snippet": "<<Flag when provided sources are insufficient.>>"
+  },
+  {
+    "id": "sources-summarize-sources-first-8",
+    "categoryId": "sources",
+    "categoryLabel": "Sources",
+    "label": "Summarize Sources First",
+    "snippet": "<<Summarize key points from sources before answering.>>"
+  },
+  {
+    "id": "sources-quote-source-passages-9",
+    "categoryId": "sources",
+    "categoryLabel": "Sources",
+    "label": "Quote Source Passages",
+    "snippet": "<<Quote relevant passages from provided materials.>>"
+  },
+  {
+    "id": "sources-source-hierarchy-10",
+    "categoryId": "sources",
+    "categoryLabel": "Sources",
+    "label": "Source Hierarchy",
+    "snippet": "<<Follow a stated hierarchy among source types.>>"
+  },
+  {
+    "id": "sources-recency-preference-11",
+    "categoryId": "sources",
+    "categoryLabel": "Sources",
+    "label": "Recency Preference",
+    "snippet": "<<Prefer the most recent sources when dates matter.>>"
+  },
+  {
+    "id": "sources-internal-knowledge-ok-12",
+    "categoryId": "sources",
+    "categoryLabel": "Sources",
+    "label": "Internal Knowledge OK",
+    "snippet": "<<Allow general knowledge when sources are silent.>>"
+  },
+  {
+    "id": "sources-link-to-sources-13",
+    "categoryId": "sources",
+    "categoryLabel": "Sources",
+    "label": "Link To Sources",
+    "snippet": "<<Link or name sources used in the answer.>>"
+  },
+  {
+    "id": "sources-no-speculation-beyond-sources-14",
+    "categoryId": "sources",
+    "categoryLabel": "Sources",
+    "label": "No Speculation Beyond Sources",
+    "snippet": "<<Do not speculate beyond what sources support.>>"
+  },
+  {
+    "id": "sources-extract-facts-from-sources-15",
+    "categoryId": "sources",
+    "categoryLabel": "Sources",
+    "label": "Extract Facts From Sources",
+    "snippet": "<<Extract facts explicitly stated in sources.>>"
+  },
+  {
+    "id": "sources-compare-source-views-16",
+    "categoryId": "sources",
+    "categoryLabel": "Sources",
+    "label": "Compare Source Views",
+    "snippet": "<<Compare conflicting views across sources.>>"
+  },
+  {
+    "id": "revision-strengthen-core-ask-1",
+    "categoryId": "revision",
+    "categoryLabel": "Revision",
+    "label": "Strengthen Core Ask",
+    "snippet": "<<Make the core ask sharper and harder to misread.>>"
+  },
+  {
+    "id": "revision-remove-weak-verbs-2",
+    "categoryId": "revision",
+    "categoryLabel": "Revision",
+    "label": "Remove Weak Verbs",
+    "snippet": "<<Replace weak verbs with specific action verbs.>>"
+  },
+  {
+    "id": "revision-merge-overlapping-sections-3",
+    "categoryId": "revision",
+    "categoryLabel": "Revision",
+    "label": "Merge Overlapping Sections",
+    "snippet": "<<Merge sections that repeat the same intent.>>"
+  },
+  {
+    "id": "revision-sharpen-deliverables-4",
+    "categoryId": "revision",
+    "categoryLabel": "Revision",
+    "label": "Sharpen Deliverables",
+    "snippet": "<<Make deliverables concrete and testable.>>"
+  },
+  {
+    "id": "revision-clarify-priority-conflicts-5",
+    "categoryId": "revision",
+    "categoryLabel": "Revision",
+    "label": "Clarify Priority Conflicts",
+    "snippet": "<<Resolve conflicting priorities explicitly.>>"
+  },
+  {
+    "id": "revision-tighten-constraints-6",
+    "categoryId": "revision",
+    "categoryLabel": "Revision",
+    "label": "Tighten Constraints",
+    "snippet": "<<Reword constraints to be measurable.>>"
+  },
+  {
+    "id": "revision-improve-flow-7",
+    "categoryId": "revision",
+    "categoryLabel": "Revision",
+    "label": "Improve Flow",
+    "snippet": "<<Reorder sections for logical flow.>>"
+  },
+  {
+    "id": "revision-remove-orphan-bullets-8",
+    "categoryId": "revision",
+    "categoryLabel": "Revision",
+    "label": "Remove Orphan Bullets",
+    "snippet": "<<Delete bullets that no longer support the goal.>>"
+  },
+  {
+    "id": "revision-align-tone-with-goal-9",
+    "categoryId": "revision",
+    "categoryLabel": "Revision",
+    "label": "Align Tone With Goal",
+    "snippet": "<<Align tone with the stated goal and audience.>>"
+  },
+  {
+    "id": "revision-add-missing-context-10",
+    "categoryId": "revision",
+    "categoryLabel": "Revision",
+    "label": "Add Missing Context",
+    "snippet": "<<Add missing context needed to execute well.>>"
+  },
+  {
+    "id": "revision-remove-tangents-11",
+    "categoryId": "revision",
+    "categoryLabel": "Revision",
+    "label": "Remove Tangents",
+    "snippet": "<<Cut tangential requirements unrelated to the goal.>>"
+  },
+  {
+    "id": "revision-unify-voice-12",
+    "categoryId": "revision",
+    "categoryLabel": "Revision",
+    "label": "Unify Voice",
+    "snippet": "<<Make the prompt read as one consistent voice.>>"
+  },
+  {
+    "id": "revision-explicit-non-goals-13",
+    "categoryId": "revision",
+    "categoryLabel": "Revision",
+    "label": "Explicit Non Goals",
+    "snippet": "<<State explicit non-goals to prevent drift.>>"
+  },
+  {
+    "id": "revision-refresh-stale-wording-14",
+    "categoryId": "revision",
+    "categoryLabel": "Revision",
+    "label": "Refresh Stale Wording",
+    "snippet": "<<Replace stale or vague wording with fresh phrasing.>>"
+  },
+  {
+    "id": "revision-balance-detail-level-15",
+    "categoryId": "revision",
+    "categoryLabel": "Revision",
+    "label": "Balance Detail Level",
+    "snippet": "<<Balance detail so no section is disproportionately thin.>>"
+  },
+  {
+    "id": "revision-harden-success-criteria-16",
+    "categoryId": "revision",
+    "categoryLabel": "Revision",
+    "label": "Harden Success Criteria",
+    "snippet": "<<Make success criteria objectively checkable.>>"
+  },
+  {
+    "id": "revision-final-polish-pass-17",
+    "categoryId": "revision",
+    "categoryLabel": "Revision",
+    "label": "Final Polish Pass",
+    "snippet": "<<Apply a final polish pass for clarity and completeness.>>"
+  },
+  {
+    "id": "specificity-name-concrete-outputs-1",
+    "categoryId": "specificity",
+    "categoryLabel": "Specificity",
+    "label": "Name Concrete Outputs",
+    "snippet": "<<Name concrete outputs instead of generic deliverables.>>"
+  },
+  {
+    "id": "specificity-quantify-targets-2",
+    "categoryId": "specificity",
+    "categoryLabel": "Specificity",
+    "label": "Quantify Targets",
+    "snippet": "<<Add numbers or ranges where they clarify expectations.>>"
+  },
+  {
+    "id": "specificity-specify-tools-3",
+    "categoryId": "specificity",
+    "categoryLabel": "Specificity",
+    "label": "Specify Tools",
+    "snippet": "<<Name tools, frameworks, or stacks when relevant.>>"
+  },
+  {
+    "id": "specificity-define-roles-4",
+    "categoryId": "specificity",
+    "categoryLabel": "Specificity",
+    "label": "Define Roles",
+    "snippet": "<<Define roles involved instead of generic 'team'.>>"
+  },
+  {
+    "id": "specificity-exact-file-names-5",
+    "categoryId": "specificity",
+    "categoryLabel": "Specificity",
+    "label": "Exact File Names",
+    "snippet": "<<Specify file names or paths when outputs are files.>>"
+  },
+  {
+    "id": "specificity-exact-formats-6",
+    "categoryId": "specificity",
+    "categoryLabel": "Specificity",
+    "label": "Exact Formats",
+    "snippet": "<<Specify formats (PDF, CSV, etc.) explicitly.>>"
+  },
+  {
+    "id": "specificity-geographic-specificity-7",
+    "categoryId": "specificity",
+    "categoryLabel": "Specificity",
+    "label": "Geographic Specificity",
+    "snippet": "<<Name regions or locales when they matter.>>"
+  },
+  {
+    "id": "specificity-version-specificity-8",
+    "categoryId": "specificity",
+    "categoryLabel": "Specificity",
+    "label": "Version Specificity",
+    "snippet": "<<Pin versions for APIs, libraries, or standards.>>"
+  },
+  {
+    "id": "specificity-metric-definitions-9",
+    "categoryId": "specificity",
+    "categoryLabel": "Specificity",
+    "label": "Metric Definitions",
+    "snippet": "<<Define how metrics are calculated.>>"
+  },
+  {
+    "id": "specificity-sample-data-shape-10",
+    "categoryId": "specificity",
+    "categoryLabel": "Specificity",
+    "label": "Sample Data Shape",
+    "snippet": "<<Describe shape of sample input data.>>"
+  },
+  {
+    "id": "specificity-ui-component-names-11",
+    "categoryId": "specificity",
+    "categoryLabel": "Specificity",
+    "label": "UI Component Names",
+    "snippet": "<<Name UI components or screens when designing.>>"
+  },
+  {
+    "id": "specificity-api-endpoint-detail-12",
+    "categoryId": "specificity",
+    "categoryLabel": "Specificity",
+    "label": "API Endpoint Detail",
+    "snippet": "<<Specify endpoints or methods when integrating.>>"
+  },
+  {
+    "id": "specificity-color-or-brand-hex-13",
+    "categoryId": "specificity",
+    "categoryLabel": "Specificity",
+    "label": "Color Or Brand Hex",
+    "snippet": "<<Include brand colors when visual design matters.>>"
+  },
+  {
+    "id": "specificity-persona-specificity-14",
+    "categoryId": "specificity",
+    "categoryLabel": "Specificity",
+    "label": "Persona Specificity",
+    "snippet": "<<Define user personas with concrete attributes.>>"
+  },
+  {
+    "id": "specificity-scenario-specificity-15",
+    "categoryId": "specificity",
+    "categoryLabel": "Specificity",
+    "label": "Scenario Specificity",
+    "snippet": "<<Anchor instructions in a concrete scenario.>>"
+  },
+  {
+    "id": "specificity-threshold-specificity-16",
+    "categoryId": "specificity",
+    "categoryLabel": "Specificity",
+    "label": "Threshold Specificity",
+    "snippet": "<<State thresholds that trigger actions.>>"
+  },
+  {
+    "id": "specificity-naming-conventions-17",
+    "categoryId": "specificity",
+    "categoryLabel": "Specificity",
+    "label": "Naming Conventions",
+    "snippet": "<<Specify naming conventions for code or files.>>"
+  },
+  {
+    "id": "edge-cases-handle-empty-input-1",
+    "categoryId": "edge-cases",
+    "categoryLabel": "Edge Cases",
+    "label": "Handle Empty Input",
+    "snippet": "<<Explain behavior when required input is missing.>>"
+  },
+  {
+    "id": "edge-cases-handle-partial-data-2",
+    "categoryId": "edge-cases",
+    "categoryLabel": "Edge Cases",
+    "label": "Handle Partial Data",
+    "snippet": "<<Explain behavior with incomplete data.>>"
+  },
+  {
+    "id": "edge-cases-large-input-handling-3",
+    "categoryId": "edge-cases",
+    "categoryLabel": "Edge Cases",
+    "label": "Large Input Handling",
+    "snippet": "<<Note how to handle very large inputs.>>"
+  },
+  {
+    "id": "edge-cases-ambiguous-input-4",
+    "categoryId": "edge-cases",
+    "categoryLabel": "Edge Cases",
+    "label": "Ambiguous Input",
+    "snippet": "<<Ask clarifying questions when input is ambiguous.>>"
+  },
+  {
+    "id": "edge-cases-conflicting-instructions-5",
+    "categoryId": "edge-cases",
+    "categoryLabel": "Edge Cases",
+    "label": "Conflicting Instructions",
+    "snippet": "<<Prioritize rules when instructions conflict.>>"
+  },
+  {
+    "id": "edge-cases-off-topic-requests-6",
+    "categoryId": "edge-cases",
+    "categoryLabel": "Edge Cases",
+    "label": "Off Topic Requests",
+    "snippet": "<<Decline or redirect off-topic extensions.>>"
+  },
+  {
+    "id": "edge-cases-safety-refusal-path-7",
+    "categoryId": "edge-cases",
+    "categoryLabel": "Edge Cases",
+    "label": "Safety Refusal Path",
+    "snippet": "<<Refuse unsafe requests with a brief explanation.>>"
+  },
+  {
+    "id": "edge-cases-fallback-behavior-8",
+    "categoryId": "edge-cases",
+    "categoryLabel": "Edge Cases",
+    "label": "Fallback Behavior",
+    "snippet": "<<Define fallback behavior when unsure.>>"
+  },
+  {
+    "id": "edge-cases-error-message-style-9",
+    "categoryId": "edge-cases",
+    "categoryLabel": "Edge Cases",
+    "label": "Error Message Style",
+    "snippet": "<<Specify how errors should be communicated.>>"
+  },
+  {
+    "id": "edge-cases-retry-guidance-10",
+    "categoryId": "edge-cases",
+    "categoryLabel": "Edge Cases",
+    "label": "Retry Guidance",
+    "snippet": "<<Include retry guidance for transient failures.>>"
+  },
+  {
+    "id": "edge-cases-localization-edge-cases-11",
+    "categoryId": "edge-cases",
+    "categoryLabel": "Edge Cases",
+    "label": "Localization Edge Cases",
+    "snippet": "<<Handle pluralization, dates, and locale formats.>>"
+  },
+  {
+    "id": "edge-cases-accessibility-edge-cases-12",
+    "categoryId": "edge-cases",
+    "categoryLabel": "Edge Cases",
+    "label": "Accessibility Edge Cases",
+    "snippet": "<<Consider screen readers and keyboard-only use.>>"
+  },
+  {
+    "id": "edge-cases-mobile-constraints-13",
+    "categoryId": "edge-cases",
+    "categoryLabel": "Edge Cases",
+    "label": "Mobile Constraints",
+    "snippet": "<<Account for mobile layout constraints.>>"
+  },
+  {
+    "id": "edge-cases-legacy-compatibility-14",
+    "categoryId": "edge-cases",
+    "categoryLabel": "Edge Cases",
+    "label": "Legacy Compatibility",
+    "snippet": "<<Note support for legacy versions if required.>>"
+  },
+  {
+    "id": "edge-cases-rate-limit-behavior-15",
+    "categoryId": "edge-cases",
+    "categoryLabel": "Edge Cases",
+    "label": "Rate Limit Behavior",
+    "snippet": "<<Describe behavior under rate limits.>>"
+  },
+  {
+    "id": "edge-cases-timeout-behavior-16",
+    "categoryId": "edge-cases",
+    "categoryLabel": "Edge Cases",
+    "label": "Timeout Behavior",
+    "snippet": "<<Describe behavior on timeouts.>>"
+  },
+  {
+    "id": "edge-cases-multi-language-input-17",
+    "categoryId": "edge-cases",
+    "categoryLabel": "Edge Cases",
+    "label": "Multi Language Input",
+    "snippet": "<<Handle mixed-language input appropriately.>>"
+  }
+]

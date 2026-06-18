@@ -4,20 +4,6 @@ import { AdminLogoutButton } from "@/components/admin/AdminLogoutButton";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
-type CompanionSuggestionOption = {
-  id: string;
-  label: string;
-  snippet: string;
-  enabled?: boolean;
-};
-
-type CompanionSuggestionGroup = {
-  id: string;
-  label?: string;
-  enabled?: boolean;
-  options: CompanionSuggestionOption[];
-};
-
 type EngineeringResponse = {
   ok?: boolean;
   user_content_token?: string;
@@ -31,20 +17,19 @@ type EngineeringResponse = {
   improve_max_completion_tokens?: number;
   refine_max_completion_tokens?: number;
   refine_continuation_max_rounds?: number;
-  suggestion_word_threshold?: number;
-  suggestion_count_short?: number;
-  suggestion_count_long?: number;
-  suggestion_groups?: CompanionSuggestionGroup[];
+  suggestion_picker_model?: string;
+  suggestion_picker_timeout_ms?: number;
+  suggestion_ai_pick_count?: number;
+  suggestion_display_min?: number;
+  suggestion_display_max?: number;
+  suggestion_max_per_category?: number;
+  catalog_stats?: {
+    total: number;
+    categories: Array<{ id: string; label: string; count: number }>;
+  };
+  default_improve_template?: string;
   error?: string;
 };
-
-function newGroupId() {
-  return `group-${Date.now().toString(36)}`;
-}
-
-function newOptionId(groupId: string) {
-  return `${groupId}-opt-${Math.random().toString(36).slice(2, 7)}`;
-}
 
 export function AdminCompanionPromptEngineeringClient() {
   const [token, setToken] = useState("<<PROMPTLY_USER_CONTENT>>");
@@ -58,10 +43,14 @@ export function AdminCompanionPromptEngineeringClient() {
   const [improveMaxTokens, setImproveMaxTokens] = useState(2200);
   const [refineMaxTokens, setRefineMaxTokens] = useState(2800);
   const [refineContinuationRounds, setRefineContinuationRounds] = useState(3);
-  const [suggestionWordThreshold, setSuggestionWordThreshold] = useState(100);
-  const [suggestionCountShort, setSuggestionCountShort] = useState(5);
-  const [suggestionCountLong, setSuggestionCountLong] = useState(6);
-  const [suggestionGroups, setSuggestionGroups] = useState<CompanionSuggestionGroup[]>([]);
+  const [suggestionPickerModel, setSuggestionPickerModel] = useState("gpt-5-nano");
+  const [suggestionPickerTimeoutMs, setSuggestionPickerTimeoutMs] = useState(15_000);
+  const [suggestionAiPickCount, setSuggestionAiPickCount] = useState(5);
+  const [suggestionDisplayMin, setSuggestionDisplayMin] = useState(3);
+  const [suggestionDisplayMax, setSuggestionDisplayMax] = useState(5);
+  const [suggestionMaxPerCategory, setSuggestionMaxPerCategory] = useState(2);
+  const [catalogStats, setCatalogStats] = useState<EngineeringResponse["catalog_stats"]>();
+  const [defaultImproveTemplate, setDefaultImproveTemplate] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -94,14 +83,24 @@ export function AdminCompanionPromptEngineeringClient() {
       setRefineContinuationRounds(
         Number.isFinite(data.refine_continuation_max_rounds) ? Number(data.refine_continuation_max_rounds) : 3
       );
-      setSuggestionWordThreshold(
-        Number.isFinite(data.suggestion_word_threshold) ? Number(data.suggestion_word_threshold) : 100
+      setSuggestionPickerModel(String(data.suggestion_picker_model || "gpt-5-nano").trim() || "gpt-5-nano");
+      setSuggestionPickerTimeoutMs(
+        Number.isFinite(data.suggestion_picker_timeout_ms) ? Number(data.suggestion_picker_timeout_ms) : 15_000
       );
-      setSuggestionCountShort(
-        Number.isFinite(data.suggestion_count_short) ? Number(data.suggestion_count_short) : 5
+      setSuggestionAiPickCount(
+        Number.isFinite(data.suggestion_ai_pick_count) ? Number(data.suggestion_ai_pick_count) : 5
       );
-      setSuggestionCountLong(Number.isFinite(data.suggestion_count_long) ? Number(data.suggestion_count_long) : 6);
-      setSuggestionGroups(Array.isArray(data.suggestion_groups) ? data.suggestion_groups : []);
+      setSuggestionDisplayMin(
+        Number.isFinite(data.suggestion_display_min) ? Number(data.suggestion_display_min) : 3
+      );
+      setSuggestionDisplayMax(
+        Number.isFinite(data.suggestion_display_max) ? Number(data.suggestion_display_max) : 5
+      );
+      setSuggestionMaxPerCategory(
+        Number.isFinite(data.suggestion_max_per_category) ? Number(data.suggestion_max_per_category) : 2
+      );
+      setCatalogStats(data.catalog_stats);
+      setDefaultImproveTemplate(String(data.default_improve_template || "").trim());
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));
     } finally {
@@ -112,73 +111,6 @@ export function AdminCompanionPromptEngineeringClient() {
   useEffect(() => {
     void load();
   }, [load]);
-
-  function updateGroup(groupIndex: number, patch: Partial<CompanionSuggestionGroup>) {
-    setSuggestionGroups((prev) =>
-      prev.map((group, index) => (index === groupIndex ? { ...group, ...patch } : group))
-    );
-  }
-
-  function updateOption(groupIndex: number, optionIndex: number, patch: Partial<CompanionSuggestionOption>) {
-    setSuggestionGroups((prev) =>
-      prev.map((group, gi) =>
-        gi !== groupIndex
-          ? group
-          : {
-              ...group,
-              options: group.options.map((option, oi) =>
-                oi !== optionIndex ? option : { ...option, ...patch }
-              )
-            }
-      )
-    );
-  }
-
-  function addGroup() {
-    const id = newGroupId();
-    setSuggestionGroups((prev) => [
-      ...prev,
-      {
-        id,
-        label: "New group",
-        enabled: true,
-        options: [{ id: newOptionId(id), label: "New suggestion", snippet: "<<>>", enabled: true }]
-      }
-    ]);
-  }
-
-  function removeGroup(groupIndex: number) {
-    setSuggestionGroups((prev) => prev.filter((_, index) => index !== groupIndex));
-  }
-
-  function addOption(groupIndex: number) {
-    setSuggestionGroups((prev) =>
-      prev.map((group, index) =>
-        index !== groupIndex
-          ? group
-          : {
-              ...group,
-              options: [
-                ...group.options,
-                {
-                  id: newOptionId(group.id),
-                  label: "New suggestion",
-                  snippet: "<<>>",
-                  enabled: true
-                }
-              ]
-            }
-      )
-    );
-  }
-
-  function removeOption(groupIndex: number, optionIndex: number) {
-    setSuggestionGroups((prev) =>
-      prev.map((group, gi) =>
-        gi !== groupIndex ? group : { ...group, options: group.options.filter((_, oi) => oi !== optionIndex) }
-      )
-    );
-  }
 
   async function save() {
     setSaving(true);
@@ -199,10 +131,12 @@ export function AdminCompanionPromptEngineeringClient() {
           improve_max_completion_tokens: improveMaxTokens,
           refine_max_completion_tokens: refineMaxTokens,
           refine_continuation_max_rounds: refineContinuationRounds,
-          suggestion_word_threshold: suggestionWordThreshold,
-          suggestion_count_short: suggestionCountShort,
-          suggestion_count_long: suggestionCountLong,
-          suggestion_groups: suggestionGroups
+          suggestion_picker_model: suggestionPickerModel,
+          suggestion_picker_timeout_ms: suggestionPickerTimeoutMs,
+          suggestion_ai_pick_count: suggestionAiPickCount,
+          suggestion_display_min: suggestionDisplayMin,
+          suggestion_display_max: suggestionDisplayMax,
+          suggestion_max_per_category: suggestionMaxPerCategory
         })
       });
       const data = await res.json().catch(() => ({}));
@@ -267,7 +201,33 @@ export function AdminCompanionPromptEngineeringClient() {
             <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-violet-300/90">Improve mode</h2>
             <p className="mb-3 text-xs text-violet-200/70">
               First pass when the user clicks Improve in Companion (<span className="font-mono">improve</span>).
+              One stateless API call: your template + the user&apos;s draft are merged into a single message—no chat
+              history. The model must return only the rewritten prompt, not these instructions.
             </p>
+            <p className="mb-3 text-xs text-violet-200/70">
+              Template must include{" "}
+              <span className="font-mono text-violet-100">&lt;&lt;PROMPTLY_USER_CONTENT&gt;&gt;</span> exactly once.
+              That token is replaced with the user&apos;s draft (e.g. &quot;Draft a letter to my teacher…&quot;).
+            </p>
+            <p className="mb-3 text-xs text-violet-200/70">
+              After generation, the backend validates the output (heuristics + a lightweight check call). If the
+              result echoes template text or is not a real rewrite, it automatically retries with a correction.
+            </p>
+            <div className="mb-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (defaultImproveTemplate) {
+                    setImproveT(defaultImproveTemplate);
+                    setMessage("Loaded default improve template — click Save to apply in production.");
+                  }
+                }}
+                disabled={!defaultImproveTemplate}
+                className="rounded-lg border border-violet-500/40 px-3 py-1.5 text-xs text-violet-100 hover:bg-violet-500/10 disabled:opacity-50"
+              >
+                Reset improve template to default
+              </button>
+            </div>
             <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
               <label className="flex flex-col gap-1 text-xs text-violet-200/80">
                 Model
@@ -323,8 +283,12 @@ export function AdminCompanionPromptEngineeringClient() {
           <section className="rounded-2xl border border-violet-500/20 bg-[#221830]/60 p-5">
             <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-violet-300/90">Refine mode</h2>
             <p className="mb-3 text-xs text-violet-200/70">
-              Apply feedback pass (<span className="font-mono">refine</span>). User slot is prompt + ⬥⬥⬥ + feedback.
-              Output uses delimiter markers for prompt and summary.
+              Apply feedback pass (<span className="font-mono">refine</span>). User slot is prompt + labeled blocks +
+              feedback. Output must be an edited prompt plus a one-sentence summary (delimiter markers).
+            </p>
+            <p className="mb-3 text-xs text-violet-200/70">
+              A validation check round confirms feedback was integrated (not pasted at the end) and the summary is one
+              sentence. Failed checks trigger an automatic correction retry.
             </p>
             <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
               <label className="flex flex-col gap-1 text-xs text-violet-200/80">
@@ -382,165 +346,101 @@ export function AdminCompanionPromptEngineeringClient() {
           </section>
 
           <section className="rounded-2xl border border-violet-500/20 bg-[#221830]/60 p-5">
-            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <h2 className="text-sm font-semibold uppercase tracking-wider text-violet-300/90">
-                  Improve suggestions database
-                </h2>
-                <p className="mt-1 text-xs text-violet-200/70">
-                  Groups are mutually exclusive — one random option per group is shown. Expand this database over time.
-                </p>
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-violet-300/90">
+              Improve suggestions (AI picker)
+            </h2>
+            <p className="mb-4 text-xs text-violet-200/70">
+              Separate from improve/refine. After improve, Companion sends the full prompt to{" "}
+              <span className="font-mono text-violet-100">POST /api/companion/suggestions</span>. The picker model
+              reads the prompt and chooses the most relevant chips from the code catalog (
+              {catalogStats?.total ?? 308} suggestions, {catalogStats?.categories.length ?? 18} categories). Category
+              diversity rules ensure at least 3 chips with max 2 per category.
+            </p>
+
+            <div className="mb-4 rounded-xl border border-violet-500/15 bg-[#150c22]/50 p-4">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-violet-300/90">Catalog</p>
+              <p className="mb-3 text-xs text-violet-200/70">
+                Source: <span className="font-mono text-violet-100">website/lib/server/companionSuggestionCatalog.json</span>
+              </p>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+                {(catalogStats?.categories || []).map((cat) => (
+                  <div
+                    key={cat.id}
+                    className="rounded-lg border border-violet-500/10 bg-[#0f0818]/40 px-2 py-1.5 text-xs text-violet-200/80"
+                  >
+                    <span className="font-medium text-violet-100">{cat.label}</span>
+                    <span className="text-violet-300/60"> · {cat.count}</span>
+                  </div>
+                ))}
               </div>
-              <button
-                type="button"
-                onClick={addGroup}
-                className="rounded-lg border border-violet-500/40 px-3 py-2 text-sm text-violet-100 hover:bg-violet-500/10"
-              >
-                + Add group
-              </button>
             </div>
 
             <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
               <label className="flex flex-col gap-1 text-xs text-violet-200/80">
-                Word threshold (short vs long count)
+                Picker model
                 <input
-                  type="number"
-                  min={20}
-                  max={2000}
-                  value={suggestionWordThreshold}
-                  onChange={(e) => setSuggestionWordThreshold(Number(e.target.value) || 100)}
+                  type="text"
+                  value={suggestionPickerModel}
+                  onChange={(e) => setSuggestionPickerModel(e.target.value)}
                   className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
                 />
               </label>
               <label className="flex flex-col gap-1 text-xs text-violet-200/80">
-                Count (prompt ≤ threshold words)
+                Picker timeout (ms)
                 <input
                   type="number"
-                  min={1}
-                  max={12}
-                  value={suggestionCountShort}
-                  onChange={(e) => setSuggestionCountShort(Number(e.target.value) || 5)}
+                  min={8000}
+                  max={60000}
+                  step={1000}
+                  value={suggestionPickerTimeoutMs}
+                  onChange={(e) => setSuggestionPickerTimeoutMs(Number(e.target.value) || 15_000)}
                   className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
                 />
               </label>
               <label className="flex flex-col gap-1 text-xs text-violet-200/80">
-                Count (prompt &gt; threshold words)
+                AI pick count (before diversity)
                 <input
                   type="number"
-                  min={1}
-                  max={12}
-                  value={suggestionCountLong}
-                  onChange={(e) => setSuggestionCountLong(Number(e.target.value) || 6)}
+                  min={3}
+                  max={8}
+                  value={suggestionAiPickCount}
+                  onChange={(e) => setSuggestionAiPickCount(Number(e.target.value) || 5)}
                   className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
                 />
               </label>
-            </div>
-
-            <div className="flex flex-col gap-4">
-              {suggestionGroups.map((group, groupIndex) => (
-                <div
-                  key={`${group.id}-${groupIndex}`}
-                  className="rounded-xl border border-violet-500/15 bg-[#150c22]/50 p-4"
-                >
-                  <div className="mb-3 flex flex-wrap items-center gap-3">
-                    <label className="flex flex-1 flex-col gap-1 text-xs text-violet-200/80">
-                      Group id
-                      <input
-                        type="text"
-                        value={group.id}
-                        onChange={(e) => updateGroup(groupIndex, { id: e.target.value })}
-                        className="rounded-lg border border-violet-500/25 bg-[#0f0818]/80 px-3 py-2 text-sm text-violet-50"
-                      />
-                    </label>
-                    <label className="flex flex-1 flex-col gap-1 text-xs text-violet-200/80">
-                      Label (optional)
-                      <input
-                        type="text"
-                        value={group.label || ""}
-                        onChange={(e) => updateGroup(groupIndex, { label: e.target.value })}
-                        className="rounded-lg border border-violet-500/25 bg-[#0f0818]/80 px-3 py-2 text-sm text-violet-50"
-                      />
-                    </label>
-                    <label className="flex items-center gap-2 text-xs text-violet-200/80">
-                      <input
-                        type="checkbox"
-                        checked={group.enabled !== false}
-                        onChange={(e) => updateGroup(groupIndex, { enabled: e.target.checked })}
-                      />
-                      Enabled
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => removeGroup(groupIndex)}
-                      className="rounded-lg border border-red-400/30 px-3 py-2 text-xs text-red-200 hover:bg-red-500/10"
-                    >
-                      Remove group
-                    </button>
-                  </div>
-
-                  <div className="flex flex-col gap-3">
-                    {group.options.map((option, optionIndex) => (
-                      <div
-                        key={`${option.id}-${optionIndex}`}
-                        className="grid grid-cols-1 gap-3 rounded-lg border border-violet-500/10 bg-[#0f0818]/40 p-3 lg:grid-cols-12"
-                      >
-                        <label className="flex flex-col gap-1 text-xs text-violet-200/80 lg:col-span-2">
-                          Option id
-                          <input
-                            type="text"
-                            value={option.id}
-                            onChange={(e) => updateOption(groupIndex, optionIndex, { id: e.target.value })}
-                            className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-2 py-1.5 text-sm text-violet-50"
-                          />
-                        </label>
-                        <label className="flex flex-col gap-1 text-xs text-violet-200/80 lg:col-span-3">
-                          Chip label
-                          <input
-                            type="text"
-                            value={option.label}
-                            onChange={(e) => updateOption(groupIndex, optionIndex, { label: e.target.value })}
-                            className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-2 py-1.5 text-sm text-violet-50"
-                          />
-                        </label>
-                        <label className="flex flex-col gap-1 text-xs text-violet-200/80 lg:col-span-6">
-                          Snippet (appended to prompt on click)
-                          <input
-                            type="text"
-                            value={option.snippet}
-                            onChange={(e) => updateOption(groupIndex, optionIndex, { snippet: e.target.value })}
-                            className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-2 py-1.5 text-sm text-violet-50"
-                          />
-                        </label>
-                        <div className="flex items-end gap-2 lg:col-span-1">
-                          <label className="flex items-center gap-2 text-xs text-violet-200/80">
-                            <input
-                              type="checkbox"
-                              checked={option.enabled !== false}
-                              onChange={(e) => updateOption(groupIndex, optionIndex, { enabled: e.target.checked })}
-                            />
-                            On
-                          </label>
-                          <button
-                            type="button"
-                            onClick={() => removeOption(groupIndex, optionIndex)}
-                            className="text-xs text-red-300 hover:text-red-200"
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => addOption(groupIndex)}
-                    className="mt-3 rounded-lg border border-violet-500/30 px-3 py-1.5 text-xs text-violet-200 hover:bg-violet-500/10"
-                  >
-                    + Add option
-                  </button>
-                </div>
-              ))}
+              <label className="flex flex-col gap-1 text-xs text-violet-200/80">
+                Display min
+                <input
+                  type="number"
+                  min={3}
+                  max={6}
+                  value={suggestionDisplayMin}
+                  onChange={(e) => setSuggestionDisplayMin(Number(e.target.value) || 3)}
+                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-violet-200/80">
+                Display max
+                <input
+                  type="number"
+                  min={3}
+                  max={6}
+                  value={suggestionDisplayMax}
+                  onChange={(e) => setSuggestionDisplayMax(Number(e.target.value) || 5)}
+                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-violet-200/80">
+                Max per category
+                <input
+                  type="number"
+                  min={1}
+                  max={3}
+                  value={suggestionMaxPerCategory}
+                  onChange={(e) => setSuggestionMaxPerCategory(Number(e.target.value) || 2)}
+                  className="rounded-lg border border-violet-500/25 bg-[#150c22]/80 px-3 py-2 text-sm text-violet-50"
+                />
+              </label>
             </div>
           </section>
 

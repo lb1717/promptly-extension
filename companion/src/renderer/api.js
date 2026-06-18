@@ -61,19 +61,18 @@ export async function optimizePrompt({
   };
 }
 
-export async function fetchSuggestions(config, wordCount) {
+export async function fetchSuggestions(config, promptText) {
   const base = String(config.apiUrl || "").replace(/\/$/, "");
   const auth = String(config.token || "").trim();
   if (!base) throw new Error("API URL is required.");
   if (!auth) throw new Error("Auth token is required.");
 
-  const params = new URLSearchParams({
-    word_count: String(Math.max(0, Number(wordCount) || 0))
-  });
-  const response = await fetch(`${base}/api/companion/suggestions?${params.toString()}`, {
-    method: "GET",
+  const prompt = String(promptText || "").trim();
+  const response = await fetch(`${base}/api/companion/suggestions`, {
+    method: "POST",
     headers: companionHeaders(config),
-    cache: "no-store"
+    cache: "no-store",
+    body: JSON.stringify({ prompt })
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -84,7 +83,9 @@ export async function fetchSuggestions(config, wordCount) {
     .map((row) => ({
       id: String(row?.id || "").trim(),
       label: String(row?.label || "").trim(),
-      snippet: String(row?.snippet || "").trim()
+      snippet: String(row?.snippet || "").trim(),
+      categoryId: String(row?.categoryId || "").trim(),
+      categoryLabel: String(row?.categoryLabel || "").trim()
     }))
     .filter((row) => row.id && row.label && row.snippet);
 }

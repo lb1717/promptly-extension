@@ -2,9 +2,11 @@ import { requireAdminSession } from "@/lib/adminData";
 import {
   adminGetCompanionPromptEngineering,
   adminSaveCompanionPromptEngineering,
+  getDefaultCompanionImproveTemplate,
   type CompanionPromptEngineeringConfig,
   type CompanionSuggestionGroup
 } from "@/lib/server/companionPromptEngineering";
+import { getCompanionSuggestionCatalogStats } from "@/lib/server/companionSuggestionPicker";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -14,7 +16,14 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const data = await adminGetCompanionPromptEngineering();
-  return NextResponse.json(data, { status: 200 });
+  return NextResponse.json(
+    {
+      ...data,
+      catalog_stats: getCompanionSuggestionCatalogStats(),
+      default_improve_template: getDefaultCompanionImproveTemplate()
+    },
+    { status: 200 }
+  );
 }
 
 export async function PATCH(request: Request) {
@@ -51,6 +60,16 @@ export async function PATCH(request: Request) {
     if (typeof b.suggestion_count_long === "number") patch.suggestion_count_long = b.suggestion_count_long;
     if (Array.isArray(b.suggestion_groups)) {
       patch.suggestion_groups = b.suggestion_groups as CompanionSuggestionGroup[];
+    }
+    if (typeof b.suggestion_picker_model === "string") patch.suggestion_picker_model = b.suggestion_picker_model;
+    if (typeof b.suggestion_picker_timeout_ms === "number") {
+      patch.suggestion_picker_timeout_ms = b.suggestion_picker_timeout_ms;
+    }
+    if (typeof b.suggestion_ai_pick_count === "number") patch.suggestion_ai_pick_count = b.suggestion_ai_pick_count;
+    if (typeof b.suggestion_display_min === "number") patch.suggestion_display_min = b.suggestion_display_min;
+    if (typeof b.suggestion_display_max === "number") patch.suggestion_display_max = b.suggestion_display_max;
+    if (typeof b.suggestion_max_per_category === "number") {
+      patch.suggestion_max_per_category = b.suggestion_max_per_category;
     }
     const result = await adminSaveCompanionPromptEngineering(patch);
     return NextResponse.json(result, { status: 200 });
