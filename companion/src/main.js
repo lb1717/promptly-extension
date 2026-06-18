@@ -1,12 +1,19 @@
 const { app, BrowserWindow, ipcMain, shell } = require("electron");
+const { execFile } = require("child_process");
 const { readFileSync, existsSync } = require("fs");
 const { homedir } = require("os");
 const { join } = require("path");
+const { promisify } = require("util");
 
+const execFileAsync = promisify(execFile);
+const ANCHOR_POLL_MS = 900;
 const PRODUCTION_API_URL = "https://promptly-labs.com";
 
 /** @type {Set<BrowserWindow>} */
 const companionWindows = new Set();
+
+/** @type {WeakMap<BrowserWindow, { anchorAppBundleId: string | null; pollTimer: ReturnType<typeof setInterval> | null; onTop: boolean | null }>} */
+const windowLayerState = new WeakMap();
 
 function normalizeApiUrl(url) {
   return String(url || "").replace(/\/$/, "");
@@ -45,6 +52,29 @@ function readDefaultCreds() {
   };
 }
 
+async function getFrontmostAppBundleId() {
+  if (process.platform !== "darwin") {
+    return null;
+  }
+  try {
+    const { stdout } = await execFileAsync("/usr/bin/osascript", [
+      "-e",
+      'tell application "System Events" to get bundle identifier of first application process whose frontmost is true'
+    ]);
+    return String(stdout || "").trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function isCompanionAppBundle(bundleId) {
+  const id = String(bundleId || "").toLowerCase();
+  if (!id) {
+    return false;
+  }
+  return id.includes("electron") || id.includes("promptly") || id === app.name?.toLowerCase();
+}
+
 function resolveAppIconPath() {
   const candidates = [
     join(__dirname, "..", "build", "icon.png"),
@@ -58,37 +88,126 @@ function resolveAppIconPath() {
   return null;
 }
 
-/**
- * Float above other apps on THIS macOS Space only — never mirror onto other Desktops.
- */
-function pinWindowToCurrentSpace(win) {
+function getLayerState(win) {
+  let state = windowLayerState.get(win);
+  if (!state) {
+    state = { anchorAppBundleId: null, pollTimer: null, onTop: null };
+    windowLayerState.set(win, state);
+  }
+  return state;
+}
+
+function ensurePinnedToCurrentSpace(win) {
+  if (process.platform === "darwin") {
+    win.setVisibleOnAllWorkspaces(false);
+  }
+}
+
+function setCompanionOnTop(win, onTop) {
   if (!win || win.isDestroyed()) {
     return;
   }
-  if (process.platform === "darwin") {
-    win.setVisibleOnAllWorkspaces(false);
-    win.setAlwaysOnTop(true, "floating");
-  } else if (process.platform === "win32") {
-    win.setAlwaysOnTop(true, "screen-saver");
-  } else {
-    win.setAlwaysOnTop(true);
+  const state = getLayerState(win);
+  if (state.onTop === onTop) {
+    return;
   }
+  state.onTop = onTop;
+  ensurePinnedToCurrentSpace(win);
+  if (onTop) {
+    if (process.platform === "darwin") {
+      win.setAlwaysOnTop(true, "floating");
+    } else if (process.platform === "win32") {
+      win.setAlwaysOnTop(true, "screen-saver");
+    } else {
+      win.setAlwaysOnTop(true);
+    }
+    win.moveTop();
+  } else {
+    if (process.platform === "darwin") {
+      win.setAlwaysOnTop(false, "normal");
+    } else if (process.platform === "win32") {
+      win.setAlwaysOnTop(false, "normal");
+    } else {
+      win.setAlwaysOnTop(false);
+    }
+  }
+}
+
+function stopAnchorWatch(win) {
+  const state = getLayerState(win);
+  if (state.pollTimer) {
+    clearInterval(state.pollTimer);
+    state.pollTimer = null;
+  }
+}
+
+function startAnchorWatch(win, anchorAppBundleId) {
+  stopAnchorWatch(win);
+  if (!anchorAppBundleId || process.platform !== "darwin") {
+    return;
+  }
+  const state = getLayerState(win);
+  state.anchorAppBundleId = anchorAppBundleId;
+  state.pollTimer = setInterval(() => {
+    void (async () => {
+      if (!win || win.isDestroyed() || win.isFocused()) {
+        stopAnchorWatch(win);
+        return;
+      }
+      const frontBundle = await getFrontmostAppBundleId();
+      if (!frontBundle) {
+        return;
+      }
+      if (isCompanionAppBundle(frontBundle)) {
+        stopAnchorWatch(win);
+        setCompanionOnTop(win, true);
+        return;
+      }
+      if (frontBundle === state.anchorAppBundleId) {
+        stopAnchorWatch(win);
+        setCompanionOnTop(win, true);
+      }
+    })();
+  }, ANCHOR_POLL_MS);
+}
+
+function handleCompanionBlur(win) {
+  void (async () => {
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    if (!win || win.isDestroyed() || win.isFocused()) {
+      return;
+    }
+    const frontBundle = await getFrontmostAppBundleId();
+    if (!frontBundle || isCompanionAppBundle(frontBundle)) {
+      return;
+    }
+    setCompanionOnTop(win, false);
+    startAnchorWatch(win, frontBundle);
+  })();
 }
 
 function registerCompanionWindow(win) {
   companionWindows.add(win);
+  ensurePinnedToCurrentSpace(win);
 
   win.once("ready-to-show", () => {
-    pinWindowToCurrentSpace(win);
+    setCompanionOnTop(win, true);
     win.show();
   });
 
   win.on("focus", () => {
-    pinWindowToCurrentSpace(win);
+    stopAnchorWatch(win);
+    setCompanionOnTop(win, true);
+  });
+
+  win.on("blur", () => {
+    handleCompanionBlur(win);
   });
 
   win.on("closed", () => {
+    stopAnchorWatch(win);
     companionWindows.delete(win);
+    windowLayerState.delete(win);
   });
 
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -111,7 +230,6 @@ function createCompanionWindow() {
     ...(iconPath ? { icon: iconPath } : {}),
     backgroundColor: "#f4f5f7",
     autoHideMenuBar: true,
-    // Stay on the Space where this window is created — do not follow three-finger swipes.
     visibleOnAllWorkspaces: false,
     webPreferences: {
       preload: join(__dirname, "preload.js"),
