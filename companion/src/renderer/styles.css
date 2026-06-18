@@ -689,6 +689,12 @@ dialog {
   margin-top: 8px;
 }
 
+.app-version-line {
+  margin-bottom: 10px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
 .settings-dialog {
   border: 1px solid var(--border);
   border-radius: var(--radius);

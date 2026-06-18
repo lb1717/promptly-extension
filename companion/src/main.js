@@ -22,6 +22,14 @@ const {
 } = require("./permissions");
 
 const execFileAsync = promisify(execFile);
+const APP_VERSION = (() => {
+  try {
+    const pkg = JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf8"));
+    return String(pkg.version || "0.0.0");
+  } catch {
+    return "0.0.0";
+  }
+})();
 const ANCHOR_POLL_MS = 900;
 const PRODUCTION_API_URL = "https://promptly-labs.com";
 const EXPANDED_DEFAULT = { width: 380, height: 680, minWidth: 320, minHeight: 480 };
@@ -568,6 +576,7 @@ ipcMain.handle("promptly:paste-to-host", async (event, text) => {
 
 ipcMain.handle("promptly:get-app-info", () => ({
   name: app.getName(),
+  version: APP_VERSION,
   isPackaged: app.isPackaged
 }));
 

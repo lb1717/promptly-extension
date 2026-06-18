@@ -39,6 +39,7 @@ const permissionsFollowupHint = document.getElementById("permissions-followup-hi
 const permissionsAppName = document.getElementById("permissions-app-name");
 const settingsForm = document.getElementById("settings-form");
 const settingsCancel = document.getElementById("settings-cancel");
+const appVersionLine = document.getElementById("app-version-line");
 const apiIndicator = document.getElementById("api-indicator");
 const apiUrlInput = document.getElementById("api-url-input");
 const tokenInput = document.getElementById("token-input");
@@ -529,7 +530,18 @@ function openSettings() {
   tokenInput.value = config.token;
   clientInput.value = config.client;
   void loadSettingsIntoForm();
+  void updateAppVersionLine();
   settingsDialog.showModal();
+}
+
+async function updateAppVersionLine() {
+  if (!appVersionLine || !window.promptlyCompanion?.getAppInfo) {
+    return;
+  }
+  const appInfo = await window.promptlyCompanion.getAppInfo();
+  const version = String(appInfo?.version || "").trim() || "unknown";
+  const runtime = appInfo?.isPackaged ? "installed" : "dev (Electron)";
+  appVersionLine.textContent = `Version ${version} · ${runtime}`;
 }
 
 async function loadSettingsIntoForm() {
