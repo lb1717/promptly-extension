@@ -1,66 +1,55 @@
-# Promptly Companion (experiment)
+# Promptly Companion
 
-A standalone desktop prompt workshop — type your draft here, improve it via Promptly, refine with follow-up feedback, and copy the result into any AI app.
+Desktop prompt workshop for Promptly — type a draft, improve it, refine with feedback, copy into any AI app.
 
-Separate from the browser extension and the main Promptly desktop app.
+Connects to **https://promptly-labs.com** by default (same account/token as your IDE integration).
 
-## Run locally
-
-### 1. Start the website API (if testing against local backend)
-
-```bash
-cd website
-npm install
-npm run dev
-```
-
-### 2. Auth
-
-The companion calls `POST /api/optimize` with a **device token** (same as Cursor / Claude Code integrations).
-
-**Option A — auto-detect (easiest)**  
-If you've already paired an IDE integration, the app reads `~/.promptly/credentials-cursor.json` (or claude_code / codex) on launch.
-
-**Option B — environment variables**
-
-```bash
-export PROMPTLY_API_URL=http://localhost:3000
-export PROMPTLY_DEVICE_TOKEN=pt_your_token_here
-```
-
-**Option C — in-app Settings**  
-Click the gear icon and paste API URL + device token. Values are saved in local storage.
-
-Pair a device at [promptly-labs.com/integrations](https://promptly-labs.com/integrations) if you don't have a token yet.
-
-### 3. Launch the companion
+## Install & run
 
 ```bash
 cd companion
 npm install
-npm run dev    # auto-picks localhost (3002 → 3001 → 3000); shows API in header
-# or
-npm start      # points at promptly-labs.com
+npm start
 ```
+
+That's it. The app uses your paired device token from `~/.promptly/credentials-cursor.json` (or claude_code / codex) and talks to the live Promptly API.
+
+## Auth
+
+The companion calls:
+
+- `POST /api/companion/optimize` — improve + refine
+- `GET /api/companion/suggestions` — suggestion chips
+
+**Auto-detect (recommended):** pair an IDE integration first — credentials are read on launch.
+
+**Manual:** open Settings (gear) and paste your device token. API URL should stay `https://promptly-labs.com`.
+
+Pair a device at [promptly-labs.com/integrations](https://promptly-labs.com/integrations).
+
+## Admin config
+
+Templates, models, and suggestion chips are editable at **Admin → Companion PE** on the website.
+
+## Local development only
+
+If you're hacking on the website backend locally:
+
+```bash
+cd website && npm run dev   # in one terminal
+cd companion && npm run dev:local   # in another — NOT for normal use
+```
+
+Normal users should always use `npm start` (production).
 
 ## How to use
 
-1. Type your draft and click **Improve** (or Cmd/Ctrl+Enter).
-2. Layout (top → bottom):
-   - **Note** (after follow-up only) — what changed
-   - **Further improve chips**
-   - **Prompt box** — stretches to fill the window; Copy in top-right
-   - **Follow-up input** + **Apply feedback** — always anchored at the bottom
-3. Copy the prompt and paste into any AI app.
-
-## Window shape
-
-Tall narrow always-on-top window (~380×680) designed as a side companion.
+1. Type your draft → **Improve** (Cmd/Ctrl+Enter)
+2. Pick suggestion chips, edit the prompt, copy when ready
+3. **Apply feedback** at the bottom to refine
+4. **+** starts a new prompt
 
 ## Notes
 
-- This is an experiment — not wired to screen reading or auto-paste yet.
-- Uses `x-promptly-client: promptly-cursor` (or whichever IDE credential file was found).
-- Follow-up uses `optimize_mode: "refine"` via **`POST /api/companion/optimize`** (separate from extension prompt engineering).
-- Improve suggestion chips come from **`GET /api/companion/suggestions`** — editable in Admin → **Companion PE**.
-- Run the local website (`cd website && npm run dev`) when testing. Check the header shows `local 300x`.
+- Tall narrow always-on-top window (~380×680), anchored to the app you're working in
+- Not wired to screen reading or auto-paste yet

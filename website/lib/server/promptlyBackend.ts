@@ -6383,9 +6383,14 @@ async function callOpenAi(options: {
       // Responses API: map `system` → `developer` for policy text (recommended for GPT-5 family).
       const mapRoleForResponses = (role: string) =>
         String(role || "").toLowerCase() === "system" ? "developer" : role;
+      const mapMessageContentForResponses = (role: string, text: string) => {
+        const normalizedRole = String(role || "").toLowerCase();
+        const contentType = normalizedRole === "assistant" ? "output_text" : "input_text";
+        return [{ type: contentType, text }];
+      };
       const initialInput = options.messages.map((message) => ({
         role: mapRoleForResponses(message.role),
-        content: [{ type: "input_text", text: message.content }]
+        content: mapMessageContentForResponses(message.role, message.content)
       }));
       const textField: Record<string, unknown> = { verbosity: responsesTextVerbosity };
       const baseResponsesFields: Record<string, unknown> = {

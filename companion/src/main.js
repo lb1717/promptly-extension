@@ -7,6 +7,7 @@ const { promisify } = require("util");
 
 const execFileAsync = promisify(execFile);
 const LAYER_POLL_MS = 350;
+const PRODUCTION_API_URL = "https://promptly-labs.com";
 
 /** @type {BrowserWindow | null} */
 let mainWindow = null;
@@ -19,16 +20,29 @@ function normalizeApiUrl(url) {
   return String(url || "").replace(/\/$/, "");
 }
 
+function isLocalApiUrl(url) {
+  try {
+    const hostname = new URL(String(url || "")).hostname;
+    return hostname === "localhost" || hostname === "127.0.0.1";
+  } catch {
+    return false;
+  }
+}
+
 function readDefaultCreds() {
-  const devApiUrl = normalizeApiUrl(process.env.PROMPTLY_API_URL || "");
+  const isDevMode = process.env.PROMPTLY_DEV === "1";
+  const devApiUrl = isDevMode ? normalizeApiUrl(process.env.PROMPTLY_API_URL || "") : "";
   for (const tool of ["cursor", "claude_code", "codex"]) {
     const path = join(homedir(), ".promptly", `credentials-${tool}.json`);
     if (!existsSync(path)) continue;
     try {
       const creds = JSON.parse(readFileSync(path, "utf8"));
       if (creds?.device_token) {
+        const credsApiUrl = normalizeApiUrl(creds.api_url || PRODUCTION_API_URL);
         return {
-          apiUrl: devApiUrl || normalizeApiUrl(creds.api_url || "https://promptly-labs.com"),
+          apiUrl: devApiUrl || credsApiUrl || PRODUCTION_API_URL,
+          productionApiUrl: PRODUCTION_API_URL,
+          isDevMode,
           devApiUrl: devApiUrl || null,
           token: String(creds.device_token),
           client: `promptly-${tool.replace(/_/g, "-")}`
@@ -39,7 +53,9 @@ function readDefaultCreds() {
     }
   }
   return {
-    apiUrl: devApiUrl || normalizeApiUrl("https://promptly-labs.com"),
+    apiUrl: devApiUrl || PRODUCTION_API_URL,
+    productionApiUrl: PRODUCTION_API_URL,
+    isDevMode,
     devApiUrl: devApiUrl || null,
     token: String(process.env.PROMPTLY_DEVICE_TOKEN || process.env.PROMPTLY_AUTH_TOKEN || ""),
     client: "promptly-cursor"

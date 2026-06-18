@@ -3,6 +3,7 @@ import { countWords } from "./further-improve.js";
 import { updateStrengthUi } from "./strength.js";
 
 const STORAGE_KEY = "promptly-companion-config";
+const PRODUCTION_API_URL = "https://promptly-labs.com";
 
 /** @type {{ apiUrl: string; token: string; client: string }} */
 let config = { apiUrl: "", token: "", client: "promptly-cursor" };
@@ -86,18 +87,47 @@ function updateApiIndicator() {
   apiIndicator.title = `API: ${url}`;
 }
 
+function isLocalApiUrl(url) {
+  try {
+    const hostname = new URL(String(url || "")).hostname;
+    return hostname === "localhost" || hostname === "127.0.0.1";
+  } catch {
+    return false;
+  }
+}
+
+function resolveApiUrl(stored, defaults) {
+  if (defaults?.isDevMode && defaults?.devApiUrl) {
+    return defaults.devApiUrl;
+  }
+  const productionUrl = String(defaults?.productionApiUrl || PRODUCTION_API_URL).trim() || PRODUCTION_API_URL;
+  const storedUrl = String(stored?.apiUrl || "").trim();
+  if (storedUrl && !isLocalApiUrl(storedUrl)) {
+    return storedUrl;
+  }
+  return String(defaults?.apiUrl || productionUrl).trim() || productionUrl;
+}
+
 async function bootstrapConfig() {
   const stored = loadStoredConfig();
   if (window.promptlyCompanion?.getConfig) {
     const defaults = await window.promptlyCompanion.getConfig();
-    const devApiUrl = String(defaults?.devApiUrl || "").trim();
+    const apiUrl = resolveApiUrl(stored, defaults);
     mergeConfig({
-      apiUrl: devApiUrl || stored?.apiUrl || defaults.apiUrl,
+      apiUrl,
       token: stored?.token || defaults.token,
       client: stored?.client || defaults.client
     });
+    if (stored?.apiUrl && isLocalApiUrl(stored.apiUrl) && apiUrl !== stored.apiUrl) {
+      saveConfig();
+    }
   } else if (stored) {
-    mergeConfig(stored);
+    mergeConfig({
+      ...stored,
+      apiUrl: isLocalApiUrl(stored.apiUrl) ? PRODUCTION_API_URL : stored.apiUrl
+    });
+  } else {
+    mergeConfig({ apiUrl: PRODUCTION_API_URL, token: "", client: "promptly-cursor" });
   }
   updateApiIndicator();
 }

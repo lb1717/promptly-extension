@@ -18,14 +18,9 @@ function portOpen(port) {
 
 async function resolveDevApiUrl() {
   const fromEnv = String(process.env.PROMPTLY_API_URL || "").replace(/\/$/, "");
-  if (fromEnv) {
-    return fromEnv;
-  }
+  if (fromEnv) return fromEnv;
 
-  // When multiple `next dev` instances are running, Next.js bumps ports (3000 → 3001 → 3002).
-  // Prefer the highest open port so we hit the most recently started local server.
-  const candidates = [3002, 3001, 3000];
-  for (const port of candidates) {
+  for (const port of [3002, 3001, 3000]) {
     if (await portOpen(port)) {
       return `http://localhost:${port}`;
     }
@@ -34,7 +29,7 @@ async function resolveDevApiUrl() {
 }
 
 const apiUrl = await resolveDevApiUrl();
-console.log(`[companion dev] Using API ${apiUrl}`);
+console.log(`[companion dev:local] Using API ${apiUrl}`);
 
 const electronBin = join(companionRoot, "node_modules", ".bin", "electron");
 spawn(electronBin, ["."], {
@@ -42,6 +37,7 @@ spawn(electronBin, ["."], {
   stdio: "inherit",
   env: {
     ...process.env,
+    PROMPTLY_DEV: "1",
     PROMPTLY_API_URL: apiUrl
   }
 });

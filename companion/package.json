@@ -9,7 +9,7 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "dev": "node scripts/dev.mjs"
+    "dev:local": "node scripts/dev.mjs"
   },
   "devDependencies": {
     "electron": "^33.2.0"
