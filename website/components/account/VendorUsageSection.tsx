@@ -2,7 +2,7 @@
 
 import type { User } from "firebase/auth";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useImperativeHandle, useMemo, useState, forwardRef } from "react";
 import {
   CartesianGrid,
   Line,
@@ -1100,51 +1100,40 @@ function SubscriptionUsageRow({
   );
 }
 
-export default function VendorUsageSection({
-  user,
-  rangeDays = 30
-}: {
-  user: User | null;
-  rangeDays?: number;
-}) {
-  const [loading, setLoading] = useState(false);
+export type VendorUsageSectionHandle = {
+  refreshInBackground: () => void;
+};
+
+const VendorUsageSection = forwardRef<
+  VendorUsageSectionHandle,
+  {
+    user: User | null;
+    rangeDays?: number;
+  }
+>(function VendorUsageSection({ user, rangeDays = 30 }, ref) {
   const [data, setData] = useState<VendorUsagePayload | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async ({ live = false }: { live?: boolean } = {}) => {
+  const applyLiveRefreshResult = useCallback((body: VendorUsagePayload) => {
+    setData(body);
+    const refreshError = (body as { live_refresh?: { error?: string } }).live_refresh?.error;
+    if (refreshError === "no_tokens" || refreshError === "tokens_unreadable") {
+      setError(body.live_refresh_hint || "Resync subscriptions from the integrations page to refresh usage.");
+    } else if (body.live_refresh_hint) {
+      setError(body.live_refresh_hint);
+    } else {
+      setError(null);
+    }
+  }, []);
+
+  const load = useCallback(async () => {
     if (!user) {
       setData(null);
       setError("Sign in to load vendor usage.");
       return;
     }
-    setLoading(true);
-    setError(null);
     try {
       const token = await user.getIdToken(false);
-      if (live) {
-        const res = await fetch("/api/account/vendor-usage", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({ refresh: true })
-        });
-        const body = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          throw new Error(body.error || body.message || `HTTP ${res.status}`);
-        }
-        setData(body as VendorUsagePayload);
-        const refreshError = (body as { live_refresh?: { error?: string } }).live_refresh?.error;
-        if (refreshError === "no_tokens" || refreshError === "tokens_unreadable") {
-          setError(body.live_refresh_hint || "Resync subscriptions from the integrations page, then Refresh again.");
-        } else if (body.live_refresh_hint) {
-          setError(body.live_refresh_hint);
-        } else {
-          setError(null);
-        }
-        return;
-      }
       const res = await fetch("/api/account/vendor-usage", {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -1153,10 +1142,40 @@ export default function VendorUsageSection({
       setData(body as VendorUsagePayload);
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));
-    } finally {
-      setLoading(false);
     }
   }, [user]);
+
+  const refreshLiveInBackground = useCallback(async () => {
+    if (!user) return;
+    try {
+      const token = await user.getIdToken(false);
+      const res = await fetch("/api/account/vendor-usage", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ refresh: true })
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(body.error || body.message || `HTTP ${res.status}`);
+      }
+      applyLiveRefreshResult(body as VendorUsagePayload);
+    } catch (e) {
+      setError(String(e instanceof Error ? e.message : e));
+    }
+  }, [user, applyLiveRefreshResult]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      refreshInBackground: () => {
+        void refreshLiveInBackground();
+      }
+    }),
+    [refreshLiveInBackground]
+  );
 
   useEffect(() => {
     if (user) void load();
@@ -1192,14 +1211,6 @@ export default function VendorUsageSection({
           >
             Resync
           </Link>
-          <button
-            type="button"
-            disabled={loading}
-            onClick={() => void load({ live: true })}
-            className="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-ink hover:bg-cream-dark disabled:opacity-50"
-          >
-            {loading ? "Refreshing…" : "Refresh"}
-          </button>
         </div>
       </div>
 
@@ -1221,7 +1232,9 @@ export default function VendorUsageSection({
           <Link href="/integrations" className="font-medium text-ink underline-offset-2 hover:underline">
             integrations setup command
           </Link>
-          , then click Refresh. If you already installed Promptly, use{" "}
+          , then use{" "}
+          <span className="font-medium text-ink">Refresh</span> at the top of this page. If you already installed
+          Promptly, use{" "}
           <Link
             href="/integrations#resync-subscriptions"
             className="font-medium text-ink underline-offset-2 hover:underline"
@@ -1247,9 +1260,9 @@ export default function VendorUsageSection({
             <p>
               Claude not synced —{" "}
               {hasClaudeTokens
-                ? "browser sign-in is saved. Click Refresh above to load Claude usage."
+                ? "browser sign-in is saved. Use Refresh at the top of this page to load Claude usage."
                 : data?.last_sync_diagnostics?.skip_details?.claude_code ||
-                  "complete setup or resync from the integrations page, then click Refresh."}
+                  "complete setup or resync from the integrations page, then use Refresh at the top of this page."}
             </p>
           ) : null}
           {!hasCursor ? <p>Cursor not synced — open Cursor, sign in, then resync from integrations.</p> : null}
@@ -1258,4 +1271,6 @@ export default function VendorUsageSection({
       ) : null}
     </section>
   );
-}
+});
+
+export default VendorUsageSection;

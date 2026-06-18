@@ -6,7 +6,7 @@ import { onAuthStateChanged, signInWithCustomToken } from "firebase/auth";
 import Link from "next/link";
 import type { User } from "firebase/auth";
 import { StatisticsPrintReport } from "@/components/account/StatisticsPrintReport";
-import VendorUsageSection from "@/components/account/VendorUsageSection";
+import VendorUsageSection, { type VendorUsageSectionHandle } from "@/components/account/VendorUsageSection";
 import { AutoDismissNoticeBar } from "@/components/ui/AutoDismissNoticeBar";
 import { buildStatisticsReportData, downloadStatisticsReportPdf } from "@/lib/statisticsReport";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -1863,6 +1863,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
   const [engagementPiesExpanded, setEngagementPiesExpanded] = useState(false);
   const [reportGenerating, setReportGenerating] = useState(false);
   const reportRef = useRef<HTMLDivElement>(null);
+  const vendorUsageRef = useRef<VendorUsageSectionHandle>(null);
   const ideStatsReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const statsContainerRef = useRef<HTMLDivElement>(null);
   const filterSentinelRef = useRef<HTMLDivElement>(null);
@@ -2385,6 +2386,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
       true,
       captureCatalog
     );
+    vendorUsageRef.current?.refreshInBackground();
   }, [
     user,
     days,
@@ -4195,7 +4197,7 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
 
           <div className="my-10 border-t border-line" role="separator" />
 
-          <VendorUsageSection user={user} rangeDays={days} />
+          <VendorUsageSection ref={vendorUsageRef} user={user} rangeDays={days} />
 
           <h2 className="mb-6 text-base font-semibold uppercase tracking-[0.22em] text-ink">Promptly Labs Diagnostics</h2>
 
