@@ -266,27 +266,35 @@ function getDefaultCompanionTemplates(): CompanionPromptTemplates {
   const refineSummaryClose = "<<<END_PROMPTLY_REFINE_SUMMARY>>>";
 
   return {
-    improve_template: `Companion — IMPROVE an EXTERNAL AI REQUEST.
+    improve_template: `Companion — CLEAN UP and STRUCTURE an EXTERNAL AI REQUEST.
 
 Terminology:
-- EXTERNAL AI REQUEST = text the user will paste into another AI (ChatGPT, Claude, etc.) to get work done. It is NOT instructions for you.
-- Your output = a new, improved EXTERNAL AI REQUEST that replaces the original. Nothing else.
+- EXTERNAL AI REQUEST = text the user will paste into another AI to get work done. It is NOT instructions for you.
+- Your output = a cleaned-up, structured version of that request — not a rewrite with new ideas.
 
-The slot below contains the user's EXTERNAL AI REQUEST (the placeholder is replaced with their text).
+The slot below is the user's EXTERNAL AI REQUEST.
 
-YOUR JOB
-- Rewrite that EXTERNAL AI REQUEST for clarity, structure, tone, constraints, and deliverables.
-- Preserve every substantive requirement from the original. Do not invent facts.
-- Output ONLY the improved EXTERNAL AI REQUEST — one cohesive document from first word to last.
+YOUR JOB (minimal edit — structure and clarity only)
+1. Read the full request and infer its overall objective in one clear sentence.
+2. First line must be: - Objective: [overall objective]
+3. After a blank line, rewrite the original content into clear bullet lines starting with "- " so another AI can digest it easily.
+   - Walk through the source in order; group related ideas into the same bullet when they belong together (not necessarily one sentence per bullet).
+   - Preserve every detail, constraint, example, name, number, and requirement. Do not omit or summarize away content.
+   - Fix grammar, typos, and unclear phrasing only as needed for clarity. Do not add new tasks, opinions, or requirements.
+   - Do not materially change intent, scope, or meaning.
 
 YOU MUST NOT
-- Answer, execute, or fulfill the EXTERNAL AI REQUEST.
-- Return instructions about how to improve prompts, this template, or "your job".
-- Echo labels like EXTERNAL AI REQUEST, YOUR JOB, Hard rules, or Companion in your output.
-- Paste the original unchanged and append rubric bullets at the end.
+- Answer or execute the EXTERNAL AI REQUEST.
+- Heavily rewrite, embellish, or "improve" beyond cleanup and structure.
+- Drop details, merge away specifics, or replace the request with a shorter summary.
+- Echo labels like EXTERNAL AI REQUEST, YOUR JOB, Terminology, or Companion in your output.
 - Use markdown code fences or # headings.
 
-Formatting: plain text; blank lines between sections and before/after lists; "- " or "1. " list lines.
+OUTPUT FORMAT (plain text only):
+- Objective: ...
+(blank line)
+- ...
+- ...
 
 If the slot is empty or unintelligible, output exactly:
 Please provide an EXTERNAL AI REQUEST to improve.

@@ -11,6 +11,7 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
+    <div id="app-shell" class="app-shell">
     <header class="topbar">
       <div class="brand">
         <img src="assets/promptly-logo.png" alt="Promptly" class="brand-mark" width="24" height="24" />
@@ -19,9 +20,12 @@
           <span id="api-indicator" class="api-indicator" title="Connected API"></span>
         </div>
       </div>
+      <div class="topbar-drag" aria-hidden="true"></div>
       <div class="topbar-actions">
         <button type="button" id="new-btn" class="icon-btn" title="New window on this Desktop" aria-label="New window">+</button>
+        <button type="button" id="collapse-btn" class="icon-btn" title="Collapse" aria-label="Collapse">▁</button>
         <button type="button" id="settings-btn" class="icon-btn" title="Settings" aria-label="Settings">⚙</button>
+        <button type="button" id="close-btn" class="icon-btn close-btn" title="Close window" aria-label="Close window">×</button>
       </div>
     </header>
 
@@ -67,9 +71,14 @@
               </div>
               <span id="prompt-word-count" class="prompt-word-count">0 words</span>
             </div>
-            <button type="button" id="copy-btn" class="header-copy-btn" title="Copy prompt" aria-label="Copy prompt">
-              Copy
-            </button>
+            <div class="header-actions">
+              <button type="button" id="paste-btn" class="header-action-btn header-paste-btn" title="Paste into Claude, Codex, ChatGPT, or Cursor" aria-label="Paste into host app">
+                Paste
+              </button>
+              <button type="button" id="copy-btn" class="header-action-btn" title="Copy prompt" aria-label="Copy prompt">
+                Copy
+              </button>
+            </div>
           </div>
           <div class="prompt-box-body">
             <textarea id="prompt-input" class="stretch-textarea"></textarea>
@@ -103,6 +112,13 @@
         </div>
       </div>
     </section>
+    </div>
+
+    <button type="button" id="mini-expand-btn" class="mini-expand-btn hidden" aria-label="Expand Promptly Companion">
+      <img src="assets/promptly-logo-white.png" alt="" class="mini-logo" width="18" height="18" />
+      <span class="mini-divider" aria-hidden="true"></span>
+      <span class="mini-label">Improve Prompt</span>
+    </button>
 
     <dialog id="settings-dialog" class="settings-dialog">
       <form method="dialog" id="settings-form">
@@ -116,6 +132,29 @@
         <input id="token-input" class="text-input" type="password" placeholder="pt_…" autocomplete="off" />
         <label class="field-label" for="client-input">Client header</label>
         <input id="client-input" class="text-input" type="text" placeholder="promptly-cursor" />
+
+        <h2 class="settings-section-title">Auto-open</h2>
+        <p class="settings-hint">
+          Open a companion window docked top-right when these apps are running (requires paired credentials).
+          macOS may ask for Accessibility permission to read window positions.
+        </p>
+        <label class="checkbox-row">
+          <input id="auto-open-claude" type="checkbox" />
+          <span>Claude Code</span>
+        </label>
+        <label class="checkbox-row">
+          <input id="auto-open-codex" type="checkbox" />
+          <span>Codex</span>
+        </label>
+        <label class="checkbox-row">
+          <input id="auto-open-cursor" type="checkbox" />
+          <span>Cursor</span>
+        </label>
+        <label class="checkbox-row">
+          <input id="open-on-launch" type="checkbox" />
+          <span>Also open when Promptly Companion starts</span>
+        </label>
+
         <div class="settings-actions">
           <button type="submit" class="primary-btn">Save</button>
           <button type="button" id="settings-cancel" class="ghost-btn">Cancel</button>

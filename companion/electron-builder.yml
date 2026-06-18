@@ -12,6 +12,8 @@ extraMetadata:
 artifactName: Promptly-Companion-${version}-${os}.${ext}
 mac:
   category: public.app-category.productivity
+  extendInfo:
+    CFBundleName: Promptly
   target:
     - dmg
     - zip

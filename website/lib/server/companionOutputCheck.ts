@@ -31,7 +31,7 @@ export function assessCompanionImproveOutput(output: string, sourcePrompt: strin
     return { ok: false, reason: "Output is empty." };
   }
   if (/^please provide an external ai request to improve\.?$/i.test(out) && src.length >= 8) {
-    return { ok: false, reason: "Model refused to improve a valid EXTERNAL AI REQUEST." };
+    return { ok: false, reason: "Model refused to structure a valid EXTERNAL AI REQUEST." };
   }
   if (/⬥⬥⬥|<<<external_ai_request|<<<refine_input_|<<<promptly_refined/i.test(out)) {
     return { ok: false, reason: "Output contains internal input markers." };
@@ -41,6 +41,7 @@ export function assessCompanionImproveOutput(output: string, sourcePrompt: strin
   const echoPhrases = [
     "companion improve mode",
     "companion — improve",
+    "companion — clean up",
     "external ai request =",
     "terminology:",
     "your job",
@@ -49,23 +50,42 @@ export function assessCompanionImproveOutput(output: string, sourcePrompt: strin
     "do not echo these instructions",
     "rewrite the user's draft prompt",
     "improve an external ai request",
-    "output only the improved"
+    "output only the improved",
+    "minimal edit — structure"
   ];
   const echoHits = echoPhrases.filter((p) => low.includes(p)).length;
   if (echoHits >= 1) {
     return {
       ok: false,
-      reason: "Output echoes improve instructions instead of returning a revised EXTERNAL AI REQUEST."
+      reason: "Output echoes cleanup instructions instead of returning a structured EXTERNAL AI REQUEST."
     };
   }
 
   if (src && normalizeCompare(out) === normalizeCompare(src)) {
-    return { ok: false, reason: "Output is identical to the source — EXTERNAL AI REQUEST was not improved." };
+    return { ok: false, reason: "Output is identical to the source — content was not restructured." };
   }
   if (src && out.startsWith(src)) {
     const tail = out.slice(src.length).trim().toLowerCase();
-    if (tail.includes("your job") || tail.includes("you must not") || /^-\s/.test(tail)) {
+    if (tail.includes("your job") || tail.includes("you must not")) {
       return { ok: false, reason: "Output pastes the original unchanged and appends instruction bullets." };
+    }
+  }
+
+  const srcWords = wordCount(src);
+  if (srcWords >= 3) {
+    if (!/^-\s*Objective\s*:/im.test(out)) {
+      return { ok: false, reason: "Output must start with '- Objective: ...' on the first line." };
+    }
+    const bulletCount = (out.match(/^-\s+/gm) || []).length;
+    if (bulletCount < 2) {
+      return { ok: false, reason: "Output needs '- Objective:' plus at least one more '- ' bullet." };
+    }
+  }
+
+  if (srcWords >= 15) {
+    const outWords = wordCount(out);
+    if (outWords < Math.floor(srcWords * 0.6)) {
+      return { ok: false, reason: "Output appears to omit too much detail from the source." };
     }
   }
 
@@ -136,7 +156,7 @@ function parseCheckJson(raw: string): CompanionOutputVerdict | null {
 }
 
 function buildImproveCheckMessage(sourcePrompt: string, candidate: string): string {
-  return `You validate Companion IMPROVE output.
+  return `You validate Companion CLEAN UP / STRUCTURE output.
 
 SOURCE EXTERNAL AI REQUEST (user input):
 ${String(sourcePrompt || "").trim().slice(0, 4000)}
@@ -144,13 +164,17 @@ ${String(sourcePrompt || "").trim().slice(0, 4000)}
 CANDIDATE OUTPUT:
 ${String(candidate || "").trim().slice(0, 6000)}
 
-Valid ONLY if CANDIDATE is a single improved EXTERNAL AI REQUEST the user can paste into another AI — rewritten from the source, preserving requirements.
+Valid ONLY if CANDIDATE:
+- Starts with "- Objective: ..." (one-sentence overall objective inferred from the source)
+- Then uses "- " bullet lines to restructure the source in clear, AI-digestible form
+- Preserves details from the source without omitting or heavily rewriting content
+- Does NOT answer the request or echo cleanup instructions (YOUR JOB, Terminology, etc.)
 
 Invalid if CANDIDATE:
-- Echoes improve instructions (YOUR JOB, EXTERNAL AI REQUEST =, Terminology, YOU MUST NOT)
-- Is the source unchanged or source + appended rubric bullets
-- Answers or executes the request instead of improving it
-- Contains meta commentary about improving prompts
+- Echoes improve/cleanup instructions
+- Is the source unchanged or a shortened summary that drops details
+- Missing "- Objective:" or lacks bullet structure
+- Adds substantial new requirements not in the source
 
 Return ONLY JSON:
 {"valid":true}
@@ -242,10 +266,17 @@ export async function runCompanionOutputCheckRound(params: {
 }
 
 export function buildCompanionImproveCheckRetry(reason: string): string {
-  const issue = String(reason || "").trim() || "Output was not a valid improved EXTERNAL AI REQUEST.";
+  const issue = String(reason || "").trim() || "Output was not a valid structured EXTERNAL AI REQUEST.";
   return `Validation failed: ${issue}
 
-Reply with ONLY the improved EXTERNAL AI REQUEST — one cohesive rewrite the user pastes into another AI. No YOUR JOB section, no Terminology block, no instructions about improving — just the revised request text.`;
+Reply with ONLY the cleaned-up EXTERNAL AI REQUEST in this format:
+
+- Objective: [one-sentence overall objective from the source]
+
+- [bullet preserving original detail]
+- [bullet preserving original detail]
+
+Rules: minimal edits for clarity only; preserve all details; do not add new requirements; no YOUR JOB section or instruction echo.`;
 }
 
 export const COMPANION_REFINE_CHECK_RETRY = `Validation failed.

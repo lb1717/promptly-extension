@@ -16,11 +16,16 @@ const improveBtn = document.getElementById("improve-btn");
 const chipGrid = document.getElementById("chip-grid");
 const promptInput = document.getElementById("prompt-input");
 const copyBtn = document.getElementById("copy-btn");
+const pasteBtn = document.getElementById("paste-btn");
 const summarySlot = document.getElementById("summary-slot");
 const followUpInput = document.getElementById("follow-up-input");
 const refineBtn = document.getElementById("refine-btn");
 const newPromptBtn = document.getElementById("new-prompt-btn");
 const newBtn = document.getElementById("new-btn");
+const collapseBtn = document.getElementById("collapse-btn");
+const closeBtn = document.getElementById("close-btn");
+const appShell = document.getElementById("app-shell");
+const miniExpandBtn = document.getElementById("mini-expand-btn");
 const settingsBtn = document.getElementById("settings-btn");
 const settingsDialog = document.getElementById("settings-dialog");
 const settingsForm = document.getElementById("settings-form");
@@ -29,6 +34,10 @@ const apiIndicator = document.getElementById("api-indicator");
 const apiUrlInput = document.getElementById("api-url-input");
 const tokenInput = document.getElementById("token-input");
 const clientInput = document.getElementById("client-input");
+const autoOpenClaude = document.getElementById("auto-open-claude");
+const autoOpenCodex = document.getElementById("auto-open-codex");
+const autoOpenCursor = document.getElementById("auto-open-cursor");
+const openOnLaunch = document.getElementById("open-on-launch");
 const draftStrengthTrack = document.getElementById("draft-strength-track");
 const draftStrengthFill = document.getElementById("draft-strength-fill");
 const promptStrengthTrack = document.getElementById("prompt-strength-track");
@@ -368,14 +377,76 @@ function startNewSession() {
   draftInput.focus();
 }
 
+let isCollapsed = false;
+
+function applyCollapsedUi(collapsed) {
+  const next = Boolean(collapsed);
+  isCollapsed = next;
+  document.body.classList.toggle("collapsed", next);
+  if (appShell) {
+    appShell.classList.toggle("hidden", next);
+  }
+  if (miniExpandBtn) {
+    miniExpandBtn.classList.toggle("hidden", !next);
+  }
+}
+
+async function setCollapsed(collapsed) {
+  const next = Boolean(collapsed);
+  if (isCollapsed === next) {
+    return;
+  }
+  if (next && settingsDialog.open) {
+    settingsDialog.close();
+  }
+  if (!window.promptlyCompanion?.setCollapsed) {
+    applyCollapsedUi(next);
+    return;
+  }
+  const result = await window.promptlyCompanion.setCollapsed(next);
+  if (result?.ok) {
+    applyCollapsedUi(next);
+  }
+}
+
 function openSettings() {
   apiUrlInput.value = config.apiUrl;
   tokenInput.value = config.token;
   clientInput.value = config.client;
+  void loadSettingsIntoForm();
   settingsDialog.showModal();
 }
 
-copyBtn.addEventListener("click", async () => {
+async function loadSettingsIntoForm() {
+  if (!window.promptlyCompanion?.getSettings) {
+    return;
+  }
+  const settings = await window.promptlyCompanion.getSettings();
+  if (autoOpenClaude) autoOpenClaude.checked = Boolean(settings.autoOpen?.claude_code);
+  if (autoOpenCodex) autoOpenCodex.checked = Boolean(settings.autoOpen?.codex);
+  if (autoOpenCursor) autoOpenCursor.checked = Boolean(settings.autoOpen?.cursor);
+  if (openOnLaunch) openOnLaunch.checked = Boolean(settings.openOnCompanionLaunch);
+}
+
+async function saveCompanionSettingsFromForm() {
+  if (!window.promptlyCompanion?.saveSettings) {
+    return;
+  }
+  await window.promptlyCompanion.saveSettings({
+    autoOpen: {
+      claude_code: Boolean(autoOpenClaude?.checked),
+      codex: Boolean(autoOpenCodex?.checked),
+      cursor: Boolean(autoOpenCursor?.checked)
+    },
+    openOnCompanionLaunch: Boolean(openOnLaunch?.checked)
+  });
+}
+
+function showSuccess(message) {
+  showStatus(message, "success");
+}
+
+copyBtn?.addEventListener("click", async () => {
   const text = String(promptInput.value || "").trim();
   if (!text) return;
   await navigator.clipboard.writeText(text);
@@ -386,39 +457,80 @@ copyBtn.addEventListener("click", async () => {
   }, 1200);
 });
 
-newBtn.addEventListener("click", () => {
+pasteBtn?.addEventListener("click", async () => {
+  const text = String(promptInput.value || "").trim();
+  if (!text) {
+    showError("Add prompt text before pasting.");
+    return;
+  }
+  if (!window.promptlyCompanion?.pasteToHost) {
+    showError("Paste is only available in the desktop app on macOS.");
+    return;
+  }
+  clearStatus();
+  if (pasteBtn) {
+    pasteBtn.disabled = true;
+    pasteBtn.textContent = "Pasting…";
+  }
+  try {
+    const result = await window.promptlyCompanion.pasteToHost(text);
+    if (!result?.ok) {
+      showError(String(result?.error || "Paste failed"));
+      return;
+    }
+    const host = result.host ? ` into ${result.host}` : "";
+    showSuccess(`Pasted${host}`);
+  } catch (error) {
+    showError(String(error?.message || error || "Paste failed"));
+  } finally {
+    if (pasteBtn) {
+      pasteBtn.disabled = false;
+      pasteBtn.textContent = "Paste";
+    }
+  }
+});
+
+newBtn?.addEventListener("click", () => {
   if (window.promptlyCompanion?.openNewWindow) {
     void window.promptlyCompanion.openNewWindow();
     return;
   }
   startNewSession();
 });
-newPromptBtn.addEventListener("click", startNewSession);
-settingsBtn.addEventListener("click", openSettings);
-settingsCancel.addEventListener("click", () => settingsDialog.close());
-settingsForm.addEventListener("submit", (ev) => {
+collapseBtn?.addEventListener("click", () => void setCollapsed(true));
+miniExpandBtn?.addEventListener("click", () => void setCollapsed(false));
+closeBtn?.addEventListener("click", () => {
+  if (window.promptlyCompanion?.closeWindow) {
+    void window.promptlyCompanion.closeWindow();
+  }
+});
+newPromptBtn?.addEventListener("click", startNewSession);
+settingsBtn?.addEventListener("click", openSettings);
+settingsCancel?.addEventListener("click", () => settingsDialog.close());
+settingsForm?.addEventListener("submit", (ev) => {
   ev.preventDefault();
   mergeConfig({
     apiUrl: apiUrlInput.value,
     token: tokenInput.value,
     client: clientInput.value
   });
+  void saveCompanionSettingsFromForm();
   updateApiIndicator();
   settingsDialog.close();
   clearStatus();
 });
 
-improveBtn.addEventListener("click", () => void handleImprove());
-refineBtn.addEventListener("click", () => void handleRefine());
+improveBtn?.addEventListener("click", () => void handleImprove());
+refineBtn?.addEventListener("click", () => void handleRefine());
 
-draftInput.addEventListener("keydown", (ev) => {
+draftInput?.addEventListener("keydown", (ev) => {
   if ((ev.metaKey || ev.ctrlKey) && ev.key === "Enter") {
     ev.preventDefault();
     void handleImprove();
   }
 });
 
-followUpInput.addEventListener("keydown", (ev) => {
+followUpInput?.addEventListener("keydown", (ev) => {
   if (followUpInput.readOnly) return;
   if ((ev.metaKey || ev.ctrlKey) && ev.key === "Enter") {
     ev.preventDefault();
@@ -426,8 +538,8 @@ followUpInput.addEventListener("keydown", (ev) => {
   }
 });
 
-draftInput.addEventListener("input", syncDraftStrength);
-promptInput.addEventListener("input", syncPromptStrength);
+draftInput?.addEventListener("input", syncDraftStrength);
+promptInput?.addEventListener("input", syncPromptStrength);
 
 void bootstrapConfig().then(() => {
   syncDraftStrength();

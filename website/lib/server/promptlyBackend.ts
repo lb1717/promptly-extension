@@ -5884,7 +5884,7 @@ function normalizeRefinePlainOutput(rawText: string): string {
 }
 
 const COMPANION_IMPROVE_RETRY_MSG =
-  "Wrong output. You returned instructions about improving (YOUR JOB, Terminology, EXTERNAL AI REQUEST =) or pasted the source unchanged. Reply with ONLY the improved EXTERNAL AI REQUEST text — the revised request the user pastes into another AI. No rubric, no meta commentary.";
+  "Wrong output. Return ONLY the cleaned-up EXTERNAL AI REQUEST: first line '- Objective: ...', then blank line, then '- ' bullets restructuring the source with minimal edits. Preserve all details. No YOUR JOB, Terminology, or instruction echo.";
 
 function looksLikeCompanionImproveEcho(text: string, sourcePrompt: string): boolean {
   const t = String(text || "").trim();
@@ -5895,6 +5895,7 @@ function looksLikeCompanionImproveEcho(text: string, sourcePrompt: string): bool
   const echoPhrases = [
     "companion improve mode",
     "companion — improve",
+    "companion — clean up",
     "external ai request =",
     "terminology:",
     "your job",
@@ -5905,7 +5906,9 @@ function looksLikeCompanionImproveEcho(text: string, sourcePrompt: string): bool
     "preserve every substantive requirement",
     "re-phrase and re-order",
     "plain text only. use blank lines between sections",
-    "improve an external ai request"
+    "improve an external ai request",
+    "clean up and structure",
+    "minimal edit — structure"
   ];
   const hits = echoPhrases.filter((p) => low.includes(p)).length;
   if (hits >= 1 && (low.includes("you must not") || low.includes("terminology:"))) {
