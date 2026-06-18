@@ -8,5 +8,7 @@ export async function GET() {
   if (!url) {
     return NextResponse.json({ error: "Mac installer not available" }, { status: 404 });
   }
-  return NextResponse.redirect(url, 302);
+  const response = NextResponse.redirect(url, 302);
+  response.headers.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  return response;
 }

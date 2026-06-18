@@ -34,6 +34,13 @@ const nextConfig = {
         headers: [{ key: "X-Content-Type-Options", value: "nosniff" }]
       },
       {
+        source: "/downloads/companion/:path*",
+        headers: [
+          { key: "Cache-Control", value: "no-store, no-cache, must-revalidate" },
+          { key: "Access-Control-Allow-Origin", value: "*" }
+        ]
+      },
+      {
         source: "/downloads/:path*",
         headers: [
           { key: "Cache-Control", value: "public, max-age=3600" },

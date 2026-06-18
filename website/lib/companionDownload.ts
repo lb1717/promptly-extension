@@ -16,14 +16,14 @@ export type CompanionAssetUrls = {
 const GITHUB_REPO = "lb1717/promptly-extension";
 
 /** Stable fallback when GitHub API is unavailable at runtime. */
-const FALLBACK_RELEASE_TAG = "companion-v0.1.0";
+const FALLBACK_RELEASE_TAG = "companion-v0.1.1";
 const FALLBACK_BASE = `https://github.com/${GITHUB_REPO}/releases/download/${FALLBACK_RELEASE_TAG}`;
 
 const FALLBACK_ASSETS: CompanionAssetUrls = {
-  version: "0.1.0",
-  macDmg: `${FALLBACK_BASE}/Promptly-Companion-0.1.0-mac.dmg`,
-  macZip: `${FALLBACK_BASE}/Promptly-Companion-0.1.0-mac.zip`,
-  winExe: `${FALLBACK_BASE}/Promptly-Companion-0.1.0-win.exe`
+  version: "0.1.1",
+  macDmg: `${FALLBACK_BASE}/Promptly-Companion-0.1.1-mac.dmg`,
+  macZip: `${FALLBACK_BASE}/Promptly-Companion-0.1.1-mac.zip`,
+  winExe: `${FALLBACK_BASE}/Promptly-Companion-0.1.1-win.exe`
 };
 
 function pickCompanionAsset(
