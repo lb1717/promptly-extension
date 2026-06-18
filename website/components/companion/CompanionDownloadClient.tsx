@@ -69,42 +69,50 @@ export function CompanionDownloadClient({ download }: Props) {
       ) : null}
 
       <section className="mt-10 rounded-2xl border border-amber-200 bg-amber-50/90 p-5 text-sm text-muted">
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-ink">
-          macOS says &ldquo;damaged and can&apos;t be opened&rdquo;?
-        </h2>
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-ink">Mac install (follow every step)</h2>
         <p className="mb-3">
-          That message is normal for apps downloaded outside the App Store. The app is not actually damaged — macOS is
-          blocking an unsigned download.
+          Companion is not from the App Store yet, so macOS will block it the first time. That is expected — the app is
+          safe. You only do this once.
         </p>
-        <ol className="list-decimal space-y-2 pl-5">
-          <li>Open the .dmg (or unzip the Mac ZIP) and drag <strong className="text-ink">Promptly Companion</strong> to{" "}
-            <strong className="text-ink">Applications</strong>.
+        <ol className="list-decimal space-y-3 pl-5">
+          <li>
+            Download the <strong className="text-ink">.dmg</strong> above, open it, and drag{" "}
+            <strong className="text-ink">Promptly Companion</strong> to <strong className="text-ink">Applications</strong>.
           </li>
           <li>
-            Open <strong className="text-ink">Terminal</strong> and paste:
+            Open <strong className="text-ink">Terminal</strong> and paste (fixes &ldquo;damaged&rdquo;):
             <pre className="mt-2 overflow-x-auto rounded-lg border border-line bg-page p-3 text-xs text-ink">
               xattr -cr &quot;/Applications/Promptly Companion.app&quot;
             </pre>
           </li>
           <li>
-            Open the app from Applications. If macOS still warns you,{" "}
-            <strong className="text-ink">right-click</strong> the app → <strong className="text-ink">Open</strong> →{" "}
-            Open again.
+            <strong className="text-ink">Do not double-click the app yet.</strong> In Finder, go to{" "}
+            <strong className="text-ink">Applications</strong>, <strong className="text-ink">right-click</strong>{" "}
+            <strong className="text-ink">Promptly Companion</strong> → <strong className="text-ink">Open</strong> → click{" "}
+            <strong className="text-ink">Open</strong> in the dialog.
+            <p className="mt-2 text-xs">
+              This fixes: &ldquo;can&apos;t be opened because Apple cannot check it for malicious software.&rdquo;
+            </p>
+          </li>
+          <li>
+            If you do not see a right-click Open option: open <strong className="text-ink">System Settings</strong> →{" "}
+            <strong className="text-ink">Privacy &amp; Security</strong> → scroll down → click{" "}
+            <strong className="text-ink">Open Anyway</strong> next to Promptly Companion.
+          </li>
+          <li>
+            After it opens, go to <strong className="text-ink">⚙ Settings</strong> and confirm{" "}
+            <strong className="text-ink">Version {download.version || "…"} · installed</strong>.
           </li>
         </ol>
       </section>
 
       <section className="mt-6 rounded-2xl border border-line bg-cream/80 p-5 text-sm text-muted">
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-ink">First-time install (Mac)</h2>
-        <ol className="list-decimal space-y-1 pl-5">
-          <li>Download the <strong className="text-ink">.dmg</strong> (or .zip) above.</li>
-          <li>Drag Promptly Companion to Applications.</li>
-          <li>Run the Terminal command in the yellow box if macOS blocks the app.</li>
-          <li>
-            Open <strong className="text-ink">⚙ Settings</strong> and confirm{" "}
-            <strong className="text-ink">Version {download.version || "…"} · installed</strong>.
-          </li>
-        </ol>
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-ink">Why does macOS block it?</h2>
+        <p>
+          Fully removing this step requires Apple&apos;s $99/year Developer Program to notarize the app. Without that,
+          every Mac app downloaded from the web needs the one-time right-click Open above. After the first successful
+          launch, you can open it normally.
+        </p>
       </section>
 
       {hasMac || hasWin ? (
