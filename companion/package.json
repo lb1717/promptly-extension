@@ -1,7 +1,7 @@
 {
   "name": "promptly-companion",
   "productName": "Promptly Companion",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Desktop prompt workshop for Promptly — improve drafts, refine with feedback, copy into any AI app.",
   "main": "src/main.js",
   "author": "Promptly Labs",

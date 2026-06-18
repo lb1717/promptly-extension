@@ -19,11 +19,14 @@ mac:
     - dmg
     - zip
   icon: build/icon.png
-  # Unsigned build — no Apple Developer Program required.
-  # Users: Right-click the app → Open the first time.
+  # Unsigned distribution — ad-hoc signed in scripts/after-pack.cjs after pack.
+  # Users: if macOS says "damaged", run: xattr -cr "/Applications/Promptly Companion.app"
   identity: null
   gatekeeperAssess: false
   hardenedRuntime: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+afterPack: ./scripts/after-pack.cjs
 dmg:
   title: Promptly Companion
 win:

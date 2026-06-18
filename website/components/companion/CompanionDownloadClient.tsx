@@ -7,6 +7,7 @@ type Props = {
 
 export function CompanionDownloadClient({ download }: Props) {
   const hasMac = Boolean(download.macUrl);
+  const hasMacZip = Boolean(download.macZipUrl);
   const hasWin = Boolean(download.winUrl);
 
   return (
@@ -25,13 +26,21 @@ export function CompanionDownloadClient({ download }: Props) {
         ) : null}
       </div>
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:justify-center">
         {hasMac && download.macUrl ? (
           <a
             href={download.macUrl}
             className="inline-flex items-center justify-center rounded-xl border border-ink bg-blue-800 px-6 py-3 text-sm font-semibold text-white hover:bg-blue-900"
           >
             {download.macLabel || "Download for Mac"}
+          </a>
+        ) : null}
+        {hasMacZip && download.macZipUrl ? (
+          <a
+            href={download.macZipUrl}
+            className="inline-flex items-center justify-center rounded-xl border border-line bg-page px-6 py-3 text-sm font-semibold text-ink hover:bg-cream-dark"
+          >
+            {download.macZipLabel || "Download Mac ZIP"}
           </a>
         ) : null}
         {hasWin && download.winUrl ? (
@@ -43,31 +52,6 @@ export function CompanionDownloadClient({ download }: Props) {
           </a>
         ) : null}
       </div>
-
-      {hasMac || hasWin ? (
-        <section className="mt-6 rounded-2xl border border-line bg-page p-5 text-sm text-muted">
-          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-ink">Verify you have the latest build</h2>
-          <p className="mb-2">
-            Open <strong className="text-ink">⚙ Settings</strong> in the app. The top line must say{" "}
-            <strong className="text-ink">Version {download.version || "…"} · installed</strong>.
-          </p>
-          <p className="mb-2">You should also see:</p>
-          <ul className="list-disc space-y-1 pl-5">
-            <li>
-              <strong className="text-ink">▁</strong> collapse, <strong className="text-ink">×</strong> close, and mic
-              buttons in the top bar / prompt boxes
-            </li>
-            <li>
-              <strong className="text-ink">Paste</strong> next to Copy after you click Improve
-            </li>
-          </ul>
-          <p className="mt-3 text-xs">
-            If those are missing, delete <code className="text-ink">/Applications/Promptly Companion.app</code>, remove
-            old <code className="text-ink">Promptly-Companion-0.1.0-mac.dmg</code> files from Downloads, then install
-            again from the button above.
-          </p>
-        </section>
-      ) : null}
 
       {!hasMac && !hasWin ? (
         <p className="mt-6 text-center text-sm text-muted">
@@ -84,24 +68,59 @@ export function CompanionDownloadClient({ download }: Props) {
         </p>
       ) : null}
 
-      <section className="mt-10 rounded-2xl border border-line bg-cream/80 p-5 text-sm text-muted">
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-ink">First-time install (Mac)</h2>
-        <p className="mb-2">
-          Companion is not from the App Store yet. macOS may say the app is from an unidentified developer — that is
-          normal without Apple&apos;s paid developer program.
+      <section className="mt-10 rounded-2xl border border-amber-200 bg-amber-50/90 p-5 text-sm text-muted">
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-ink">
+          macOS says &ldquo;damaged and can&apos;t be opened&rdquo;?
+        </h2>
+        <p className="mb-3">
+          That message is normal for apps downloaded outside the App Store. The app is not actually damaged — macOS is
+          blocking an unsigned download.
         </p>
-        <ol className="list-decimal space-y-1 pl-5">
-          <li>Open the .dmg and drag Promptly Companion to Applications.</li>
+        <ol className="list-decimal space-y-2 pl-5">
+          <li>Open the .dmg (or unzip the Mac ZIP) and drag <strong className="text-ink">Promptly Companion</strong> to{" "}
+            <strong className="text-ink">Applications</strong>.
+          </li>
           <li>
-            <strong className="text-ink">Right-click</strong> the app → <strong className="text-ink">Open</strong> →
-            Open again. (Or System Settings → Privacy &amp; Security → Open Anyway.)
+            Open <strong className="text-ink">Terminal</strong> and paste:
+            <pre className="mt-2 overflow-x-auto rounded-lg border border-line bg-page p-3 text-xs text-ink">
+              xattr -cr &quot;/Applications/Promptly Companion.app&quot;
+            </pre>
+          </li>
+          <li>
+            Open the app from Applications. If macOS still warns you,{" "}
+            <strong className="text-ink">right-click</strong> the app → <strong className="text-ink">Open</strong> →{" "}
+            Open again.
           </li>
         </ol>
-        <p className="mt-4 text-xs">
-          You do <em>not</em> need an Apple Developer account to download or use the app — signing only removes this
-          extra step.
-        </p>
       </section>
+
+      <section className="mt-6 rounded-2xl border border-line bg-cream/80 p-5 text-sm text-muted">
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-ink">First-time install (Mac)</h2>
+        <ol className="list-decimal space-y-1 pl-5">
+          <li>Download the <strong className="text-ink">.dmg</strong> (or .zip) above.</li>
+          <li>Drag Promptly Companion to Applications.</li>
+          <li>Run the Terminal command in the yellow box if macOS blocks the app.</li>
+          <li>
+            Open <strong className="text-ink">⚙ Settings</strong> and confirm{" "}
+            <strong className="text-ink">Version {download.version || "…"} · installed</strong>.
+          </li>
+        </ol>
+      </section>
+
+      {hasMac || hasWin ? (
+        <section className="mt-6 rounded-2xl border border-line bg-page p-5 text-sm text-muted">
+          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-ink">Latest build checklist</h2>
+          <ul className="list-disc space-y-1 pl-5">
+            <li>
+              Top bar: <strong className="text-ink">▁</strong> collapse, <strong className="text-ink">×</strong> close
+            </li>
+            <li>Mic buttons on the draft and follow-up boxes</li>
+            <li>
+              <strong className="text-ink">Paste</strong> next to Copy after you click Improve
+            </li>
+          </ul>
+        </section>
+      ) : null}
 
       <section className="mt-6 rounded-2xl border border-line bg-page p-5 text-sm text-muted">
         <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-ink">Windows</h2>

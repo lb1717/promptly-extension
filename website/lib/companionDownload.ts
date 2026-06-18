@@ -1,8 +1,10 @@
 export type CompanionDownloadInfo = {
   version: string;
   macUrl: string | null;
+  macZipUrl: string | null;
   winUrl: string | null;
   macLabel: string | null;
+  macZipLabel: string | null;
   winLabel: string | null;
 };
 
@@ -16,14 +18,14 @@ export type CompanionAssetUrls = {
 const GITHUB_REPO = "lb1717/promptly-extension";
 
 /** Stable fallback when GitHub API is unavailable at runtime. */
-const FALLBACK_RELEASE_TAG = "companion-v0.1.2";
+const FALLBACK_RELEASE_TAG = "companion-v0.1.3";
 const FALLBACK_BASE = `https://github.com/${GITHUB_REPO}/releases/download/${FALLBACK_RELEASE_TAG}`;
 
 const FALLBACK_ASSETS: CompanionAssetUrls = {
-  version: "0.1.2",
-  macDmg: `${FALLBACK_BASE}/Promptly-Companion-0.1.2-mac.dmg`,
-  macZip: `${FALLBACK_BASE}/Promptly-Companion-0.1.2-mac.zip`,
-  winExe: `${FALLBACK_BASE}/Promptly-Companion-0.1.2-win.exe`
+  version: "0.1.3",
+  macDmg: `${FALLBACK_BASE}/Promptly-Companion-0.1.3-mac.dmg`,
+  macZip: `${FALLBACK_BASE}/Promptly-Companion-0.1.3-mac.zip`,
+  winExe: `${FALLBACK_BASE}/Promptly-Companion-0.1.3-win.exe`
 };
 
 function pickCompanionAsset(
@@ -106,15 +108,15 @@ export async function resolveCompanionAssetUrls(): Promise<CompanionAssetUrls> {
 /** Page-facing download links — direct GitHub release URLs with versioned filenames. */
 export async function getCompanionDownloadInfo(): Promise<CompanionDownloadInfo> {
   const assets = await resolveCompanionAssetUrls();
-  const macUrl = assets.macDmg || assets.macZip || null;
-  const winUrl = assets.winExe || null;
 
   return {
     version: assets.version,
-    macUrl,
-    winUrl,
-    macLabel: macUrl ? `Download for Mac (v${assets.version} .dmg)` : null,
-    winLabel: winUrl ? `Download for Windows (v${assets.version} .exe)` : null
+    macUrl: assets.macDmg || null,
+    macZipUrl: assets.macZip || null,
+    winUrl: assets.winExe || null,
+    macLabel: assets.macDmg ? `Download for Mac (v${assets.version} .dmg)` : null,
+    macZipLabel: assets.macZip ? `Download Mac ZIP (v${assets.version})` : null,
+    winLabel: assets.winExe ? `Download for Windows (v${assets.version} .exe)` : null
   };
 }
 
