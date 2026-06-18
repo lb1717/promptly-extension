@@ -9,7 +9,7 @@ export function estimateTokensFromChars(charCount) {
 /** Keep in sync with `website/lib/server/promptOptimizeEngine.ts` (worker has no Firestore templates). */
 export function resolveOptimizeModeFromPayload(payload) {
   const m = String(payload?.optimize_mode || "").trim().toLowerCase();
-  if (m === "auto" || m === "improve" || m === "generate") {
+  if (m === "auto" || m === "improve" || m === "generate" || m === "refine") {
     return m;
   }
   const rm = String(payload?.request_mode || "").trim().toLowerCase();

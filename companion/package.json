@@ -1,0 +1,17 @@
+{
+  "name": "promptly-companion",
+  "productName": "Promptly Companion",
+  "version": "0.1.0",
+  "description": "Experimental floating Promptly prompt workshop",
+  "main": "src/main.js",
+  "author": "Promptly Labs",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dev": "node scripts/dev.mjs"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0"
+  }
+}

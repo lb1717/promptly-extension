@@ -125,6 +125,7 @@ type DailyUsage = {
 
 type OptimizerResult = {
   optimized_prompt: string;
+  refine_summary?: string;
   usage: {
     total_tokens: number;
     prompt_tokens: number;
@@ -5591,6 +5592,116 @@ function stripComposeMetaForbiddenSections(s: string): string {
   return t.replace(/\n{3,}/g, "\n\n").trim();
 }
 
+/** Unlikely to appear in user prompts; separates prompt from feedback in refine user slot. */
+const REFINE_FEEDBACK_DELIMITER = "\n\n⬥⬥⬥\n\n";
+const REFINE_PROMPT_OPEN = "<<<PROMPTLY_REFINED_PROMPT>>>";
+const REFINE_PROMPT_CLOSE = "<<<END_PROMPTLY_REFINED_PROMPT>>>";
+const REFINE_SUMMARY_OPEN = "<<<PROMPTLY_REFINE_SUMMARY>>>";
+const REFINE_SUMMARY_CLOSE = "<<<END_PROMPTLY_REFINE_SUMMARY>>>";
+
+function buildRefineUserSlot(prompt: string, promptFeedback: string): string {
+  return `${String(prompt || "").trim()}${REFINE_FEEDBACK_DELIMITER}${String(promptFeedback || "").trim()}`;
+}
+
+function looksLikeRefineEcho(output: string, sourcePrompt: string): boolean {
+  const o = String(output || "").trim();
+  if (!o) {
+    return true;
+  }
+  if (/CURRENT PROMPT:|USER FEEDBACK:|⬥⬥⬥|Personalization for the user:|Rewrite the entire current prompt/i.test(o)) {
+    return true;
+  }
+  const head = String(sourcePrompt || "")
+    .trim()
+    .slice(0, Math.min(160, sourcePrompt.length));
+  if (head.length >= 48 && o.startsWith(head) && /USER FEEDBACK/i.test(o)) {
+    return true;
+  }
+  return false;
+}
+
+function parseRefineDelimitedOutput(rawText: string): { prompt: string; summary: string } {
+  const t = String(rawText || "");
+  let prompt = "";
+  let summary = "";
+  const pOpen = t.indexOf(REFINE_PROMPT_OPEN);
+  const pClose = t.indexOf(REFINE_PROMPT_CLOSE);
+  if (pOpen >= 0 && pClose > pOpen) {
+    prompt = t.slice(pOpen + REFINE_PROMPT_OPEN.length, pClose).trim();
+  }
+  const sOpen = t.indexOf(REFINE_SUMMARY_OPEN);
+  const sClose = t.indexOf(REFINE_SUMMARY_CLOSE);
+  if (sOpen >= 0 && sClose > sOpen) {
+    summary = t.slice(sOpen + REFINE_SUMMARY_OPEN.length, sClose).trim();
+  }
+  if (!prompt) {
+    prompt = normalizeRefinePlainOutput(t);
+  }
+  summary = summary.replace(/^["']|["']$/g, "").trim();
+  return { prompt, summary };
+}
+
+function normalizeRefinePlainOutput(rawText: string): string {
+  let t = String(rawText || "")
+    .replace(/\r\n/g, "\n")
+    .trim();
+  if (!t) {
+    return "";
+  }
+
+  const delimIdx = t.indexOf("⬥⬥⬥");
+  if (delimIdx > 0) {
+    t = t.slice(0, delimIdx).trim();
+  }
+
+  t = t.replace(/^CURRENT PROMPT:\s*\n?/i, "");
+  const userFbIdx = t.search(/\nUSER FEEDBACK:\s*\n/i);
+  if (userFbIdx > 0) {
+    t = t.slice(0, userFbIdx).trim();
+  }
+
+  const cutMarkers = [
+    /\nPersonalization for the user:/i,
+    /\n- Final instruction:/i,
+    /\nUSER FEEDBACK:/i,
+    /\nRewrite the entire current prompt/i
+  ];
+  for (const re of cutMarkers) {
+    const idx = t.search(re);
+    if (idx > 40) {
+      t = t.slice(0, idx).trim();
+    }
+  }
+
+  t = t.replace(/^(?:Here is|Here'?s|I've|I have|The following is)[^\n]{0,160}\n+/i, "");
+
+  const metaLine =
+    /^(?:={2,}\s*.+\s*={2,}|context provided|user request\s*\(applied\)|additional note|update:|applied feedback|revision note|current prompt:|user feedback:)\s*:?\s*$/i;
+
+  const lines = t.split("\n");
+  const kept: string[] = [];
+  let skippingMetaBlock = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (metaLine.test(trimmed)) {
+      skippingMetaBlock = true;
+      continue;
+    }
+    if (skippingMetaBlock && trimmed === "") {
+      skippingMetaBlock = false;
+      continue;
+    }
+    if (!skippingMetaBlock) {
+      kept.push(line);
+    }
+  }
+
+  t = kept.join("\n").trim();
+  t = postFormatPlainTextForApi(t);
+  return t.slice(0, 100_000);
+}
+
 function normalizePlainRewriteOutput(
   rawText: string,
   fallbackPrompt: string,
@@ -5633,6 +5744,7 @@ export type PromptEngineeringTemplates = {
   rewrite_auto_template: string;
   rewrite_manual_template: string;
   compose_template: string;
+  refine_template: string;
 };
 
 export type PromptEngineeringRuntimeControls = {
@@ -5777,7 +5889,53 @@ Reply with only that prompt as plain text—no preamble—or JSON {"prompt":"...
 
 ${tok}
 
-Infer only reasonable defaults from the description. Target ~220–600 words for rich tasks; shorter for trivial asks; hard max ~900 words. Do not chat.`
+Infer only reasonable defaults from the description. Target ~220–600 words for rich tasks; shorter for trivial asks; hard max ~900 words. Do not chat.`,
+    refine_template: `Refine mode — edit an existing prompt document in place.
+
+WHAT YOU RECEIVE in the user content slot (two parts separated by a line containing only ⬥⬥⬥):
+
+PART 1 — PROMPT
+The full text of an existing AI prompt. This is plain document text the user already has. It tells some other AI what to do later.
+
+PART 2 — PROMPT-FEEDBACK
+The user's instructions for how to change that PROMPT text (add, remove, rephrase, shorten, fill in names, etc.).
+
+YOUR ONLY JOB
+1. Apply PROMPT-FEEDBACK to the PROMPT: edit that text throughout so the feedback is reflected inline.
+2. Output the edited PROMPT text (same type of document — still a prompt for another AI, not your answer to it).
+3. Output a one-sentence summary of what you changed.
+
+YOU ARE NOT
+- Answering, executing, or fulfilling the task described inside the PROMPT.
+- Writing a new prompt about how to improve prompts or about prompt engineering.
+- Producing instructions to an AI on how to rewrite — you rewrite the text yourself.
+- Appending a separate "note", "context", or "feedback applied" block — change the PROMPT body directly.
+
+HOW TO EDIT
+- If PROMPT-FEEDBACK removes something, delete it from the PROMPT everywhere it appears.
+- If it adds facts or names, weave them into the relevant bullets and sentences; replace bracket placeholders with concrete values.
+- Do NOT append a new paragraph like "Your teacher is Mr. John" or "Additional note:" — change the existing PROMPT sentences in place.
+- Keep similar formatting (paragraph breaks, bullets, labels) unless PROMPT-FEEDBACK says otherwise.
+- Do not invent facts the user did not provide.
+
+EXAMPLE
+PROMPT: "Write an email to [Teacher Name] about homework."
+PROMPT-FEEDBACK: "My teacher is Mr. John"
+WRONG: keeping "[Teacher Name]" and adding "Your teacher is Mr. John." at the end.
+RIGHT: "Write an email to Mr. John about homework."
+
+OUTPUT FORMAT (exact markers only):
+
+${REFINE_PROMPT_OPEN}
+(the complete edited PROMPT — the modified document text only)
+${REFINE_PROMPT_CLOSE}
+${REFINE_SUMMARY_OPEN}
+(one sentence, max 25 words, stating what you changed in the PROMPT)
+${REFINE_SUMMARY_CLOSE}
+
+Nothing before ${REFINE_PROMPT_OPEN}. Nothing after ${REFINE_SUMMARY_CLOSE}. No markdown fences. Do not echo ⬥⬥⬥ or input labels.
+
+${tok}`
   };
 }
 
@@ -5799,7 +5957,8 @@ async function loadPromptEngineeringConfig(options: { forceRefresh?: boolean } =
   const templates: PromptEngineeringTemplates = {
     rewrite_auto_template: pick("rewrite_auto_template"),
     rewrite_manual_template: pick("rewrite_manual_template"),
-    compose_template: pick("compose_template")
+    compose_template: pick("compose_template"),
+    refine_template: pick("refine_template")
   };
   const defaultsRuntime = getDefaultPromptEngineeringRuntimeControls();
   const defaultsModels = getDefaultPromptEngineeringModelControls();
@@ -5900,6 +6059,7 @@ export async function adminGetPromptEngineering(): Promise<
     rewrite_auto_template: coalesce("rewrite_auto_template"),
     rewrite_manual_template: coalesce("rewrite_manual_template"),
     compose_template: coalesce("compose_template"),
+    refine_template: coalesce("refine_template"),
     rewrite_timeout_ms: normalizeRuntimeControl(
       raw.rewrite_timeout_ms,
       defaultsRuntime.rewrite_timeout_ms,
@@ -5970,7 +6130,9 @@ export async function adminSavePromptEngineering(
         ? patch.rewrite_manual_template
         : current.rewrite_manual_template,
     compose_template:
-      typeof patch.compose_template === "string" ? patch.compose_template : current.compose_template
+      typeof patch.compose_template === "string" ? patch.compose_template : current.compose_template,
+    refine_template:
+      typeof patch.refine_template === "string" ? patch.refine_template : current.refine_template
   };
   validateTemplateLengths(next);
   const nextRuntime: PromptEngineeringRuntimeControls = {
@@ -6405,10 +6567,11 @@ export async function optimizePrompt(
   prompt: string,
   userInstruction: string,
   modeOrLegacyRequest: string,
-  options: { forceConfigRefresh?: boolean } = {}
+  options: { forceConfigRefresh?: boolean; promptFeedback?: string; feedback?: string } = {}
 ): Promise<OptimizerResult> {
   const trimmedPrompt = String(prompt || "").trim();
   const trimmedInstruction = String(userInstruction || "").trim();
+  const trimmedFeedback = String(options.promptFeedback || options.feedback || "").trim();
   const engineMode: OptimizeEngineMode = isOptimizeEngineMode(modeOrLegacyRequest)
     ? modeOrLegacyRequest
     : resolveOptimizeEngineMode({
@@ -6417,12 +6580,19 @@ export async function optimizePrompt(
       });
   const providerRequestMode = pickProviderRequestMode(engineMode);
   const isGenerate = engineMode === "generate";
+  const isRefine = engineMode === "refine";
+
+  if (isRefine && (!trimmedPrompt || !trimmedFeedback)) {
+    throw new Error("Refine mode requires prompt and prompt_feedback");
+  }
 
   const config = await loadPromptEngineeringConfig({ forceRefresh: !!options.forceConfigRefresh });
   const defaultTemplates = getDefaultPromptEngineeringTemplates();
   const template = pickTemplateStringForMode(engineMode, config, config.create_template_max_chars, defaultTemplates);
 
-  const userSlotRaw = trimmedPrompt || trimmedInstruction;
+  const userSlotRaw = isRefine
+    ? buildRefineUserSlot(trimmedPrompt, trimmedFeedback)
+    : trimmedPrompt || trimmedInstruction;
   const userSlot = isGenerate ? userSlotRaw.slice(0, config.create_user_slot_max_chars) : userSlotRaw;
 
   const bundledUserMessage = fillPromptTemplateWithUserSlot(template, userSlot);
@@ -6504,11 +6674,43 @@ export async function optimizePrompt(
     });
   }
 
-  let normalized = normalizePlainRewriteOutput(firstResult.rawText, trimmedPrompt || trimmedInstruction, {
-    create: isGenerate
-  });
+  if (isRefine && looksLikeRefineEcho(firstResult.rawText, trimmedPrompt)) {
+    const retryResult = await callOpenAi({
+      messages: [
+        ...messages,
+        { role: "assistant", content: firstResult.rawText },
+        {
+          role: "user",
+          content: `Wrong format. Remember: you are editing the PROMPT document text — not answering it, not writing meta-instructions about improving prompts. Output only:
+
+${REFINE_PROMPT_OPEN}
+(edited PROMPT text with PROMPT-FEEDBACK applied inline)
+${REFINE_PROMPT_CLOSE}
+${REFINE_SUMMARY_OPEN}
+(one sentence: what you changed)
+${REFINE_SUMMARY_CLOSE}`
+        }
+      ],
+      requestMode: providerRequestMode,
+      ...requestOptions
+    });
+    firstResult = retryResult;
+  }
+
+  let normalized = isRefine
+    ? (() => {
+        const parsed = parseRefineDelimitedOutput(firstResult.rawText);
+        return {
+          optimized_prompt: parsed.prompt,
+          refine_summary: parsed.summary
+        };
+      })()
+    : normalizePlainRewriteOutput(firstResult.rawText, trimmedPrompt || trimmedInstruction, {
+        create: isGenerate
+      });
   // Improve/auto: model text -> light formatting only (no delimiter echo stripping).
-  if (!isGenerate) {
+  // Refine: prompt-only output with meta-section sanitizer (no verbatim-source stripping).
+  if (!isGenerate && !isRefine) {
     let out = String(normalized.optimized_prompt || "").trim();
     if (userSlot.length >= 80) {
       out = stripVerbatimSourceAppend(out, userSlot);
@@ -6520,12 +6722,145 @@ export async function optimizePrompt(
   }
 
   let optimized_prompt = postFormatPlainTextForApi(normalized.optimized_prompt);
-  if (!isGenerate && !optimized_prompt.trim() && userSlot.trim()) {
+  const refine_summary =
+    isRefine && typeof (normalized as { refine_summary?: string }).refine_summary === "string"
+      ? String((normalized as { refine_summary?: string }).refine_summary || "").trim()
+      : undefined;
+  if (isRefine && !optimized_prompt.trim()) {
+    throw new Error("Refine returned an empty prompt");
+  }
+  if (!isGenerate && !isRefine && !optimized_prompt.trim() && userSlot.trim()) {
     optimized_prompt = postFormatPlainTextForApi(userSlot);
   }
 
   return {
     optimized_prompt,
+    ...(refine_summary ? { refine_summary } : {}),
+    usage: firstResult.usage,
+    model,
+    provider: "openai"
+  };
+}
+
+/** Used by companion prompt engineering admin saves. */
+export async function validateOpenAiModelExistsForCompanionAdmin(model: string): Promise<void> {
+  return validateOpenAiModelExists(model);
+}
+
+export async function optimizeCompanionPrompt(
+  prompt: string,
+  promptFeedback: string,
+  mode: "improve" | "refine",
+  options: { forceConfigRefresh?: boolean } = {}
+): Promise<OptimizerResult> {
+  const {
+    loadCompanionPromptEngineeringConfig,
+    buildCompanionRefineUserSlot,
+    fillCompanionTemplate
+  } = await import("@/lib/server/companionPromptEngineering");
+
+  const trimmedPrompt = String(prompt || "").trim();
+  const trimmedFeedback = String(promptFeedback || "").trim();
+  const isRefine = mode === "refine";
+
+  if (isRefine && (!trimmedPrompt || !trimmedFeedback)) {
+    throw new Error("Refine mode requires prompt and prompt_feedback");
+  }
+  if (!isRefine && !trimmedPrompt) {
+    throw new Error("Improve mode requires prompt");
+  }
+
+  const config = await loadCompanionPromptEngineeringConfig({ forceRefresh: !!options.forceConfigRefresh });
+  const template = isRefine ? config.refine_template : config.improve_template;
+  const userSlot = isRefine ? buildCompanionRefineUserSlot(trimmedPrompt, trimmedFeedback) : trimmedPrompt;
+  const bundledUserMessage = fillCompanionTemplate(template, userSlot);
+  const maxBundled = CREDIT_MAX_PROMPT_CHARS + PROMPT_TEMPLATE_MAX_CHARS;
+  if (bundledUserMessage.length > maxBundled) {
+    throw new Error("Bundled prompt exceeds safe size; shorten the template or user content.");
+  }
+
+  let model = isRefine ? config.refine_model : config.improve_model;
+  const requestOptions = {
+    model,
+    timeoutMs: isRefine ? config.refine_timeout_ms : config.improve_timeout_ms,
+    maxCompletionTokens: isRefine ? config.refine_max_completion_tokens : config.improve_max_completion_tokens,
+    createContinuationMaxRounds: isRefine ? config.refine_continuation_max_rounds : 1
+  };
+
+  const messages: Array<{ role: string; content: string }> = [{ role: "user", content: bundledUserMessage }];
+  let firstResult;
+  try {
+    firstResult = await callOpenAi({
+      messages,
+      requestMode: isRefine ? "create" : "rewrite",
+      ...requestOptions
+    });
+  } catch (error) {
+    const shouldFallback = isProviderTimeoutError(error) || isProviderNoContentError(error);
+    const fallbackModel = shouldFallback ? String(config.fallback_model || "").trim() : "";
+    if (!fallbackModel) {
+      throw error;
+    }
+    model = fallbackModel;
+    firstResult = await callOpenAi({
+      messages,
+      requestMode: isRefine ? "create" : "rewrite",
+      model,
+      timeoutMs: Math.max(12_000, requestOptions.timeoutMs),
+      maxCompletionTokens: requestOptions.maxCompletionTokens,
+      createContinuationMaxRounds: requestOptions.createContinuationMaxRounds
+    });
+  }
+
+  if (isRefine && looksLikeRefineEcho(firstResult.rawText, trimmedPrompt)) {
+    firstResult = await callOpenAi({
+      messages: [
+        ...messages,
+        { role: "assistant", content: firstResult.rawText },
+        {
+          role: "user",
+          content: `Wrong format. Remember: you are editing the PROMPT document text — not answering it, not writing meta-instructions about improving prompts. Output only:
+
+${REFINE_PROMPT_OPEN}
+(edited PROMPT text with PROMPT-FEEDBACK applied inline)
+${REFINE_PROMPT_CLOSE}
+${REFINE_SUMMARY_OPEN}
+(one sentence: what you changed)
+${REFINE_SUMMARY_CLOSE}`
+        }
+      ],
+      requestMode: "create",
+      ...requestOptions,
+      model
+    });
+  }
+
+  let normalized = isRefine
+    ? (() => {
+        const parsed = parseRefineDelimitedOutput(firstResult.rawText);
+        return {
+          optimized_prompt: parsed.prompt,
+          refine_summary: parsed.summary
+        };
+      })()
+    : normalizePlainRewriteOutput(firstResult.rawText, trimmedPrompt, { create: false });
+
+  let optimized_prompt = postFormatPlainTextForApi(normalized.optimized_prompt);
+  const refine_summary =
+    isRefine && typeof (normalized as { refine_summary?: string }).refine_summary === "string"
+      ? String((normalized as { refine_summary?: string }).refine_summary || "").trim()
+      : undefined;
+
+  if (isRefine && !optimized_prompt.trim()) {
+    throw new Error("Refine returned an empty prompt");
+  }
+  if (!isRefine && !optimized_prompt.trim() && userSlot.trim()) {
+    optimized_prompt = postFormatPlainTextForApi(userSlot);
+  }
+
+  return {
+    optimized_prompt,
+    ...(refine_summary ? { refine_summary } : {}),
     usage: firstResult.usage,
     model,
     provider: "openai"
@@ -6602,7 +6937,7 @@ export async function consumeDailyUsage(params: {
     };
     if (params.optimizeMode === "auto") {
       nextUsage.auto = currentAuto + 1;
-    } else if (params.optimizeMode === "improve") {
+    } else if (params.optimizeMode === "improve" || params.optimizeMode === "refine") {
       nextUsage.manual = currentManual + 1;
     }
     tx.set(

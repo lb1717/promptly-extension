@@ -1,9 +1,9 @@
 import { PROMPTLY_USER_CONTENT_TOKEN } from "./promptEngineeringConstants";
 
 /** Product modes for /api/optimize (extension + admin templates). */
-export type OptimizeEngineMode = "auto" | "improve" | "generate";
+export type OptimizeEngineMode = "auto" | "improve" | "generate" | "refine";
 
-const ENGINE_MODES = new Set<string>(["auto", "improve", "generate"]);
+const ENGINE_MODES = new Set<string>(["auto", "improve", "generate", "refine"]);
 
 export function isOptimizeEngineMode(value: string): value is OptimizeEngineMode {
   return ENGINE_MODES.has(String(value || "").trim().toLowerCase());
@@ -86,6 +86,7 @@ export type EngineTemplateFields = {
   rewrite_auto_template: string;
   rewrite_manual_template: string;
   compose_template: string;
+  refine_template: string;
 };
 
 export function pickTemplateStringForMode(
@@ -97,6 +98,8 @@ export function pickTemplateStringForMode(
   const raw =
     mode === "generate"
       ? templates.compose_template
+      : mode === "refine"
+        ? templates.refine_template
       : mode === "improve"
         ? templates.rewrite_manual_template
         : templates.rewrite_auto_template;
@@ -117,6 +120,9 @@ export function pickPrimaryModelForMode(
   if (mode === "generate") {
     return models.create_model;
   }
+  if (mode === "refine") {
+    return models.create_model;
+  }
   if (mode === "improve") {
     return models.rewrite_manual_model;
   }
@@ -124,7 +130,7 @@ export function pickPrimaryModelForMode(
 }
 
 export function pickProviderRequestMode(mode: OptimizeEngineMode): "rewrite" | "create" {
-  return mode === "generate" ? "create" : "rewrite";
+  return mode === "generate" || mode === "refine" ? "create" : "rewrite";
 }
 
 export function pickTimeoutMsForMode(

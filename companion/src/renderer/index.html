@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' http://localhost:* http://127.0.0.1:* https://promptly-labs.com https://www.promptly-labs.com https://*.vercel.app https://*"
+    />
+    <title>Promptly Companion</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <img src="assets/promptly-logo.png" alt="Promptly" class="brand-mark" width="24" height="24" />
+        <div class="brand-text">
+          <span class="brand-name">Companion</span>
+          <span id="api-indicator" class="api-indicator" title="Connected API"></span>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <button type="button" id="new-btn" class="icon-btn" title="New prompt" aria-label="New prompt">+</button>
+        <button type="button" id="settings-btn" class="icon-btn" title="Settings" aria-label="Settings">⚙</button>
+      </div>
+    </header>
+
+    <div id="status-banner" class="status-banner hidden" role="status"></div>
+
+    <section id="draft-view" class="workspace">
+      <div class="prompt-box-wrap stretch-box">
+        <div class="prompt-box-header">
+          <div class="prompt-strength" aria-label="Prompt strength">
+            <span class="prompt-strength-label">Strength</span>
+            <div id="draft-strength-track" class="prompt-strength-track">
+              <div id="draft-strength-fill" class="prompt-strength-fill"></div>
+            </div>
+          </div>
+        </div>
+        <textarea id="draft-input" class="stretch-textarea" placeholder="Type your prompt here…"></textarea>
+      </div>
+      <footer class="bottom-dock">
+        <button type="button" id="improve-btn" class="primary-btn">Improve</button>
+      </footer>
+    </section>
+
+    <section id="refine-view" class="workspace hidden">
+      <h2 class="section-title">Improve Suggestions</h2>
+      <div id="chip-grid" class="chip-grid"></div>
+      <div class="prompt-column">
+        <div class="prompt-box-wrap stretch-box">
+          <div class="prompt-box-header">
+            <div class="prompt-strength" aria-label="Prompt strength">
+              <span class="prompt-strength-label">Strength</span>
+              <div id="prompt-strength-track" class="prompt-strength-track">
+                <div id="prompt-strength-fill" class="prompt-strength-fill"></div>
+              </div>
+            </div>
+            <button type="button" id="copy-btn" class="header-copy-btn" title="Copy prompt" aria-label="Copy prompt">
+              Copy
+            </button>
+          </div>
+          <textarea id="prompt-input" class="stretch-textarea"></textarea>
+        </div>
+        <div class="feedback-stack">
+          <textarea
+            id="summary-slot"
+            class="feedback-slot summary-slot hidden"
+            readonly
+            tabindex="-1"
+            aria-label="Last change summary"
+          ></textarea>
+          <textarea
+            id="follow-up-input"
+            class="feedback-slot follow-up-slot"
+            rows="2"
+            placeholder="Suggest a change — tone, length, add detail, etc."
+          ></textarea>
+        </div>
+        <button type="button" id="refine-btn" class="primary-btn">Apply feedback</button>
+      </div>
+    </section>
+
+    <dialog id="settings-dialog" class="settings-dialog">
+      <form method="dialog" id="settings-form">
+        <h2>Connection</h2>
+        <p class="settings-hint">
+          Uses your paired IDE token from <code>~/.promptly/credentials-*.json</code> when available.
+        </p>
+        <label class="field-label" for="api-url-input">API URL</label>
+        <input id="api-url-input" class="text-input" type="url" placeholder="http://localhost:3000" />
+        <label class="field-label" for="token-input">Device token</label>
+        <input id="token-input" class="text-input" type="password" placeholder="pt_…" autocomplete="off" />
+        <label class="field-label" for="client-input">Client header</label>
+        <input id="client-input" class="text-input" type="text" placeholder="promptly-cursor" />
+        <div class="settings-actions">
+          <button type="submit" class="primary-btn">Save</button>
+          <button type="button" id="settings-cancel" class="ghost-btn">Cancel</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

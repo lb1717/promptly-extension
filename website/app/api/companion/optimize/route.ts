@@ -13,15 +13,22 @@ import {
   getUtcWeekKey,
   handlePromptlyPreflight,
   normalizePromptlyService,
-  optimizePrompt,
+  optimizeCompanionPrompt,
   parseOptimizeTelemetryFromPayload,
   recordOptimizeTelemetryEventSafe,
   requirePromptlyOptimizeUser,
   weeklyTokenLimitFromDaily
 } from "@/lib/server/promptlyBackend";
-import { resolveOptimizeEngineMode } from "@/lib/server/promptOptimizeEngine";
 
 export const runtime = "nodejs";
+
+type CompanionOptimizeMode = "improve" | "refine";
+
+function resolveCompanionMode(raw: unknown): CompanionOptimizeMode | null {
+  const mode = String(raw || "").trim().toLowerCase();
+  if (mode === "improve" || mode === "refine") return mode;
+  return null;
+}
 
 export async function OPTIONS(request: Request) {
   return handlePromptlyPreflight(request);
@@ -40,20 +47,19 @@ export async function POST(request: Request) {
     }
 
     const prompt = typeof payload.prompt === "string" ? payload.prompt.trim() : "";
-    const userInstruction =
-      typeof payload.user_instruction === "string" ? payload.user_instruction.trim() : "";
     const promptFeedback =
       typeof payload.prompt_feedback === "string"
         ? payload.prompt_feedback.trim()
         : typeof payload.feedback === "string"
           ? payload.feedback.trim()
           : "";
-    const telemetrySnapshot = parseOptimizeTelemetryFromPayload(payload as Record<string, unknown>);
-    const optimizeMode = resolveOptimizeEngineMode({
-      optimize_mode: (payload as Record<string, unknown>).optimize_mode,
-      request_mode: (payload as Record<string, unknown>).request_mode,
-      user_instruction: userInstruction
-    });
+    const optimizeMode = resolveCompanionMode(payload.optimize_mode);
+    if (!optimizeMode) {
+      return NextResponse.json(
+        { error: "optimize_mode must be improve or refine" },
+        { status: 400, headers: buildPromptlyCorsHeaders(origin) }
+      );
+    }
 
     if (optimizeMode === "refine") {
       if (!prompt) {
@@ -74,28 +80,23 @@ export async function POST(request: Request) {
           { status: 413, headers: buildPromptlyCorsHeaders(origin) }
         );
       }
-    } else if (!prompt && !userInstruction) {
+    } else if (!prompt) {
       return NextResponse.json(
-        { error: "prompt or user_instruction is required" },
+        { error: "prompt is required for improve mode" },
         { status: 400, headers: buildPromptlyCorsHeaders(origin) }
       );
     }
+
     if (prompt.length > CREDIT_MAX_PROMPT_CHARS) {
       return NextResponse.json(
         { error: `prompt exceeds ${CREDIT_MAX_PROMPT_CHARS} chars` },
         { status: 413, headers: buildPromptlyCorsHeaders(origin) }
       );
     }
-    if (userInstruction.length > CREDIT_MAX_INSTRUCTION_CHARS) {
-      return NextResponse.json(
-        { error: `user_instruction exceeds ${CREDIT_MAX_INSTRUCTION_CHARS} chars` },
-        { status: 413, headers: buildPromptlyCorsHeaders(origin) }
-      );
-    }
 
     const estimatedInputTokens = estimateBundledInputTokensForOptimize(
       prompt.length + (optimizeMode === "refine" ? promptFeedback.length : 0),
-      userInstruction.length
+      0
     );
     if (estimatedInputTokens > CREDIT_MAX_ESTIMATED_INPUT_TOKENS) {
       return NextResponse.json(
@@ -117,15 +118,14 @@ export async function POST(request: Request) {
     }
 
     const service = normalizePromptlyService(request.headers.get("x-promptly-service"));
+    const telemetrySnapshot = parseOptimizeTelemetryFromPayload(payload as Record<string, unknown>);
     const optimizeStartedAt = Date.now();
-    const optimized = await optimizePrompt(prompt, userInstruction, optimizeMode, {
-      forceConfigRefresh: true,
-      promptFeedback
+    const optimized = await optimizeCompanionPrompt(prompt, promptFeedback, optimizeMode, {
+      forceConfigRefresh: true
     });
     const optimizeElapsedMs = Math.max(0, Date.now() - optimizeStartedAt);
-    const fallbackText = optimizeMode === "refine" ? "" : (prompt || userInstruction).trim();
     const optimizedText = String(optimized?.optimized_prompt ?? "").trim();
-    const optimized_prompt = optimizedText || fallbackText;
+    const optimized_prompt = optimizedText || (optimizeMode === "refine" ? "" : prompt);
     const providerUsagePrompt = Math.max(0, Number(optimized?.usage?.prompt_tokens || 0));
     const providerUsageCompletion = Math.max(0, Number(optimized?.usage?.completion_tokens || 0));
     const providerUsageTotalRaw = Math.max(0, Number(optimized?.usage?.total_tokens || 0));
@@ -138,6 +138,7 @@ export async function POST(request: Request) {
         : providerUsageDerivedTotal > 0
           ? "provider_prompt_plus_completion"
           : "estimated_input_tokens";
+
     const usageResult = await consumeDailyUsage({
       user: auth.user,
       optimizeMode,
@@ -168,11 +169,11 @@ export async function POST(request: Request) {
       telemetry: telemetrySnapshot,
       serverComposerCharTotal: Math.min(
         CREDIT_MAX_PROMPT_CHARS,
-        prompt.length + userInstruction.length + (optimizeMode === "refine" ? promptFeedback.length : 0)
+        prompt.length + (optimizeMode === "refine" ? promptFeedback.length : 0)
       ),
       serverComposerWordTotal: countComposerWordsRough(
         prompt,
-        optimizeMode === "refine" ? promptFeedback : userInstruction
+        optimizeMode === "refine" ? promptFeedback : ""
       ),
       serverOptimizedWordTotal: countComposerWordsRough(optimized_prompt)
     });
@@ -197,7 +198,7 @@ export async function POST(request: Request) {
     );
   } catch (error) {
     const message = String(error instanceof Error ? error.message : error);
-    console.error("[promptly optimize] request failed:", message);
+    console.error("[companion optimize] request failed:", message);
     const status = /missing or invalid x-promptly-client|missing firebase auth token/i.test(message)
       ? 400
       : /google account email does not match|invalid google access token|auth/i.test(message)

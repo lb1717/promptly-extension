@@ -130,6 +130,12 @@ export function AdminDashboardClient() {
             Prompt engineering
           </Link>
           <Link
+            href="/admin/companion-prompt-engineering"
+            className="rounded-xl border border-violet-500/35 px-3 py-2 text-xs font-semibold text-violet-100 hover:bg-violet-500/15"
+          >
+            Companion PE
+          </Link>
+          <Link
             href="/admin/sales"
             className="rounded-xl border border-violet-500/35 px-3 py-2 text-xs font-semibold text-violet-100 hover:bg-violet-500/15"
           >

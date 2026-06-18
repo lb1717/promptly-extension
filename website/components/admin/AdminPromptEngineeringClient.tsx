@@ -178,6 +178,12 @@ export function AdminPromptEngineeringClient() {
           >
             Plan limits
           </Link>
+          <Link
+            href="/admin/companion-prompt-engineering"
+            className="rounded-lg border border-violet-500/40 px-3 py-2 text-sm text-violet-200 hover:bg-violet-500/10"
+          >
+            Companion PE
+          </Link>
           <AdminLogoutButton />
         </div>
       </div>
