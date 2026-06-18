@@ -6,7 +6,7 @@ const { join } = require("path");
 const { promisify } = require("util");
 
 const execFileAsync = promisify(execFile);
-const LAYER_POLL_MS = 350;
+const LAYER_POLL_MS = 500;
 const PRODUCTION_API_URL = "https://promptly-labs.com";
 
 /** @type {BrowserWindow | null} */
@@ -15,6 +15,8 @@ let mainWindow = null;
 let anchorAppBundleId = null;
 /** @type {ReturnType<typeof setInterval> | null} */
 let layerPollTimer = null;
+/** @type {{ visible: boolean | null; onTop: boolean | null }} */
+let layerState = { visible: null, onTop: null };
 
 function normalizeApiUrl(url) {
   return String(url || "").replace(/\/$/, "");
@@ -89,19 +91,50 @@ function isCompanionAppBundle(bundleId) {
   );
 }
 
-function applyAlwaysOnTop(onTop) {
+function resetLayerState() {
+  layerState = { visible: null, onTop: null };
+}
+
+function applyWindowLayer({ visible, onTop }) {
   if (!mainWindow || mainWindow.isDestroyed()) {
     return;
   }
+
   if (process.platform === "darwin") {
-    mainWindow.setAlwaysOnTop(onTop, onTop ? "floating" : "normal");
-    if (onTop) {
-      mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    if (layerState.visible !== visible) {
+      if (visible) {
+        if (!mainWindow.isVisible()) {
+          mainWindow.showInactive();
+        }
+      } else {
+        mainWindow.hide();
+      }
+      layerState.visible = visible;
     }
-  } else if (process.platform === "win32") {
-    mainWindow.setAlwaysOnTop(onTop, onTop ? "screen-saver" : "normal");
-  } else {
+
+    if (layerState.onTop !== onTop) {
+      if (onTop) {
+        mainWindow.setAlwaysOnTop(true, "floating");
+        mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+      } else {
+        mainWindow.setAlwaysOnTop(false, "normal");
+      }
+      layerState.onTop = onTop;
+    }
+    return;
+  }
+
+  if (process.platform === "win32") {
+    if (layerState.onTop !== onTop) {
+      mainWindow.setAlwaysOnTop(onTop, onTop ? "screen-saver" : "normal");
+      layerState.onTop = onTop;
+    }
+    return;
+  }
+
+  if (layerState.onTop !== onTop) {
     mainWindow.setAlwaysOnTop(onTop);
+    layerState.onTop = onTop;
   }
 }
 
@@ -111,12 +144,12 @@ async function syncWindowLayer() {
   }
 
   if (mainWindow.isFocused()) {
-    applyAlwaysOnTop(true);
+    applyWindowLayer({ visible: true, onTop: true });
     return;
   }
 
   if (process.platform !== "darwin") {
-    applyAlwaysOnTop(false);
+    applyWindowLayer({ visible: true, onTop: false });
     return;
   }
 
@@ -126,16 +159,18 @@ async function syncWindowLayer() {
   }
 
   if (isCompanionAppBundle(frontBundle)) {
-    applyAlwaysOnTop(true);
+    applyWindowLayer({ visible: true, onTop: true });
     return;
   }
 
-  if (!anchorAppBundleId) {
-    applyAlwaysOnTop(false);
+  if (anchorAppBundleId && frontBundle === anchorAppBundleId) {
+    applyWindowLayer({ visible: true, onTop: true });
     return;
   }
 
-  applyAlwaysOnTop(frontBundle === anchorAppBundleId);
+  // Hide when another app is frontmost (other Desktop, browser, etc.) instead of
+  // toggling always-on-top every poll — avoids flash loops and stray appearances.
+  applyWindowLayer({ visible: false, onTop: false });
 }
 
 function startLayerPolling() {
@@ -163,7 +198,21 @@ function captureAnchorApp() {
   })();
 }
 
+function resolveAppIconPath() {
+  const candidates = [
+    join(__dirname, "..", "build", "icon.png"),
+    join(__dirname, "renderer", "assets", "promptly-logo.png")
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
 function createWindow() {
+  const iconPath = resolveAppIconPath();
   mainWindow = new BrowserWindow({
     width: 380,
     height: 680,
@@ -171,6 +220,7 @@ function createWindow() {
     minHeight: 480,
     show: false,
     title: "Promptly Companion",
+    ...(iconPath ? { icon: iconPath } : {}),
     backgroundColor: "#f4f5f7",
     autoHideMenuBar: true,
     visibleOnFullScreen: true,
@@ -183,13 +233,13 @@ function createWindow() {
   });
 
   mainWindow.once("ready-to-show", () => {
-    applyAlwaysOnTop(true);
+    applyWindowLayer({ visible: true, onTop: true });
     mainWindow?.show();
     startLayerPolling();
   });
 
   mainWindow.on("focus", () => {
-    applyAlwaysOnTop(true);
+    applyWindowLayer({ visible: true, onTop: true });
   });
 
   mainWindow.on("blur", () => {
@@ -198,6 +248,7 @@ function createWindow() {
 
   mainWindow.on("closed", () => {
     stopLayerPolling();
+    resetLayerState();
     mainWindow = null;
     anchorAppBundleId = null;
   });
@@ -213,6 +264,10 @@ function createWindow() {
 ipcMain.handle("promptly:get-config", () => readDefaultCreds());
 
 app.whenReady().then(() => {
+  const iconPath = resolveAppIconPath();
+  if (process.platform === "darwin" && iconPath && app.dock) {
+    app.dock.setIcon(iconPath);
+  }
   createWindow();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

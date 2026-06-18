@@ -35,9 +35,19 @@
             <div id="draft-strength-track" class="prompt-strength-track">
               <div id="draft-strength-fill" class="prompt-strength-fill"></div>
             </div>
+            <span id="draft-word-count" class="prompt-word-count">0 words</span>
           </div>
         </div>
-        <textarea id="draft-input" class="stretch-textarea" placeholder="Type your prompt here…"></textarea>
+        <div class="prompt-box-body">
+          <textarea id="draft-input" class="stretch-textarea" placeholder="Type your prompt here…"></textarea>
+          <div id="draft-busy-overlay" class="prompt-busy-overlay hidden" aria-hidden="true">
+            <div class="prompt-loader" role="progressbar" aria-label="Improving prompt">
+              <span class="loader-ring"></span>
+              <span class="loader-ring loader-ring--inner"></span>
+              <span class="loader-dot"></span>
+            </div>
+          </div>
+        </div>
       </div>
       <footer class="bottom-dock">
         <button type="button" id="improve-btn" class="primary-btn">Improve</button>
@@ -55,12 +65,22 @@
               <div id="prompt-strength-track" class="prompt-strength-track">
                 <div id="prompt-strength-fill" class="prompt-strength-fill"></div>
               </div>
+              <span id="prompt-word-count" class="prompt-word-count">0 words</span>
             </div>
             <button type="button" id="copy-btn" class="header-copy-btn" title="Copy prompt" aria-label="Copy prompt">
               Copy
             </button>
           </div>
-          <textarea id="prompt-input" class="stretch-textarea"></textarea>
+          <div class="prompt-box-body">
+            <textarea id="prompt-input" class="stretch-textarea"></textarea>
+            <div id="prompt-busy-overlay" class="prompt-busy-overlay hidden" aria-hidden="true">
+              <div class="prompt-loader" role="progressbar" aria-label="Updating prompt">
+                <span class="loader-ring"></span>
+                <span class="loader-ring loader-ring--inner"></span>
+                <span class="loader-dot"></span>
+              </div>
+            </div>
+          </div>
         </div>
         <div class="feedback-stack">
           <textarea
@@ -77,7 +97,10 @@
             placeholder="Suggest a change — tone, length, add detail, etc."
           ></textarea>
         </div>
-        <button type="button" id="refine-btn" class="primary-btn">Apply feedback</button>
+        <div class="action-row">
+          <button type="button" id="refine-btn" class="primary-btn">Apply feedback</button>
+          <button type="button" id="new-prompt-btn" class="ghost-btn">New Prompt</button>
+        </div>
       </div>
     </section>
 

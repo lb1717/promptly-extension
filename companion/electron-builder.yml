@@ -1,0 +1,38 @@
+appId: com.promptlylabs.companion
+productName: Promptly Companion
+copyright: Copyright © Promptly Labs
+directories:
+  output: dist
+  buildResources: build
+files:
+  - src/**/*
+  - package.json
+extraMetadata:
+  main: src/main.js
+artifactName: Promptly-Companion-${version}-${os}.${ext}
+mac:
+  category: public.app-category.productivity
+  target:
+    - dmg
+    - zip
+  icon: build/icon.png
+  # Unsigned build — no Apple Developer Program required.
+  # Users: Right-click the app → Open the first time.
+  identity: null
+  gatekeeperAssess: false
+  hardenedRuntime: false
+dmg:
+  title: Promptly Companion
+win:
+  target:
+    - nsis
+  icon: build/icon.png
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: Promptly Companion
+linux:
+  target:
+    - AppImage
+  icon: build/icon.png
+  category: Utility

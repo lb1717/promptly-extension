@@ -19,6 +19,7 @@ const copyBtn = document.getElementById("copy-btn");
 const summarySlot = document.getElementById("summary-slot");
 const followUpInput = document.getElementById("follow-up-input");
 const refineBtn = document.getElementById("refine-btn");
+const newPromptBtn = document.getElementById("new-prompt-btn");
 const newBtn = document.getElementById("new-btn");
 const settingsBtn = document.getElementById("settings-btn");
 const settingsDialog = document.getElementById("settings-dialog");
@@ -32,6 +33,11 @@ const draftStrengthTrack = document.getElementById("draft-strength-track");
 const draftStrengthFill = document.getElementById("draft-strength-fill");
 const promptStrengthTrack = document.getElementById("prompt-strength-track");
 const promptStrengthFill = document.getElementById("prompt-strength-fill");
+
+const draftWordCount = document.getElementById("draft-word-count");
+const promptWordCount = document.getElementById("prompt-word-count");
+const draftBusyOverlay = document.getElementById("draft-busy-overlay");
+const promptBusyOverlay = document.getElementById("prompt-busy-overlay");
 
 const appliedChipIds = new Set();
 let promptAiEnhanced = false;
@@ -147,6 +153,26 @@ function clearStatus() {
   statusBanner.className = "status-banner hidden";
 }
 
+function showError(message) {
+  showStatus(message, "error");
+}
+
+function setDraftBusy(busy) {
+  if (draftBusyOverlay) {
+    draftBusyOverlay.classList.toggle("hidden", !busy);
+    draftBusyOverlay.setAttribute("aria-hidden", busy ? "false" : "true");
+  }
+  draftInput.readOnly = busy;
+}
+
+function setPromptBusy(busy) {
+  if (promptBusyOverlay) {
+    promptBusyOverlay.classList.toggle("hidden", !busy);
+    promptBusyOverlay.setAttribute("aria-hidden", busy ? "false" : "true");
+  }
+  promptInput.readOnly = busy;
+}
+
 function showDraftView() {
   draftView.classList.remove("hidden");
   refineView.classList.add("hidden");
@@ -157,14 +183,26 @@ function showRefineView() {
   refineView.classList.remove("hidden");
 }
 
+function formatWordCount(text) {
+  const n = countWords(text);
+  return n === 1 ? "1 word" : `${n} words`;
+}
+
+function updateWordCountLabel(el, text) {
+  if (!el) return;
+  el.textContent = formatWordCount(text);
+}
+
 function syncDraftStrength() {
   updateStrengthUi(draftStrengthTrack, draftStrengthFill, draftInput.value, { aiEnhanced: false });
+  updateWordCountLabel(draftWordCount, draftInput.value);
 }
 
 function syncPromptStrength() {
   updateStrengthUi(promptStrengthTrack, promptStrengthFill, promptInput.value, {
     aiEnhanced: promptAiEnhanced
   });
+  updateWordCountLabel(promptWordCount, promptInput.value);
 }
 
 function renderChips() {
@@ -240,33 +278,34 @@ function unlockFollowUp(clear) {
 async function handleImprove() {
   const draft = String(draftInput.value || "").trim();
   if (!isDraftSubstantive(draft)) {
-    showStatus("Write at least 3 words before improving.", "error");
+    showError("Write at least 3 words before improving.");
     return;
   }
   if (!config.token) {
-    showStatus("Connect in Settings — paste a device token (pt_…).", "error");
+    showError("Connect in Settings — paste a device token (pt_…).");
     settingsDialog.showModal();
     return;
   }
 
+  clearStatus();
   improveBtn.disabled = true;
   improveBtn.textContent = "Improving…";
-  showStatus("Improving your draft…", "loading");
+  setDraftBusy(true);
 
   try {
     const { optimized } = await improveInitialDraft(config, draft);
-    clearStatus();
 
     promptInput.value = optimized;
     resetFeedbackUi();
     promptAiEnhanced = true;
+    showRefineView();
     await loadSuggestionsForPrompt(optimized);
     syncPromptStrength();
-    showRefineView();
     followUpInput.focus();
   } catch (error) {
-    showStatus(String(error?.message || error || "Improve failed"), "error");
+    showError(String(error?.message || error || "Improve failed"));
   } finally {
+    setDraftBusy(false);
     improveBtn.disabled = false;
     improveBtn.textContent = "Improve";
   }
@@ -276,43 +315,45 @@ async function handleRefine() {
   const currentPrompt = String(promptInput.value || "").trim();
   const feedback = String(followUpInput.value || "").trim();
   if (!currentPrompt) {
-    showStatus("Add prompt text before refining.", "error");
+    showError("Add prompt text before refining.");
     return;
   }
   if (!feedback) {
-    showStatus("Add follow-up feedback first.", "error");
+    showError("Add follow-up feedback first.");
     return;
   }
   if (followUpInput.readOnly) {
     return;
   }
 
+  clearStatus();
   lockFollowUp();
   refineBtn.disabled = true;
-  refineBtn.textContent = "Refining…";
-  showStatus("Applying your feedback…", "loading");
+  refineBtn.textContent = "Applying feedback…";
+  setPromptBusy(true);
 
   try {
     const result = await refineWithFeedback(config, currentPrompt, feedback);
-    clearStatus();
 
     promptInput.value = result.prompt;
     showSummary(result.summary);
     unlockFollowUp(true);
     promptAiEnhanced = true;
-    await loadSuggestionsForPrompt(result.prompt);
     syncPromptStrength();
     followUpInput.focus();
   } catch (error) {
-    showStatus(String(error?.message || error || "Refine failed"), "error");
+    showError(String(error?.message || error || "Refine failed"));
     unlockFollowUp(false);
   } finally {
+    setPromptBusy(false);
     refineBtn.disabled = false;
     refineBtn.textContent = "Apply feedback";
   }
 }
 
 function startNewSession() {
+  setDraftBusy(false);
+  setPromptBusy(false);
   draftInput.value = "";
   promptInput.value = "";
   resetFeedbackUi();
@@ -346,6 +387,7 @@ copyBtn.addEventListener("click", async () => {
 });
 
 newBtn.addEventListener("click", startNewSession);
+newPromptBtn.addEventListener("click", startNewSession);
 settingsBtn.addEventListener("click", openSettings);
 settingsCancel.addEventListener("click", () => settingsDialog.close());
 settingsForm.addEventListener("submit", (ev) => {

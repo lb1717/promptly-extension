@@ -2,16 +2,23 @@
   "name": "promptly-companion",
   "productName": "Promptly Companion",
   "version": "0.1.0",
-  "description": "Experimental floating Promptly prompt workshop",
+  "description": "Desktop prompt workshop for Promptly — improve drafts, refine with feedback, copy into any AI app.",
   "main": "src/main.js",
   "author": "Promptly Labs",
   "license": "UNLICENSED",
   "private": true,
   "scripts": {
     "start": "electron .",
-    "dev:local": "node scripts/dev.mjs"
+    "dev:local": "node scripts/dev.mjs",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win",
+    "dist:linux": "electron-builder --linux",
+    "copy-to-website": "node scripts/copy-to-website.mjs"
   },
   "devDependencies": {
-    "electron": "^33.2.0"
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
   }
 }

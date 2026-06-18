@@ -1,0 +1,5 @@
+*.dmg
+*.exe
+*.zip
+*.blockmap
+!.gitkeep

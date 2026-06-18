@@ -4,7 +4,13 @@ Desktop prompt workshop for Promptly — type a draft, improve it, refine with f
 
 Connects to **https://promptly-labs.com** by default (same account/token as your IDE integration).
 
-## Install & run
+## Download (end users)
+
+**https://promptly-labs.com/companion**
+
+No Apple Developer Program required for users. The Mac build is unsigned — first launch: **Right-click → Open**.
+
+## Install & run (developers)
 
 ```bash
 cd companion
@@ -12,44 +18,57 @@ npm install
 npm start
 ```
 
-That's it. The app uses your paired device token from `~/.promptly/credentials-cursor.json` (or claude_code / codex) and talks to the live Promptly API.
+Uses your paired device token from `~/.promptly/credentials-cursor.json` (or claude_code / codex).
+
+## Build installers for the website
+
+```bash
+cd companion
+npm install
+npm run dist:mac          # Mac .dmg + .zip → dist/
+npm run copy-to-website   # copies to website/public/downloads/companion/
+```
+
+Deploy the website — files are served at `/downloads/companion/…` and linked from `/companion`.
+
+Windows (on a Windows machine or CI):
+
+```bash
+npm run dist:win
+npm run copy-to-website
+```
+
+### GitHub Releases (optional)
+
+Tag a release to build Mac + Windows in CI:
+
+```bash
+git tag companion-v0.1.0
+git push origin companion-v0.1.0
+```
+
+The download page also picks up assets from the latest GitHub release if env URLs are not set.
+
+### Apple Developer Program?
+
+**Not required** to host downloads on your site. It only removes macOS “unidentified developer” warnings (notarization). Unsigned builds work fine with Right-click → Open.
 
 ## Auth
 
-The companion calls:
-
 - `POST /api/companion/optimize` — improve + refine
-- `GET /api/companion/suggestions` — suggestion chips
+- `POST /api/companion/suggestions` — suggestion chips
 
-**Auto-detect (recommended):** pair an IDE integration first — credentials are read on launch.
-
-**Manual:** open Settings (gear) and paste your device token. API URL should stay `https://promptly-labs.com`.
-
-Pair a device at [promptly-labs.com/integrations](https://promptly-labs.com/integrations).
+Pair at [promptly-labs.com/integrations](https://promptly-labs.com/integrations) or paste a device token in Settings.
 
 ## Admin config
 
-Templates, models, and suggestion chips are editable at **Admin → Companion PE** on the website.
+Templates and models: **Admin → Companion PE** on the website.
 
-## Local development only
-
-If you're hacking on the website backend locally:
+## Local backend dev
 
 ```bash
-cd website && npm run dev   # in one terminal
-cd companion && npm run dev:local   # in another — NOT for normal use
+cd website && npm run dev
+cd companion && npm run dev:local
 ```
 
-Normal users should always use `npm start` (production).
-
-## How to use
-
-1. Type your draft → **Improve** (Cmd/Ctrl+Enter)
-2. Pick suggestion chips, edit the prompt, copy when ready
-3. **Apply feedback** at the bottom to refine
-4. **+** starts a new prompt
-
-## Notes
-
-- Tall narrow always-on-top window (~380×680), anchored to the app you're working in
-- Not wired to screen reading or auto-paste yet
+Normal users: `npm start` (production API only).
