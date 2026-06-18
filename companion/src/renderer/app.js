@@ -1,6 +1,7 @@
 import { improveInitialDraft, refineWithFeedback, fetchSuggestions } from "./api.js";
 import { countWords } from "./further-improve.js";
 import { updateStrengthUi } from "./strength.js";
+import { createDictationController, stopAllDictation } from "./dictation.js";
 
 const STORAGE_KEY = "promptly-companion-config";
 const PRODUCTION_API_URL = "https://promptly-labs.com";
@@ -12,6 +13,7 @@ const statusBanner = document.getElementById("status-banner");
 const draftView = document.getElementById("draft-view");
 const refineView = document.getElementById("refine-view");
 const draftInput = document.getElementById("draft-input");
+const draftMicBtn = document.getElementById("draft-mic-btn");
 const improveBtn = document.getElementById("improve-btn");
 const chipGrid = document.getElementById("chip-grid");
 const promptInput = document.getElementById("prompt-input");
@@ -19,6 +21,7 @@ const copyBtn = document.getElementById("copy-btn");
 const pasteBtn = document.getElementById("paste-btn");
 const summarySlot = document.getElementById("summary-slot");
 const followUpInput = document.getElementById("follow-up-input");
+const followUpMicBtn = document.getElementById("follow-up-mic-btn");
 const refineBtn = document.getElementById("refine-btn");
 const newPromptBtn = document.getElementById("new-prompt-btn");
 const newBtn = document.getElementById("new-btn");
@@ -28,6 +31,12 @@ const appShell = document.getElementById("app-shell");
 const miniExpandBtn = document.getElementById("mini-expand-btn");
 const settingsBtn = document.getElementById("settings-btn");
 const settingsDialog = document.getElementById("settings-dialog");
+const permissionsDialog = document.getElementById("permissions-dialog");
+const permissionsAllowBtn = document.getElementById("permissions-allow-btn");
+const permissionsSkipBtn = document.getElementById("permissions-skip-btn");
+const permissionsDevHint = document.getElementById("permissions-dev-hint");
+const permissionsFollowupHint = document.getElementById("permissions-followup-hint");
+const permissionsAppName = document.getElementById("permissions-app-name");
 const settingsForm = document.getElementById("settings-form");
 const settingsCancel = document.getElementById("settings-cancel");
 const apiIndicator = document.getElementById("api-indicator");
@@ -52,6 +61,33 @@ const appliedChipIds = new Set();
 let promptAiEnhanced = false;
 /** @type {Array<{ id: string; label: string; snippet: string }>} */
 let suggestionOptions = [];
+
+const draftDictation = createDictationController({
+  textarea: draftInput,
+  micButton: draftMicBtn,
+  onError: showError
+});
+
+const followUpDictation = createDictationController({
+  textarea: followUpInput,
+  micButton: followUpMicBtn,
+  onError: showError
+});
+
+function setupDictationUi() {
+  for (const [controller, button] of [
+    [draftDictation, draftMicBtn],
+    [followUpDictation, followUpMicBtn]
+  ]) {
+    if (!button) continue;
+    if (!controller.isSupported()) {
+      button.classList.add("hidden");
+      continue;
+    }
+    button.classList.remove("hidden");
+    button.addEventListener("click", () => controller.toggle());
+  }
+}
 
 function loadStoredConfig() {
   try {
@@ -172,6 +208,10 @@ function setDraftBusy(busy) {
     draftBusyOverlay.setAttribute("aria-hidden", busy ? "false" : "true");
   }
   draftInput.readOnly = busy;
+  if (draftMicBtn) {
+    draftMicBtn.disabled = busy;
+    if (busy) draftDictation.stop();
+  }
 }
 
 function setPromptBusy(busy) {
@@ -274,17 +314,21 @@ function showSummary(text) {
 function lockFollowUp() {
   followUpInput.readOnly = true;
   followUpInput.classList.add("locked");
+  followUpDictation.stop();
+  if (followUpMicBtn) followUpMicBtn.disabled = true;
 }
 
 function unlockFollowUp(clear) {
   followUpInput.readOnly = false;
   followUpInput.classList.remove("locked");
+  if (followUpMicBtn) followUpMicBtn.disabled = !followUpDictation.isSupported();
   if (clear) {
     followUpInput.value = "";
   }
 }
 
 async function handleImprove() {
+  stopAllDictation();
   const draft = String(draftInput.value || "").trim();
   if (!isDraftSubstantive(draft)) {
     showError("Write at least 3 words before improving.");
@@ -321,6 +365,7 @@ async function handleImprove() {
 }
 
 async function handleRefine() {
+  stopAllDictation();
   const currentPrompt = String(promptInput.value || "").trim();
   const feedback = String(followUpInput.value || "").trim();
   if (!currentPrompt) {
@@ -361,6 +406,7 @@ async function handleRefine() {
 }
 
 function startNewSession() {
+  stopAllDictation();
   setDraftBusy(false);
   setPromptBusy(false);
   draftInput.value = "";
@@ -408,6 +454,75 @@ async function setCollapsed(collapsed) {
     applyCollapsedUi(next);
   }
 }
+
+async function maybeShowPermissionsOnboarding() {
+  if (!permissionsDialog || !window.promptlyCompanion?.getSettings) {
+    return;
+  }
+  const settings = await window.promptlyCompanion.getSettings();
+  if (settings.permissionsOnboardingComplete) {
+    return;
+  }
+
+  const appInfo = window.promptlyCompanion.getAppInfo
+    ? await window.promptlyCompanion.getAppInfo()
+    : { name: "Promptly Companion", isPackaged: true };
+
+  if (permissionsAppName) {
+    permissionsAppName.textContent = appInfo.name || "Promptly Companion";
+  }
+  if (permissionsDevHint) {
+    permissionsDevHint.classList.toggle("hidden", Boolean(appInfo.isPackaged));
+  }
+  if (permissionsFollowupHint) {
+    permissionsFollowupHint.classList.add("hidden");
+  }
+
+  permissionsDialog.showModal();
+}
+
+async function handlePermissionsAllow() {
+  if (!window.promptlyCompanion?.requestAllPermissions) {
+    await finishPermissionsOnboarding();
+    return;
+  }
+  if (permissionsAllowBtn) {
+    permissionsAllowBtn.disabled = true;
+    permissionsAllowBtn.textContent = "Requesting…";
+  }
+  try {
+    const result = await window.promptlyCompanion.requestAllPermissions();
+    const needsSettings =
+      !result?.microphone?.granted || !result?.accessibility?.granted;
+    if (needsSettings && permissionsFollowupHint) {
+      permissionsFollowupHint.classList.remove("hidden");
+      if (permissionsAppName) {
+        permissionsAppName.textContent = result?.appName || "Promptly Companion";
+      }
+      showError(
+        `Enable ${result?.appName || "Promptly Companion"} under Microphone and Accessibility in the System Settings window, then tap Allow access again or continue.`
+      );
+      return;
+    }
+    clearStatus();
+    await finishPermissionsOnboarding();
+  } finally {
+    if (permissionsAllowBtn) {
+      permissionsAllowBtn.disabled = false;
+      permissionsAllowBtn.textContent = "Allow access";
+    }
+  }
+}
+
+async function finishPermissionsOnboarding() {
+  if (window.promptlyCompanion?.completePermissionsOnboarding) {
+    await window.promptlyCompanion.completePermissionsOnboarding();
+  }
+  permissionsDialog?.close();
+}
+
+permissionsAllowBtn?.addEventListener("click", () => void handlePermissionsAllow());
+permissionsSkipBtn?.addEventListener("click", () => void finishPermissionsOnboarding());
 
 function openSettings() {
   apiUrlInput.value = config.apiUrl;
@@ -541,7 +656,9 @@ followUpInput?.addEventListener("keydown", (ev) => {
 draftInput?.addEventListener("input", syncDraftStrength);
 promptInput?.addEventListener("input", syncPromptStrength);
 
-void bootstrapConfig().then(() => {
+void bootstrapConfig().then(async () => {
+  setupDictationUi();
   syncDraftStrength();
   syncPromptStrength();
+  await maybeShowPermissionsOnboarding();
 });

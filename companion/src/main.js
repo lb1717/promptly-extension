@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, systemPreferences, Menu } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, systemPreferences, Menu, session } = require("electron");
 const { execFile } = require("child_process");
 const { readFileSync, existsSync } = require("fs");
 const { homedir } = require("os");
@@ -15,6 +15,11 @@ const {
   notifyDockedWindowClosed
 } = require("./hostAppWatcher");
 const { pasteToHostProcess, isAllowedProcess } = require("./hostPaste");
+const {
+  getPermissionStatus,
+  requestAllPermissions,
+  requestMicrophoneAccess
+} = require("./permissions");
 
 const execFileAsync = promisify(execFile);
 const ANCHOR_POLL_MS = 900;
@@ -560,6 +565,26 @@ ipcMain.handle("promptly:paste-to-host", async (event, text) => {
   }
   return pasteToHostProcess(host, text);
 });
+
+ipcMain.handle("promptly:get-app-info", () => ({
+  name: app.getName(),
+  isPackaged: app.isPackaged
+}));
+
+ipcMain.handle("promptly:get-permission-status", () => getPermissionStatus(systemPreferences));
+ipcMain.handle("promptly:request-all-permissions", async () =>
+  requestAllPermissions(systemPreferences)
+);
+ipcMain.handle("promptly:request-microphone-access", async () =>
+  requestMicrophoneAccess(systemPreferences)
+);
+ipcMain.handle("promptly:complete-permissions-onboarding", (_event, patch) => {
+  companionSettings = writeCompanionSettings({
+    permissionsOnboardingComplete: true,
+    ...(patch || {})
+  });
+  return companionSettings;
+});
 ipcMain.handle("promptly:get-settings", () => companionSettings);
 ipcMain.handle("promptly:save-settings", (_event, patch) => {
   companionSettings = writeCompanionSettings(patch || {});
@@ -568,6 +593,11 @@ ipcMain.handle("promptly:save-settings", (_event, patch) => {
 });
 
 app.whenReady().then(() => {
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    callback(permission === "media");
+  });
+  session.defaultSession.setPermissionCheckHandler((_webContents, permission) => permission === "media");
+
   setupApplicationMenu();
 
   const iconPath = resolveAppIconPath();

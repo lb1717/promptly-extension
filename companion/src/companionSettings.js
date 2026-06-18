@@ -10,7 +10,8 @@ const DEFAULT_SETTINGS = {
     codex: true,
     cursor: false
   },
-  openOnCompanionLaunch: false
+  openOnCompanionLaunch: false,
+  permissionsOnboardingComplete: false
 };
 
 function readCompanionSettings() {
@@ -22,7 +23,8 @@ function readCompanionSettings() {
     return {
       ...DEFAULT_SETTINGS,
       ...raw,
-      autoOpen: { ...DEFAULT_SETTINGS.autoOpen, ...(raw.autoOpen || {}) }
+      autoOpen: { ...DEFAULT_SETTINGS.autoOpen, ...(raw.autoOpen || {}) },
+      permissionsOnboardingComplete: raw.permissionsOnboardingComplete === true
     };
   } catch {
     return { ...DEFAULT_SETTINGS, autoOpen: { ...DEFAULT_SETTINGS.autoOpen } };

@@ -239,6 +239,70 @@ dialog {
   gap: 6px;
 }
 
+.feedback-slot-wrap {
+  position: relative;
+}
+
+.feedback-slot.has-dictation-mic {
+  padding-right: 40px;
+}
+
+.stretch-textarea.has-dictation-mic {
+  padding-right: 40px;
+}
+
+.dictation-mic-btn {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+  -webkit-app-region: no-drag;
+}
+
+.dictation-mic-btn--compact {
+  right: 6px;
+  bottom: 6px;
+  width: 28px;
+  height: 28px;
+}
+
+.dictation-mic-btn:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+
+.dictation-mic-btn.dictation-active {
+  color: #fff;
+  border-color: var(--danger);
+  background: var(--danger);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 25%, transparent);
+}
+
+.dictation-mic-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.dictation-mic-btn.hidden {
+  display: none;
+}
+
+.mic-icon {
+  display: block;
+}
+
 .feedback-slot {
   width: 100%;
   border: 1px solid var(--border);
@@ -604,6 +668,25 @@ dialog {
   text-transform: uppercase;
   color: var(--muted);
   margin-bottom: 6px;
+}
+
+.permissions-dialog {
+  border: none;
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  width: min(360px, calc(100vw - 24px));
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.18);
+}
+
+.permissions-list {
+  margin: 12px 0;
+  padding-left: 18px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.permissions-list li + li {
+  margin-top: 8px;
 }
 
 .settings-dialog {

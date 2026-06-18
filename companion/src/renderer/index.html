@@ -43,7 +43,22 @@
           </div>
         </div>
         <div class="prompt-box-body">
-          <textarea id="draft-input" class="stretch-textarea" placeholder="Type your prompt here…"></textarea>
+          <textarea id="draft-input" class="stretch-textarea has-dictation-mic" placeholder="Type your prompt here…"></textarea>
+          <button
+            type="button"
+            id="draft-mic-btn"
+            class="dictation-mic-btn"
+            title="Start dictation"
+            aria-label="Start dictation"
+            aria-pressed="false"
+          >
+            <svg class="mic-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+              <path
+                fill="currentColor"
+                d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V19H9v2h6v-2h-2v-1.08A7 7 0 0 0 19 11h-2Z"
+              />
+            </svg>
+          </button>
           <div id="draft-busy-overlay" class="prompt-busy-overlay hidden" aria-hidden="true">
             <div class="prompt-loader" role="progressbar" aria-label="Improving prompt">
               <span class="loader-ring"></span>
@@ -99,12 +114,29 @@
             tabindex="-1"
             aria-label="Last change summary"
           ></textarea>
-          <textarea
-            id="follow-up-input"
-            class="feedback-slot follow-up-slot"
-            rows="2"
-            placeholder="Suggest a change — tone, length, add detail, etc."
-          ></textarea>
+          <div class="feedback-slot-wrap">
+            <textarea
+              id="follow-up-input"
+              class="feedback-slot follow-up-slot has-dictation-mic"
+              rows="2"
+              placeholder="Suggest a change — tone, length, add detail, etc."
+            ></textarea>
+            <button
+              type="button"
+              id="follow-up-mic-btn"
+              class="dictation-mic-btn dictation-mic-btn--compact"
+              title="Start dictation"
+              aria-label="Start dictation"
+              aria-pressed="false"
+            >
+              <svg class="mic-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V19H9v2h6v-2h-2v-1.08A7 7 0 0 0 19 11h-2Z"
+                />
+              </svg>
+            </button>
+          </div>
         </div>
         <div class="action-row">
           <button type="button" id="refine-btn" class="primary-btn">Apply feedback</button>
@@ -119,6 +151,31 @@
       <span class="mini-divider" aria-hidden="true"></span>
       <span class="mini-label">Improve Prompt</span>
     </button>
+
+    <dialog id="permissions-dialog" class="permissions-dialog">
+      <form method="dialog" id="permissions-form">
+        <h2>Allow access</h2>
+        <p class="settings-hint" id="permissions-intro">
+          Promptly Companion needs a couple of macOS permissions to work best.
+        </p>
+        <ul class="permissions-list">
+          <li><strong>Microphone</strong> — dictate prompts with the mic button</li>
+          <li><strong>Accessibility</strong> — dock beside Claude/Codex and paste into their chat box</li>
+        </ul>
+        <p class="settings-hint hidden" id="permissions-dev-hint">
+          You are running a local dev build. macOS may list the app as <strong>Electron</strong> instead of
+          Promptly Companion. Install from the website for the proper app name in System Settings.
+        </p>
+        <p class="settings-hint hidden" id="permissions-followup-hint">
+          If a settings window opened, enable <strong id="permissions-app-name">Promptly Companion</strong> for
+          the permissions above, then return here.
+        </p>
+        <div class="settings-actions">
+          <button type="button" id="permissions-allow-btn" class="primary-btn">Allow access</button>
+          <button type="button" id="permissions-skip-btn" class="ghost-btn">Not now</button>
+        </div>
+      </form>
+    </dialog>
 
     <dialog id="settings-dialog" class="settings-dialog">
       <form method="dialog" id="settings-form">
