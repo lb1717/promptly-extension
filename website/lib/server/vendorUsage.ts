@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import { FieldValue } from "firebase-admin/firestore";
 import { getFirebaseAdminDb } from "@/lib/server/firebaseAdmin";
 import {
+  correctLegacyClaudeStoredUtilization,
   dollarsUnusedFromUtilization,
   dollarsUsedFromUtilization,
   normalizeUtilizationPercent,
@@ -152,6 +153,60 @@ function readUsageHistory(raw: unknown): VendorUsageWindowHistory {
   return {
     primary: readSeries(row.primary).slice(-USAGE_HISTORY_CAP),
     secondary: readSeries(row.secondary).slice(-USAGE_HISTORY_CAP)
+  };
+}
+
+function correctClaudeUsageHistory(
+  history: VendorUsageWindowHistory,
+  primaryWindowSeconds: number | null | undefined,
+  secondaryWindowSeconds: number | null | undefined
+): VendorUsageWindowHistory {
+  return {
+    primary: history.primary.map((point) => ({
+      ...point,
+      utilization: correctLegacyClaudeStoredUtilization(
+        point.utilization,
+        primaryWindowSeconds,
+        point.at_ms
+      )
+    })),
+    secondary: history.secondary.map((point) => ({
+      ...point,
+      utilization: correctLegacyClaudeStoredUtilization(
+        point.utilization,
+        secondaryWindowSeconds,
+        point.at_ms
+      )
+    }))
+  };
+}
+
+function correctClaudeWindows(
+  primary: VendorUsageWindow | null,
+  secondary: VendorUsageWindow | null,
+  syncedAtMs: number
+): { primary: VendorUsageWindow | null; secondary: VendorUsageWindow | null } {
+  return {
+    primary: primary
+      ? {
+          ...primary,
+          utilization: correctLegacyClaudeStoredUtilization(
+            primary.utilization,
+            primary.window_seconds,
+            syncedAtMs
+          )
+        }
+      : null,
+    secondary: secondary
+      ? {
+          ...secondary,
+          utilization: correctLegacyClaudeStoredUtilization(
+            secondary.utilization,
+            secondary.window_seconds,
+            syncedAtMs
+          )
+        }
+      : null
   };
 }
 
@@ -340,13 +395,24 @@ export async function persistVendorUsageSnapshots(
     if (!snap.profile_id || snap.sync_error) continue;
     const docId = vendorUsageProfileDocId(snap.provider, snap.profile_id);
     const existingSnap = await profileRef(uid, docId).get();
-    const existingHistory = readUsageHistory(existingSnap.exists ? existingSnap.data()?.usage_history : null);
-    const usage_history = mergeUsageHistory(existingHistory, snap);
+    const existingData = existingSnap.exists ? existingSnap.data() : null;
+    const existingHistory = readUsageHistory(existingData?.usage_history);
+    let usage_history = mergeUsageHistory(existingHistory, snap);
+    const historyAlreadyCorrected = existingData?.usage_history_corrected_v2 === true;
+    if (snap.provider === "claude_code" && !historyAlreadyCorrected) {
+      usage_history = correctClaudeUsageHistory(
+        usage_history,
+        snap.primary_window?.window_seconds,
+        snap.secondary_window?.window_seconds
+      );
+    }
     await profileRef(uid, docId).set(
       {
         ...snap,
         sync_error: null,
         usage_history,
+        usage_history_corrected_v2:
+          snap.provider === "claude_code" ? true : existingData?.usage_history_corrected_v2 === true,
         uid,
         updated_at: FieldValue.serverTimestamp()
       },
@@ -373,7 +439,21 @@ export async function listVendorUsageProfiles(uid: string): Promise<VendorUsageP
     const secondary_window = readWindow(raw.secondary_window);
     const sync_error = typeof raw.sync_error === "string" ? raw.sync_error : null;
     if (sync_error && !primary_window && !secondary_window) continue;
-    const usage_history = readUsageHistory(raw.usage_history);
+    const synced_at_ms = typeof raw.synced_at_ms === "number" ? raw.synced_at_ms : 0;
+    const historyAlreadyCorrected = raw.usage_history_corrected_v2 === true;
+    let usage_history = readUsageHistory(raw.usage_history);
+    let normalizedPrimary = primary_window;
+    let normalizedSecondary = secondary_window;
+    if (provider === "claude_code" && !historyAlreadyCorrected) {
+      const correctedWindows = correctClaudeWindows(primary_window, secondary_window, synced_at_ms);
+      normalizedPrimary = correctedWindows.primary;
+      normalizedSecondary = correctedWindows.secondary;
+      usage_history = correctClaudeUsageHistory(
+        usage_history,
+        normalizedPrimary?.window_seconds,
+        normalizedSecondary?.window_seconds
+      );
+    }
     views.push(
       enrichProfile(
         {
@@ -386,10 +466,10 @@ export async function listVendorUsageProfiles(uid: string): Promise<VendorUsageP
           plan_display: typeof raw.plan_display === "string" ? raw.plan_display : null,
           plan_organization_type:
             typeof raw.plan_organization_type === "string" ? raw.plan_organization_type : null,
-          primary_window,
-          secondary_window,
-          sync_error: primary_window || secondary_window ? null : sync_error,
-          synced_at_ms: typeof raw.synced_at_ms === "number" ? raw.synced_at_ms : 0
+          primary_window: normalizedPrimary,
+          secondary_window: normalizedSecondary,
+          sync_error: normalizedPrimary || normalizedSecondary ? null : sync_error,
+          synced_at_ms
         },
         usage_history
       )

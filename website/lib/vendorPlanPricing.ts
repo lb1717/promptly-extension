@@ -119,10 +119,16 @@ function windowElapsedRatio(
   return resetsAtElapsedRatio(resetsAt, windowSeconds);
 }
 
-/** Claude oauth/usage: prefer explicit used/remaining fields; heuristics only for ambiguous utilization. */
+/** When weekly Claude utilization stopped being inverted (commit 397035b). */
+export const CLAUDE_WEEKLY_UTIL_FIX_MS = Date.parse("2026-06-17T14:41:04.000Z");
+
+/** When five-hour Claude utilization stopped being inverted. */
+export const CLAUDE_FIVE_HOUR_UTIL_FIX_MS = Date.parse("2026-06-18T00:00:00.000Z");
+
+/** Claude oauth/usage: prefer explicit used/remaining fields; `utilization` is percent used for all buckets. */
 export function resolveClaudeWindowUsedPercent(
   window: Record<string, unknown> | null | undefined,
-  context: VendorWindowUsedPercentContext = {}
+  _context: VendorWindowUsedPercentContext = {}
 ): number {
   if (!window || typeof window !== "object") return 0;
 
@@ -147,14 +153,22 @@ export function resolveClaudeWindowUsedPercent(
   if (pct > 0 && pct <= 1) pct *= 100;
   pct = Math.max(0, Math.min(100, pct));
 
-  const windowSeconds = Number(context.windowSeconds ?? window.limit_window_seconds ?? 0);
-  const isWeeklyWindow = windowSeconds >= 6 * 86400;
+  return normalizeUtilizationPercent(pct);
+}
 
-  // Five-hour Claude windows report remaining quota in `utilization`; seven-day reports percent used.
-  if (isWeeklyWindow) {
-    return normalizeUtilizationPercent(pct);
-  }
-  return normalizeUtilizationPercent(100 - pct);
+/** Undo mistaken 100-x inversion on stored Claude utilization snapshots. */
+export function correctLegacyClaudeStoredUtilization(
+  utilization: number,
+  windowSeconds: number | null | undefined,
+  recordedAtMs: number
+): number {
+  const util = normalizeUtilizationPercent(utilization);
+  const window = windowSeconds ?? 5 * 3600;
+  const isWeekly = window >= 6 * 86400;
+  const wasInverted = isWeekly
+    ? recordedAtMs < CLAUDE_WEEKLY_UTIL_FIX_MS
+    : recordedAtMs < CLAUDE_FIVE_HOUR_UTIL_FIX_MS;
+  return wasInverted ? normalizeUtilizationPercent(100 - util) : util;
 }
 
 /** Normalize vendor quota windows (Claude, Codex, Cursor) to percent used — not remaining. */
