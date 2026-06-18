@@ -97,9 +97,13 @@ function getLayerState(win) {
   return state;
 }
 
-function ensurePinnedToCurrentSpace(win) {
-  if (process.platform === "darwin") {
-    win.setVisibleOnAllWorkspaces(false);
+function configureMacWindowLayer(win, onTop) {
+  // Stay on this Space, but allow floating above fullscreen apps (e.g. fullscreen Cursor).
+  win.setVisibleOnAllWorkspaces(false, { visibleOnFullScreen: true });
+  if (onTop) {
+    win.setAlwaysOnTop(true, "screen-saver");
+  } else {
+    win.setAlwaysOnTop(false, "normal");
   }
 }
 
@@ -112,10 +116,9 @@ function setCompanionOnTop(win, onTop) {
     return;
   }
   state.onTop = onTop;
-  ensurePinnedToCurrentSpace(win);
   if (onTop) {
     if (process.platform === "darwin") {
-      win.setAlwaysOnTop(true, "floating");
+      configureMacWindowLayer(win, true);
     } else if (process.platform === "win32") {
       win.setAlwaysOnTop(true, "screen-saver");
     } else {
@@ -124,7 +127,7 @@ function setCompanionOnTop(win, onTop) {
     win.moveTop();
   } else {
     if (process.platform === "darwin") {
-      win.setAlwaysOnTop(false, "normal");
+      configureMacWindowLayer(win, false);
     } else if (process.platform === "win32") {
       win.setAlwaysOnTop(false, "normal");
     } else {
@@ -188,7 +191,9 @@ function handleCompanionBlur(win) {
 
 function registerCompanionWindow(win) {
   companionWindows.add(win);
-  ensurePinnedToCurrentSpace(win);
+  if (process.platform === "darwin") {
+    win.setVisibleOnAllWorkspaces(false, { visibleOnFullScreen: true });
+  }
 
   win.once("ready-to-show", () => {
     setCompanionOnTop(win, true);
