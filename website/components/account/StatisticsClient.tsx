@@ -2460,19 +2460,21 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
   ]);
 
   const prevModelServiceRef = useRef(selectedModelService);
+  const prevStatsGroupModeRef = useRef(statsGroupMode);
   useEffect(() => {
     if (statsGroupMode !== "model") {
       prevModelServiceRef.current = selectedModelService;
+      prevStatsGroupModeRef.current = statsGroupMode;
       return;
     }
-    if (prevModelServiceRef.current === selectedModelService && selectedModelBuckets.size > 0) {
-      return;
-    }
+    const serviceChanged = prevModelServiceRef.current !== selectedModelService;
+    const modeJustSwitched = prevStatsGroupModeRef.current !== "model";
     prevModelServiceRef.current = selectedModelService;
-    const buckets = new Set<string>();
-    const top = modelOptionsForSelectedService[0];
-    if (top) buckets.add(top.bucket);
-    setSelectedModelBuckets(buckets);
+    prevStatsGroupModeRef.current = statsGroupMode;
+    if (!serviceChanged && !modeJustSwitched && selectedModelBuckets.size > 0) {
+      return;
+    }
+    setSelectedModelBuckets(new Set(modelOptionsForSelectedService.map((row) => row.bucket)));
   }, [
     statsGroupMode,
     selectedModelService,
