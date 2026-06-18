@@ -83,9 +83,9 @@ export function CompanionDownloadClient({ download }: Props) {
       <section className="mt-6 rounded-2xl border border-line bg-page p-5 text-sm text-muted">
         <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-ink">Windows</h2>
         <p>
-          Windows installer builds via GitHub Releases when tagged (<code className="rounded bg-cream px-1">companion-v*</code>
-          ). Mac is available now; Windows link appears here automatically once a release includes a{" "}
-          <code className="rounded bg-cream px-1">.exe</code>.
+          {hasWin
+            ? "Windows installer is available above."
+            : "Windows builds with each companion release — refresh this page after a new release is published."}
         </p>
       </section>
 

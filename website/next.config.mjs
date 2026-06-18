@@ -19,6 +19,11 @@ const nextConfig = {
         source: "/labs",
         destination: "/research",
         permanent: true
+      },
+      {
+        source: "/downloads/companion/Promptly-Companion-mac.dmg",
+        destination: "/downloads/companion/mac",
+        permanent: false
       }
     ];
   },

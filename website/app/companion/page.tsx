@@ -5,6 +5,8 @@ import { Navbar } from "@/components/Navbar";
 import { getCompanionDownloadInfo } from "@/lib/companionDownload";
 import { buildPageMetadata } from "@/lib/seo";
 
+export const dynamic = "force-dynamic";
+
 export const metadata = buildPageMetadata({
   title: "Promptly Companion — desktop download",
   description:
