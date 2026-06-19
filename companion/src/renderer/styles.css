@@ -9,7 +9,7 @@
   --accent: #6d5ce8;
   --accent-hover: #5b4ed4;
   --danger: #dc3545;
-  --radius: 10px;
+  --radius: 6px;
   --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
@@ -127,7 +127,7 @@ dialog {
 }
 
 .icon-btn {
-  border: none;
+  border: 1px solid var(--text);
   background: transparent;
   color: var(--muted);
   cursor: pointer;
@@ -157,6 +157,11 @@ dialog {
   padding: 8px 12px;
   border-radius: var(--radius);
   font-size: 13px;
+  transition: opacity 0.35s ease;
+}
+
+.status-banner.fading {
+  opacity: 0;
 }
 
 .status-banner.error {
@@ -254,15 +259,16 @@ dialog {
 .dictation-mic-btn {
   position: absolute;
   right: 8px;
-  bottom: 8px;
+  top: 50%;
+  transform: translateY(-50%);
   z-index: 2;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 30px;
   height: 30px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
+  border: 1px solid var(--text);
+  border-radius: var(--radius);
   background: var(--surface);
   color: var(--muted);
   cursor: pointer;
@@ -272,7 +278,6 @@ dialog {
 
 .dictation-mic-btn--compact {
   right: 6px;
-  bottom: 6px;
   width: 28px;
   height: 28px;
 }
@@ -359,7 +364,7 @@ dialog {
 }
 
 .chip {
-  border: 1px solid var(--border);
+  border: 1px solid var(--text);
   background: var(--surface);
   color: var(--text);
   border-radius: var(--radius);
@@ -367,16 +372,27 @@ dialog {
   font-size: 11px;
   cursor: pointer;
   line-height: 1.2;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
-.chip:hover:not(:disabled) {
+.chip:hover:not(:disabled):not(.applied) {
   border-color: var(--accent);
   color: var(--accent);
 }
 
 .chip.applied {
-  opacity: 0.45;
+  background: #dcfce7;
+  border-color: #16a34a;
+  color: #166534;
   pointer-events: none;
+}
+
+.chip-check {
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .chip-loading {
@@ -391,6 +407,11 @@ dialog {
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+.prompt-box-body .dictation-mic-btn {
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .prompt-busy-overlay {
@@ -563,7 +584,7 @@ dialog {
 
 .header-action-btn {
   flex-shrink: 0;
-  border: 1px solid var(--border);
+  border: 1px solid var(--text);
   background: var(--surface);
   color: var(--muted);
   border-radius: var(--radius);
@@ -581,7 +602,7 @@ dialog {
 
 .header-paste-btn {
   background: var(--accent);
-  border-color: var(--accent);
+  border-color: var(--text);
   color: #fff;
 }
 
@@ -615,7 +636,7 @@ dialog {
   font-weight: 600;
   cursor: pointer;
   padding: 10px 16px;
-  border: none;
+  border: 1px solid var(--text);
 }
 
 .primary-btn {
@@ -635,13 +656,18 @@ dialog {
 
 .ghost-btn {
   background: var(--surface);
-  color: var(--muted);
-  border: 1px solid var(--border);
+  color: var(--text);
+  border: 1px solid var(--text);
 }
 
 .ghost-btn:hover:not(:disabled) {
   color: var(--text);
-  border-color: var(--muted);
+  background: var(--surface-2);
+}
+
+#new-prompt-btn {
+  color: var(--text);
+  font-weight: 600;
 }
 
 .text-input {

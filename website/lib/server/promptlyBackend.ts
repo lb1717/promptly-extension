@@ -7335,7 +7335,7 @@ export async function transcribeCompanionAudio(
   const model = "whisper-1";
 
   const form = new FormData();
-  form.append("file", new Blob([audioBytes], { type: type || "audio/webm" }), filename);
+  form.append("file", new Blob([new Uint8Array(audioBytes)], { type: type || "audio/webm" }), filename);
   form.append("model", model);
 
   const controller = new AbortController();

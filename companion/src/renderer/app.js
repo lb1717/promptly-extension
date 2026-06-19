@@ -63,6 +63,34 @@ let promptAiEnhanced = false;
 /** @type {Array<{ id: string; label: string; snippet: string }>} */
 let suggestionOptions = [];
 
+let statusFadeTimer = null;
+
+function scheduleStatusFade(ms = 4200) {
+  if (statusFadeTimer) {
+    clearTimeout(statusFadeTimer);
+    statusFadeTimer = null;
+  }
+  statusFadeTimer = setTimeout(() => {
+    statusBanner.classList.add("fading");
+    setTimeout(() => clearStatus(), 380);
+  }, ms);
+}
+
+function showStatus(message, kind = "loading", options = {}) {
+  const { autoFade = kind === "error" || kind === "success" } = options;
+  if (statusFadeTimer) {
+    clearTimeout(statusFadeTimer);
+    statusFadeTimer = null;
+  }
+  statusBanner.classList.remove("fading");
+  statusBanner.textContent = message;
+  statusBanner.className = `status-banner ${kind}`;
+  statusBanner.classList.remove("hidden");
+  if (autoFade) {
+    scheduleStatusFade();
+  }
+}
+
 const draftDictation = createDictationController({
   textarea: draftInput,
   micButton: draftMicBtn,
@@ -190,13 +218,12 @@ function isDraftSubstantive(text) {
   return countWords(text) >= 3;
 }
 
-function showStatus(message, kind = "loading") {
-  statusBanner.textContent = message;
-  statusBanner.className = `status-banner ${kind}`;
-  statusBanner.classList.remove("hidden");
-}
-
 function clearStatus() {
+  if (statusFadeTimer) {
+    clearTimeout(statusFadeTimer);
+    statusFadeTimer = null;
+  }
+  statusBanner.classList.remove("fading");
   statusBanner.textContent = "";
   statusBanner.className = "status-banner hidden";
 }
@@ -264,8 +291,12 @@ function renderChips() {
     const chip = document.createElement("button");
     chip.type = "button";
     chip.className = "chip";
-    chip.textContent = opt.label;
     chip.dataset.id = opt.id;
+
+    const labelSpan = document.createElement("span");
+    labelSpan.textContent = opt.label;
+    chip.appendChild(labelSpan);
+
     chip.addEventListener("click", () => {
       if (appliedChipIds.has(opt.id)) return;
       const current = String(promptInput.value || "").trim();
@@ -273,6 +304,13 @@ function renderChips() {
       promptInput.value = current ? `${current}\n\n${snippet}` : snippet;
       appliedChipIds.add(opt.id);
       chip.classList.add("applied");
+      labelSpan.textContent = opt.label;
+      const check = document.createElement("span");
+      check.className = "chip-check";
+      check.textContent = "✓";
+      check.setAttribute("aria-hidden", "true");
+      chip.appendChild(check);
+      chip.setAttribute("aria-disabled", "true");
       promptInput.focus();
       syncPromptStrength();
     });
@@ -404,7 +442,7 @@ async function handleRefine() {
   } finally {
     setPromptBusy(false);
     refineBtn.disabled = false;
-    refineBtn.textContent = "Apply feedback";
+    refineBtn.textContent = "Apply Feedback";
   }
 }
 
