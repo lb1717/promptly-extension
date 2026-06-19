@@ -50,6 +50,7 @@ let companionSettings = readCompanionSettings();
 
 if (process.platform === "darwin") {
   app.setName("Promptly");
+  app.setActivationPolicy("regular");
 }
 
 function normalizeApiUrl(url) {
@@ -439,6 +440,9 @@ function registerCompanionWindow(win, options = {}) {
   win.once("ready-to-show", () => {
     win.__promptlyIsReady = true;
     setCompanionOnTop(win, true);
+    if (process.platform === "darwin" && app.dock) {
+      app.dock.show();
+    }
     if (!options.deferShow) {
       win.show();
     }
@@ -530,7 +534,10 @@ ipcMain.handle("promptly:close-window", (event) => {
     return { ok: false };
   }
   if (process.platform === "darwin") {
-    win.hide();
+    win.minimize();
+    if (app.dock) {
+      app.dock.show();
+    }
   } else {
     win.close();
   }
@@ -618,6 +625,12 @@ app.whenReady().then(() => {
 
   app.on("activate", () => {
     const windows = BrowserWindow.getAllWindows().filter((win) => !win.isDestroyed());
+    const minimized = windows.filter((win) => win.isMinimized());
+    if (minimized.length > 0) {
+      minimized[0].restore();
+      minimized[0].focus();
+      return;
+    }
     const hidden = windows.filter((win) => !win.isVisible());
     if (hidden.length > 0) {
       hidden[0].show();

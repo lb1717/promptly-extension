@@ -150,6 +150,12 @@ export async function transcribeAudio(config, audioBlob) {
     if (error?.name === "AbortError") {
       throw new Error("Transcription timed out — try a shorter recording.");
     }
+    const message = String(error?.message || error || "");
+    if (/failed to fetch|network error|load failed/i.test(message)) {
+      throw new Error(
+        "Could not reach Promptly transcription. Check your connection and try again in a minute."
+      );
+    }
     throw error;
   } finally {
     clearTimeout(timer);

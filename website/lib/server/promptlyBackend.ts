@@ -4886,6 +4886,31 @@ export function buildPromptlyCorsHeaders(origin?: string | null) {
   return headers;
 }
 
+/** Companion desktop app may send no Origin (Electron file://) — allow all for those requests. */
+export function buildCompanionCorsHeaders(origin?: string | null) {
+  const headers: Record<string, string> = {
+    "Cache-Control": "no-store",
+    "Access-Control-Allow-Origin": origin || "*"
+  };
+  if (origin) {
+    headers["Vary"] = "Origin";
+  }
+  return headers;
+}
+
+export function handleCompanionPreflight(request: Request) {
+  const origin = request.headers.get("Origin");
+  return new Response(null, {
+    status: 204,
+    headers: {
+      ...buildCompanionCorsHeaders(origin),
+      "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+      "Access-Control-Allow-Headers":
+        "Content-Type,x-promptly-client,x-promptly-firebase-token,x-promptly-google-access-token,x-promptly-user-email,x-promptly-estimate-prompt-length,x-promptly-estimate-instruction-length,x-promptly-live-config,Authorization"
+    }
+  });
+}
+
 export function handlePromptlyPreflight(request: Request) {
   const origin = request.headers.get("Origin");
   return new Response(null, {

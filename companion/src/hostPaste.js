@@ -18,9 +18,8 @@ function escapeAppleScriptString(value) {
 function buildPasteScript(processName) {
   const safeProcess = escapeAppleScriptString(processName);
 
-  // Fast path: activate host, select all, paste. Clipboard is already set in JS.
-  return `tell application "${safeProcess}" to activate
-tell application "System Events"
+  // System Events only — skip "tell application X to activate" (adds ~1–2s).
+  return `tell application "System Events"
   if not (exists process "${safeProcess}") then return "missing_process"
   tell process "${safeProcess}"
     set frontmost to true
@@ -28,7 +27,7 @@ tell application "System Events"
     keystroke "v" using command down
   end tell
 end tell
-return "clipboard_paste"`;
+return "ok"`;
 }
 
 function mapPasteError(raw) {
@@ -41,9 +40,6 @@ function mapPasteError(raw) {
   }
   if (text === "missing_process") {
     return "Target app is not running. Open Claude, Codex, ChatGPT, or Cursor first.";
-  }
-  if (text === "no_window") {
-    return "Could not find a window in the target app.";
   }
   return text || "Paste failed";
 }
@@ -71,7 +67,7 @@ async function pasteToHostProcess(processName, text) {
   try {
     const { stdout } = await execFileAsync("/usr/bin/osascript", ["-e", buildPasteScript(host)]);
     const method = String(stdout || "").trim();
-    if (!method || method.startsWith("error:") || method === "missing_process" || method === "no_window") {
+    if (!method || method === "missing_process" || method.startsWith("error:")) {
       return { ok: false, error: mapPasteError(method), method: null };
     }
     return { ok: true, method, host };

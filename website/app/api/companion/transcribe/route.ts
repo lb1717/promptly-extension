@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import {
-  buildPromptlyCorsHeaders,
-  handlePromptlyPreflight,
+  buildCompanionCorsHeaders,
+  handleCompanionPreflight,
   requirePromptlyOptimizeUser,
   transcribeCompanionAudio
 } from "@/lib/server/promptlyBackend";
@@ -11,7 +11,7 @@ export const runtime = "nodejs";
 const MAX_AUDIO_BYTES = 12 * 1024 * 1024;
 
 export async function OPTIONS(request: Request) {
-  return handlePromptlyPreflight(request);
+  return handleCompanionPreflight(request);
 }
 
 export async function POST(request: Request) {
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
     if (!form) {
       return NextResponse.json(
         { error: "Expected multipart form data with an audio field" },
-        { status: 400, headers: buildPromptlyCorsHeaders(origin) }
+        { status: 400, headers: buildCompanionCorsHeaders(origin) }
       );
     }
 
@@ -30,19 +30,19 @@ export async function POST(request: Request) {
     if (!(audio instanceof Blob)) {
       return NextResponse.json(
         { error: "audio file is required" },
-        { status: 400, headers: buildPromptlyCorsHeaders(origin) }
+        { status: 400, headers: buildCompanionCorsHeaders(origin) }
       );
     }
     if (audio.size < 1) {
       return NextResponse.json(
         { error: "audio file is empty" },
-        { status: 400, headers: buildPromptlyCorsHeaders(origin) }
+        { status: 400, headers: buildCompanionCorsHeaders(origin) }
       );
     }
     if (audio.size > MAX_AUDIO_BYTES) {
       return NextResponse.json(
         { error: "audio file is too large" },
-        { status: 413, headers: buildPromptlyCorsHeaders(origin) }
+        { status: 413, headers: buildCompanionCorsHeaders(origin) }
       );
     }
 
@@ -51,7 +51,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json(
       { text: result.text, model: result.model },
-      { headers: buildPromptlyCorsHeaders(origin) }
+      { headers: buildCompanionCorsHeaders(origin) }
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : "Transcription failed";
@@ -60,6 +60,6 @@ export async function POST(request: Request) {
       : /required|empty|too large|exceeds/i.test(message)
         ? 400
         : 500;
-    return NextResponse.json({ error: message }, { status, headers: buildPromptlyCorsHeaders(origin) });
+    return NextResponse.json({ error: message }, { status, headers: buildCompanionCorsHeaders(origin) });
   }
 }
