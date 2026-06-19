@@ -56,10 +56,58 @@ body.collapsed {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 12px;
+  gap: 8px;
+  padding: 8px 10px 8px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
   flex-shrink: 0;
+}
+
+.window-controls {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+}
+
+.traffic-btn {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 0.5px solid rgba(0, 0, 0, 0.12);
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-app-region: no-drag;
+  transition: filter 120ms ease;
+}
+
+.traffic-btn:hover {
+  filter: brightness(0.94);
+}
+
+.traffic-btn-close {
+  background: #ff5f57;
+}
+
+.traffic-btn-collapse {
+  background: #febc2e;
+}
+
+.traffic-glyph {
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  color: rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.traffic-btn:hover .traffic-glyph,
+.traffic-btn:focus-visible .traffic-glyph {
+  opacity: 1;
 }
 
 .topbar-drag {
@@ -127,18 +175,65 @@ dialog {
 }
 
 .icon-btn {
-  border: 1px solid var(--text);
+  border: 1px solid var(--border);
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  font-size: 16px;
-  padding: 4px 6px;
+  font-size: 14px;
+  padding: 3px 6px;
   border-radius: var(--radius);
+}
+
+.icon-btn-subtle {
+  border-color: transparent;
+  background: transparent;
+}
+
+.icon-btn-subtle:hover {
+  border-color: var(--border);
+  background: var(--surface-2);
 }
 
 .icon-btn:hover {
   color: var(--text);
   background: var(--surface-2);
+}
+
+.sign-in-gate {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px 20px;
+  text-align: center;
+  min-height: 0;
+}
+
+.sign-in-logo {
+  display: block;
+  object-fit: contain;
+}
+
+.sign-in-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.sign-in-copy {
+  margin: 0;
+  max-width: 280px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.sign-in-gate .primary-btn,
+.sign-in-gate .ghost-btn {
+  width: 100%;
+  max-width: 280px;
 }
 
 .close-btn {
@@ -259,8 +354,8 @@ dialog {
 .dictation-mic-btn {
   position: absolute;
   right: 8px;
-  top: 50%;
-  transform: translateY(-50%);
+  top: 10px;
+  transform: none;
   z-index: 2;
   display: inline-flex;
   align-items: center;
@@ -278,6 +373,7 @@ dialog {
 
 .dictation-mic-btn--compact {
   right: 6px;
+  top: 8px;
   width: 28px;
   height: 28px;
 }
@@ -407,11 +503,6 @@ dialog {
   min-height: 0;
   display: flex;
   flex-direction: column;
-}
-
-.prompt-box-body .dictation-mic-btn {
-  top: 50%;
-  transform: translateY(-50%);
 }
 
 .prompt-busy-overlay {
@@ -769,6 +860,86 @@ dialog {
   font-size: 1rem;
 }
 
+.settings-account-card {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.settings-account-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.settings-account-row .field-label {
+  margin: 0;
+}
+
+.settings-account-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  text-align: right;
+  word-break: break-word;
+}
+
+.settings-credits-block {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.settings-credits-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.settings-credits-header .field-label {
+  margin: 0;
+}
+
+.settings-credits-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.settings-credits-track {
+  height: 6px;
+  border-radius: var(--radius);
+  background: #e5e7eb;
+  overflow: hidden;
+}
+
+.settings-credits-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: var(--radius);
+  background: #22c55e;
+  transition: width 240ms ease;
+}
+
+.settings-credits-fill[data-level="mid"] {
+  background: #f59e0b;
+}
+
+.settings-credits-fill[data-level="high"] {
+  background: #ef4444;
+}
+
+.settings-credits-reset {
+  margin: 6px 0 0;
+  font-size: 11px;
+}
+
 .checkbox-row {
   display: flex;
   align-items: center;
@@ -794,7 +965,7 @@ dialog {
   margin: 0;
   padding: 0 14px;
   border: none;
-  border-radius: 10px;
+  border-radius: 0;
   background: var(--accent);
   color: #fff;
   font: inherit;

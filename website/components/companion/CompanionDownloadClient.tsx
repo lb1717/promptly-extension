@@ -76,8 +76,18 @@ export function CompanionDownloadClient({ download }: Props) {
         </p>
         <ol className="list-decimal space-y-3 pl-5">
           <li>
+            <strong className="text-ink">Quit Promptly Companion first</strong> if it is already installed — right-click
+            its Dock icon → <strong className="text-ink">Quit</strong>, or press <strong className="text-ink">⌘Q</strong>{" "}
+            while the app is focused. If drag-to-Applications says the app is &ldquo;in use,&rdquo; it is still running
+            (even minimized).
+            <pre className="mt-2 overflow-x-auto rounded-lg border border-line bg-page p-3 text-xs text-ink">
+              osascript -e &apos;quit app &quot;Promptly Companion&quot;&apos;
+            </pre>
+          </li>
+          <li>
             Download the <strong className="text-ink">.dmg</strong> above, open it, and drag{" "}
-            <strong className="text-ink">Promptly Companion</strong> to <strong className="text-ink">Applications</strong>.
+            <strong className="text-ink">Promptly Companion</strong> to <strong className="text-ink">Applications</strong>{" "}
+            (replace the existing copy when asked).
           </li>
           <li>
             Open <strong className="text-ink">Terminal</strong> and paste (fixes &ldquo;damaged&rdquo;):

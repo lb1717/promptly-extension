@@ -1,4 +1,5 @@
 const OPTIMIZE_TIMEOUT_MS = 45000;
+const CREDITS_POLL_MS = 45000;
 
 function companionHeaders(config) {
   return {
@@ -8,6 +9,51 @@ function companionHeaders(config) {
     "x-promptly-live-config": "1"
   };
 }
+
+function buildOptimizeError(body, status) {
+  const error = new Error(String(body.error || `Optimize failed (${status})`));
+  if (body.credits) {
+    error.credits = body.credits;
+  }
+  if (status === 401) {
+    error.needsSignIn = true;
+  }
+  if (status === 429) {
+    error.outOfTokens = true;
+  }
+  return error;
+}
+
+export async function fetchAccount(config) {
+  const base = String(config.apiUrl || "").replace(/\/$/, "");
+  const auth = String(config.token || "").trim();
+  if (!base || !auth) {
+    throw new Error("Sign in to Promptly to use Companion.");
+  }
+
+  const response = await fetch(`${base}/api/companion/account`, {
+    method: "GET",
+    headers: companionHeaders(config),
+    cache: "no-store"
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(String(body.error || `Account lookup failed (${response.status})`));
+    if (response.status === 401) {
+      error.needsSignIn = true;
+    }
+    throw error;
+  }
+  return {
+    email: body.email || null,
+    displayName: body.displayName || null,
+    plan: body.plan || "free",
+    credits: body.credits || null,
+    deviceTool: body.deviceTool || null
+  };
+}
+
+export { CREDITS_POLL_MS };
 
 export async function optimizePrompt({
   apiUrl,
@@ -48,7 +94,7 @@ export async function optimizePrompt({
 
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(String(body.error || `Optimize failed (${response.status})`));
+    throw buildOptimizeError(body, response.status);
   }
   const optimized = String(body.optimized_prompt || "").trim();
   if (!optimized) {

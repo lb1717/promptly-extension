@@ -1,13 +1,18 @@
-import { improveInitialDraft, refineWithFeedback, fetchSuggestions } from "./api.js";
+import { improveInitialDraft, refineWithFeedback, fetchSuggestions, fetchAccount, CREDITS_POLL_MS } from "./api.js";
 import { countWords } from "./further-improve.js";
 import { updateStrengthUi } from "./strength.js";
 import { createDictationController, stopAllDictation } from "./dictation.js";
 
-const STORAGE_KEY = "promptly-companion-config";
 const PRODUCTION_API_URL = "https://promptly-labs.com";
+const SIGN_IN_URL = "https://promptly-labs.com/integrations";
 
 /** @type {{ apiUrl: string; token: string; client: string }} */
 let config = { apiUrl: "", token: "", client: "promptly-cursor" };
+
+/** @type {{ email: string | null; displayName: string | null; plan: string; credits: Record<string, unknown> | null } | null>} */
+let account = null;
+let creditsPollTimer = null;
+let isSignedIn = false;
 
 const statusBanner = document.getElementById("status-banner");
 const draftView = document.getElementById("draft-view");
@@ -31,6 +36,9 @@ const appShell = document.getElementById("app-shell");
 const miniExpandBtn = document.getElementById("mini-expand-btn");
 const settingsBtn = document.getElementById("settings-btn");
 const settingsDialog = document.getElementById("settings-dialog");
+const signInGate = document.getElementById("sign-in-gate");
+const signInBtn = document.getElementById("sign-in-btn");
+const refreshAuthBtn = document.getElementById("refresh-auth-btn");
 const permissionsDialog = document.getElementById("permissions-dialog");
 const permissionsAllowBtn = document.getElementById("permissions-allow-btn");
 const permissionsSkipBtn = document.getElementById("permissions-skip-btn");
@@ -40,10 +48,13 @@ const permissionsAppName = document.getElementById("permissions-app-name");
 const settingsForm = document.getElementById("settings-form");
 const settingsCancel = document.getElementById("settings-cancel");
 const appVersionLine = document.getElementById("app-version-line");
-const apiIndicator = document.getElementById("api-indicator");
-const apiUrlInput = document.getElementById("api-url-input");
-const tokenInput = document.getElementById("token-input");
-const clientInput = document.getElementById("client-input");
+const accountIndicator = document.getElementById("account-indicator");
+const settingsAccountName = document.getElementById("settings-account-name");
+const settingsAccountEmail = document.getElementById("settings-account-email");
+const settingsAccountPlan = document.getElementById("settings-account-plan");
+const settingsCreditsLabel = document.getElementById("settings-credits-label");
+const settingsCreditsFill = document.getElementById("settings-credits-fill");
+const settingsCreditsReset = document.getElementById("settings-credits-reset");
 const autoOpenClaude = document.getElementById("auto-open-claude");
 const autoOpenCodex = document.getElementById("auto-open-codex");
 const autoOpenCursor = document.getElementById("auto-open-cursor");
@@ -120,53 +131,185 @@ function setupDictationUi() {
   }
 }
 
-function loadStoredConfig() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-function saveConfig() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
-}
-
 function mergeConfig(partial) {
   config = {
     apiUrl: String(partial?.apiUrl || config.apiUrl || "").trim(),
     token: String(partial?.token || config.token || "").trim(),
     client: String(partial?.client || config.client || "promptly-cursor").trim()
   };
-  saveConfig();
 }
 
-function updateApiIndicator() {
-  if (!apiIndicator) return;
-  const url = String(config.apiUrl || "").trim();
-  if (!url) {
-    apiIndicator.textContent = "Not connected";
-    apiIndicator.className = "api-indicator";
+function isCreditsHardExhausted(credits) {
+  return Boolean(credits?.hard_exhausted);
+}
+
+function applyCredits(credits) {
+  if (!credits) return;
+  if (account) {
+    account.credits = credits;
+  } else {
+    account = { email: null, displayName: null, plan: "free", credits };
+  }
+  updateAccountUi();
+  updateCreditsUi();
+}
+
+function updateCreditsUi() {
+  const credits = account?.credits;
+  if (!settingsCreditsFill || !settingsCreditsLabel || !settingsCreditsReset) return;
+
+  if (!credits) {
+    settingsCreditsLabel.textContent = "—";
+    settingsCreditsFill.style.width = "0%";
+    settingsCreditsFill.removeAttribute("data-level");
+    settingsCreditsReset.textContent = "Connect your account to view usage.";
     return;
   }
-  let label = url;
-  let kind = "prod";
-  try {
-    const parsed = new URL(url);
-    if (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") {
-      kind = "local";
-      label = `local ${parsed.port || "3000"}`;
-    } else {
-      label = parsed.hostname.replace(/^www\./, "");
+
+  const max = Math.max(1, Number(credits.max || 1));
+  const used = Math.min(max, Math.max(0, Number(credits.used || 0)));
+  const leftPercent =
+    credits.left_percent != null
+      ? Math.max(0, Math.min(100, Math.round(Number(credits.left_percent) || 0)))
+      : Math.max(0, Math.min(100, Math.round(((max - used) / max) * 100)));
+  const usedPercent = Math.max(0, Math.min(100, 100 - leftPercent));
+  settingsCreditsLabel.textContent = `${leftPercent}% left · ${used.toLocaleString()} / ${max.toLocaleString()}`;
+  settingsCreditsFill.style.width = `${usedPercent > 0 ? Math.max(1.5, usedPercent) : 0}%`;
+  settingsCreditsFill.dataset.level = usedPercent >= 85 ? "high" : usedPercent >= 55 ? "mid" : "low";
+
+  const resetLabel = String(credits.reset_label || "").trim();
+  const resetDays = Math.max(0, Math.ceil(Number(credits.reset_in_days || 0) || 0));
+  const resetHours = Math.max(0, Math.ceil(Number(credits.reset_in_hours || 0) || 0));
+  settingsCreditsReset.textContent =
+    resetLabel || (resetDays > 0 ? `Resets in ${resetDays} day${resetDays === 1 ? "" : "s"}` : resetHours > 0 ? `Resets in ${resetHours} hour${resetHours === 1 ? "" : "s"}` : "");
+}
+
+function updateAccountUi() {
+  if (accountIndicator) {
+    if (!isSignedIn) {
+      accountIndicator.textContent = "Sign in required";
+      accountIndicator.className = "api-indicator";
+      accountIndicator.title = "Sign in to Promptly";
+      return;
     }
-  } catch {
-    /* keep raw url */
+    const label = account?.displayName || account?.email || "Connected";
+    accountIndicator.textContent = label;
+    accountIndicator.className = "api-indicator prod";
+    accountIndicator.title = account?.email ? `Signed in as ${account.email}` : "Signed in";
   }
-  apiIndicator.textContent = label;
-  apiIndicator.className = `api-indicator ${kind}`;
-  apiIndicator.title = `API: ${url}`;
+
+  if (settingsAccountName) {
+    settingsAccountName.textContent = account?.displayName || account?.email || "—";
+  }
+  if (settingsAccountEmail) {
+    settingsAccountEmail.textContent = account?.email || "—";
+  }
+  if (settingsAccountPlan) {
+    settingsAccountPlan.textContent = account?.plan ? String(account.plan) : "—";
+  }
+  updateCreditsUi();
+}
+
+function setSignedInUi(signedIn) {
+  isSignedIn = Boolean(signedIn);
+  if (signInGate) {
+    signInGate.classList.toggle("hidden", isSignedIn);
+  }
+  if (!isSignedIn) {
+    draftView?.classList.add("hidden");
+    refineView?.classList.add("hidden");
+  } else if (refineView && !refineView.classList.contains("hidden")) {
+    /* keep refine view */
+  } else {
+    showDraftView();
+  }
+  updateAccountUi();
+}
+
+function stopCreditsPolling() {
+  if (creditsPollTimer) {
+    clearInterval(creditsPollTimer);
+    creditsPollTimer = null;
+  }
+}
+
+function startCreditsPolling() {
+  stopCreditsPolling();
+  if (!isSignedIn || !config.token) return;
+  creditsPollTimer = setInterval(() => {
+    void refreshAccount({ silent: true });
+  }, CREDITS_POLL_MS);
+}
+
+async function refreshAccount(options = {}) {
+  const { silent = false } = options;
+  if (!config.token) {
+    account = null;
+    setSignedInUi(false);
+    stopCreditsPolling();
+    return null;
+  }
+  try {
+    account = await fetchAccount(config);
+    setSignedInUi(true);
+    startCreditsPolling();
+    return account;
+  } catch (error) {
+    account = null;
+    setSignedInUi(false);
+    stopCreditsPolling();
+    if (!silent) {
+      showError(String(error?.message || error || "Could not verify your Promptly account."));
+    }
+    return null;
+  }
+}
+
+async function refreshAuthFromDisk() {
+  if (window.promptlyCompanion?.refreshConfig) {
+    const defaults = await window.promptlyCompanion.refreshConfig();
+    mergeConfig({
+      apiUrl: resolveApiUrl(null, defaults),
+      token: defaults?.token || "",
+      client: defaults?.client || "promptly-cursor"
+    });
+  } else {
+    await bootstrapConfig();
+  }
+  await refreshAccount();
+  if (isSignedIn) {
+    clearStatus();
+    showSuccess("Connected to Promptly.");
+  }
+}
+
+function openSignInPage() {
+  if (window.promptlyCompanion?.openExternal) {
+    void window.promptlyCompanion.openExternal(SIGN_IN_URL);
+    return;
+  }
+  window.open(SIGN_IN_URL, "_blank", "noopener,noreferrer");
+}
+
+function mapPromptlyError(error) {
+  if (error?.outOfTokens || /weekly api token limit|token limit reached/i.test(String(error?.message || ""))) {
+    return "Weekly token limit reached. Resets Sunday UTC.";
+  }
+  if (error?.needsSignIn || /auth token|sign in/i.test(String(error?.message || ""))) {
+    return "Sign in to Promptly to continue.";
+  }
+  return String(error?.message || error || "Request failed");
+}
+
+function handleApiError(error) {
+  if (error?.credits) {
+    applyCredits(error.credits);
+  }
+  const message = mapPromptlyError(error);
+  showError(message);
+  if (error?.needsSignIn) {
+    setSignedInUi(false);
+  }
 }
 
 function isLocalApiUrl(url) {
@@ -191,27 +334,16 @@ function resolveApiUrl(stored, defaults) {
 }
 
 async function bootstrapConfig() {
-  const stored = loadStoredConfig();
+  let defaults = null;
   if (window.promptlyCompanion?.getConfig) {
-    const defaults = await window.promptlyCompanion.getConfig();
-    const apiUrl = resolveApiUrl(stored, defaults);
-    mergeConfig({
-      apiUrl,
-      token: stored?.token || defaults.token,
-      client: stored?.client || defaults.client
-    });
-    if (stored?.apiUrl && isLocalApiUrl(stored.apiUrl) && apiUrl !== stored.apiUrl) {
-      saveConfig();
-    }
-  } else if (stored) {
-    mergeConfig({
-      ...stored,
-      apiUrl: isLocalApiUrl(stored.apiUrl) ? PRODUCTION_API_URL : stored.apiUrl
-    });
-  } else {
-    mergeConfig({ apiUrl: PRODUCTION_API_URL, token: "", client: "promptly-cursor" });
+    defaults = await window.promptlyCompanion.getConfig();
   }
-  updateApiIndicator();
+  const apiUrl = resolveApiUrl(null, defaults);
+  mergeConfig({
+    apiUrl,
+    token: defaults?.token || "",
+    client: defaults?.client || "promptly-cursor"
+  });
 }
 
 function isDraftSubstantive(text) {
@@ -375,9 +507,13 @@ async function handleImprove() {
     showError("Write at least 3 words before improving.");
     return;
   }
-  if (!config.token) {
-    showError("Connect in Settings — paste a device token (pt_…).");
-    settingsDialog.showModal();
+  if (!isSignedIn || !config.token) {
+    showError("Sign in to Promptly to improve prompts.");
+    openSignInPage();
+    return;
+  }
+  if (isCreditsHardExhausted(account?.credits)) {
+    showError("Weekly token limit reached. Resets Sunday UTC.");
     return;
   }
 
@@ -387,7 +523,8 @@ async function handleImprove() {
   setDraftBusy(true);
 
   try {
-    const { optimized } = await improveInitialDraft(config, draft);
+    const { optimized, credits } = await improveInitialDraft(config, draft);
+    if (credits) applyCredits(credits);
 
     promptInput.value = optimized;
     resetFeedbackUi();
@@ -397,7 +534,7 @@ async function handleImprove() {
     syncPromptStrength();
     followUpInput.focus();
   } catch (error) {
-    showError(String(error?.message || error || "Improve failed"));
+    handleApiError(error);
   } finally {
     setDraftBusy(false);
     improveBtn.disabled = false;
@@ -420,6 +557,15 @@ async function handleRefine() {
   if (followUpInput.readOnly) {
     return;
   }
+  if (!isSignedIn || !config.token) {
+    showError("Sign in to Promptly to continue.");
+    openSignInPage();
+    return;
+  }
+  if (isCreditsHardExhausted(account?.credits)) {
+    showError("Weekly token limit reached. Resets Sunday UTC.");
+    return;
+  }
 
   clearStatus();
   lockFollowUp();
@@ -429,6 +575,7 @@ async function handleRefine() {
 
   try {
     const result = await refineWithFeedback(config, currentPrompt, feedback);
+    if (result.credits) applyCredits(result.credits);
 
     promptInput.value = result.prompt;
     showSummary(result.summary);
@@ -437,7 +584,7 @@ async function handleRefine() {
     syncPromptStrength();
     followUpInput.focus();
   } catch (error) {
-    showError(String(error?.message || error || "Refine failed"));
+    handleApiError(error);
     unlockFollowUp(false);
   } finally {
     setPromptBusy(false);
@@ -566,11 +713,9 @@ permissionsAllowBtn?.addEventListener("click", () => void handlePermissionsAllow
 permissionsSkipBtn?.addEventListener("click", () => void finishPermissionsOnboarding());
 
 function openSettings() {
-  apiUrlInput.value = config.apiUrl;
-  tokenInput.value = config.token;
-  clientInput.value = config.client;
   void loadSettingsIntoForm();
   void updateAppVersionLine();
+  updateAccountUi();
   settingsDialog.showModal();
 }
 
@@ -657,6 +802,8 @@ pasteBtn?.addEventListener("click", async () => {
   }
 });
 
+signInBtn?.addEventListener("click", () => openSignInPage());
+refreshAuthBtn?.addEventListener("click", () => void refreshAuthFromDisk());
 newBtn?.addEventListener("click", () => {
   if (window.promptlyCompanion?.openNewWindow) {
     void window.promptlyCompanion.openNewWindow();
@@ -676,13 +823,7 @@ settingsBtn?.addEventListener("click", openSettings);
 settingsCancel?.addEventListener("click", () => settingsDialog.close());
 settingsForm?.addEventListener("submit", (ev) => {
   ev.preventDefault();
-  mergeConfig({
-    apiUrl: apiUrlInput.value,
-    token: tokenInput.value,
-    client: clientInput.value
-  });
   void saveCompanionSettingsFromForm();
-  updateApiIndicator();
   settingsDialog.close();
   clearStatus();
 });
@@ -712,5 +853,6 @@ void bootstrapConfig().then(async () => {
   setupDictationUi();
   syncDraftStrength();
   syncPromptStrength();
+  await refreshAccount({ silent: true });
   await maybeShowPermissionsOnboarding();
 });

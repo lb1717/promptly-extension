@@ -33,7 +33,7 @@ const APP_VERSION = (() => {
 const ANCHOR_POLL_MS = 900;
 const PRODUCTION_API_URL = "https://promptly-labs.com";
 const EXPANDED_DEFAULT = { width: 380, height: 680, minWidth: 320, minHeight: 480 };
-const COLLAPSED_SIZE = { width: 236, height: 44 };
+const COLLAPSED_HEIGHT = 44;
 const COLLAPSED_BG = "#6d5ce8";
 const EXPANDED_BG = "#f4f5f7";
 
@@ -288,15 +288,15 @@ function setWindowCollapsed(win, collapsed) {
     win.setMaximumSize(10000, 10000);
     win.setMinimumSize(1, 1);
     win.setBounds({
-      x: Math.round(bounds.x + bounds.width - COLLAPSED_SIZE.width),
+      x: bounds.x,
       y: bounds.y,
-      width: COLLAPSED_SIZE.width,
-      height: COLLAPSED_SIZE.height
+      width: bounds.width,
+      height: COLLAPSED_HEIGHT
     });
     win.setBackgroundColor(COLLAPSED_BG);
     win.setResizable(false);
-    win.setMinimumSize(COLLAPSED_SIZE.width, COLLAPSED_SIZE.height);
-    win.setMaximumSize(COLLAPSED_SIZE.width, COLLAPSED_SIZE.height);
+    win.setMinimumSize(bounds.width, COLLAPSED_HEIGHT);
+    win.setMaximumSize(bounds.width, COLLAPSED_HEIGHT);
   } else {
     state.collapsed = false;
 
@@ -524,6 +524,15 @@ function restartHostWatcher() {
 }
 
 ipcMain.handle("promptly:get-config", () => readDefaultCreds());
+ipcMain.handle("promptly:refresh-config", () => readDefaultCreds());
+ipcMain.handle("promptly:open-external", (_event, url) => {
+  const target = String(url || "").trim();
+  if (/^https?:\/\//i.test(target)) {
+    void shell.openExternal(target);
+    return { ok: true };
+  }
+  return { ok: false, error: "Invalid URL" };
+});
 ipcMain.handle("promptly:open-window", () => {
   openNewCompanionWindow();
   return { ok: true };

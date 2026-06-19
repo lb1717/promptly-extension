@@ -2,6 +2,8 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("promptlyCompanion", {
   getConfig: () => ipcRenderer.invoke("promptly:get-config"),
+  refreshConfig: () => ipcRenderer.invoke("promptly:refresh-config"),
+  openExternal: (url) => ipcRenderer.invoke("promptly:open-external", url),
   getAppInfo: () => ipcRenderer.invoke("promptly:get-app-info"),
   getPermissionStatus: () => ipcRenderer.invoke("promptly:get-permission-status"),
   requestAllPermissions: () => ipcRenderer.invoke("promptly:request-all-permissions"),

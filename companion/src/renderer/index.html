@@ -13,23 +13,40 @@
   <body>
     <div id="app-shell" class="app-shell">
     <header class="topbar">
+      <div class="window-controls" aria-label="Window controls">
+        <button type="button" id="close-btn" class="traffic-btn traffic-btn-close" title="Minimize to Dock" aria-label="Minimize to Dock">
+          <span class="traffic-glyph" aria-hidden="true">×</span>
+        </button>
+        <button type="button" id="collapse-btn" class="traffic-btn traffic-btn-collapse" title="Collapse" aria-label="Collapse">
+          <span class="traffic-glyph" aria-hidden="true">−</span>
+        </button>
+      </div>
       <div class="brand">
         <img src="assets/promptly-logo.png" alt="Promptly" class="brand-mark" width="24" height="24" />
         <div class="brand-text">
           <span class="brand-name">Companion</span>
-          <span id="api-indicator" class="api-indicator" title="Connected API"></span>
+          <span id="account-indicator" class="api-indicator" title="Account"></span>
         </div>
       </div>
       <div class="topbar-drag" aria-hidden="true"></div>
       <div class="topbar-actions">
-        <button type="button" id="new-btn" class="icon-btn" title="New window on this Desktop" aria-label="New window">+</button>
-        <button type="button" id="collapse-btn" class="icon-btn" title="Collapse" aria-label="Collapse">▁</button>
-        <button type="button" id="settings-btn" class="icon-btn" title="Settings" aria-label="Settings">⚙</button>
-        <button type="button" id="close-btn" class="icon-btn close-btn" title="Minimize to Dock" aria-label="Minimize to Dock">×</button>
+        <button type="button" id="new-btn" class="icon-btn icon-btn-subtle" title="New window on this Desktop" aria-label="New window">+</button>
+        <button type="button" id="settings-btn" class="icon-btn icon-btn-subtle" title="Settings" aria-label="Settings">⚙</button>
       </div>
     </header>
 
     <div id="status-banner" class="status-banner hidden" role="status"></div>
+
+    <section id="sign-in-gate" class="sign-in-gate hidden">
+      <img src="assets/promptly-logo.png" alt="" class="sign-in-logo" width="40" height="40" />
+      <h2 class="sign-in-title">Sign in to Promptly</h2>
+      <p class="sign-in-copy">
+        Companion uses your Promptly account from a paired coding agent. Install Cursor, Claude Code, or Codex
+        integration and connect your account first.
+      </p>
+      <button type="button" id="sign-in-btn" class="primary-btn">Sign in at promptly-labs.com</button>
+      <button type="button" id="refresh-auth-btn" class="ghost-btn">I&apos;ve connected — refresh</button>
+    </section>
 
     <section id="draft-view" class="workspace">
       <div class="prompt-box-wrap stretch-box">
@@ -179,17 +196,33 @@
 
     <dialog id="settings-dialog" class="settings-dialog">
       <form method="dialog" id="settings-form">
-        <h2>Connection</h2>
+        <h2>Settings</h2>
         <p id="app-version-line" class="settings-hint app-version-line">Version …</p>
-        <p class="settings-hint">
-          Uses your paired IDE token from <code>~/.promptly/credentials-*.json</code> when available.
-        </p>
-        <label class="field-label" for="api-url-input">API URL</label>
-        <input id="api-url-input" class="text-input" type="url" placeholder="https://promptly-labs.com" />
-        <label class="field-label" for="token-input">Device token</label>
-        <input id="token-input" class="text-input" type="password" placeholder="pt_…" autocomplete="off" />
-        <label class="field-label" for="client-input">Client header</label>
-        <input id="client-input" class="text-input" type="text" placeholder="promptly-cursor" />
+
+        <div class="settings-account-card">
+          <div class="settings-account-row">
+            <span class="field-label">Account</span>
+            <span id="settings-account-name" class="settings-account-value">—</span>
+          </div>
+          <div class="settings-account-row">
+            <span class="field-label">Email</span>
+            <span id="settings-account-email" class="settings-account-value">—</span>
+          </div>
+          <div class="settings-account-row">
+            <span class="field-label">Plan</span>
+            <span id="settings-account-plan" class="settings-account-value">—</span>
+          </div>
+          <div class="settings-credits-block">
+            <div class="settings-credits-header">
+              <span class="field-label">Weekly tokens</span>
+              <span id="settings-credits-label" class="settings-credits-label">—</span>
+            </div>
+            <div class="settings-credits-track" aria-hidden="true">
+              <div id="settings-credits-fill" class="settings-credits-fill"></div>
+            </div>
+            <p id="settings-credits-reset" class="settings-hint settings-credits-reset">—</p>
+          </div>
+        </div>
 
         <h2 class="settings-section-title">Auto-open</h2>
         <p class="settings-hint">
