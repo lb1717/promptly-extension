@@ -1,6 +1,8 @@
 import Link from "next/link";
 import type { CompanionDownloadInfo } from "@/lib/companionDownload";
 
+const MAC_INSTALL_COMMAND = 'xattr -cr "/Applications/Promptly Companion.app"';
+
 type Props = {
   download: CompanionDownloadInfo;
 };
@@ -68,61 +70,24 @@ export function CompanionDownloadClient({ download }: Props) {
         </p>
       ) : null}
 
-      <section className="mt-10 rounded-2xl border border-amber-200 bg-amber-50/90 p-5 text-sm text-muted">
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-ink">Mac install (follow every step)</h2>
-        <p className="mb-3">
-          Companion is not from the App Store yet, so macOS will block it the first time. That is expected — the app is
-          safe. You only do this once.
-        </p>
-        <ol className="list-decimal space-y-3 pl-5">
+      <section className="mt-10 rounded-2xl border border-line bg-page p-5 text-sm text-muted">
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-ink">Mac install</h2>
+        <ol className="list-decimal space-y-4 pl-5">
           <li>
-            <strong className="text-ink">Quit Promptly Companion first</strong> if it is already installed — right-click
-            its Dock icon → <strong className="text-ink">Quit</strong>, or press <strong className="text-ink">⌘Q</strong>{" "}
-            while the app is focused. If drag-to-Applications says the app is &ldquo;in use,&rdquo; it is still running
-            (even minimized).
-            <pre className="mt-2 overflow-x-auto rounded-lg border border-line bg-page p-3 text-xs text-ink">
-              osascript -e &apos;quit app &quot;Promptly Companion&quot;&apos;
+            Download the <strong className="text-ink">.dmg</strong> above, open it, and drag{" "}
+            <strong className="text-ink">Promptly Companion</strong> to <strong className="text-ink">Applications</strong>.
+          </li>
+          <li>
+            Open <strong className="text-ink">Terminal</strong> and paste this command (select and copy, or use{" "}
+            <strong className="text-ink">Install command.txt</strong> on the disk image):
+            <pre className="mt-2 select-all overflow-x-auto rounded-lg border border-line bg-cream p-3 font-mono text-xs leading-relaxed text-ink">
+              {MAC_INSTALL_COMMAND}
             </pre>
-          </li>
-          <li>
-            Download the <strong className="text-ink">.dmg</strong> above and open it. Drag{" "}
-            <strong className="text-ink">Promptly Companion</strong> to <strong className="text-ink">Applications</strong>{" "}
-            — the disk window shows the Terminal command and right-click Open steps below the icons.
-          </li>
-          <li>
-            Follow steps <strong className="text-ink">2</strong> and <strong className="text-ink">3</strong> on the install
-            window (or here if you closed it). Open <strong className="text-ink">Terminal</strong> and paste:
-            <pre className="mt-2 overflow-x-auto rounded-lg border border-line bg-page p-3 text-xs text-ink">
-              xattr -cr &quot;/Applications/Promptly Companion.app&quot;
-            </pre>
-          </li>
-          <li>
-            <strong className="text-ink">Do not double-click the app yet.</strong> In Finder, go to{" "}
-            <strong className="text-ink">Applications</strong>, <strong className="text-ink">right-click</strong>{" "}
-            <strong className="text-ink">Promptly Companion</strong> → <strong className="text-ink">Open</strong> → click{" "}
-            <strong className="text-ink">Open</strong> in the dialog.
-            <p className="mt-2 text-xs">
-              This fixes: &ldquo;can&apos;t be opened because Apple cannot check it for malicious software.&rdquo;
-            </p>
-          </li>
-          <li>
-            If you do not see a right-click Open option: open <strong className="text-ink">System Settings</strong> →{" "}
-            <strong className="text-ink">Privacy &amp; Security</strong> → scroll down → click{" "}
-            <strong className="text-ink">Open Anyway</strong> next to Promptly Companion.
-          </li>
-          <li>
-            After it opens, go to <strong className="text-ink">⚙ Settings</strong> and confirm{" "}
-            <strong className="text-ink">Version {download.version || "…"} · installed</strong>.
           </li>
         </ol>
-      </section>
-
-      <section className="mt-6 rounded-2xl border border-line bg-cream/80 p-5 text-sm text-muted">
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-ink">Why does macOS block it?</h2>
-        <p>
-          Fully removing this step requires Apple&apos;s $99/year Developer Program to notarize the app. Without that,
-          every Mac app downloaded from the web needs the one-time right-click Open above. After the first successful
-          launch, you can open it normally.
+        <p className="mt-4 text-xs">
+          First launch only: if macOS blocks the app, right-click it in Applications → Open → Open. After that, open
+          normally.
         </p>
       </section>
 
@@ -155,8 +120,8 @@ export function CompanionDownloadClient({ download }: Props) {
         <p className="text-muted">
           Pair an IDE integration first (Cursor, Claude Code, or Codex) — Companion reads your token automatically. Or
           open Settings in the app and paste a device token from{" "}
-          <Link href="/integrations" className="font-medium text-ink underline">
-            Integrations
+          <Link href="/auth/companion" className="font-medium text-ink underline">
+            Connect in browser
           </Link>
           .
         </p>

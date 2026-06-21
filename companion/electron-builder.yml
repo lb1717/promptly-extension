@@ -31,15 +31,19 @@ dmg:
   iconSize: 96
   window:
     width: 660
-    height: 460
+    height: 320
   background: build/dmg-background.png
   contents:
     - x: 170
-      y: 210
+      y: 155
     - x: 470
-      y: 210
+      y: 155
       type: link
       path: /Applications
+    - x: 330
+      y: 292
+      type: file
+      path: build/Install command.txt
 win:
   target:
     - nsis

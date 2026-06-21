@@ -4,7 +4,15 @@ import { updateStrengthUi } from "./strength.js";
 import { createDictationController, stopAllDictation } from "./dictation.js";
 
 const PRODUCTION_API_URL = "https://promptly-labs.com";
-const SIGN_IN_URL = "https://promptly-labs.com/integrations";
+
+function normalizeApiUrl(url) {
+  return String(url || "").trim().replace(/\/$/, "");
+}
+
+function getSignInUrl(apiUrl) {
+  const base = normalizeApiUrl(apiUrl) || PRODUCTION_API_URL;
+  return `${base}/auth/companion`;
+}
 
 /** @type {{ apiUrl: string; token: string; client: string }} */
 let config = { apiUrl: "", token: "", client: "promptly-cursor" };
@@ -289,11 +297,15 @@ async function refreshAuthFromDisk() {
 }
 
 function openSignInPage() {
+  const url = getSignInUrl(config.apiUrl);
+  showStatus("Finish sign-in in your browser, then tap I've connected — refresh.", "loading", {
+    autoFade: false
+  });
   if (window.promptlyCompanion?.openExternal) {
-    void window.promptlyCompanion.openExternal(SIGN_IN_URL);
+    void window.promptlyCompanion.openExternal(url);
     return;
   }
-  window.open(SIGN_IN_URL, "_blank", "noopener,noreferrer");
+  window.open(url, "_blank", "noopener,noreferrer");
 }
 
 async function signOut() {
@@ -327,7 +339,9 @@ async function autoPasteToHost(text, options = {}) {
   const { silent = true } = options;
   const result = await pasteToHostPrompt(text);
   if (!result?.ok && result?.error) {
-    showError(String(result.error));
+    if (!silent) {
+      showError(String(result.error));
+    }
   } else if (result?.ok && !silent) {
     showSuccess("Pasted");
   }
@@ -834,7 +848,7 @@ pasteBtn?.addEventListener("click", async () => {
     pasteBtn.textContent = "Pasting…";
   }
   try {
-    await autoPasteToHost(text);
+    await autoPasteToHost(text, { silent: false });
   } finally {
     if (pasteBtn) {
       pasteBtn.disabled = false;

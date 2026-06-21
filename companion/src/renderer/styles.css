@@ -314,18 +314,18 @@ dialog {
 }
 
 #draft-view .prompt-box-wrap {
-  flex: 0 1 auto;
-  max-height: 240px;
+  flex: 1;
+  min-height: 0;
 }
 
 #draft-view .prompt-box-body {
-  flex: 0 1 auto;
-  max-height: 200px;
+  flex: 1;
+  min-height: 0;
 }
 
 #draft-view .stretch-textarea {
-  min-height: 120px;
-  max-height: 200px;
+  flex: 1;
+  min-height: 0;
 }
 
 .ack-note {
@@ -753,7 +753,7 @@ dialog {
   color: var(--text);
   padding: 10px 12px;
   font: inherit;
-  line-height: 1.5;
+  line-height: 1.35;
   resize: none;
 }
 
