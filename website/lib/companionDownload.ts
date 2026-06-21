@@ -83,20 +83,20 @@ export async function resolveCompanionAssetUrls(): Promise<CompanionAssetUrls> {
   }
 
   try {
-    const latestRes = await fetchFromGitHubApi("/releases/latest");
-    if (latestRes.ok) {
-      const latest = (await latestRes.json()) as Parameters<typeof parseCompanionRelease>[0];
-      const parsed = parseCompanionRelease(latest);
-      if (parsed) return parsed;
-    }
-
-    const listRes = await fetchFromGitHubApi("/releases?per_page=20");
+    const listRes = await fetchFromGitHubApi("/releases?per_page=30");
     if (listRes.ok) {
       const releases = (await listRes.json()) as Array<Parameters<typeof parseCompanionRelease>[0]>;
       for (const release of releases) {
         const parsed = parseCompanionRelease(release);
         if (parsed) return parsed;
       }
+    }
+
+    const latestRes = await fetchFromGitHubApi("/releases/latest");
+    if (latestRes.ok) {
+      const latest = (await latestRes.json()) as Parameters<typeof parseCompanionRelease>[0];
+      const parsed = parseCompanionRelease(latest);
+      if (parsed) return parsed;
     }
   } catch {
     /* use fallback */
