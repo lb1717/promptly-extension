@@ -1,7 +1,7 @@
 {
   "name": "promptly-companion",
   "productName": "Promptly Companion",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "Desktop prompt workshop for Promptly — improve drafts, refine with feedback, copy into any AI app.",
   "main": "src/main.js",
   "author": "Promptly Labs",
@@ -10,15 +10,17 @@
   "scripts": {
     "start": "electron .",
     "dev:local": "node scripts/dev.mjs",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder",
-    "dist:mac": "electron-builder --mac",
+    "generate:dmg-bg": "node scripts/generate-dmg-background.mjs",
+    "pack": "npm run generate:dmg-bg && electron-builder --dir",
+    "dist": "npm run generate:dmg-bg && electron-builder",
+    "dist:mac": "npm run generate:dmg-bg && electron-builder --mac",
     "dist:win": "electron-builder --win",
     "dist:linux": "electron-builder --linux",
     "copy-to-website": "node scripts/copy-to-website.mjs"
   },
   "devDependencies": {
     "electron": "^33.2.0",
-    "electron-builder": "^25.1.8"
+    "electron-builder": "^25.1.8",
+    "sharp": "^0.33.5"
   }
 }

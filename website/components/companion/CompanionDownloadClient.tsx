@@ -85,12 +85,13 @@ export function CompanionDownloadClient({ download }: Props) {
             </pre>
           </li>
           <li>
-            Download the <strong className="text-ink">.dmg</strong> above, open it, and drag{" "}
+            Download the <strong className="text-ink">.dmg</strong> above and open it. Drag{" "}
             <strong className="text-ink">Promptly Companion</strong> to <strong className="text-ink">Applications</strong>{" "}
-            (replace the existing copy when asked).
+            — the disk window shows the Terminal command and right-click Open steps below the icons.
           </li>
           <li>
-            Open <strong className="text-ink">Terminal</strong> and paste (fixes &ldquo;damaged&rdquo;):
+            Follow steps <strong className="text-ink">2</strong> and <strong className="text-ink">3</strong> on the install
+            window (or here if you closed it). Open <strong className="text-ink">Terminal</strong> and paste:
             <pre className="mt-2 overflow-x-auto rounded-lg border border-line bg-page p-3 text-xs text-ink">
               xattr -cr &quot;/Applications/Promptly Companion.app&quot;
             </pre>

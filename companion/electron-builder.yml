@@ -28,17 +28,18 @@ mac:
 afterPack: ./scripts/after-pack.cjs
 dmg:
   title: Promptly Companion
+  iconSize: 96
+  window:
+    width: 660
+    height: 460
+  background: build/dmg-background.png
   contents:
-    - x: 130
-      y: 220
-    - x: 410
-      y: 220
+    - x: 170
+      y: 210
+    - x: 470
+      y: 210
       type: link
       path: /Applications
-    - x: 280
-      y: 120
-      type: file
-      path: build/INSTALL.txt
 win:
   target:
     - nsis
