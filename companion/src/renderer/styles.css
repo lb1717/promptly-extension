@@ -106,6 +106,10 @@ body.collapsed {
   grid-column: 2;
   min-width: 0;
   max-width: 100%;
+  -webkit-app-region: drag;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
 }
 
 .topbar-trailing {
@@ -164,7 +168,6 @@ body.collapsed {
 }
 
 .topbar-actions,
-.brand,
 .topbar-leading,
 .topbar-trailing,
 button,
@@ -183,6 +186,9 @@ dialog {
   gap: 8px;
   min-width: 0;
   font-weight: 600;
+  -webkit-app-region: drag;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .brand-product {
@@ -221,6 +227,10 @@ dialog {
   height: 24px;
   flex-shrink: 0;
   object-fit: contain;
+  -webkit-user-drag: none;
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: none;
 }
 
 .topbar-actions {
@@ -1067,6 +1077,10 @@ dialog {
   height: 18px;
   flex-shrink: 0;
   object-fit: contain;
+  -webkit-user-drag: none;
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: none;
 }
 
 .mini-divider {
