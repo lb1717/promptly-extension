@@ -13,24 +13,29 @@
   <body>
     <div id="app-shell" class="app-shell">
     <header class="topbar">
-      <div class="window-controls" aria-label="Window controls">
-        <button type="button" id="close-btn" class="traffic-btn traffic-btn-close" title="Close window" aria-label="Close window">
-          <span class="traffic-glyph" aria-hidden="true">×</span>
-        </button>
-        <button type="button" id="collapse-btn" class="traffic-btn traffic-btn-collapse" title="Collapse" aria-label="Collapse">
-          <span class="traffic-glyph" aria-hidden="true">−</span>
-        </button>
+      <div class="topbar-leading">
+        <div class="window-controls" aria-label="Window controls">
+          <button type="button" id="close-btn" class="traffic-btn traffic-btn-close" title="Close window" aria-label="Close window">
+            <span class="traffic-glyph" aria-hidden="true">×</span>
+          </button>
+          <button type="button" id="collapse-btn" class="traffic-btn traffic-btn-collapse" title="Collapse" aria-label="Collapse">
+            <span class="traffic-glyph" aria-hidden="true">−</span>
+          </button>
+        </div>
       </div>
-      <div class="brand">
-        <img src="assets/promptly-logo.png" alt="Promptly" class="brand-mark" width="22" height="22" />
-        <span class="brand-product">Prompt Improver</span>
-        <span class="brand-divider" aria-hidden="true"></span>
-        <span id="account-indicator" class="brand-account" title="Account">Sign in required</span>
+      <div class="topbar-brand">
+        <div class="brand">
+          <img src="assets/promptly-logo.png" alt="Promptly" class="brand-mark" width="22" height="22" />
+          <span class="brand-product">Prompt Improver</span>
+          <span class="brand-divider" aria-hidden="true"></span>
+          <span id="account-indicator" class="brand-account" title="Account">Sign in required</span>
+        </div>
       </div>
-      <div class="topbar-drag" aria-hidden="true"></div>
-      <div class="topbar-actions">
-        <button type="button" id="new-btn" class="icon-btn icon-btn-subtle" title="New window on this Desktop" aria-label="New window">+</button>
-        <button type="button" id="settings-btn" class="icon-btn icon-btn-subtle" title="Settings" aria-label="Settings">⚙</button>
+      <div class="topbar-trailing">
+        <div class="topbar-actions">
+          <button type="button" id="new-btn" class="icon-btn icon-btn-subtle" title="New window on this Desktop" aria-label="New window">+</button>
+          <button type="button" id="settings-btn" class="icon-btn icon-btn-subtle" title="Settings" aria-label="Settings">⚙</button>
+        </div>
       </div>
     </header>
 
@@ -162,12 +167,10 @@
     </section>
     </div>
 
-    <div id="collapsed-bar" class="collapsed-bar hidden">
-      <button type="button" id="mini-expand-btn" class="mini-expand-btn" aria-label="Expand Promptly Companion">
-        <img src="assets/promptly-logo-white.png" alt="" class="mini-logo" width="18" height="18" />
-        <span class="mini-divider" aria-hidden="true"></span>
-        <span class="mini-label">Improve Prompt</span>
-      </button>
+    <div id="collapsed-bar" class="collapsed-bar hidden" role="button" tabindex="0" aria-label="Expand Promptly Companion">
+      <img src="assets/promptly-logo-white.png" alt="" class="mini-logo" width="18" height="18" />
+      <span class="mini-divider" aria-hidden="true"></span>
+      <span class="mini-label">Improve Prompt</span>
     </div>
 
     <dialog id="permissions-dialog" class="permissions-dialog">

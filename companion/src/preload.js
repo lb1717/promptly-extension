@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld("promptlyCompanion", {
   getSettings: () => ipcRenderer.invoke("promptly:get-settings"),
   saveSettings: (patch) => ipcRenderer.invoke("promptly:save-settings", patch),
   setCollapsed: (collapsed) => ipcRenderer.invoke("promptly:set-collapsed", collapsed),
+  getWindowBounds: () => ipcRenderer.invoke("promptly:get-window-bounds"),
+  setWindowPosition: (position) => ipcRenderer.invoke("promptly:set-window-position", position),
   pasteToHost: (text) => ipcRenderer.invoke("promptly:paste-to-host", text),
   requestMicrophoneAccess: () => ipcRenderer.invoke("promptly:request-microphone-access")
 });

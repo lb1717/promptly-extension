@@ -581,6 +581,31 @@ ipcMain.handle("promptly:set-collapsed", (event, collapsed) => {
   }
   return setWindowCollapsed(win, collapsed);
 });
+ipcMain.handle("promptly:get-window-bounds", (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win || win.isDestroyed()) {
+    return null;
+  }
+  return win.getBounds();
+});
+ipcMain.handle("promptly:set-window-position", (event, position) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win || win.isDestroyed()) {
+    return { ok: false };
+  }
+  const x = Math.round(Number(position?.x));
+  const y = Math.round(Number(position?.y));
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return { ok: false, error: "Invalid position" };
+  }
+  win.setPosition(x, y);
+  const state = getChromeState(win);
+  if (state.collapsed && state.expandedBounds) {
+    state.expandedBounds.x = x;
+    state.expandedBounds.y = y;
+  }
+  return { ok: true };
+});
 ipcMain.handle("promptly:paste-to-host", async (event, text) => {
   if (
     process.platform === "darwin" &&

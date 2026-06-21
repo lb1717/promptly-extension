@@ -47,12 +47,27 @@ body.collapsed {
   min-height: 0;
   align-items: center;
   justify-content: center;
-  -webkit-app-region: drag;
-  cursor: grab;
+  gap: 10px;
+  margin: 0;
+  padding: 0 14px;
+  border: none;
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  -webkit-app-region: no-drag;
 }
 
-.collapsed-bar:active {
+.collapsed-bar:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.collapsed-bar.is-dragging {
   cursor: grabbing;
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .app-shell {
@@ -68,14 +83,37 @@ body.collapsed {
 }
 
 .topbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  padding: 8px 10px 8px 12px;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
   flex-shrink: 0;
+  -webkit-app-region: drag;
+}
+
+.topbar-leading {
+  display: flex;
+  align-items: center;
+  justify-self: start;
+  min-width: 0;
+}
+
+.topbar-brand {
+  justify-self: center;
+  grid-column: 2;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.topbar-trailing {
+  display: flex;
+  justify-content: flex-end;
+  justify-self: end;
+  grid-column: 3;
+  min-width: 0;
 }
 
 .window-controls {
@@ -125,15 +163,10 @@ body.collapsed {
   opacity: 1;
 }
 
-.topbar-drag {
-  flex: 1;
-  min-width: 8px;
-  align-self: stretch;
-  -webkit-app-region: drag;
-}
-
 .topbar-actions,
 .brand,
+.topbar-leading,
+.topbar-trailing,
 button,
 input,
 textarea,
@@ -146,6 +179,7 @@ dialog {
 .brand {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
   min-width: 0;
   font-weight: 600;
@@ -174,7 +208,7 @@ dialog {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 140px;
+  max-width: 120px;
 }
 
 .brand-account.signed-in {
@@ -207,7 +241,7 @@ dialog {
 
 .icon-btn-subtle {
   border-color: transparent;
-  background: transparent;
+  background: color-mix(in srgb, var(--surface-2) 72%, transparent);
 }
 
 .icon-btn-subtle:hover {
@@ -1025,29 +1059,6 @@ dialog {
   width: 16px;
   height: 16px;
   margin: 0;
-}
-
-.mini-expand-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  height: 100%;
-  margin: 0;
-  padding: 0 14px;
-  border: none;
-  border-radius: 0;
-  background: transparent;
-  color: #fff;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  -webkit-app-region: no-drag;
-}
-
-.mini-expand-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
 }
 
 .mini-logo {

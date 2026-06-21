@@ -30,8 +30,9 @@ dmg:
   title: Promptly Companion
   iconSize: 96
   window:
-    width: 660
-    height: 320
+    size:
+      width: 660
+      height: 320
   background: build/dmg-background.png
   contents:
     - x: 170

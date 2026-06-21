@@ -42,7 +42,6 @@ const collapseBtn = document.getElementById("collapse-btn");
 const closeBtn = document.getElementById("close-btn");
 const appShell = document.getElementById("app-shell");
 const collapsedBar = document.getElementById("collapsed-bar");
-const miniExpandBtn = document.getElementById("mini-expand-btn");
 const settingsBtn = document.getElementById("settings-btn");
 const settingsDialog = document.getElementById("settings-dialog");
 const signInGate = document.getElementById("sign-in-gate");
@@ -676,6 +675,9 @@ function startNewSession() {
 }
 
 let isCollapsed = false;
+const COLLAPSED_DRAG_THRESHOLD_PX = 6;
+/** @type {{ pointerId: number; offsetX: number; offsetY: number; startX: number; startY: number; dragging: boolean } | null} */
+let collapsedPointer = null;
 
 function applyCollapsedUi(collapsed) {
   const next = Boolean(collapsed);
@@ -705,6 +707,100 @@ async function setCollapsed(collapsed) {
   if (result?.ok) {
     applyCollapsedUi(next);
   }
+}
+
+function clearCollapsedPointerListeners(listeners) {
+  window.removeEventListener("pointermove", listeners.onMove);
+  window.removeEventListener("pointerup", listeners.onUp);
+  window.removeEventListener("pointercancel", listeners.onUp);
+}
+
+function setupCollapsedBarInteraction() {
+  if (!collapsedBar) {
+    return;
+  }
+
+  collapsedBar.addEventListener("keydown", (event) => {
+    if (!isCollapsed) {
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      void setCollapsed(false);
+    }
+  });
+
+  collapsedBar.addEventListener("pointerdown", (event) => {
+    if (!isCollapsed || event.button !== 0 || collapsedPointer) {
+      return;
+    }
+    event.preventDefault();
+    void beginCollapsedPointer(event);
+  });
+}
+
+async function beginCollapsedPointer(event) {
+  if (!window.promptlyCompanion?.getWindowBounds || !window.promptlyCompanion?.setWindowPosition) {
+    return;
+  }
+
+  const bounds = await window.promptlyCompanion.getWindowBounds();
+  if (!bounds) {
+    return;
+  }
+
+  collapsedPointer = {
+    pointerId: event.pointerId,
+    offsetX: event.screenX - bounds.x,
+    offsetY: event.screenY - bounds.y,
+    startX: event.clientX,
+    startY: event.clientY,
+    dragging: false
+  };
+
+  collapsedBar.classList.remove("is-dragging");
+  collapsedBar.setPointerCapture(event.pointerId);
+
+  const onMove = (moveEvent) => {
+    if (!collapsedPointer || moveEvent.pointerId !== collapsedPointer.pointerId) {
+      return;
+    }
+    const dx = moveEvent.clientX - collapsedPointer.startX;
+    const dy = moveEvent.clientY - collapsedPointer.startY;
+    if (!collapsedPointer.dragging) {
+      if (Math.hypot(dx, dy) < COLLAPSED_DRAG_THRESHOLD_PX) {
+        return;
+      }
+      collapsedPointer.dragging = true;
+      collapsedBar.classList.add("is-dragging");
+    }
+    void window.promptlyCompanion.setWindowPosition({
+      x: moveEvent.screenX - collapsedPointer.offsetX,
+      y: moveEvent.screenY - collapsedPointer.offsetY
+    });
+  };
+
+  const onUp = (upEvent) => {
+    if (!collapsedPointer || upEvent.pointerId !== collapsedPointer.pointerId) {
+      return;
+    }
+    const wasDrag = collapsedPointer.dragging;
+    collapsedPointer = null;
+    collapsedBar.classList.remove("is-dragging");
+    try {
+      collapsedBar.releasePointerCapture(upEvent.pointerId);
+    } catch {
+      /* ignore */
+    }
+    clearCollapsedPointerListeners({ onMove, onUp });
+    if (!wasDrag) {
+      void setCollapsed(false);
+    }
+  };
+
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+  window.addEventListener("pointercancel", onUp);
 }
 
 async function maybeShowPermissionsOnboarding() {
@@ -867,7 +963,6 @@ newBtn?.addEventListener("click", () => {
   startNewSession();
 });
 collapseBtn?.addEventListener("click", () => void setCollapsed(true));
-miniExpandBtn?.addEventListener("click", () => void setCollapsed(false));
 closeBtn?.addEventListener("click", () => {
   if (window.promptlyCompanion?.closeWindow) {
     void window.promptlyCompanion.closeWindow();
@@ -907,6 +1002,7 @@ promptInput?.addEventListener("input", syncPromptStrength);
 
 void bootstrapConfig().then(async () => {
   setupDictationUi();
+  setupCollapsedBarInteraction();
   syncDraftStrength();
   syncPromptStrength();
   await refreshAccount({ silent: true });
