@@ -33,6 +33,7 @@ const newBtn = document.getElementById("new-btn");
 const collapseBtn = document.getElementById("collapse-btn");
 const closeBtn = document.getElementById("close-btn");
 const appShell = document.getElementById("app-shell");
+const collapsedBar = document.getElementById("collapsed-bar");
 const miniExpandBtn = document.getElementById("mini-expand-btn");
 const settingsBtn = document.getElementById("settings-btn");
 const settingsDialog = document.getElementById("settings-dialog");
@@ -664,8 +665,8 @@ function applyCollapsedUi(collapsed) {
   if (appShell) {
     appShell.classList.toggle("hidden", next);
   }
-  if (miniExpandBtn) {
-    miniExpandBtn.classList.toggle("hidden", !next);
+  if (collapsedBar) {
+    collapsedBar.classList.toggle("hidden", !next);
   }
 }
 

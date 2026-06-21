@@ -427,6 +427,19 @@ function applyWindowAnchor(win, options = {}) {
   state.anchorProcessNames = Array.isArray(options.anchorProcessNames) ? options.anchorProcessNames : [];
 }
 
+function syncExpandedBoundsOrigin(win) {
+  const state = getChromeState(win);
+  if (!state.collapsed || !state.expandedBounds) {
+    return;
+  }
+  const bounds = win.getBounds();
+  state.expandedBounds = {
+    ...state.expandedBounds,
+    x: bounds.x,
+    y: bounds.y
+  };
+}
+
 function registerCompanionWindow(win, options = {}) {
   companionWindows.add(win);
   applyWindowAnchor(win, options);
@@ -471,6 +484,10 @@ function registerCompanionWindow(win, options = {}) {
 
   win.on("blur", () => {
     handleCompanionBlur(win);
+  });
+
+  win.on("move", () => {
+    syncExpandedBoundsOrigin(win);
   });
 
   win.on("closed", () => {
