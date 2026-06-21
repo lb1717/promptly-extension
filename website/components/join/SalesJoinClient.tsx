@@ -29,6 +29,8 @@ import { GetStartedAllAgentsInstall } from "@/components/onboarding/GetStartedAl
 import { OnboardingBrowserExtensionInstall } from "@/components/onboarding/OnboardingBrowserExtensionInstall";
 import { OnboardingDoneStep } from "@/components/onboarding/OnboardingDoneStep";
 import { OnboardingDesktopAppsInstall } from "@/components/onboarding/OnboardingDesktopAppsInstall";
+import { OnboardingInstallOsToggle } from "@/components/onboarding/OnboardingInstallOsToggle";
+import type { OsId } from "@/components/integrations/integrationOs";
 import {
   activeOnboardingInstallSegments,
   canFinishOnboardingInstall,
@@ -129,6 +131,8 @@ export function SalesJoinClient({ slug }: { slug: string }) {
   );
   const [codingAgentsSetupCopied, setCodingAgentsSetupCopied] = useState(false);
   const [desktopAppsCommandCopied, setDesktopAppsCommandCopied] = useState(false);
+  const [desktopAppsDownloadClicked, setDesktopAppsDownloadClicked] = useState(false);
+  const [installOs, setInstallOs] = useState<OsId>("mac");
 
   const [emailAuthMode, setEmailAuthMode] = useState<"signin" | "register">("register");
   const [emailAuthEmail, setEmailAuthEmail] = useState("");
@@ -162,22 +166,32 @@ export function SalesJoinClient({ slug }: { slug: string }) {
         wantsWeb,
         wantsCodingAgents,
         wantsDesktopApps,
+        installOs,
         browserStoreClicked,
         codingAgentsSetupCopied,
-        desktopAppsCommandCopied
+        desktopAppsCommandCopied,
+        desktopAppsDownloadClicked
       }),
     [
       wantsWeb,
       wantsCodingAgents,
       wantsDesktopApps,
+      installOs,
       browserStoreClicked,
       codingAgentsSetupCopied,
-      desktopAppsCommandCopied
+      desktopAppsCommandCopied,
+      desktopAppsDownloadClicked
     ]
   );
 
   const noteAgentCommandCopy = useCallback(() => {
     setCodingAgentsSetupCopied(true);
+  }, []);
+
+  const handleInstallOsChange = useCallback((next: OsId) => {
+    setInstallOs(next);
+    setDesktopAppsCommandCopied(false);
+    setDesktopAppsDownloadClicked(false);
   }, []);
 
   useEffect(() => {
@@ -545,7 +559,12 @@ export function SalesJoinClient({ slug }: { slug: string }) {
       </div>
 
       <div className="rounded-2xl border border-line bg-cream p-6 shadow-card sm:p-8">
-        <h1 className="text-2xl font-semibold text-ink">{stepTitle}</h1>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-semibold text-ink">{stepTitle}</h1>
+          {step === INSTALL_STEP && (wantsCodingAgents || wantsDesktopApps) ? (
+            <OnboardingInstallOsToggle os={installOs} onChange={handleInstallOsChange} />
+          ) : null}
+        </div>
 
         {error ? (
           <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
@@ -682,6 +701,7 @@ export function SalesJoinClient({ slug }: { slug: string }) {
                 setBrowserStoreClicked(false);
                 setCodingAgentsSetupCopied(false);
                 setDesktopAppsCommandCopied(false);
+                setDesktopAppsDownloadClicked(false);
                 goToStep(INSTALL_STEP);
               }}
               disabled={!hasAnyOnboardingProduct(productSelection)}
@@ -702,6 +722,7 @@ export function SalesJoinClient({ slug }: { slug: string }) {
           <div className="mt-6 space-y-4">
             {wantsCodingAgents ? (
               <GetStartedAllAgentsInstall
+                os={installOs}
                 stepNumber={onboardingInstallStepNumber(installSegments, "coding_agents")}
                 onCommandCopy={noteAgentCommandCopy}
               />
@@ -717,8 +738,10 @@ export function SalesJoinClient({ slug }: { slug: string }) {
 
             {wantsDesktopApps ? (
               <OnboardingDesktopAppsInstall
+                os={installOs}
                 stepNumber={onboardingInstallStepNumber(installSegments, "desktop_apps")}
                 onCommandCopy={() => setDesktopAppsCommandCopied(true)}
+                onDownloadClick={() => setDesktopAppsDownloadClicked(true)}
               />
             ) : null}
 

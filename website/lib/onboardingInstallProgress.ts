@@ -1,4 +1,4 @@
-import type { IdeToolId } from "@/components/integrations/integrationOs";
+import type { IdeToolId, OsId } from "@/components/integrations/integrationOs";
 import { hasAnyCodingAgent, type OnboardingProductSelection } from "@/lib/onboardingProducts";
 
 export type OnboardingInstallSegment = "coding_agents" | "web" | "desktop_apps";
@@ -45,13 +45,19 @@ export function canFinishOnboardingInstall(input: {
   wantsWeb: boolean;
   wantsCodingAgents: boolean;
   wantsDesktopApps: boolean;
+  installOs: OsId;
   browserStoreClicked: boolean;
   codingAgentsSetupCopied: boolean;
   desktopAppsCommandCopied: boolean;
+  desktopAppsDownloadClicked: boolean;
 }): boolean {
   const webOk = !input.wantsWeb || input.browserStoreClicked;
   const agentsOk = !input.wantsCodingAgents || input.codingAgentsSetupCopied;
-  const desktopOk = !input.wantsDesktopApps || input.desktopAppsCommandCopied;
+  const desktopOk =
+    !input.wantsDesktopApps ||
+    (input.installOs === "windows"
+      ? input.desktopAppsDownloadClicked
+      : input.desktopAppsCommandCopied);
   return webOk && agentsOk && desktopOk;
 }
 

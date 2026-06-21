@@ -35,6 +35,8 @@ export const PROMPTLY_MAC_INSTALL_COMMAND = `xattr -cr "${PROMPTLY_MAC_APP_PATH}
 
 export const PROMPTLY_MAC_DMG_FALLBACK_URL = FALLBACK_ASSETS.macDmg!;
 
+export const PROMPTLY_WIN_EXE_FALLBACK_URL = FALLBACK_ASSETS.winExe!;
+
 function pickCompanionAsset(
   assets: Array<{ name: string; browser_download_url: string }>,
   ext: string

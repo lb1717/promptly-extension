@@ -10,7 +10,7 @@ export type OnboardingProductSelection = {
 
 export const DEFAULT_ONBOARDING_PRODUCT_SELECTION: OnboardingProductSelection = {
   web: true,
-  desktop_apps: false,
+  desktop_apps: true,
   claude_code: true,
   cursor: true,
   codex: true

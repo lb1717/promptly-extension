@@ -4,6 +4,8 @@ import { GetStartedAiSelection } from "@/components/onboarding/GetStartedAiSelec
 import { GetStartedAllAgentsInstall } from "@/components/onboarding/GetStartedAllAgentsInstall";
 import { OnboardingBrowserExtensionInstall } from "@/components/onboarding/OnboardingBrowserExtensionInstall";
 import { OnboardingDesktopAppsInstall } from "@/components/onboarding/OnboardingDesktopAppsInstall";
+import { OnboardingInstallOsToggle } from "@/components/onboarding/OnboardingInstallOsToggle";
+import type { OsId } from "@/components/integrations/integrationOs";
 import { syncWebsiteSessionToExtension } from "@/lib/extensionBridge";
 import {
   activeOnboardingInstallSegments,
@@ -25,6 +27,7 @@ export function InstallMoreIntegrationsClient({ user }: { user: User }) {
     DEFAULT_ONBOARDING_PRODUCT_SELECTION
   );
   const [extensionDetected, setExtensionDetected] = useState(false);
+  const [installOs, setInstallOs] = useState<OsId>("mac");
 
   const wantsWeb = productSelection.web;
   const wantsCodingAgents = hasAnyCodingAgent(productSelection);
@@ -33,6 +36,7 @@ export function InstallMoreIntegrationsClient({ user }: { user: User }) {
     () => activeOnboardingInstallSegments(productSelection),
     [productSelection]
   );
+  const showInstallOsToggle = wantsCodingAgents || wantsDesktopApps;
 
   useEffect(() => {
     if (step !== 2 || !wantsWeb || !user) return;
@@ -84,8 +88,16 @@ export function InstallMoreIntegrationsClient({ user }: { user: User }) {
         </div>
       ) : (
         <div className="mt-8 space-y-4">
+          {showInstallOsToggle ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-cream-dark px-4 py-3">
+              <p className="text-sm font-semibold text-ink">Install Promptly</p>
+              <OnboardingInstallOsToggle os={installOs} onChange={setInstallOs} />
+            </div>
+          ) : null}
+
           {wantsCodingAgents ? (
             <GetStartedAllAgentsInstall
+              os={installOs}
               stepNumber={onboardingInstallStepNumber(installSegments, "coding_agents")}
             />
           ) : null}
@@ -99,6 +111,7 @@ export function InstallMoreIntegrationsClient({ user }: { user: User }) {
 
           {wantsDesktopApps ? (
             <OnboardingDesktopAppsInstall
+              os={installOs}
               stepNumber={onboardingInstallStepNumber(installSegments, "desktop_apps")}
             />
           ) : null}
