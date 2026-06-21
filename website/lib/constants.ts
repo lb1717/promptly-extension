@@ -48,6 +48,8 @@ export const SITE = {
   navBrand: "Promptly Labs",
   /** Public general onboarding funnel (not sales invite links). */
   getStartedPath: "/get-started",
+  /** Shareable desktop app download — always resolves the latest release. */
+  companionPath: "/companion",
   chromeStoreUrl: `https://chromewebstore.google.com/detail/promptly/${CHROME_EXTENSION_ID}`,
   edgeAddonsUrl: String(
     process.env.NEXT_PUBLIC_EDGE_ADDONS_URL ||

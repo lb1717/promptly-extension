@@ -8,9 +8,9 @@ import { buildPageMetadata } from "@/lib/seo";
 export const dynamic = "force-dynamic";
 
 export const metadata = buildPageMetadata({
-  title: "Promptly Companion — desktop download",
+  title: "Promptly — desktop download",
   description:
-    "Download Promptly Companion for Mac or Windows. Improve and refine AI prompts in a floating desktop workshop, then copy into ChatGPT, Claude, or any AI app.",
+    "Download Promptly for Mac or Windows. Improve and refine AI prompts in the desktop app, then paste into ChatGPT, Claude, or any AI app.",
   path: "/companion"
 });
 
