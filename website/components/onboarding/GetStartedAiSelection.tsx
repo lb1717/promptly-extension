@@ -56,6 +56,12 @@ export function GetStartedAiSelection({
       </p>
       <div className="space-y-2">
         <SelectionRow
+          checked={value.desktop_apps}
+          onChange={(checked) => onChange({ ...value, desktop_apps: checked })}
+          label={ONBOARDING_DESKTOP_APPS_OPTION.label}
+          description={ONBOARDING_DESKTOP_APPS_OPTION.description}
+        />
+        <SelectionRow
           checked={value.web}
           onChange={(checked) => onChange({ ...value, web: checked })}
           label={ONBOARDING_WEB_OPTION.label}
@@ -66,12 +72,6 @@ export function GetStartedAiSelection({
           onChange={(checked) => onChange(setCodingAgentsGroupSelected(value, checked))}
           label={ONBOARDING_CODING_AGENTS_OPTION.label}
           description={ONBOARDING_CODING_AGENTS_OPTION.description}
-        />
-        <SelectionRow
-          checked={value.desktop_apps}
-          onChange={(checked) => onChange({ ...value, desktop_apps: checked })}
-          label={ONBOARDING_DESKTOP_APPS_OPTION.label}
-          description={ONBOARDING_DESKTOP_APPS_OPTION.description}
         />
       </div>
     </div>

@@ -14,7 +14,7 @@ const {
   stopHostAppWatcher,
   notifyDockedWindowClosed
 } = require("./hostAppWatcher");
-const { pasteToHostProcess, isAllowedProcess } = require("./hostPaste");
+const { pasteToHostProcess, resolvePasteHostName, rememberPasteHost } = require("./hostPaste");
 const {
   getPermissionStatus,
   requestAllPermissions,
@@ -31,6 +31,7 @@ const APP_VERSION = (() => {
   }
 })();
 const ANCHOR_POLL_MS = 900;
+const HOST_FOCUS_TRACK_MS = 1200;
 const PRODUCTION_API_URL = "https://promptly-labs.com";
 const EXPANDED_DEFAULT = { width: 380, height: 580, minWidth: 320, minHeight: 420 };
 const COLLAPSED_HEIGHT = 44;
@@ -47,6 +48,8 @@ const windowLayerState = new WeakMap();
 const windowChromeState = new WeakMap();
 
 let companionSettings = readCompanionSettings();
+/** @type {ReturnType<typeof setInterval> | null} */
+let hostFocusTrackTimer = null;
 
 if (process.platform === "darwin") {
   app.setName("Promptly");
@@ -151,6 +154,28 @@ function resolveAppIconPath() {
     }
   }
   return null;
+}
+
+function getMacAppBundlePath() {
+  if (process.platform !== "darwin" || !app.isPackaged) {
+    return null;
+  }
+  const exePath = app.getPath("exe");
+  const marker = "/Contents/MacOS/";
+  const index = exePath.indexOf(marker);
+  if (index <= 0) {
+    return null;
+  }
+  return exePath.slice(0, index);
+}
+
+/** Strip Gatekeeper quarantine once — stops repeat "app is damaged" after drag-install. */
+function clearMacDownloadQuarantine() {
+  const bundlePath = getMacAppBundlePath();
+  if (!bundlePath) {
+    return;
+  }
+  execFile("/usr/bin/xattr", ["-cr", bundlePath], () => {});
 }
 
 function getLayerState(win) {
@@ -268,8 +293,18 @@ function startAnchorWatch(win, anchorAppBundleId, anchorProcessName) {
 }
 
 function handleCompanionBlur(win) {
-  // Keep the companion window visible and floating — do not demote behind other apps.
-  void win;
+  void (async () => {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    if (!win || win.isDestroyed() || win.isFocused()) {
+      return;
+    }
+    const bundle = await getFrontmostAppBundleId();
+    if (isCompanionAppBundle(bundle)) {
+      return;
+    }
+    const front = await getFrontmostProcessName();
+    rememberPasteHost(front);
+  })();
 }
 
 function getChromeState(win) {
@@ -344,19 +379,35 @@ function openNewCompanionWindow() {
 }
 
 async function resolvePasteHost(win) {
-  if (win && !win.isDestroyed()) {
-    const state = getLayerState(win);
-    for (const name of state.anchorProcessNames || []) {
-      if (isAllowedProcess(name)) {
-        return name;
+  const anchorProcessNames =
+    win && !win.isDestroyed() ? getLayerState(win).anchorProcessNames || [] : [];
+  return resolvePasteHostName({
+    anchorProcessNames,
+    getFrontmostProcessName
+  });
+}
+
+function startHostFocusTracking() {
+  if (process.platform !== "darwin" || hostFocusTrackTimer) {
+    return;
+  }
+  hostFocusTrackTimer = setInterval(() => {
+    void (async () => {
+      const bundle = await getFrontmostAppBundleId();
+      if (isCompanionAppBundle(bundle)) {
+        return;
       }
-    }
+      const front = await getFrontmostProcessName();
+      rememberPasteHost(front);
+    })();
+  }, HOST_FOCUS_TRACK_MS);
+}
+
+function stopHostFocusTracking() {
+  if (hostFocusTrackTimer) {
+    clearInterval(hostFocusTrackTimer);
+    hostFocusTrackTimer = null;
   }
-  const front = await getFrontmostProcessName();
-  if (isAllowedProcess(front)) {
-    return front;
-  }
-  return null;
 }
 
 function setupApplicationMenu() {
@@ -620,7 +671,8 @@ ipcMain.handle("promptly:paste-to-host", async (event, text) => {
   if (!host) {
     return {
       ok: false,
-      error: "Open Claude, Codex, ChatGPT, or Cursor beside Companion, then try again."
+      error:
+        "Could not find Claude, Codex, ChatGPT, or Cursor. Click into the app you want to paste into, then try again."
     };
   }
   return pasteToHostProcess(host, text);
@@ -661,6 +713,8 @@ app.whenReady().then(() => {
 
   setupApplicationMenu();
 
+  clearMacDownloadQuarantine();
+
   const iconPath = resolveAppIconPath();
   if (process.platform === "darwin") {
     if (app.dock) {
@@ -672,6 +726,7 @@ app.whenReady().then(() => {
   }
 
   restartHostWatcher();
+  startHostFocusTracking();
   createCompanionWindow();
 
   app.on("activate", () => {

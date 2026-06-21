@@ -7,9 +7,9 @@ export function activeOnboardingInstallSegments(
   selection: OnboardingProductSelection
 ): OnboardingInstallSegment[] {
   const segments: OnboardingInstallSegment[] = [];
-  if (hasAnyCodingAgent(selection)) segments.push("coding_agents");
-  if (selection.web) segments.push("web");
   if (selection.desktop_apps) segments.push("desktop_apps");
+  if (selection.web) segments.push("web");
+  if (hasAnyCodingAgent(selection)) segments.push("coding_agents");
   return segments;
 }
 

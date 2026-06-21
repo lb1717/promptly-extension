@@ -95,10 +95,10 @@ export function InstallMoreIntegrationsClient({ user }: { user: User }) {
             </div>
           ) : null}
 
-          {wantsCodingAgents ? (
-            <GetStartedAllAgentsInstall
+          {wantsDesktopApps ? (
+            <OnboardingDesktopAppsInstall
               os={installOs}
-              stepNumber={onboardingInstallStepNumber(installSegments, "coding_agents")}
+              stepNumber={onboardingInstallStepNumber(installSegments, "desktop_apps")}
             />
           ) : null}
 
@@ -109,10 +109,10 @@ export function InstallMoreIntegrationsClient({ user }: { user: User }) {
             />
           ) : null}
 
-          {wantsDesktopApps ? (
-            <OnboardingDesktopAppsInstall
+          {wantsCodingAgents ? (
+            <GetStartedAllAgentsInstall
               os={installOs}
-              stepNumber={onboardingInstallStepNumber(installSegments, "desktop_apps")}
+              stepNumber={onboardingInstallStepNumber(installSegments, "coding_agents")}
             />
           ) : null}
 

@@ -720,11 +720,12 @@ export function SalesJoinClient({ slug }: { slug: string }) {
 
         {step === 4 ? (
           <div className="mt-6 space-y-4">
-            {wantsCodingAgents ? (
-              <GetStartedAllAgentsInstall
+            {wantsDesktopApps ? (
+              <OnboardingDesktopAppsInstall
                 os={installOs}
-                stepNumber={onboardingInstallStepNumber(installSegments, "coding_agents")}
-                onCommandCopy={noteAgentCommandCopy}
+                stepNumber={onboardingInstallStepNumber(installSegments, "desktop_apps")}
+                onCommandCopy={() => setDesktopAppsCommandCopied(true)}
+                onDownloadClick={() => setDesktopAppsDownloadClicked(true)}
               />
             ) : null}
 
@@ -736,12 +737,11 @@ export function SalesJoinClient({ slug }: { slug: string }) {
               />
             ) : null}
 
-            {wantsDesktopApps ? (
-              <OnboardingDesktopAppsInstall
+            {wantsCodingAgents ? (
+              <GetStartedAllAgentsInstall
                 os={installOs}
-                stepNumber={onboardingInstallStepNumber(installSegments, "desktop_apps")}
-                onCommandCopy={() => setDesktopAppsCommandCopied(true)}
-                onDownloadClick={() => setDesktopAppsDownloadClicked(true)}
+                stepNumber={onboardingInstallStepNumber(installSegments, "coding_agents")}
+                onCommandCopy={noteAgentCommandCopy}
               />
             ) : null}
 

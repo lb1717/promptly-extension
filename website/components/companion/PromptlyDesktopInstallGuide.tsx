@@ -95,8 +95,9 @@ export function PromptlyMacInstallSteps({
           )}
         </li>
         <li>
-          If macOS blocks the app — e.g. &ldquo;damaged&rdquo; or &ldquo;can&apos;t be opened&rdquo; — paste this in{" "}
-          <strong className="text-ink">Terminal</strong> and press Enter:
+          If macOS blocks the app — e.g. &ldquo;damaged&rdquo; or &ldquo;can&apos;t be opened&rdquo; — run this{" "}
+          <strong className="text-ink">once</strong> in Terminal after moving Promptly to Applications, then open
+          normally:
           <CopyBlock lines={[PROMPTLY_MAC_INSTALL_COMMAND]} label="Terminal" onCopy={onCommandCopy} />
         </li>
       </ol>

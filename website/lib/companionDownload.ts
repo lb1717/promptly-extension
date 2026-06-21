@@ -18,14 +18,14 @@ export type CompanionAssetUrls = {
 const GITHUB_REPO = "lb1717/promptly-extension";
 
 /** Stable fallback when GitHub API is unavailable at runtime. */
-const FALLBACK_RELEASE_TAG = "companion-v0.1.15";
+const FALLBACK_RELEASE_TAG = "companion-v0.1.16";
 const FALLBACK_BASE = `https://github.com/${GITHUB_REPO}/releases/download/${FALLBACK_RELEASE_TAG}`;
 
 const FALLBACK_ASSETS: CompanionAssetUrls = {
-  version: "0.1.15",
-  macDmg: `${FALLBACK_BASE}/Promptly-Companion-0.1.15-mac.dmg`,
-  macZip: `${FALLBACK_BASE}/Promptly-Companion-0.1.15-mac.zip`,
-  winExe: `${FALLBACK_BASE}/Promptly-Companion-0.1.15-win.exe`
+  version: "0.1.16",
+  macDmg: `${FALLBACK_BASE}/Promptly-Companion-0.1.16-mac.dmg`,
+  macZip: `${FALLBACK_BASE}/Promptly-Companion-0.1.16-mac.zip`,
+  winExe: `${FALLBACK_BASE}/Promptly-Companion-0.1.16-win.exe`
 };
 
 /** macOS bundle path after drag-to-Applications (matches electron-builder productName). */
