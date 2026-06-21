@@ -308,6 +308,26 @@ dialog {
   overflow: hidden;
 }
 
+#draft-view {
+  flex: 1;
+  min-height: 0;
+}
+
+#draft-view .prompt-box-wrap {
+  flex: 0 1 auto;
+  max-height: 240px;
+}
+
+#draft-view .prompt-box-body {
+  flex: 0 1 auto;
+  max-height: 200px;
+}
+
+#draft-view .stretch-textarea {
+  min-height: 120px;
+  max-height: 200px;
+}
+
 .ack-note {
   flex-shrink: 0;
   margin: 0;

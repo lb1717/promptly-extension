@@ -32,7 +32,7 @@ const APP_VERSION = (() => {
 })();
 const ANCHOR_POLL_MS = 900;
 const PRODUCTION_API_URL = "https://promptly-labs.com";
-const EXPANDED_DEFAULT = { width: 380, height: 680, minWidth: 320, minHeight: 480 };
+const EXPANDED_DEFAULT = { width: 380, height: 580, minWidth: 320, minHeight: 420 };
 const COLLAPSED_HEIGHT = 44;
 const COLLAPSED_BG = "#6d5ce8";
 const EXPANDED_BG = "#f4f5f7";

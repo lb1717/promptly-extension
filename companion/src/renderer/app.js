@@ -323,13 +323,13 @@ async function pasteToHostPrompt(text) {
   }
 }
 
-async function autoPasteToHost(text) {
+async function autoPasteToHost(text, options = {}) {
+  const { silent = true } = options;
   const result = await pasteToHostPrompt(text);
-  if (result?.ok) {
-    const host = result.host ? ` into ${result.host}` : "";
-    showSuccess(`Pasted${host}`);
-  } else if (result?.error) {
+  if (!result?.ok && result?.error) {
     showError(String(result.error));
+  } else if (result?.ok && !silent) {
+    showSuccess("Pasted");
   }
   return result;
 }
@@ -573,10 +573,13 @@ async function handleImprove() {
     resetFeedbackUi();
     promptAiEnhanced = true;
     showRefineView();
-    await loadSuggestionsForPrompt(optimized);
     syncPromptStrength();
+
+    const pastePromise = autoPasteToHost(optimized);
+    const suggestionsPromise = loadSuggestionsForPrompt(optimized);
+    await Promise.all([pastePromise, suggestionsPromise]);
+
     followUpInput.focus();
-    await autoPasteToHost(optimized);
   } catch (error) {
     handleApiError(error);
   } finally {
@@ -623,11 +626,13 @@ async function handleRefine() {
 
     promptInput.value = result.prompt;
     showSummary(result.summary);
-    unlockFollowUp(true);
     promptAiEnhanced = true;
     syncPromptStrength();
-    followUpInput.focus();
+
     await autoPasteToHost(result.prompt);
+
+    unlockFollowUp(true);
+    followUpInput.focus();
   } catch (error) {
     handleApiError(error);
     unlockFollowUp(false);
