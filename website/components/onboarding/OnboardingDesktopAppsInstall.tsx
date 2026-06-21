@@ -1,0 +1,60 @@
+"use client";
+
+import { CopyBlock } from "@/components/integrations/integrationCopyBlock";
+import {
+  PROMPTLY_MAC_DMG_FALLBACK_URL,
+  PROMPTLY_MAC_INSTALL_COMMAND
+} from "@/lib/companionDownload";
+import { useEffect, useState } from "react";
+
+export function OnboardingDesktopAppsInstall({
+  onCommandCopy,
+  stepNumber = 1
+}: {
+  onCommandCopy?: () => void;
+  stepNumber?: number;
+}) {
+  const [macUrl, setMacUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/companion/download")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { macUrl?: string | null } | null) => {
+        if (!cancelled && data?.macUrl) setMacUrl(data.macUrl);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const downloadUrl = macUrl || PROMPTLY_MAC_DMG_FALLBACK_URL;
+
+  return (
+    <div className="rounded-xl border border-line bg-cream-dark p-4">
+      <p className="text-base font-semibold text-ink">{stepNumber}. Promptly desktop app</p>
+      <p className="mt-1 text-xs text-muted">
+        For Claude Cowork, ChatGPT Desktop, and similar native apps — improve prompts in Promptly, then paste back.
+      </p>
+
+      <ol className="mt-4 list-decimal space-y-4 pl-5 text-xs text-muted">
+        <li>
+          <span className="text-ink">Download and install.</span> Open the .dmg and drag{" "}
+          <strong className="text-ink">Promptly</strong> to Applications.
+          <a
+            href={downloadUrl}
+            className="mt-2 inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream transition-colors hover:bg-neutral-800"
+          >
+            Download for Mac
+          </a>
+        </li>
+        <li>
+          <span className="text-ink">If macOS blocks the app</span> — e.g. &ldquo;damaged&rdquo; or &ldquo;can&apos;t be
+          opened&rdquo; — paste this in Terminal and press Enter:
+          <CopyBlock lines={[PROMPTLY_MAC_INSTALL_COMMAND]} label="Terminal" onCopy={onCommandCopy} />
+        </li>
+      </ol>
+    </div>
+  );
+}

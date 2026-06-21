@@ -1,4 +1,25 @@
 import type { IdeToolId } from "@/components/integrations/integrationOs";
+import { hasAnyCodingAgent, type OnboardingProductSelection } from "@/lib/onboardingProducts";
+
+export type OnboardingInstallSegment = "coding_agents" | "web" | "desktop_apps";
+
+export function activeOnboardingInstallSegments(
+  selection: OnboardingProductSelection
+): OnboardingInstallSegment[] {
+  const segments: OnboardingInstallSegment[] = [];
+  if (hasAnyCodingAgent(selection)) segments.push("coding_agents");
+  if (selection.web) segments.push("web");
+  if (selection.desktop_apps) segments.push("desktop_apps");
+  return segments;
+}
+
+export function onboardingInstallStepNumber(
+  segments: OnboardingInstallSegment[],
+  segment: OnboardingInstallSegment
+): number {
+  const index = segments.indexOf(segment);
+  return index >= 0 ? index + 1 : 1;
+}
 
 export const ONBOARDING_AGENT_LABELS: Record<IdeToolId, string> = {
   claude_code: "Claude Code",
@@ -23,12 +44,15 @@ export function formatSetupAgentList(agents: IdeToolId[]): string {
 export function canFinishOnboardingInstall(input: {
   wantsWeb: boolean;
   wantsCodingAgents: boolean;
+  wantsDesktopApps: boolean;
   browserStoreClicked: boolean;
   codingAgentsSetupCopied: boolean;
+  desktopAppsCommandCopied: boolean;
 }): boolean {
   const webOk = !input.wantsWeb || input.browserStoreClicked;
   const agentsOk = !input.wantsCodingAgents || input.codingAgentsSetupCopied;
-  return webOk && agentsOk;
+  const desktopOk = !input.wantsDesktopApps || input.desktopAppsCommandCopied;
+  return webOk && agentsOk && desktopOk;
 }
 
 export function showBrowserTryLinksOnDone(browserStoreClicked: boolean): boolean {

@@ -28,7 +28,12 @@ import { GetStartedAiSelection } from "@/components/onboarding/GetStartedAiSelec
 import { GetStartedAllAgentsInstall } from "@/components/onboarding/GetStartedAllAgentsInstall";
 import { OnboardingBrowserExtensionInstall } from "@/components/onboarding/OnboardingBrowserExtensionInstall";
 import { OnboardingDoneStep } from "@/components/onboarding/OnboardingDoneStep";
-import { canFinishOnboardingInstall } from "@/lib/onboardingInstallProgress";
+import { OnboardingDesktopAppsInstall } from "@/components/onboarding/OnboardingDesktopAppsInstall";
+import {
+  activeOnboardingInstallSegments,
+  canFinishOnboardingInstall,
+  onboardingInstallStepNumber
+} from "@/lib/onboardingInstallProgress";
 import {
   DEFAULT_ONBOARDING_PRODUCT_SELECTION,
   hasAnyCodingAgent,
@@ -123,6 +128,7 @@ export function SalesJoinClient({ slug }: { slug: string }) {
     DEFAULT_ONBOARDING_PRODUCT_SELECTION
   );
   const [codingAgentsSetupCopied, setCodingAgentsSetupCopied] = useState(false);
+  const [desktopAppsCommandCopied, setDesktopAppsCommandCopied] = useState(false);
 
   const [emailAuthMode, setEmailAuthMode] = useState<"signin" | "register">("register");
   const [emailAuthEmail, setEmailAuthEmail] = useState("");
@@ -144,16 +150,30 @@ export function SalesJoinClient({ slug }: { slug: string }) {
   const planInfo = link ? planDetailsForTier(link.tier) : null;
   const wantsWeb = productSelection.web;
   const wantsCodingAgents = hasAnyCodingAgent(productSelection);
+  const wantsDesktopApps = productSelection.desktop_apps;
+  const installSegments = useMemo(
+    () => activeOnboardingInstallSegments(productSelection),
+    [productSelection]
+  );
 
   const canFinishInstall = useMemo(
     () =>
       canFinishOnboardingInstall({
         wantsWeb,
         wantsCodingAgents,
+        wantsDesktopApps,
         browserStoreClicked,
-        codingAgentsSetupCopied
+        codingAgentsSetupCopied,
+        desktopAppsCommandCopied
       }),
-    [wantsWeb, wantsCodingAgents, browserStoreClicked, codingAgentsSetupCopied]
+    [
+      wantsWeb,
+      wantsCodingAgents,
+      wantsDesktopApps,
+      browserStoreClicked,
+      codingAgentsSetupCopied,
+      desktopAppsCommandCopied
+    ]
   );
 
   const noteAgentCommandCopy = useCallback(() => {
@@ -661,6 +681,7 @@ export function SalesJoinClient({ slug }: { slug: string }) {
               onClick={() => {
                 setBrowserStoreClicked(false);
                 setCodingAgentsSetupCopied(false);
+                setDesktopAppsCommandCopied(false);
                 goToStep(INSTALL_STEP);
               }}
               disabled={!hasAnyOnboardingProduct(productSelection)}
@@ -681,27 +702,28 @@ export function SalesJoinClient({ slug }: { slug: string }) {
           <div className="mt-6 space-y-4">
             {wantsCodingAgents ? (
               <GetStartedAllAgentsInstall
-                stepNumber={1}
+                stepNumber={onboardingInstallStepNumber(installSegments, "coding_agents")}
                 onCommandCopy={noteAgentCommandCopy}
               />
             ) : null}
 
             {wantsWeb ? (
               <OnboardingBrowserExtensionInstall
-                stepNumber={wantsCodingAgents ? 2 : 1}
+                stepNumber={onboardingInstallStepNumber(installSegments, "web")}
                 extensionDetected={extensionDetected}
                 onStoreClick={() => setBrowserStoreClicked(true)}
               />
             ) : null}
 
+            {wantsDesktopApps ? (
+              <OnboardingDesktopAppsInstall
+                stepNumber={onboardingInstallStepNumber(installSegments, "desktop_apps")}
+                onCommandCopy={() => setDesktopAppsCommandCopied(true)}
+              />
+            ) : null}
+
             {!canFinishInstall ? (
-              <p className="text-center text-xs text-faint">
-                {wantsWeb && wantsCodingAgents
-                  ? "Copy the coding-agents command and add the browser extension to continue."
-                  : wantsWeb
-                    ? "Add to Chrome or Edge to continue."
-                    : "Copy the coding-agents install command to continue."}
-              </p>
+              <p className="text-center text-xs text-faint">Complete each install step above to continue.</p>
             ) : null}
             <button
               type="button"

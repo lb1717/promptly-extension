@@ -3,7 +3,12 @@
 import { GetStartedAiSelection } from "@/components/onboarding/GetStartedAiSelection";
 import { GetStartedAllAgentsInstall } from "@/components/onboarding/GetStartedAllAgentsInstall";
 import { OnboardingBrowserExtensionInstall } from "@/components/onboarding/OnboardingBrowserExtensionInstall";
+import { OnboardingDesktopAppsInstall } from "@/components/onboarding/OnboardingDesktopAppsInstall";
 import { syncWebsiteSessionToExtension } from "@/lib/extensionBridge";
+import {
+  activeOnboardingInstallSegments,
+  onboardingInstallStepNumber
+} from "@/lib/onboardingInstallProgress";
 import {
   DEFAULT_ONBOARDING_PRODUCT_SELECTION,
   hasAnyCodingAgent,
@@ -12,7 +17,7 @@ import {
 } from "@/lib/onboardingProducts";
 import type { User } from "firebase/auth";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 export function InstallMoreIntegrationsClient({ user }: { user: User }) {
   const [step, setStep] = useState<1 | 2>(1);
@@ -23,6 +28,11 @@ export function InstallMoreIntegrationsClient({ user }: { user: User }) {
 
   const wantsWeb = productSelection.web;
   const wantsCodingAgents = hasAnyCodingAgent(productSelection);
+  const wantsDesktopApps = productSelection.desktop_apps;
+  const installSegments = useMemo(
+    () => activeOnboardingInstallSegments(productSelection),
+    [productSelection]
+  );
 
   useEffect(() => {
     if (step !== 2 || !wantsWeb || !user) return;
@@ -75,13 +85,21 @@ export function InstallMoreIntegrationsClient({ user }: { user: User }) {
       ) : (
         <div className="mt-8 space-y-4">
           {wantsCodingAgents ? (
-            <GetStartedAllAgentsInstall stepNumber={1} />
+            <GetStartedAllAgentsInstall
+              stepNumber={onboardingInstallStepNumber(installSegments, "coding_agents")}
+            />
           ) : null}
 
           {wantsWeb ? (
             <OnboardingBrowserExtensionInstall
-              stepNumber={wantsCodingAgents ? 2 : 1}
+              stepNumber={onboardingInstallStepNumber(installSegments, "web")}
               extensionDetected={extensionDetected}
+            />
+          ) : null}
+
+          {wantsDesktopApps ? (
+            <OnboardingDesktopAppsInstall
+              stepNumber={onboardingInstallStepNumber(installSegments, "desktop_apps")}
             />
           ) : null}
 

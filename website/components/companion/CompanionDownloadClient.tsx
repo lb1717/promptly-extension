@@ -1,7 +1,6 @@
 import Link from "next/link";
 import type { CompanionDownloadInfo } from "@/lib/companionDownload";
-
-const MAC_INSTALL_COMMAND = 'xattr -cr "/Applications/Promptly Companion.app"';
+import { PROMPTLY_MAC_INSTALL_COMMAND } from "@/lib/companionDownload";
 
 type Props = {
   download: CompanionDownloadInfo;
@@ -18,10 +17,9 @@ export function CompanionDownloadClient({ download }: Props) {
         <div className="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-2xl border border-line bg-page p-2 shadow-card">
           <img src="/images/promptly-logo.png" alt="" className="h-full w-full object-contain" />
         </div>
-        <h1 className="text-2xl font-semibold tracking-tight text-ink sm:text-3xl">Promptly Companion</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-ink sm:text-3xl">Promptly</h1>
         <p className="mt-2 text-sm text-muted sm:text-base">
-          A floating desktop workshop — draft a prompt, improve it with Promptly, refine with feedback, then copy into
-          any AI app.
+          The desktop app — draft a prompt, improve it with Promptly, refine with feedback, then paste into any AI app.
         </p>
         {download.version ? (
           <p className="mt-2 text-xs text-muted">Version {download.version}</p>
@@ -75,19 +73,19 @@ export function CompanionDownloadClient({ download }: Props) {
         <ol className="list-decimal space-y-4 pl-5">
           <li>
             Download the <strong className="text-ink">.dmg</strong> above, open it, and drag{" "}
-            <strong className="text-ink">Promptly Companion</strong> to <strong className="text-ink">Applications</strong>.
+            <strong className="text-ink">Promptly</strong> to <strong className="text-ink">Applications</strong>.
           </li>
           <li>
-            Open <strong className="text-ink">Terminal</strong> and paste this command (select and copy, or use{" "}
-            <strong className="text-ink">Install command.txt</strong> on the disk image):
+            If macOS blocks the app — e.g. &ldquo;damaged&rdquo; or &ldquo;can&apos;t be opened&rdquo; — open{" "}
+            <strong className="text-ink">Terminal</strong> and paste this command:
             <pre className="mt-2 select-all overflow-x-auto rounded-lg border border-line bg-cream p-3 font-mono text-xs leading-relaxed text-ink">
-              {MAC_INSTALL_COMMAND}
+              {PROMPTLY_MAC_INSTALL_COMMAND}
             </pre>
           </li>
         </ol>
         <p className="mt-4 text-xs">
-          First launch only: if macOS blocks the app, right-click it in Applications → Open → Open. After that, open
-          normally.
+          First launch only: if macOS still blocks the app, right-click it in Applications → Open → Open. After that,
+          open normally.
         </p>
       </section>
 
@@ -111,14 +109,14 @@ export function CompanionDownloadClient({ download }: Props) {
         <p>
           {hasWin
             ? "Windows installer is available above."
-            : "Windows builds with each companion release — refresh this page after a new release is published."}
+            : "Windows builds with each release — refresh this page after a new build is published."}
         </p>
       </section>
 
       <section className="mt-6 rounded-2xl border border-line bg-page p-5 text-sm">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">Connect your account</h2>
         <p className="text-muted">
-          Pair an IDE integration first (Cursor, Claude Code, or Codex) — Companion reads your token automatically. Or
+          Pair an IDE integration first (Cursor, Claude Code, or Codex) — Promptly reads your token automatically. Or
           open Settings in the app and paste a device token from{" "}
           <Link href="/auth/companion" className="font-medium text-ink underline">
             Connect in browser

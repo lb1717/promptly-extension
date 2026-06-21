@@ -28,6 +28,13 @@ const FALLBACK_ASSETS: CompanionAssetUrls = {
   winExe: `${FALLBACK_BASE}/Promptly-Companion-0.1.15-win.exe`
 };
 
+/** macOS bundle path after drag-to-Applications (matches electron-builder productName). */
+export const PROMPTLY_MAC_APP_PATH = "/Applications/Promptly Companion.app";
+
+export const PROMPTLY_MAC_INSTALL_COMMAND = `xattr -cr "${PROMPTLY_MAC_APP_PATH}"`;
+
+export const PROMPTLY_MAC_DMG_FALLBACK_URL = FALLBACK_ASSETS.macDmg!;
+
 function pickCompanionAsset(
   assets: Array<{ name: string; browser_download_url: string }>,
   ext: string

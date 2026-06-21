@@ -104,9 +104,9 @@ export function CompanionAuthClient() {
         <p className="mt-8 text-center text-sm text-muted">Loading…</p>
       ) : !showSignedIn ? (
         <>
-          <h1 className="mt-6 text-center text-xl font-semibold text-ink">Sign in to Promptly Companion</h1>
+          <h1 className="mt-6 text-center text-xl font-semibold text-ink">Sign in to Promptly</h1>
           <p className="mt-2 text-center text-sm text-muted">
-            Connect your Promptly account so Companion can improve and refine your prompts.
+            Connect your Promptly account so the desktop app can improve and refine your prompts.
           </p>
           <div className="mt-8 space-y-4">
             <button
@@ -139,11 +139,11 @@ export function CompanionAuthClient() {
             Signed in as <span className="font-medium text-ink">{user?.email}</span>
           </p>
           <div className="mt-6 w-full rounded-xl border border-emerald-200 bg-emerald-50/80 px-4 py-4 text-left">
-            <p className="text-sm font-semibold text-ink">Return to Promptly Companion</p>
+            <p className="text-sm font-semibold text-ink">Return to Promptly</p>
             <p className="mt-1 text-sm text-muted">
               Close this tab and switch back to the app. If you still need to connect, run the command below in{" "}
               {terminalLabel}, then tap <span className="font-medium text-ink">I&apos;ve connected — refresh</span> in
-              Companion.
+              the app.
             </p>
           </div>
         </div>
@@ -209,7 +209,7 @@ export function CompanionAuthClient() {
         </Link>
         {" · "}
         <Link href="/companion" className="underline hover:text-ink">
-          Download Companion
+          Download Promptly
         </Link>
       </p>
     </div>
