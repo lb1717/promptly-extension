@@ -41,6 +41,28 @@ function pickCompanionAsset(
   return { url: match.browser_download_url, label: match.name };
 }
 
+function compareCompanionVersions(a: string, b: string): number {
+  const parse = (value: string) => value.split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const left = parse(a);
+  const right = parse(b);
+  const length = Math.max(left.length, right.length);
+  for (let i = 0; i < length; i += 1) {
+    const diff = (left[i] || 0) - (right[i] || 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+function pickNewestCompanionRelease(
+  releases: Array<Parameters<typeof parseCompanionRelease>[0]>
+): CompanionAssetUrls | null {
+  const parsed = releases
+    .map((release) => parseCompanionRelease(release))
+    .filter((release): release is CompanionAssetUrls => release !== null);
+  if (!parsed.length) return null;
+  return parsed.sort((a, b) => compareCompanionVersions(b.version, a.version))[0];
+}
+
 function parseCompanionRelease(release: {
   tag_name?: string;
   assets?: Array<{ name: string; browser_download_url: string }>;
@@ -86,10 +108,8 @@ export async function resolveCompanionAssetUrls(): Promise<CompanionAssetUrls> {
     const listRes = await fetchFromGitHubApi("/releases?per_page=30");
     if (listRes.ok) {
       const releases = (await listRes.json()) as Array<Parameters<typeof parseCompanionRelease>[0]>;
-      for (const release of releases) {
-        const parsed = parseCompanionRelease(release);
-        if (parsed) return parsed;
-      }
+      const newest = pickNewestCompanionRelease(releases);
+      if (newest) return newest;
     }
 
     const latestRes = await fetchFromGitHubApi("/releases/latest");
