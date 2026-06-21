@@ -132,32 +132,38 @@ dialog {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   font-weight: 600;
 }
 
-.brand-text {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
+.brand-product {
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
 }
 
-.api-indicator {
-  font-size: 10px;
+.brand-divider {
+  flex-shrink: 0;
+  width: 1px;
+  height: 14px;
+  background: var(--border);
+}
+
+.brand-account {
+  min-width: 0;
+  font-size: 12px;
   font-weight: 500;
   color: var(--muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 180px;
+  max-width: 140px;
 }
 
-.api-indicator.local {
-  color: #0f766e;
-}
-
-.api-indicator.prod {
-  color: #b45309;
+.brand-account.signed-in {
+  color: var(--text);
 }
 
 .brand-mark {
@@ -464,13 +470,13 @@ dialog {
   background: var(--surface);
   color: var(--text);
   border-radius: var(--radius);
-  padding: 5px 10px;
-  font-size: 11px;
+  padding: 3px 8px;
+  font-size: 10px;
   cursor: pointer;
   line-height: 1.2;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
 }
 
 .chip:hover:not(:disabled):not(.applied) {
@@ -730,6 +736,17 @@ dialog {
   border: 1px solid var(--text);
 }
 
+.primary-btn.btn-compact,
+.ghost-btn.btn-compact {
+  padding: 7px 12px;
+  font-size: 13px;
+}
+
+.bottom-dock .primary-btn {
+  padding: 8px 14px;
+  font-size: 13px;
+}
+
 .primary-btn {
   width: 100%;
   background: var(--accent);
@@ -844,6 +861,26 @@ dialog {
   display: flex;
   gap: 8px;
   margin-top: 12px;
+}
+
+.settings-actions-stack {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.settings-actions-row {
+  display: flex;
+  gap: 8px;
+}
+
+.settings-actions-row .primary-btn,
+.settings-actions-row .ghost-btn {
+  flex: 1;
+}
+
+.settings-sign-out-btn {
+  color: #b42318;
+  border-color: #fecaca;
 }
 
 .settings-actions .primary-btn,

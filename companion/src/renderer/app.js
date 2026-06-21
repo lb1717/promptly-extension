@@ -47,6 +47,7 @@ const permissionsFollowupHint = document.getElementById("permissions-followup-hi
 const permissionsAppName = document.getElementById("permissions-app-name");
 const settingsForm = document.getElementById("settings-form");
 const settingsCancel = document.getElementById("settings-cancel");
+const settingsSignOutBtn = document.getElementById("settings-sign-out-btn");
 const appVersionLine = document.getElementById("app-version-line");
 const accountIndicator = document.getElementById("account-indicator");
 const settingsAccountName = document.getElementById("settings-account-name");
@@ -188,13 +189,13 @@ function updateAccountUi() {
   if (accountIndicator) {
     if (!isSignedIn) {
       accountIndicator.textContent = "Sign in required";
-      accountIndicator.className = "api-indicator";
+      accountIndicator.className = "brand-account";
       accountIndicator.title = "Sign in to Promptly";
       return;
     }
     const label = account?.displayName || account?.email || "Connected";
     accountIndicator.textContent = label;
-    accountIndicator.className = "api-indicator prod";
+    accountIndicator.className = "brand-account signed-in";
     accountIndicator.title = account?.email ? `Signed in as ${account.email}` : "Signed in";
   }
 
@@ -266,6 +267,9 @@ async function refreshAccount(options = {}) {
 }
 
 async function refreshAuthFromDisk() {
+  if (window.promptlyCompanion?.saveSettings) {
+    await window.promptlyCompanion.saveSettings({ signedOut: false });
+  }
   if (window.promptlyCompanion?.refreshConfig) {
     const defaults = await window.promptlyCompanion.refreshConfig();
     mergeConfig({
@@ -289,6 +293,44 @@ function openSignInPage() {
     return;
   }
   window.open(SIGN_IN_URL, "_blank", "noopener,noreferrer");
+}
+
+async function signOut() {
+  if (window.promptlyCompanion?.saveSettings) {
+    await window.promptlyCompanion.saveSettings({ signedOut: true });
+  }
+  mergeConfig({ token: "" });
+  account = null;
+  stopCreditsPolling();
+  setSignedInUi(false);
+  settingsDialog?.close();
+  clearStatus();
+}
+
+async function pasteToHostPrompt(text) {
+  const trimmed = String(text || "").trim();
+  if (!trimmed) {
+    return { ok: false, error: "Nothing to paste." };
+  }
+  if (!window.promptlyCompanion?.pasteToHost) {
+    return { ok: false, error: "Paste is only available in the desktop app on macOS." };
+  }
+  try {
+    return await window.promptlyCompanion.pasteToHost(trimmed);
+  } catch (error) {
+    return { ok: false, error: String(error?.message || error || "Paste failed") };
+  }
+}
+
+async function autoPasteToHost(text) {
+  const result = await pasteToHostPrompt(text);
+  if (result?.ok) {
+    const host = result.host ? ` into ${result.host}` : "";
+    showSuccess(`Pasted${host}`);
+  } else if (result?.error) {
+    showError(String(result.error));
+  }
+  return result;
 }
 
 function mapPromptlyError(error) {
@@ -533,6 +575,7 @@ async function handleImprove() {
     await loadSuggestionsForPrompt(optimized);
     syncPromptStrength();
     followUpInput.focus();
+    await autoPasteToHost(optimized);
   } catch (error) {
     handleApiError(error);
   } finally {
@@ -583,6 +626,7 @@ async function handleRefine() {
     promptAiEnhanced = true;
     syncPromptStrength();
     followUpInput.focus();
+    await autoPasteToHost(result.prompt);
   } catch (error) {
     handleApiError(error);
     unlockFollowUp(false);
@@ -737,7 +781,10 @@ async function loadSettingsIntoForm() {
   if (autoOpenClaude) autoOpenClaude.checked = Boolean(settings.autoOpen?.claude_code);
   if (autoOpenCodex) autoOpenCodex.checked = Boolean(settings.autoOpen?.codex);
   if (autoOpenCursor) autoOpenCursor.checked = Boolean(settings.autoOpen?.cursor);
-  if (openOnLaunch) openOnLaunch.checked = Boolean(settings.openOnCompanionLaunch);
+  if (openOnLaunch) openOnLaunch.checked = settings.openOnCompanionLaunch !== false;
+  if (settingsSignOutBtn) {
+    settingsSignOutBtn.disabled = !isSignedIn;
+  }
 }
 
 async function saveCompanionSettingsFromForm() {
@@ -775,25 +822,13 @@ pasteBtn?.addEventListener("click", async () => {
     showError("Add prompt text before pasting.");
     return;
   }
-  if (!window.promptlyCompanion?.pasteToHost) {
-    showError("Paste is only available in the desktop app on macOS.");
-    return;
-  }
   clearStatus();
   if (pasteBtn) {
     pasteBtn.disabled = true;
     pasteBtn.textContent = "Pasting…";
   }
   try {
-    const result = await window.promptlyCompanion.pasteToHost(text);
-    if (!result?.ok) {
-      showError(String(result?.error || "Paste failed"));
-      return;
-    }
-    const host = result.host ? ` into ${result.host}` : "";
-    showSuccess(`Pasted${host}`);
-  } catch (error) {
-    showError(String(error?.message || error || "Paste failed"));
+    await autoPasteToHost(text);
   } finally {
     if (pasteBtn) {
       pasteBtn.disabled = false;
@@ -821,6 +856,7 @@ closeBtn?.addEventListener("click", () => {
 newPromptBtn?.addEventListener("click", startNewSession);
 settingsBtn?.addEventListener("click", openSettings);
 settingsCancel?.addEventListener("click", () => settingsDialog.close());
+settingsSignOutBtn?.addEventListener("click", () => void signOut());
 settingsForm?.addEventListener("submit", (ev) => {
   ev.preventDefault();
   void saveCompanionSettingsFromForm();

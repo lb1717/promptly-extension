@@ -22,11 +22,10 @@
         </button>
       </div>
       <div class="brand">
-        <img src="assets/promptly-logo.png" alt="Promptly" class="brand-mark" width="24" height="24" />
-        <div class="brand-text">
-          <span class="brand-name">Companion</span>
-          <span id="account-indicator" class="api-indicator" title="Account"></span>
-        </div>
+        <img src="assets/promptly-logo.png" alt="Promptly" class="brand-mark" width="22" height="22" />
+        <span class="brand-product">Prompt Improver</span>
+        <span class="brand-divider" aria-hidden="true"></span>
+        <span id="account-indicator" class="brand-account" title="Account">Sign in required</span>
       </div>
       <div class="topbar-drag" aria-hidden="true"></div>
       <div class="topbar-actions">
@@ -156,8 +155,8 @@
           </div>
         </div>
         <div class="action-row">
-          <button type="button" id="refine-btn" class="primary-btn">Apply Feedback</button>
-          <button type="button" id="new-prompt-btn" class="ghost-btn">New Prompt</button>
+          <button type="button" id="refine-btn" class="primary-btn btn-compact">Apply Feedback</button>
+          <button type="button" id="new-prompt-btn" class="ghost-btn btn-compact">New Prompt</button>
         </div>
       </div>
     </section>
@@ -243,12 +242,15 @@
         </label>
         <label class="checkbox-row">
           <input id="open-on-launch" type="checkbox" />
-          <span>Also open when Promptly Companion starts</span>
+          <span>Open window when Promptly Companion starts</span>
         </label>
 
-        <div class="settings-actions">
-          <button type="submit" class="primary-btn">Save</button>
-          <button type="button" id="settings-cancel" class="ghost-btn">Cancel</button>
+        <div class="settings-actions settings-actions-stack">
+          <button type="button" id="settings-sign-out-btn" class="ghost-btn settings-sign-out-btn">Sign out</button>
+          <div class="settings-actions-row">
+            <button type="submit" class="primary-btn">Save</button>
+            <button type="button" id="settings-cancel" class="ghost-btn">Cancel</button>
+          </div>
         </div>
       </form>
     </dialog>

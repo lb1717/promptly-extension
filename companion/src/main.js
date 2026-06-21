@@ -58,8 +58,20 @@ function normalizeApiUrl(url) {
 }
 
 function readDefaultCreds() {
+  const settings = readCompanionSettings();
   const isDevMode = process.env.PROMPTLY_DEV === "1";
   const devApiUrl = isDevMode ? normalizeApiUrl(process.env.PROMPTLY_API_URL || "") : "";
+  const productionFallback = {
+    apiUrl: devApiUrl || PRODUCTION_API_URL,
+    productionApiUrl: PRODUCTION_API_URL,
+    isDevMode,
+    devApiUrl: devApiUrl || null,
+    token: "",
+    client: "promptly-cursor"
+  };
+  if (settings.signedOut) {
+    return productionFallback;
+  }
   for (const tool of ["cursor", "claude_code", "codex"]) {
     const path = join(homedir(), ".promptly", `credentials-${tool}.json`);
     if (!existsSync(path)) continue;
@@ -625,12 +637,7 @@ app.whenReady().then(() => {
   }
 
   restartHostWatcher();
-
-  const openOnLaunch =
-    companionSettings.openOnCompanionLaunch || !hasEnabledAutoOpenTarget();
-  if (openOnLaunch) {
-    createCompanionWindow();
-  }
+  createCompanionWindow();
 
   app.on("activate", () => {
     const windows = BrowserWindow.getAllWindows().filter((win) => !win.isDestroyed());
@@ -646,7 +653,7 @@ app.whenReady().then(() => {
       hidden[0].focus();
       return;
     }
-    if (windows.length === 0 && !hasEnabledAutoOpenTarget()) {
+    if (windows.length === 0) {
       createCompanionWindow();
     }
   });
