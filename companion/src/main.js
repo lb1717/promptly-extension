@@ -571,14 +571,7 @@ ipcMain.handle("promptly:close-window", (event) => {
   if (!win || win.isDestroyed()) {
     return { ok: false };
   }
-  if (process.platform === "darwin") {
-    win.minimize();
-    if (app.dock) {
-      app.dock.show();
-    }
-  } else {
-    win.close();
-  }
+  win.close();
   return { ok: true };
 });
 ipcMain.handle("promptly:set-collapsed", (event, collapsed) => {
