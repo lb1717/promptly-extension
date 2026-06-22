@@ -53,6 +53,11 @@ let companionSettings = readCompanionSettings();
 /** @type {ReturnType<typeof setInterval> | null} */
 let hostFocusTrackTimer = null;
 
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+}
+
 if (process.platform === "darwin") {
   app.setName("Promptly");
   app.setActivationPolicy("regular");
@@ -768,26 +773,18 @@ app.whenReady().then(() => {
 
   restartHostWatcher();
   startHostFocusTracking();
-  createCompanionWindow();
 
-  app.on("activate", () => {
-    const windows = BrowserWindow.getAllWindows().filter((win) => !win.isDestroyed());
-    const minimized = windows.filter((win) => win.isMinimized());
-    if (minimized.length > 0) {
-      minimized[0].restore();
-      minimized[0].focus();
-      return;
-    }
-    const hidden = windows.filter((win) => !win.isVisible());
-    if (hidden.length > 0) {
-      hidden[0].show();
-      hidden[0].focus();
-      return;
-    }
-    if (windows.length === 0) {
-      createCompanionWindow();
-    }
-  });
+  if (process.platform !== "darwin") {
+    openNewCompanionWindow();
+  }
+});
+
+app.on("second-instance", () => {
+  openNewCompanionWindow();
+});
+
+app.on("activate", () => {
+  openNewCompanionWindow();
 });
 
 app.on("window-all-closed", () => {

@@ -14,6 +14,24 @@ function getSignInUrl(apiUrl) {
   return `${base}/auth/companion`;
 }
 
+function getAccountPageUrl(apiUrl) {
+  const base = normalizeApiUrl(apiUrl) || PRODUCTION_API_URL;
+  return `${base}/account`;
+}
+
+function getStatisticsPageUrl(apiUrl) {
+  const base = normalizeApiUrl(apiUrl) || PRODUCTION_API_URL;
+  return `${base}/account/statistics`;
+}
+
+function openExternalUrl(url) {
+  if (window.promptlyCompanion?.openExternal) {
+    void window.promptlyCompanion.openExternal(url);
+    return;
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
 /** @type {{ apiUrl: string; token: string; client: string }} */
 let config = { apiUrl: "", token: "", client: "promptly-cursor" };
 
@@ -21,6 +39,7 @@ let config = { apiUrl: "", token: "", client: "promptly-cursor" };
 let account = null;
 let creditsPollTimer = null;
 let isSignedIn = false;
+let loadingSettingsForm = false;
 
 const statusBanner = document.getElementById("status-banner");
 const draftView = document.getElementById("draft-view");
@@ -54,9 +73,10 @@ const permissionsSkipBtn = document.getElementById("permissions-skip-btn");
 const permissionsDevHint = document.getElementById("permissions-dev-hint");
 const permissionsFollowupHint = document.getElementById("permissions-followup-hint");
 const permissionsAppName = document.getElementById("permissions-app-name");
-const settingsForm = document.getElementById("settings-form");
-const settingsCancel = document.getElementById("settings-cancel");
+const settingsCloseBtn = document.getElementById("settings-close-btn");
 const settingsSignOutBtn = document.getElementById("settings-sign-out-btn");
+const settingsStatisticsBtn = document.getElementById("settings-statistics-btn");
+const settingsManageAccountBtn = document.getElementById("settings-manage-account-btn");
 const appVersionLine = document.getElementById("app-version-line");
 const accountIndicator = document.getElementById("account-indicator");
 const settingsAccountName = document.getElementById("settings-account-name");
@@ -303,11 +323,19 @@ function openSignInPage() {
   showStatus("Finish sign-in in your browser, then tap I've connected — refresh.", "loading", {
     autoFade: false
   });
-  if (window.promptlyCompanion?.openExternal) {
-    void window.promptlyCompanion.openExternal(url);
-    return;
-  }
-  window.open(url, "_blank", "noopener,noreferrer");
+  openExternalUrl(url);
+}
+
+function openAccountPage() {
+  openExternalUrl(getAccountPageUrl(config.apiUrl));
+}
+
+function openStatisticsPage() {
+  openExternalUrl(getStatisticsPageUrl(config.apiUrl));
+}
+
+function closeSettings() {
+  settingsDialog?.close();
 }
 
 async function signOut() {
@@ -954,17 +982,19 @@ async function loadSettingsIntoForm() {
     return;
   }
   const settings = await window.promptlyCompanion.getSettings();
+  loadingSettingsForm = true;
   if (autoOpenClaude) autoOpenClaude.checked = Boolean(settings.autoOpen?.claude_code);
   if (autoOpenCodex) autoOpenCodex.checked = Boolean(settings.autoOpen?.codex);
   if (autoOpenCursor) autoOpenCursor.checked = Boolean(settings.autoOpen?.cursor);
   if (openOnLaunch) openOnLaunch.checked = settings.openOnCompanionLaunch !== false;
+  loadingSettingsForm = false;
   if (settingsSignOutBtn) {
     settingsSignOutBtn.disabled = !isSignedIn;
   }
 }
 
 async function saveCompanionSettingsFromForm() {
-  if (!window.promptlyCompanion?.saveSettings) {
+  if (loadingSettingsForm || !window.promptlyCompanion?.saveSettings) {
     return;
   }
   await window.promptlyCompanion.saveSettings({
@@ -975,6 +1005,14 @@ async function saveCompanionSettingsFromForm() {
     },
     openOnCompanionLaunch: Boolean(openOnLaunch?.checked)
   });
+}
+
+function wireSettingsAutoSave() {
+  for (const input of [autoOpenClaude, autoOpenCodex, autoOpenCursor, openOnLaunch]) {
+    input?.addEventListener("change", () => {
+      void saveCompanionSettingsFromForm();
+    });
+  }
 }
 
 function showSuccess(message) {
@@ -1030,14 +1068,11 @@ closeBtn?.addEventListener("click", () => {
 });
 newPromptBtn?.addEventListener("click", startNewSession);
 settingsBtn?.addEventListener("click", openSettings);
-settingsCancel?.addEventListener("click", () => settingsDialog.close());
+settingsCloseBtn?.addEventListener("click", closeSettings);
+settingsStatisticsBtn?.addEventListener("click", () => openStatisticsPage());
+settingsManageAccountBtn?.addEventListener("click", () => openAccountPage());
 settingsSignOutBtn?.addEventListener("click", () => void signOut());
-settingsForm?.addEventListener("submit", (ev) => {
-  ev.preventDefault();
-  void saveCompanionSettingsFromForm();
-  settingsDialog.close();
-  clearStatus();
-});
+wireSettingsAutoSave();
 
 improveBtn?.addEventListener("click", () => void handleImprove());
 refineBtn?.addEventListener("click", () => void handleRefine());

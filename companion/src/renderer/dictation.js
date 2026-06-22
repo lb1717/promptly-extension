@@ -115,14 +115,15 @@ export function createDictationController(options) {
       recordingOverlay.className = "dictation-recording-overlay hidden";
       recordingOverlay.innerHTML = `
         <div class="dictation-recording-stage">
-          <div class="dictation-recording-ripples" aria-hidden="true">
-            <span></span><span></span><span></span>
+          <div class="dictation-recording-mic-wrap">
+            <div class="dictation-recording-ripples" aria-hidden="true">
+              <span></span><span></span><span></span>
+            </div>
+            <button type="button" class="dictation-recording-mic" aria-label="Stop recording">
+              ${MIC_SVG}
+            </button>
           </div>
-          <button type="button" class="dictation-recording-mic" aria-label="Stop recording">
-            ${MIC_SVG}
-          </button>
           <p class="dictation-recording-hint">Tap to stop recording</p>
-          <p class="dictation-recording-transcribing hidden">Converting speech to text</p>
         </div>
       `;
 
@@ -156,9 +157,11 @@ export function createDictationController(options) {
         overlay.classList.add("hidden");
         overlay.classList.remove("dictation-recording-overlay--transcribing");
         overlay.querySelector(".dictation-recording-ripples")?.classList.remove("hidden");
-        overlay.querySelector(".dictation-recording-mic")?.classList.remove("hidden");
-        overlay.querySelector(".dictation-recording-hint")?.classList.remove("hidden");
-        overlay.querySelector(".dictation-recording-transcribing")?.classList.add("hidden");
+        const hint = overlay.querySelector(".dictation-recording-hint");
+        if (hint) {
+          hint.textContent = "Tap to stop recording";
+          hint.classList.remove("dictation-recording-hint--transcribing");
+        }
       }
       if (compactStatus) {
         compactStatus.textContent = "";
@@ -177,35 +180,35 @@ export function createDictationController(options) {
     if (overlayMode === "full" && overlay) {
       overlay.classList.remove("hidden");
       const ripples = overlay.querySelector(".dictation-recording-ripples");
-      const bigMic = overlay.querySelector(".dictation-recording-mic");
       const hint = overlay.querySelector(".dictation-recording-hint");
-      const transcribingLabel = overlay.querySelector(".dictation-recording-transcribing");
 
       if (state === "listening") {
         overlay.classList.remove("dictation-recording-overlay--transcribing");
         ripples?.classList.remove("hidden");
-        bigMic?.classList.remove("hidden");
-        hint?.classList.remove("hidden");
-        transcribingLabel?.classList.add("hidden");
+        if (hint) {
+          hint.textContent = "Tap to stop recording";
+          hint.classList.remove("dictation-recording-hint--transcribing");
+        }
       } else {
         overlay.classList.add("dictation-recording-overlay--transcribing");
         ripples?.classList.add("hidden");
-        bigMic?.classList.add("hidden");
-        hint?.classList.add("hidden");
-        transcribingLabel?.classList.remove("hidden");
+        if (hint) {
+          hint.textContent = "Converting to text";
+          hint.classList.add("dictation-recording-hint--transcribing");
+        }
       }
     } else if (compactStatus) {
       compactStatus.className =
         state === "transcribing"
           ? "dictation-status dictation-status--transcribing"
           : "dictation-status hidden";
-      compactStatus.textContent = state === "transcribing" ? "converting speech to text" : "";
+      compactStatus.textContent = state === "transcribing" ? "Converting to text" : "";
     }
 
     if (micButton) {
       micButton.setAttribute(
         "aria-label",
-        state === "listening" ? "Stop dictation" : "Converting speech to text"
+        state === "listening" ? "Stop dictation" : "Converting to text"
       );
     }
   }
@@ -225,7 +228,7 @@ export function createDictationController(options) {
     micButton.classList.toggle("dictation-active", recording);
     micButton.setAttribute("aria-pressed", recording ? "true" : "false");
     if (transcribing) {
-      micButton.title = "Converting speech to text…";
+      micButton.title = "Converting to text…";
       setDictationVisualState("transcribing");
     } else if (recording) {
       micButton.title = "Stop dictation";
@@ -289,7 +292,7 @@ export function createDictationController(options) {
         if (micButton) {
           micButton.classList.remove("dictation-active");
           micButton.setAttribute("aria-pressed", "false");
-          micButton.title = "Converting speech to text…";
+          micButton.title = "Converting to text…";
         }
         onStateChange?.(true);
         recorder.stop();

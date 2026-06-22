@@ -208,8 +208,19 @@
     </dialog>
 
     <dialog id="settings-dialog" class="settings-dialog">
-      <form method="dialog" id="settings-form">
-        <h2>Settings</h2>
+      <div class="settings-dialog-inner">
+        <div class="settings-dialog-header">
+          <h2>Settings</h2>
+          <button
+            type="button"
+            id="settings-close-btn"
+            class="icon-btn settings-close-btn"
+            title="Close settings"
+            aria-label="Close settings"
+          >
+            ×
+          </button>
+        </div>
         <p id="app-version-line" class="settings-hint app-version-line">Version …</p>
 
         <div class="settings-account-card">
@@ -238,35 +249,31 @@
         </div>
 
         <h2 class="settings-section-title">Auto-open</h2>
-        <p class="settings-hint">
-          Open a companion window docked top-right when these apps are running (requires paired credentials).
-          macOS may ask for Accessibility permission to read window positions.
-        </p>
-        <label class="checkbox-row">
-          <input id="auto-open-claude" type="checkbox" />
-          <span>Claude</span>
-        </label>
-        <label class="checkbox-row">
-          <input id="auto-open-codex" type="checkbox" />
-          <span>ChatGPT</span>
-        </label>
-        <label class="checkbox-row">
-          <input id="auto-open-cursor" type="checkbox" />
-          <span>Cursor</span>
-        </label>
-        <label class="checkbox-row">
-          <input id="open-on-launch" type="checkbox" />
-          <span>Open window when Promptly Companion starts</span>
-        </label>
+        <div class="settings-checkbox-group">
+          <label class="checkbox-row">
+            <input id="auto-open-claude" type="checkbox" />
+            <span>Claude</span>
+          </label>
+          <label class="checkbox-row">
+            <input id="auto-open-codex" type="checkbox" />
+            <span>ChatGPT</span>
+          </label>
+          <label class="checkbox-row">
+            <input id="auto-open-cursor" type="checkbox" />
+            <span>Cursor</span>
+          </label>
+          <label class="checkbox-row">
+            <input id="open-on-launch" type="checkbox" />
+            <span>Open window when Promptly Companion starts</span>
+          </label>
+        </div>
 
         <div class="settings-actions settings-actions-stack">
+          <button type="button" id="settings-statistics-btn" class="ghost-btn">See Statistics</button>
+          <button type="button" id="settings-manage-account-btn" class="ghost-btn">Manage Account</button>
           <button type="button" id="settings-sign-out-btn" class="ghost-btn settings-sign-out-btn">Sign out</button>
-          <div class="settings-actions-row">
-            <button type="submit" class="primary-btn">Save</button>
-            <button type="button" id="settings-cancel" class="ghost-btn">Cancel</button>
-          </div>
         </div>
-      </form>
+      </div>
     </dialog>
 
     <script type="module" src="app.js"></script>
