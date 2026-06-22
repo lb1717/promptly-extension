@@ -6,6 +6,7 @@
 import { createHash } from "crypto";
 import { spawn, spawnSync } from "child_process";
 import {
+  chmodSync,
   closeSync,
   existsSync,
   mkdirSync,
@@ -3214,20 +3215,20 @@ function auditInstalledHooks(tool) {
       (tool === "codex" || tool === "cursor") && /node \.\/bin\/promptly-telemetry/.test(raw);
     let jsonValid = true;
     let jsonError = null;
+    let parsed = null;
     try {
-      JSON.parse(raw);
+      parsed = JSON.parse(raw);
     } catch (err) {
       jsonValid = false;
       jsonError = String(err?.message || err);
     }
-    const usesBareNodeRunner =
-      (process.platform === "win32" || process.platform === "darwin") &&
-      /\bnode "/.test(raw) &&
-      !hookFileUsesNodeExe(raw, resolveNodeExeForHooks());
+    const usesBareNodeRunner = hookCommandsUseBareNode(raw);
+    const usesNonCanonicalRunner =
+      jsonValid && parsed ? hookDocumentNeedsPatch(parsed, resolveNodeExeForHooks(), process.platform) : false;
     const hookOk =
       tool === "codex" && isUserCodexHooks
-        ? missing.length === 0 && jsonValid && raw.includes("promptly-telemetry.mjs") && !usesBareNodeRunner
-        : missing.length === 0 && usesPluginRoot && !usesRelativeBin && jsonValid && !usesBareNodeRunner;
+        ? missing.length === 0 && jsonValid && raw.includes("promptly-telemetry.mjs") && !usesBareNodeRunner && !usesNonCanonicalRunner
+        : missing.length === 0 && usesPluginRoot && !usesRelativeBin && jsonValid && !usesBareNodeRunner && !usesNonCanonicalRunner;
     out.push({
       path: filePath,
       exists: true,
@@ -3237,6 +3238,7 @@ function auditInstalledHooks(tool) {
       uses_plugin_root: usesPluginRoot,
       uses_relative_bin: usesRelativeBin,
       uses_bare_node_runner: usesBareNodeRunner,
+      uses_non_canonical_runner: usesNonCanonicalRunner,
       json_valid: jsonValid,
       json_error: jsonError
     });
@@ -3496,7 +3498,8 @@ async function finalizeAgentTracking(tool) {
 
 function printAgentTrackingNextSteps(tool) {
   if (tool === "claude_code") {
-    console.log("→ In Claude Code run /reload-plugins once, then send a test prompt.");
+    console.log("→ In Claude Code (terminal or Desktop Code tab) run /reload-plugins once, then send a test prompt.");
+    console.log("→ If Claude asks about Promptly hooks, click Allow.");
   } else if (tool === "codex") {
     console.log("→ Quit and reopen Codex, then send a test prompt.");
   } else if (tool === "cursor") {
@@ -3545,34 +3548,20 @@ function patchHookRunnerFile(filePath, nodeExe = resolveNodeExeForHooks()) {
     return { path: filePath, patched: false, reason: "missing" };
   }
   const raw = readFileSync(filePath, "utf8");
-  if (hookFileUsesNodeExe(raw, nodeExe)) {
-    return { path: filePath, patched: false, reason: "already_patched" };
-  }
-  if (!/\bnode "/.test(raw) && !/node \\"/.test(raw)) {
-    try {
-      JSON.parse(raw);
-    } catch {
-      return { path: filePath, patched: false, reason: "invalid_json" };
-    }
-    return { path: filePath, patched: false, reason: "no_node_runner" };
-  }
-
-  let patched;
-  if (platform === "win32") {
-    const jsonFragment = `\\"${nodeExe.replace(/\\/g, "\\\\")}\\" `;
-    patched = raw.replace(/node /g, jsonFragment);
-  } else {
-    const escaped = nodeExe.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-    patched = raw.replace(/node /g, `${escaped} `);
-  }
-
-  if (patched === raw) {
-    return { path: filePath, patched: false, reason: "no_match" };
-  }
+  let doc;
   try {
-    JSON.parse(patched);
+    doc = JSON.parse(raw);
   } catch (err) {
     return { path: filePath, patched: false, reason: "invalid_json", error: String(err?.message || err) };
+  }
+  if (!hookDocumentNeedsPatch(doc, nodeExe, platform)) {
+    return { path: filePath, patched: false, reason: "already_patched" };
+  }
+
+  const patchedDoc = patchHookDocument(doc, nodeExe, platform);
+  const patched = `${JSON.stringify(patchedDoc, null, 2)}\n`;
+  if (patched === raw || patchedDoc === doc) {
+    return { path: filePath, patched: false, reason: "no_match" };
   }
   writeFileSync(filePath, patched, "utf8");
   return { path: filePath, patched: true };
@@ -3637,7 +3626,142 @@ function codexUserHooksPath() {
 }
 
 function resolveNodeExeForHooks() {
-  return String(process.env.PROMPTLY_NODE_EXE || process.execPath).trim();
+  const fromEnv = String(process.env.PROMPTLY_NODE_EXE || "").trim();
+  if (fromEnv && existsSync(fromEnv)) return fromEnv;
+
+  const candidates = [];
+  const execPath = String(process.execPath || "").trim();
+  if (execPath) candidates.push(execPath);
+
+  const home = homedir();
+  const promptlyNodeRoot = join(home, ".promptly/node");
+  if (existsSync(promptlyNodeRoot)) {
+    try {
+      for (const entry of readdirSync(promptlyNodeRoot)) {
+        if (!entry.startsWith("node-v")) continue;
+        candidates.push(join(promptlyNodeRoot, entry, "bin/node"));
+      }
+    } catch {
+      /* ignore unreadable promptly node dir */
+    }
+  }
+
+  for (const rel of ["/usr/local/bin/node", "/opt/homebrew/bin/node"]) {
+    candidates.push(rel);
+  }
+
+  try {
+    const which = spawnSync("which", ["node"], { encoding: "utf8" }).stdout?.trim();
+    if (which) candidates.push(which);
+  } catch {
+    /* ignore missing which */
+  }
+
+  for (const candidate of candidates) {
+    if (!candidate || !existsSync(candidate)) continue;
+    try {
+      const probe = spawnSync(candidate, ["-e", "process.exit(0)"], { encoding: "utf8", timeout: 5000 });
+      if (probe.status === 0) return candidate;
+    } catch {
+      /* try next candidate */
+    }
+  }
+
+  return execPath || "node";
+}
+
+function ensureTelemetryScriptRunnable(dest, nodeExe = resolveNodeExeForHooks()) {
+  if (!dest || !existsSync(dest)) return false;
+  if (process.platform !== "darwin" && process.platform !== "win32") return false;
+  try {
+    let raw = readFileSync(dest, "utf8");
+    if (raw.startsWith("#!") && process.platform === "darwin") {
+      const lines = raw.split("\n");
+      lines[0] = `#!${nodeExe}`;
+      raw = lines.join("\n");
+      writeFileSync(dest, raw, "utf8");
+    }
+    chmodSync(dest, 0o755);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function patchHookCommandString(command, nodeExe, platform) {
+  const raw = String(command || "");
+  if (!raw.includes("promptly-telemetry.mjs")) return raw;
+  return canonicalHookCommand(raw, nodeExe, platform);
+}
+
+function canonicalHookCommand(command, nodeExe, platform) {
+  const raw = String(command || "");
+  const match = raw.match(
+    /("(?:\$\{(?:CLAUDE_PLUGIN_ROOT|CURSOR_PLUGIN_ROOT|PLUGIN_ROOT)\}|[^"])*\/bin\/promptly-telemetry\.mjs")/
+  );
+  if (!match) return raw;
+  const scriptRef = match[1];
+  const hookArgs = raw.slice(raw.indexOf(match[0]) + match[0].length);
+  if (platform === "darwin") {
+    return `${scriptRef}${hookArgs}`.trim();
+  }
+  if (platform === "win32") {
+    return `"${nodeExe.replace(/\\/g, "\\\\")}" ${scriptRef}${hookArgs}`.trim();
+  }
+  return /^node /i.test(raw) ? raw : `node ${scriptRef}${hookArgs}`.trim();
+}
+
+function hookCommandIsCanonical(command, nodeExe, platform) {
+  const raw = String(command || "");
+  if (!raw.includes("promptly-telemetry.mjs")) return true;
+  return raw === canonicalHookCommand(raw, nodeExe, platform);
+}
+
+function hookDocumentNeedsPatch(value, nodeExe, platform) {
+  if (typeof value === "string") {
+    return !hookCommandIsCanonical(value, nodeExe, platform);
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) => hookDocumentNeedsPatch(item, nodeExe, platform));
+  }
+  if (value && typeof value === "object") {
+    return Object.values(value).some((item) => hookDocumentNeedsPatch(item, nodeExe, platform));
+  }
+  return false;
+}
+
+function patchHookDocument(value, nodeExe, platform) {
+  if (typeof value === "string") {
+    const next = patchHookCommandString(value, nodeExe, platform);
+    return next === value ? value : next;
+  }
+  if (Array.isArray(value)) {
+    let changed = false;
+    const out = value.map((item) => {
+      const next = patchHookDocument(item, nodeExe, platform);
+      if (next !== item) changed = true;
+      return next;
+    });
+    return changed ? out : value;
+  }
+  if (value && typeof value === "object") {
+    let changed = false;
+    const out = {};
+    for (const [key, item] of Object.entries(value)) {
+      const next = patchHookDocument(item, nodeExe, platform);
+      if (next !== item) changed = true;
+      out[key] = next;
+    }
+    return changed ? out : value;
+  }
+  return value;
+}
+
+function hookCommandsUseBareNode(raw) {
+  if (!raw || typeof raw !== "string") return false;
+  return /(^|[\s"])node (?="(?:\$\{(?:CLAUDE_PLUGIN_ROOT|CURSOR_PLUGIN_ROOT|PLUGIN_ROOT)\}|[^"])*\/bin\/promptly-telemetry\.mjs")/.test(
+    raw
+  );
 }
 
 function resolveCodexTelemetryPath(integrationsRoot = join(homedir(), "integrations")) {
@@ -3935,12 +4059,14 @@ function syncAgentRuntimeTelemetry() {
     ? join(integrationsRoot, "packages/telemetry-cli/bin/promptly-telemetry.mjs")
     : TELEMETRY_SCRIPT;
   let copied = 0;
+  const nodeExe = resolveNodeExeForHooks();
 
   const copyTelemetryInto = (dest) => {
     if (!dest) return;
     try {
       mkdirSync(dirname(dest), { recursive: true });
       writeFileSync(dest, readFileSync(telemetrySrc));
+      ensureTelemetryScriptRunnable(dest, nodeExe);
       copied += 1;
     } catch {
       /* ignore unreadable cache paths */
