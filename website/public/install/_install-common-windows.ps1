@@ -6,6 +6,38 @@ function Promptly-UnzipPluginPack {
   Expand-Archive -Path $ZipPath -DestinationPath $Dest -Force
 }
 
+function Promptly-IsQuiet {
+  return $env:PROMPTLY_QUIET -eq "1"
+}
+
+function Promptly-Detail {
+  param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Message)
+  if (Promptly-IsQuiet) { return }
+  if ($Message -and $Message.Count) {
+    Write-Host ($Message -join " ")
+  }
+}
+
+function Promptly-Ok {
+  param([Parameter(Mandatory)][string]$Message)
+  Write-Host "✓ $Message"
+}
+
+function Promptly-Fail {
+  param([Parameter(Mandatory)][string]$Message)
+  Write-Host "✗ $Message" -ForegroundColor Red
+}
+
+function Promptly-PrintInstallSuccess {
+  Write-Host "Promptly Successfully Installed"
+}
+
+function Promptly-ShouldShowCommandOutput {
+  param([switch]$ForceShow)
+  if ($ForceShow) { return $true }
+  return -not (Promptly-IsQuiet)
+}
+
 function Promptly-SyncImproveCli {
   param([string]$PluginDir)
   $src = Join-Path $env:USERPROFILE "integrations\packages\promptly-improve\bin\promptly-improve.mjs"
@@ -57,10 +89,16 @@ function Promptly-GetNodeExe {
 function Promptly-RunNode {
   param(
     [Parameter(Mandatory)][string[]]$Args,
-    [switch]$AllowFailure
+    [switch]$AllowFailure,
+    [switch]$ShowOutput
   )
   $nodeExe = Promptly-GetNodeExe
-  & $nodeExe @Args 2>&1 | Write-Host
+  $emitOutput = $ShowOutput -or ($Args -contains "--quiet") -or (Promptly-ShouldShowCommandOutput)
+  if ($emitOutput) {
+    & $nodeExe @Args 2>&1 | Write-Host
+  } else {
+    & $nodeExe @Args 2>&1 | Out-Null
+  }
   if (-not $AllowFailure -and $LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
   }
@@ -87,9 +125,17 @@ function Promptly-PatchHookNodeInFiles {
     }
   }
   if ($Paths -and $Paths.Count) {
-    & $nodeExe $patchScript @Paths 2>&1 | Write-Host
+    if (Promptly-ShouldShowCommandOutput) {
+      & $nodeExe $patchScript @Paths 2>&1 | Write-Host
+    } else {
+      & $nodeExe $patchScript @Paths 2>&1 | Out-Null
+    }
   } else {
-    & $nodeExe $patchScript 2>&1 | Write-Host
+    if (Promptly-ShouldShowCommandOutput) {
+      & $nodeExe $patchScript 2>&1 | Write-Host
+    } else {
+      & $nodeExe $patchScript 2>&1 | Out-Null
+    }
   }
 }
 
@@ -172,8 +218,12 @@ function Promptly-PreparePluginPack {
   $syncScript = Join-Path $Integrations "scripts\sync-plugin-pack.mjs"
   $nodeExe = Promptly-GetNodeExe
   if ($syncScript -and (Test-Path $syncScript)) {
-    Write-Host "-> Syncing plugin pack hooks and CLIs..."
-    & $nodeExe $syncScript 2>&1 | Write-Host
+    Promptly-Detail "-> Syncing plugin pack hooks and CLIs..."
+    if (Promptly-ShouldShowCommandOutput) {
+      & $nodeExe $syncScript 2>&1 | Write-Host
+    } else {
+      & $nodeExe $syncScript 2>&1 | Out-Null
+    }
   }
   Promptly-ApplyWindowsHookPaths -Integrations $Integrations
 }
@@ -184,7 +234,7 @@ function Promptly-SyncClaudePluginCache {
   if (-not (Test-Path $src)) { return 0 }
   $cacheRoot = Join-Path $env:USERPROFILE ".claude\plugins\cache\promptly-labs\promptly-claude-code"
   if (-not (Test-Path $cacheRoot)) {
-    Write-Host "  Note: Claude plugin cache not created yet (open Claude Code once if hooks do not run)"
+    Promptly-Detail "  Note: Claude plugin cache not created yet (open Claude Code once if hooks do not run)"
     return 0
   }
   $count = 0
@@ -198,7 +248,7 @@ function Promptly-SyncClaudePluginCache {
       Copy-Item -Force $hooksSrc (Join-Path $hooksDir "hooks.json")
     }
     $count++
-    Write-Host "  Synced Claude Code plugin cache: $($_.FullName)"
+    Promptly-Detail "  Synced Claude Code plugin cache: $($_.FullName)"
   }
   Promptly-PatchHookNodeInFiles -Paths (Promptly-CollectHookJsonPaths)
   return $count
@@ -214,7 +264,7 @@ function Promptly-RepairCodexConfigToml {
     $node = Promptly-GetNodeExe
     $out = & $node $cli codex-repair-config 2>&1 | Out-String
     if ($out -match '"repaired"\s*:\s*true') {
-      Write-Host "  OK Repaired Codex config.toml (removed invalid Promptly hook entries)"
+      Promptly-Detail "  OK Repaired Codex config.toml (removed invalid Promptly hook entries)"
       return $true
     }
     if ($LASTEXITCODE -eq 0) { return $false }
@@ -223,7 +273,7 @@ function Promptly-RepairCodexConfigToml {
   $raw = Get-Content -LiteralPath $config -Raw
   if ($raw -notmatch '\[hooks\.state\..*(hooks\.json|promptly-codex|\\)') { return $false }
 
-  Write-Host "-> Repairing broken Codex config.toml..."
+  Promptly-Detail "-> Repairing broken Codex config.toml..."
   $lines = Get-Content -LiteralPath $config
   $outLines = New-Object System.Collections.Generic.List[string]
   $skip = $false
@@ -240,7 +290,7 @@ function Promptly-RepairCodexConfigToml {
   }
   $text = ($outLines -join "`n").TrimEnd() + "`n"
   [System.IO.File]::WriteAllText($config, $text, [System.Text.UTF8Encoding]::new($false))
-  Write-Host "  OK Repaired Codex config.toml"
+  Promptly-Detail "  OK Repaired Codex config.toml"
   return $true
 }
 
@@ -248,22 +298,22 @@ function Promptly-TrustCodexHooks {
   param([string]$Integrations = (Join-Path $env:USERPROFILE "integrations"))
   $cli = Join-Path $Integrations "packages\telemetry-cli\bin\promptly-telemetry.mjs"
   if (-not (Test-Path -LiteralPath $cli)) {
-    Write-Host "  WARN Codex hook trust skipped - telemetry CLI missing"
+    Promptly-Detail "  WARN Codex hook trust skipped - telemetry CLI missing"
     return $false
   }
   $nodeExe = Promptly-GetNodeExe
   if ($nodeExe) { $env:PROMPTLY_NODE_EXE = $nodeExe }
-  Write-Host "-> Installing Promptly hooks to ~/.codex/hooks.json (Codex Windows has no /hooks command)..."
+  Promptly-Detail "-> Installing Promptly hooks to ~/.codex/hooks.json (Codex Windows has no /hooks command)..."
   Promptly-RunNode -Args @($cli, "codex-trust-hooks") -AllowFailure
   if ($LASTEXITCODE -eq 0) {
-    Write-Host "  OK Codex hooks installed and pre-trusted in config.toml"
+    Promptly-Detail "  OK Codex hooks installed and pre-trusted in config.toml"
     Promptly-StartCodexWatchDaemon -Integrations $Integrations | Out-Null
     Promptly-RegisterCodexWatchDaemonStartup -Integrations $Integrations | Out-Null
-    Write-Host "  OK Codex transcript watcher started (tracks prompts without /hooks)"
-    Write-Host "  Quit and reopen Codex, then send a test prompt"
+    Promptly-Detail "  OK Codex transcript watcher started (tracks prompts without /hooks)"
+    Promptly-Detail "  Quit and reopen Codex, then send a test prompt"
     return $true
   }
-  Write-Host "  WARN Codex hook install failed - rerun: node `"$cli`" codex-trust-hooks"
+  Promptly-Detail "  WARN Codex hook install failed - rerun: node `"$cli`" codex-trust-hooks"
   return $false
 }
 
@@ -326,7 +376,7 @@ function Promptly-SyncCodexPluginCache {
   if (-not (Test-Path $src)) { return 0 }
   $cacheRoot = Join-Path $env:USERPROFILE ".codex\plugins\cache\promptly-labs\promptly-codex"
   if (-not (Test-Path $cacheRoot)) {
-    Write-Host "  Note: Codex plugin cache not created yet (open Codex once, then rerun setup or sync-runtimes)"
+    Promptly-Detail "  Note: Codex plugin cache not created yet (open Codex once, then rerun setup or sync-runtimes)"
     return 0
   }
   $count = 0
@@ -344,7 +394,7 @@ function Promptly-SyncCodexPluginCache {
       }
     }
     $count++
-    Write-Host "  Synced Codex plugin cache: $($_.FullName)"
+    Promptly-Detail "  Synced Codex plugin cache: $($_.FullName)"
   }
   Promptly-PatchHookNodeInFiles -Paths (Promptly-CollectHookJsonPaths)
   return $count
@@ -355,7 +405,7 @@ function Promptly-SyncAllAgentRuntimes {
   $cliSrc = Join-Path $env:USERPROFILE "integrations\packages\telemetry-cli\bin\promptly-telemetry.mjs"
   if (-not (Test-Path $cliSrc)) { return }
 
-  Write-Host "-> Syncing telemetry CLI into agent plugin folders..."
+  Promptly-Detail "-> Syncing telemetry CLI into agent plugin folders..."
   foreach ($plugin in @("claude-code", "cursor", "codex")) {
     $pluginDir = Join-Path $Integrations $plugin
     if (Test-Path $pluginDir) {
@@ -369,7 +419,7 @@ function Promptly-SyncAllAgentRuntimes {
   $cursorDest = Join-Path $env:USERPROFILE ".cursor\plugins\local\promptly-cursor"
   $cursorSrc = Join-Path $Integrations "cursor"
   if (Test-Path $cursorSrc) {
-    Write-Host "-> Refreshing local Cursor plugin copy..."
+    Promptly-Detail "-> Refreshing local Cursor plugin copy..."
     if (Test-Path $cursorDest) { Remove-Item -Recurse -Force $cursorDest }
     New-Item -ItemType Directory -Force -Path (Split-Path $cursorDest) | Out-Null
     Copy-Item -Recurse -Force $cursorSrc $cursorDest
@@ -378,7 +428,9 @@ function Promptly-SyncAllAgentRuntimes {
   Promptly-ApplyWindowsHookPaths -Integrations $Integrations
   Promptly-RunNode -Args @($cliSrc, "sync-runtimes") -AllowFailure
   Promptly-TrustCodexHooks -Integrations $Integrations | Out-Null
-  Write-Host "OK Synced live hooks + telemetry CLI for Claude Code, Cursor, and Codex"
+  if (-not (Promptly-IsQuiet)) {
+    Write-Host "OK Synced live hooks + telemetry CLI for Claude Code, Cursor, and Codex"
+  }
 }
 
 function Promptly-PrintHookDiagnostics {
@@ -398,15 +450,12 @@ function Promptly-PrintInstallSummary {
     [string[]]$Skipped,
     [string[]]$Failed
   )
-  if ($env:PROMPTLY_QUIET -eq "1") {
-    foreach ($label in $Installed) {
-      Write-Host "✓ $label completed"
-    }
+  if (Promptly-IsQuiet) {
     foreach ($label in $Skipped) {
-      Write-Host "✓ $label skipped (CLI not installed)"
+      Promptly-Ok "${label} skipped (CLI not installed)"
     }
     foreach ($label in $Failed) {
-      Write-Host "X $label failed"
+      Promptly-Fail "${label} failed"
     }
     return
   }
@@ -431,7 +480,7 @@ function Promptly-SyncSubscriptionUsage {
   if ($env:PROMPTLY_QUIET -eq "1") {
     Promptly-RunNode -Args @($cli, "usage-sync", "--login-claude") -AllowFailure | Out-Null
     if ($LASTEXITCODE -eq 0) {
-      Write-Host "✓ Subscription usage synced"
+      Promptly-Ok "Subscription usage synced"
     }
     return
   }
@@ -613,7 +662,7 @@ function Promptly-SetupAgents {
   Ensure-NodeJs
 
   $zipPath = Join-Path $env:USERPROFILE "promptly.zip"
-  Write-Host "-> Downloading Promptly plugin pack (Claude Code, Cursor, Codex)..."
+  Promptly-Detail "-> Downloading Promptly plugin pack (Claude Code, Cursor, Codex)..."
   Invoke-WebRequest -Uri $PluginPackUrl -OutFile $zipPath -UseBasicParsing
   Promptly-UnzipPluginPack -ZipPath $zipPath -Dest $env:USERPROFILE
   if (-not (Promptly-VerifyPluginPack -Integrations $Integrations)) {
@@ -627,7 +676,7 @@ function Promptly-SetupAgents {
   Promptly-FinalizeWithPairCodeAndDebug -Code $normalizedCode -Integrations $Integrations -InstallSummary $summary
 
   if (-not $SuppressSuccessLine) {
-    Write-Host "Promptly Successfully Installed"
+    Promptly-PrintInstallSuccess
   }
 }
 
@@ -703,12 +752,12 @@ function Promptly-InstallCompanionWindows {
   Unblock-File -LiteralPath $exePath -ErrorAction SilentlyContinue
   Start-Process -FilePath $exePath -ArgumentList "/S" -Wait
   Remove-Item $exePath -Force -ErrorAction SilentlyContinue
-  Write-Host "✓ Desktop app installed"
+  Promptly-Ok "Desktop app installed"
 
   $shouldLaunch = -not $SkipLaunch -and $env:PROMPTLY_QUIET -ne "1" -and $env:PROMPTLY_SKIP_COMPANION_LAUNCH -ne "1"
   if (-not $shouldLaunch) {
     if ($env:PROMPTLY_QUIET -eq "1") {
-      Write-Host "✓ Open Promptly Companion from the Start menu when you are ready"
+      Promptly-Ok "Open Promptly Companion from the Start menu when you are ready"
     }
     return
   }
@@ -722,7 +771,7 @@ function Promptly-InstallCompanionWindows {
     if (Test-Path $launchPath) {
       Unblock-File -LiteralPath $launchPath -ErrorAction SilentlyContinue
       Start-Process -FilePath $launchPath | Out-Null
-      Write-Host "✓ Desktop app opened"
+      Promptly-Ok "Desktop app opened"
       return
     }
   }
@@ -730,7 +779,7 @@ function Promptly-InstallCompanionWindows {
   $startMenuShortcut = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Promptly Companion.lnk"
   if (Test-Path $startMenuShortcut) {
     Start-Process -FilePath $startMenuShortcut | Out-Null
-    Write-Host "✓ Desktop app opened"
+    Promptly-Ok "Desktop app opened"
   }
 }
 
@@ -747,7 +796,7 @@ function Promptly-ClaudeMarketplaceRefresh {
     exit 1
   }
   & $claude plugin marketplace update promptly-labs 2>$null | Out-Null
-  Write-Host "Marketplace refreshed"
+  Promptly-Detail "Marketplace refreshed"
 }
 
 function Promptly-ClaudePluginReinstall {
@@ -757,11 +806,19 @@ function Promptly-ClaudePluginReinstall {
     exit 1
   }
   if ((& $claude plugin list 2>&1 | Out-String) -match 'promptly-claude-code') {
-    Write-Host "-> Removing previous Promptly Claude Code plugin..."
-    & $claude plugin uninstall promptly-claude-code@promptly-labs 2>$null
+    Promptly-Detail "-> Removing previous Promptly Claude Code plugin..."
+    if (Promptly-IsQuiet) {
+      & $claude plugin uninstall promptly-claude-code@promptly-labs 2>$null | Out-Null
+    } else {
+      & $claude plugin uninstall promptly-claude-code@promptly-labs 2>$null
+    }
   }
-  Write-Host "-> Installing fresh Promptly plugin..."
-  & $claude plugin install promptly-claude-code@promptly-labs 2>&1 | Write-Host
+  Promptly-Detail "-> Installing fresh Promptly plugin..."
+  if (Promptly-IsQuiet) {
+    & $claude plugin install promptly-claude-code@promptly-labs 2>&1 | Out-Null
+  } else {
+    & $claude plugin install promptly-claude-code@promptly-labs 2>&1 | Write-Host
+  }
 }
 
 function Promptly-CodexMarketplaceAdd {
@@ -776,7 +833,7 @@ function Promptly-CodexMarketplaceAdd {
   if ($LASTEXITCODE -eq 0) { return }
   if ($out -match 'already installed|already exists') { return }
   if ($out -match 'TOML parse error|failed to parse user config|unicode value digits') {
-    Write-Host "  Codex config.toml is invalid - repairing and retrying..."
+    Promptly-Detail "  Codex config.toml is invalid - repairing and retrying..."
     Promptly-RepairCodexConfigToml -Integrations $IntegrationsPath | Out-Null
     $out = & $codex plugin marketplace add $IntegrationsPath 2>&1 | Out-String
     if ($LASTEXITCODE -eq 0) { return }
@@ -793,12 +850,21 @@ function Promptly-CodexPluginReinstall {
     exit 1
   }
   if ((& $codex plugin list 2>&1 | Out-String) -match 'promptly-codex') {
-    Write-Host "-> Removing previous Promptly Codex plugin..."
-    & $codex plugin remove promptly-codex@promptly-labs 2>$null
+    Promptly-Detail "-> Removing previous Promptly Codex plugin..."
+    if (Promptly-IsQuiet) {
+      & $codex plugin remove promptly-codex@promptly-labs 2>$null | Out-Null
+    } else {
+      & $codex plugin remove promptly-codex@promptly-labs 2>$null
+    }
   }
-  Write-Host "-> Installing fresh Promptly plugin..."
-  & $codex plugin add promptly-codex@promptly-labs 2>&1 | Write-Host
-  if ($LASTEXITCODE -ne 0) { & $codex plugin install promptly-codex@promptly-labs 2>&1 | Write-Host }
+  Promptly-Detail "-> Installing fresh Promptly plugin..."
+  if (Promptly-IsQuiet) {
+    & $codex plugin add promptly-codex@promptly-labs 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { & $codex plugin install promptly-codex@promptly-labs 2>&1 | Out-Null }
+  } else {
+    & $codex plugin add promptly-codex@promptly-labs 2>&1 | Write-Host
+    if ($LASTEXITCODE -ne 0) { & $codex plugin install promptly-codex@promptly-labs 2>&1 | Write-Host }
+  }
 }
 
 function Promptly-SyncClaudeCodeCommandFiles {
@@ -817,7 +883,7 @@ function Promptly-SyncClaudeCodeCommandFiles {
     New-Item -ItemType Directory -Force -Path $skillDestDir | Out-Null
     Copy-Item -Force $skillSrc (Join-Path $skillDestDir "SKILL.md")
   }
-  Write-Host "Installed /promptly for Claude Code"
+  Promptly-Detail "Installed /promptly for Claude Code"
 }
 
 function Promptly-SyncCursorCommandFiles {
@@ -833,7 +899,7 @@ function Promptly-SyncCursorCommandFiles {
   $pluginCmd = Join-Path $PluginDir "commands\promptly.md"
   New-Item -ItemType Directory -Force -Path (Split-Path $pluginCmd) | Out-Null
   Copy-Item -Force $src $pluginCmd
-  Write-Host "Installed /promptly for Cursor"
+  Promptly-Detail "Installed /promptly for Cursor"
 }
 
 function Promptly-InstallCodexSkill {
@@ -846,13 +912,13 @@ function Promptly-InstallCodexSkill {
   $destDir = Join-Path $env:USERPROFILE ".codex\skills\promptly"
   New-Item -ItemType Directory -Force -Path $destDir | Out-Null
   Copy-Item -Force $src (Join-Path $destDir "SKILL.md")
-  Write-Host "Installed /promptly for Codex"
+  Promptly-Detail "Installed /promptly for Codex"
 }
 
 function Promptly-CursorPluginReinstall {
   param([string]$Integrations)
   $dest = Join-Path $env:USERPROFILE ".cursor\plugins\local\promptly-cursor"
-  Write-Host "-> Removing previous Promptly Cursor plugin..."
+  Promptly-Detail "-> Removing previous Promptly Cursor plugin..."
   if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
   New-Item -ItemType Directory -Force -Path (Join-Path $env:USERPROFILE ".cursor\plugins\local") | Out-Null
   Copy-Item -Recurse -Force (Join-Path $Integrations "cursor") $dest
@@ -881,16 +947,20 @@ function Promptly-VerifyPluginPack {
     return $false
   }
   Promptly-PreparePluginPack -Integrations $Integrations
-  Write-Host "Plugin pack OK"
+  if (Promptly-IsQuiet) {
+    Promptly-Ok "Plugin pack ready"
+  } else {
+    Write-Host "✓ Plugin pack OK"
+  }
   return $true
 }
 
 function Promptly-InstallForCursor {
   param([string]$Integrations)
-  Write-Host ""
-  Write-Host "=== Cursor ==="
+  Promptly-Detail ""
+  Promptly-Detail "=== Cursor ==="
   $source = Join-Path $Integrations "cursor"
-  if (-not (Test-Path $source)) { Write-Host "Cursor plugin files missing"; return 1 }
+  if (-not (Test-Path $source)) { Write-Host "✗ Cursor plugin files missing"; return 1 }
   Promptly-PreparePluginPack -Integrations $Integrations
   Promptly-SyncTelemetryCli -PluginDir $source
   try { Promptly-SyncImproveCli -PluginDir $source } catch { }
@@ -911,17 +981,21 @@ function Promptly-InstallForCursor {
     return 1
   }
   if (-not (Promptly-EnsureHooksUseNodeExe -HooksPath $hooksPath)) {
-    Write-Host "X Cursor hooks must use full node.exe path"
+    Write-Host "✗ Cursor hooks must use full node.exe path"
     return 1
   }
-  Write-Host "OK Promptly installed for Cursor"
+  if (Promptly-IsQuiet) {
+    Promptly-Ok "Cursor completed"
+  } else {
+    Write-Host "✓ Promptly installed for Cursor"
+  }
   return 0
 }
 
 function Promptly-InstallForClaudeCode {
   param([string]$Integrations)
-  Write-Host ""
-  Write-Host "=== Claude Code ==="
+  Promptly-Detail ""
+  Promptly-Detail "=== Claude Code ==="
   if (-not (Promptly-EnsureClaudeCli)) { return 2 }
   $plugin = Join-Path $Integrations "claude-code"
   if (-not (Test-Path $plugin)) { Write-Host "Claude Code plugin files missing"; return 1 }
@@ -944,17 +1018,21 @@ function Promptly-InstallForClaudeCode {
     return 1
   }
   if (-not (Promptly-EnsureHooksUseNodeExe -HooksPath $hooksPath)) {
-    Write-Host "X Claude Code hooks must use full node.exe path"
+    Write-Host "✗ Claude Code hooks must use full node.exe path"
     return 1
   }
-  Write-Host "OK Promptly installed for Claude Code"
+  if (Promptly-IsQuiet) {
+    Promptly-Ok "Claude Code completed"
+  } else {
+    Write-Host "✓ Promptly installed for Claude Code"
+  }
   return 0
 }
 
 function Promptly-InstallForCodex {
   param([string]$Integrations)
-  Write-Host ""
-  Write-Host "=== Codex ==="
+  Promptly-Detail ""
+  Promptly-Detail "=== Codex ==="
   Promptly-RepairCodexConfigToml -Integrations $Integrations | Out-Null
   if (-not (Promptly-EnsureCodexCli)) { return 2 }
   $plugin = Join-Path $Integrations "codex"
@@ -982,11 +1060,15 @@ function Promptly-InstallForCodex {
     return 1
   }
   if (-not (Promptly-EnsureHooksUseNodeExe -HooksPath $hooksPath)) {
-    Write-Host "X Codex hooks must use full node.exe path (required for Codex Desktop)"
+    Write-Host "✗ Codex hooks must use full node.exe path (required for Codex Desktop)"
     return 1
   }
-  Write-Host "OK Promptly installed for Codex"
-  Write-Host "  Pair with a code via get-started or setup-windows.ps1 to enable live tracking"
-  Write-Host "  Codex Windows has no /hooks command — install will pre-trust hooks and start a transcript watcher"
+  if (Promptly-IsQuiet) {
+    Promptly-Ok "Codex completed"
+  } else {
+    Write-Host "✓ Promptly installed for Codex"
+    Write-Host "  Pair with a code via get-started or setup-windows.ps1 to enable live tracking"
+    Write-Host "  Codex Windows has no /hooks command — install will pre-trust hooks and start a transcript watcher"
+  }
   return 0
 }

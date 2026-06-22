@@ -1,3 +1,20 @@
+if (-not (Get-Command Promptly-IsQuiet -ErrorAction SilentlyContinue)) {
+  function Promptly-IsQuiet {
+    return $env:PROMPTLY_QUIET -eq "1"
+  }
+  function Promptly-Detail {
+    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Message)
+    if (Promptly-IsQuiet) { return }
+    if ($Message -and $Message.Count) {
+      Write-Host ($Message -join " ")
+    }
+  }
+  function Promptly-Ok {
+    param([Parameter(Mandatory)][string]$Message)
+    Write-Host "✓ $Message"
+  }
+}
+
 function Promptly-GetNpmCmdPath {
   $fromPath = Get-Command npm.cmd -ErrorAction SilentlyContinue
   if ($fromPath) { return $fromPath.Source }
@@ -21,7 +38,11 @@ function Promptly-InvokeNpm {
   param([Parameter(Mandatory)][string[]]$Args)
   $npmCmd = Promptly-GetNpmCmdPath
   if (-not $npmCmd) { return 127 }
-  & $npmCmd @Args 2>&1 | Write-Host
+  if (Promptly-IsQuiet) {
+    & $npmCmd @Args 2>&1 | Out-Null
+  } else {
+    & $npmCmd @Args 2>&1 | Write-Host
+  }
   return $LASTEXITCODE
 }
 
@@ -176,27 +197,35 @@ function Promptly-EnsureAgentCli {
 
   $cli = Promptly-GetAgentCliPath -Name $Name
   if ($cli) {
-    Write-Host "-> Found $DisplayName CLI at $cli"
-    & $cli --version 2>&1 | Write-Host
+    Promptly-Detail "-> Found $DisplayName CLI at $cli"
+    if (Promptly-IsQuiet) {
+      & $cli --version 2>&1 | Out-Null
+    } else {
+      & $cli --version 2>&1 | Write-Host
+    }
     return $true
   }
 
   if ($Name -eq "claude" -and (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps\Claude.exe"))) {
-    Write-Host "-> Claude Desktop is installed, but Promptly needs the Claude Code terminal CLI."
-    Write-Host "   Turn OFF the desktop alias: Settings > Apps > Advanced app settings > App execution aliases > Claude"
-    Write-Host "   Then install the CLI with npm (this script will try that next)."
+    Promptly-Detail "-> Claude Desktop is installed, but Promptly needs the Claude Code terminal CLI."
+    Promptly-Detail "   Turn OFF the desktop alias: Settings > Apps > Advanced app settings > App execution aliases > Claude"
+    Promptly-Detail "   Then install the CLI with npm (this script will try that next)."
   } elseif ($Name -eq "codex" -and (
     (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA "OpenAI\Codex")) -or
     (Test-Path -LiteralPath (Join-Path $env:USERPROFILE ".codex"))
   )) {
-    Write-Host "-> Codex desktop app data was found, but the terminal CLI is not on PATH yet."
-    Write-Host "   Close and reopen PowerShell after installing Codex, or let this script install the CLI via npm."
+    Promptly-Detail "-> Codex desktop app data was found, but the terminal CLI is not on PATH yet."
+    Promptly-Detail "   Close and reopen PowerShell after installing Codex, or let this script install the CLI via npm."
   } else {
-    Write-Host "-> $DisplayName CLI not found; installing $NpmPackage..."
+    Promptly-Detail "-> $DisplayName CLI not found; installing $NpmPackage..."
   }
 
   if (-not (Promptly-TestNpmAvailable)) {
-    Write-Host "Warning: Could not install $DisplayName CLI because npm is unavailable."
+    if (Promptly-IsQuiet) {
+      Promptly-Detail "Warning: Could not install $DisplayName CLI because npm is unavailable."
+    } else {
+      Write-Host "Warning: Could not install $DisplayName CLI because npm is unavailable."
+    }
     return $false
   }
 
@@ -204,16 +233,29 @@ function Promptly-EnsureAgentCli {
   Promptly-RefreshAgentPaths
   $cli = Promptly-GetAgentCliPath -Name $Name
   if ($cli) {
-    Write-Host "-> Installed $DisplayName CLI at $cli"
-    & $cli --version 2>&1 | Write-Host
+    Promptly-Detail "-> Installed $DisplayName CLI at $cli"
+    if (Promptly-IsQuiet) {
+      & $cli --version 2>&1 | Out-Null
+    } else {
+      & $cli --version 2>&1 | Write-Host
+    }
     return $true
   }
 
   if ($exitCode -ne 0) {
-    Write-Host "Warning: Could not install $DisplayName CLI (npm exit $exitCode)."
+    if (Promptly-IsQuiet) {
+      Promptly-Detail "Warning: Could not install $DisplayName CLI (npm exit $exitCode)."
+    } else {
+      Write-Host "Warning: Could not install $DisplayName CLI (npm exit $exitCode)."
+    }
   } else {
-    Write-Host "Warning: npm finished but $DisplayName CLI was still not found."
-    Write-Host "   Close and reopen PowerShell, then rerun the Promptly install command."
+    if (Promptly-IsQuiet) {
+      Promptly-Detail "Warning: npm finished but $DisplayName CLI was still not found."
+      Promptly-Detail "   Close and reopen PowerShell, then rerun the Promptly install command."
+    } else {
+      Write-Host "Warning: npm finished but $DisplayName CLI was still not found."
+      Write-Host "   Close and reopen PowerShell, then rerun the Promptly install command."
+    }
   }
   return $false
 }
@@ -230,7 +272,7 @@ function Promptly-GetHookNodePrefix {
 }
 
 function Ensure-NodeJs {
-  Write-Host "-> Checking Node.js..."
+  Promptly-Detail "-> Checking Node.js..."
   $nodeCmd = Get-Command node.exe -ErrorAction SilentlyContinue
   if (-not $nodeCmd) {
     $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
@@ -238,21 +280,25 @@ function Ensure-NodeJs {
   if ($nodeCmd) {
     $major = [int](& $nodeCmd.Source -p "parseInt(process.versions.node.split('.')[0], 10)")
     if ($major -ge 18) {
-      & $nodeCmd.Source --version
+      Promptly-Detail (& $nodeCmd.Source --version)
       if (-not (Promptly-TestNpmAvailable)) {
-        Write-Host "npm not found. Reinstall Node.js from https://nodejs.org/"
+        Write-Host "✗ npm not found. Reinstall Node.js from https://nodejs.org/"
         exit 1
       }
       Promptly-RefreshNpmPath
-      Write-Host "Node.js OK"
+      if (Promptly-IsQuiet) {
+        Promptly-Ok "Node.js ready"
+      } else {
+        Write-Host "✓ Node.js OK"
+      }
       return
     }
-    Write-Host "  Found Node $(& $nodeCmd.Source --version) - need v18 or newer."
+    Promptly-Detail "  Found Node $(& $nodeCmd.Source --version) - need v18 or newer."
   } else {
-    Write-Host "  Node.js not found on this PC."
+    Promptly-Detail "  Node.js not found on this PC."
   }
 
-  Write-Host "-> Installing Node.js (required for Promptly hooks)..."
+  Promptly-Detail "-> Installing Node.js (required for Promptly hooks)..."
 
   $refreshed = $false
   function Refresh-Path {
@@ -262,30 +308,38 @@ function Ensure-NodeJs {
   }
 
   if (Get-Command winget -ErrorAction SilentlyContinue) {
-    Write-Host "  Trying winget..."
+    Promptly-Detail "  Trying winget..."
     try {
-      winget install OpenJS.NodeJS.LTS --accept-package-agreements --accept-source-agreements --disable-interactivity
+      if (Promptly-IsQuiet) {
+        winget install OpenJS.NodeJS.LTS --accept-package-agreements --accept-source-agreements --disable-interactivity *>$null
+      } else {
+        winget install OpenJS.NodeJS.LTS --accept-package-agreements --accept-source-agreements --disable-interactivity
+      }
       $refreshed = $true
     } catch {
-      Write-Host "  winget install did not complete."
+      Promptly-Detail "  winget install did not complete."
     }
   }
 
   if ($refreshed) { Refresh-Path }
 
   if (-not (Get-Command node.exe -ErrorAction SilentlyContinue) -and (Get-Command choco -ErrorAction SilentlyContinue)) {
-    Write-Host "  Trying Chocolatey..."
+    Promptly-Detail "  Trying Chocolatey..."
     try {
-      choco install nodejs-lts -y
+      if (Promptly-IsQuiet) {
+        choco install nodejs-lts -y *>$null
+      } else {
+        choco install nodejs-lts -y
+      }
       Refresh-Path
     } catch {
-      Write-Host "  Chocolatey install did not complete."
+      Promptly-Detail "  Chocolatey install did not complete."
     }
   }
 
   if (-not (Get-Command node.exe -ErrorAction SilentlyContinue) -and -not (Get-Command node -ErrorAction SilentlyContinue)) {
     Write-Host ""
-    Write-Host "Could not install Node.js automatically."
+    Write-Host "✗ Could not install Node.js automatically."
     Write-Host "1. Install Node.js 20 LTS from https://nodejs.org/"
     Write-Host "2. Close and reopen PowerShell"
     Write-Host "3. Rerun the Promptly install command"
@@ -299,21 +353,25 @@ function Ensure-NodeJs {
   }
   $majorAfter = [int](& $nodeExe -p "parseInt(process.versions.node.split('.')[0], 10)")
   if ($majorAfter -lt 18) {
-    Write-Host "Node.js $(& $nodeExe --version) is still too old. Install v18+ from https://nodejs.org/"
+    Write-Host "✗ Node.js $(& $nodeExe --version) is still too old. Install v18+ from https://nodejs.org/"
     exit 1
   }
 
   if (-not (Promptly-TestNpmAvailable)) {
-    Write-Host "npm not found after Node.js install."
+    Write-Host "✗ npm not found after Node.js install."
     exit 1
   }
 
   Promptly-RefreshNpmPath
-  & $nodeExe --version
+  Promptly-Detail (& $nodeExe --version)
   & $nodeExe -e "process.exit(0)" 2>$null | Out-Null
   if (-not $?) {
-    Write-Host "Node.js installed but not runnable - close PowerShell, reopen, and retry."
+    Write-Host "✗ Node.js installed but not runnable - close PowerShell, reopen, and retry."
     exit 1
   }
-  Write-Host "Node.js OK"
+  if (Promptly-IsQuiet) {
+    Promptly-Ok "Node.js ready"
+  } else {
+    Write-Host "✓ Node.js OK"
+  }
 }

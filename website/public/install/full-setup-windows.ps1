@@ -30,7 +30,7 @@ function Setup-PromptlyFull {
 
   Promptly-SetupAgents -PairCode $Code -SuppressSuccessLine
   Promptly-InstallCompanionWindows
-  Write-Host "Promptly Successfully Installed"
+  Promptly-PrintInstallSuccess
 }
 
 if ($Code) {
