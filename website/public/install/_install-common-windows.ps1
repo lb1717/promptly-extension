@@ -734,6 +734,8 @@ function Promptly-InstallCompanionWindows {
     [switch]$SkipLaunch
   )
 
+  Write-Host "Installing Promptly Desktop..."
+
   $apiUrl = "https://promptly-labs.com/api/companion/download"
   $fallback = "https://github.com/lb1717/promptly-extension/releases/download/companion-v0.2.0/Promptly-Companion-0.2.0-win.exe"
   $exeUrl = $null

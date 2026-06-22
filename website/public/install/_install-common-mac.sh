@@ -790,6 +790,8 @@ promptly_install_companion_mac() {
     return 1
   fi
 
+  echo "Installing Promptly Desktop…"
+
   if [[ -z "${dmg_url}" ]]; then
     local json
     json="$(curl -fsSL "${api_url}" 2>/dev/null || true)"
