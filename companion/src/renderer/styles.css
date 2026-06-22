@@ -1195,6 +1195,9 @@ dialog {
 
 .settings-actions-stack .ghost-btn {
   width: 100%;
+  padding: 6px 12px;
+  font-size: 13px;
+  line-height: 1.2;
 }
 
 .settings-actions-row {
@@ -1222,8 +1225,12 @@ dialog {
 }
 
 .settings-section-title {
-  margin: 18px 0 6px;
+  margin: 28px 0 6px;
   font-size: 1rem;
+}
+
+.settings-account-card + .settings-section-title {
+  margin-top: 32px;
 }
 
 .settings-account-card {
