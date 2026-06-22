@@ -40,10 +40,6 @@ dmg:
       y: 155
       type: link
       path: /Applications
-    - x: 330
-      y: 292
-      type: file
-      path: build/Install command.txt
 win:
   target:
     - nsis

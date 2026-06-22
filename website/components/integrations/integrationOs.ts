@@ -1,7 +1,7 @@
 export type OsId = "mac" | "windows";
 export type IdeToolId = "claude_code" | "cursor" | "codex";
 
-export const PLUGIN_PACK_VERSION = "1.4.9";
+export const PLUGIN_PACK_VERSION = "1.4.10";
 export const PLUGIN_PACK_URL = `https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=${PLUGIN_PACK_VERSION}`;
 export const INSTALL_BASE_URL = "https://promptly-labs.com/install";
 export const NODE_INSTALL_URL = "https://nodejs.org/";

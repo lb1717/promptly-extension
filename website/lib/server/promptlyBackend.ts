@@ -67,6 +67,13 @@ const HOST_LLM_EVENTS_COLLECTION = "promptly_host_llm_events";
 export const HOST_LLM_EVENTS_QUERY_LIMIT = 5000;
 /** Minimum foreground segment length for web extension engagement rows (align with IDE hooks). */
 const HOST_ENGAGEMENT_MIN_SEGMENT_MS = 500;
+/** Matches telemetry-cli READING_IDLE_FINAL_CAP_MS — older SessionEnd rows omitted this cap. */
+const IDE_READING_IDLE_MAX_SEGMENT_MS = 90_000;
+
+function capIdeReadingIdleSegmentMs(category: string | null, durMs: number): number {
+  if (category === "reading_idle") return Math.min(durMs, IDE_READING_IDLE_MAX_SEGMENT_MS);
+  return durMs;
+}
 /** IDE / CLI agent telemetry (Claude Code, Cursor, Codex) — separate from web extension stats. */
 const IDE_EVENTS_COLLECTION = "promptly_ide_events";
 export const IDE_EVENTS_QUERY_LIMIT = 5000;
@@ -2578,7 +2585,9 @@ export async function getAccountIdeUsageStats(
       const catRaw = raw.engagementCategory ?? raw.engagement_category;
       const cat = typeof catRaw === "string" ? catRaw.trim().toLowerCase() : "";
       const durRaw = raw.engagementDurationMs ?? raw.engagement_duration_ms ?? raw.duration_ms ?? raw.durationMs;
-      const durMs = typeof durRaw === "number" && Number.isFinite(durRaw) ? Math.floor(durRaw) : null;
+      const durMsRaw =
+        typeof durRaw === "number" && Number.isFinite(durRaw) ? Math.floor(durRaw) : null;
+      const durMs = durMsRaw !== null ? capIdeReadingIdleSegmentMs(cat, durMsRaw) : null;
       if ((cat === "drafting" || cat === "waiting" || cat === "reading_idle") && durMs !== null && durMs >= 500) {
         screenMs = durMs;
       }
@@ -2688,8 +2697,9 @@ export async function getAccountIdeUsageStats(
         }
       }
       const durRaw = raw.engagementDurationMs ?? raw.engagement_duration_ms ?? raw.duration_ms ?? raw.durationMs;
-      const durMs =
+      const durMsRaw =
         typeof durRaw === "number" && Number.isFinite(durRaw) ? Math.floor(durRaw) : null;
+      const durMs = cat && durMsRaw !== null ? capIdeReadingIdleSegmentMs(cat, durMsRaw) : durMsRaw;
       if (cat && durMs !== null && durMs >= 500) {
         const { mb, label } = readEffectiveIdeEventModel(tool, raw);
         pushScreenInterval(screenIntervals, bucket, tool, cat, raw, durMs, mb, label);

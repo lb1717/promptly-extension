@@ -311,7 +311,12 @@ function markDraftWindowStart(tool, sessionId, atMs = Date.now()) {
   if (!sid) return;
   const sessions = loadDraftTimingSessions(tool);
   const prev = sessions[sid] && typeof sessions[sid] === "object" ? sessions[sid] : {};
-  sessions[sid] = { ...prev, draft_window_start_ms: atMs, updated_at: atMs };
+  sessions[sid] = {
+    ...prev,
+    draft_window_start_ms: atMs,
+    reading_idle_start_ms: null,
+    updated_at: atMs
+  };
   saveDraftTimingSessions(tool, sessions);
 }
 
@@ -509,7 +514,6 @@ function finalizeCodexResponseEngagement(tool, sessionId, latencyEvent) {
       model_bucket: latencyEvent.model_bucket || "unknown"
     });
   }
-  markDraftWindowStart(tool, sid, atMs);
   markReadingIdleStart(tool, sid, atMs);
 }
 
@@ -2258,11 +2262,12 @@ function isCodexLikePromptSubmit(input) {
   const model = hookModelToken(input);
   if (model.startsWith("claude")) return false;
   if (/^(gpt-|o[0-9]|codex)/.test(model)) return true;
-  if (typeof input?.effort === "string" || typeof input?.model_reasoning_effort === "string") return true;
-  if (typeof input?.reasoning_effort === "string") return true;
+  const transcript = String(input?.transcript_path || input?.transcriptPath || "");
+  if (transcript.includes("/.codex/")) return true;
   const hookCtx = readCodexHookContext(input);
   const ctxModel = String(hookCtx?.model || "").trim().toLowerCase();
   if (ctxModel && /^(gpt-|o[0-9]|codex)/.test(ctxModel)) return true;
+  // Effort/reasoning fields appear on Claude Code hooks too — not Codex-specific on their own.
   return false;
 }
 
@@ -2461,19 +2466,8 @@ function hookEventToTelemetry(input, tool) {
   }
 
   if (eventName.includes("sessionend") || (hasSessionEnd && !hasPrompt)) {
-    const dur = resolveSessionEndDurationMs(input);
-    if (dur !== null) {
-      const resolvedModel = mergeSessionScreenModelMeta(tool, sessionId, modelMeta);
-      return {
-        tool,
-        interaction_kind: "engagement_segment",
-        engagement_category: "reading_idle",
-        duration_ms: dur,
-        client_occurred_ms: now,
-        agent_account_email: agentAccountEmail,
-        ...resolvedModel
-      };
-    }
+    // SessionEnd duration is whole-session wall time — not reading output. cmdHook flushes
+    // any in-progress reading-idle segment with the normal per-chunk cap instead.
     return null;
   }
 

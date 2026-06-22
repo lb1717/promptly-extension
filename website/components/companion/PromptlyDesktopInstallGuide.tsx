@@ -68,39 +68,21 @@ export function PromptlyDesktopDownloadButtons({
 
 export function PromptlyMacInstallSteps({
   onCommandCopy,
-  compact = false,
-  downloadOnSamePage = true
+  compact = false
 }: {
   onCommandCopy?: () => void;
   compact?: boolean;
-  downloadOnSamePage?: boolean;
 }) {
   return (
     <section className={compact ? "mt-3 space-y-3 text-xs text-muted" : "mt-10 rounded-2xl border border-line bg-page p-5 text-sm text-muted"}>
       {!compact ? (
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-ink">Mac install</h2>
       ) : null}
-      <ol className={`list-decimal space-y-3 pl-5 ${compact ? "" : "space-y-4"}`}>
-        <li>
-          {downloadOnSamePage ? (
-            <>
-              Download the <strong className="text-ink">.dmg</strong> above, open it, and drag{" "}
-              <strong className="text-ink">Promptly</strong> to <strong className="text-ink">Applications</strong>.
-            </>
-          ) : (
-            <>
-              On the download page, get the Mac <strong className="text-ink">.dmg</strong>, open it, and drag{" "}
-              <strong className="text-ink">Promptly</strong> to <strong className="text-ink">Applications</strong>.
-            </>
-          )}
-        </li>
-        <li>
-          If macOS blocks the app — e.g. &ldquo;damaged&rdquo; or &ldquo;can&apos;t be opened&rdquo; — run this{" "}
-          <strong className="text-ink">once</strong> in Terminal after moving Promptly to Applications, then open
-          normally:
-          <CopyBlock lines={[PROMPTLY_MAC_INSTALL_COMMAND]} label="Terminal" onCopy={onCommandCopy} />
-        </li>
-      </ol>
+      <p>
+        If MacOS error e.g. &ldquo;damaged&rdquo; or &ldquo;can&apos;t be opened&rdquo;, run this command in
+        Terminal once and open normally after
+        <CopyBlock lines={[PROMPTLY_MAC_INSTALL_COMMAND]} label="Terminal" onCopy={onCommandCopy} />
+      </p>
       {!compact ? (
         <p className="mt-4 text-xs">
           First launch only: if macOS still blocks the app, right-click it in Applications → Open → Open. After that,

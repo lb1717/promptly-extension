@@ -2461,6 +2461,39 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
     loadIdeStats
   ]);
 
+  useEffect(() => {
+    if (!user || loading) return;
+    const intervalMs = 30_000;
+    const tick = () => {
+      if (document.visibilityState !== "visible") return;
+      const captureCatalog = statsGroupMode !== "model";
+      void loadExtended(user, days, granularity, statsScopeParams, false, captureCatalog);
+      void loadIdeStats(
+        user,
+        days,
+        granularity,
+        selectedEmailsByTool,
+        ideStats?.agent_emails_by_tool,
+        statsScopeParams,
+        false,
+        captureCatalog
+      );
+    };
+    const id = window.setInterval(tick, intervalMs);
+    return () => window.clearInterval(id);
+  }, [
+    user,
+    loading,
+    days,
+    granularity,
+    statsScopeParams,
+    statsGroupMode,
+    selectedEmailsByTool,
+    ideStats?.agent_emails_by_tool,
+    loadExtended,
+    loadIdeStats
+  ]);
+
   const prevModelServiceRef = useRef(selectedModelService);
   const prevStatsGroupModeRef = useRef(statsGroupMode);
   useEffect(() => {

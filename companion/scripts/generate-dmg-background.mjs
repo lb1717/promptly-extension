@@ -48,7 +48,7 @@ function buildInstallBackgroundSvg(w, h) {
   <path d="M ${arrowStart} ${arrowY} L ${arrowEnd} ${arrowY}" stroke="#6d5ce8" stroke-width="${3 * scale}" fill="none" stroke-linecap="round"/>
   <path d="M ${arrowEnd - 15 * scale} ${arrowY - 7 * scale} L ${arrowEnd} ${arrowY} L ${arrowEnd - 15 * scale} ${arrowY + 7 * scale}" fill="#6d5ce8"/>
 
-  <text x="${cx}" y="${step2Y}" text-anchor="middle" fill="#141820" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="${stepSize}" font-weight="600">2. Open Install command.txt · copy · paste in Terminal</text>
+  <text x="${cx}" y="${step2Y}" text-anchor="middle" fill="#141820" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="${stepSize}" font-weight="600">2. If macOS blocks the app, paste in Terminal</text>
 
   <rect x="${cmdBoxX}" y="${cmdBoxY}" width="${cmdBoxW}" height="${cmdBoxH}" rx="${6 * scale}" fill="#ffffff" stroke="#d8dce5"/>
   <text x="${cmdBoxX + 12 * scale}" y="${cmdTextY}" fill="#141820" font-family="Menlo,Monaco,Consolas,monospace" font-size="${cmdSize}">${escapeSvgText(INSTALL_COMMAND)}</text>
@@ -57,7 +57,6 @@ function buildInstallBackgroundSvg(w, h) {
 
 const svg1x = buildInstallBackgroundSvg(width, height);
 writeFileSync(join(outDir, "dmg-background.svg"), svg1x, "utf8");
-writeFileSync(join(outDir, "Install command.txt"), `${INSTALL_COMMAND}\n`, "utf8");
 
 let sharp;
 try {
@@ -78,4 +77,4 @@ async function writeDmgBackground(outputName, svg, pixelWidth, pixelHeight) {
 await writeDmgBackground("dmg-background.png", svg1x, width, height);
 await writeDmgBackground("dmg-background@2x.png", buildInstallBackgroundSvg(width * 2, height * 2), width * 2, height * 2);
 
-console.log("Wrote build/dmg-background.png, build/dmg-background@2x.png, and build/Install command.txt");
+console.log("Wrote build/dmg-background.png and build/dmg-background@2x.png");

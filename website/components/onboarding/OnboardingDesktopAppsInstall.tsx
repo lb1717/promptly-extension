@@ -56,7 +56,7 @@ export function OnboardingDesktopAppsInstall({
       </a>
 
       {os === "mac" ? (
-        <PromptlyMacInstallSteps compact downloadOnSamePage onCommandCopy={onCommandCopy} />
+        <PromptlyMacInstallSteps compact onCommandCopy={onCommandCopy} />
       ) : (
         <PromptlyWindowsInstallSteps compact downloadOnSamePage />
       )}
