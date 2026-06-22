@@ -381,6 +381,50 @@ function setWindowCollapsed(win, collapsed) {
   return { ok: true, collapsed: next };
 }
 
+function getLiveCompanionWindows() {
+  return [...companionWindows].filter((win) => win && !win.isDestroyed());
+}
+
+function findCompanionWindowForTool(tool) {
+  const target = String(tool || "").trim();
+  if (!target) {
+    return null;
+  }
+  for (const win of getLiveCompanionWindows()) {
+    const state = getLayerState(win);
+    if (state.anchorTool === target) {
+      return win;
+    }
+  }
+  return null;
+}
+
+function focusCompanionWindow(win) {
+  if (!win || win.isDestroyed()) {
+    return null;
+  }
+  if (win.isMinimized()) {
+    win.restore();
+  }
+  win.show();
+  win.focus();
+  return win;
+}
+
+function focusMostRecentCompanionWindow() {
+  const live = getLiveCompanionWindows();
+  if (live.length === 0) {
+    return null;
+  }
+  const focused = live.find((win) => win.isFocused());
+  if (focused) {
+    return focused;
+  }
+  const visible = live.filter((win) => win.isVisible());
+  const target = visible[visible.length - 1] || live[live.length - 1];
+  return focusCompanionWindow(target);
+}
+
 function openNewCompanionWindow() {
   const win = createCompanionWindow();
   win.show();
@@ -619,6 +663,7 @@ function restartHostWatcher() {
     startHostAppWatcher({
       settings: companionSettings,
       createCompanionWindow,
+      findCompanionWindowForTool,
       setCompanionOnTop,
       systemPreferences
     });
@@ -780,10 +825,19 @@ app.whenReady().then(() => {
 });
 
 app.on("second-instance", () => {
+  if (focusMostRecentCompanionWindow()) {
+    return;
+  }
   openNewCompanionWindow();
 });
 
 app.on("activate", () => {
+  if (focusMostRecentCompanionWindow()) {
+    return;
+  }
+  if (companionSettings.openOnCompanionLaunch === false) {
+    return;
+  }
   openNewCompanionWindow();
 });
 

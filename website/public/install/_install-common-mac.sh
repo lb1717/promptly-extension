@@ -765,10 +765,24 @@ promptly_pick_companion_app_dir() {
   printf '%s' "${user_apps}"
 }
 
+promptly_companion_is_running_mac() {
+  if pgrep -f "Promptly Companion.app/Contents/MacOS" >/dev/null 2>&1; then
+    return 0
+  fi
+  if pgrep -x "Promptly Companion" >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+
 promptly_open_companion_mac() {
   local app_path="$1"
   if [[ ! -d "${app_path}" ]]; then
     return 1
+  fi
+  if promptly_companion_is_running_mac; then
+    promptly_ok "Desktop app already running"
+    return 0
   fi
   if ! command -v open >/dev/null 2>&1; then
     promptly_detail "→ Open ${app_path} manually to finish setup."

@@ -229,9 +229,41 @@ async function waitForCompanionReady(win) {
   }
 }
 
-function startHostAppWatcher({ settings, createCompanionWindow, setCompanionOnTop, systemPreferences }) {
+function startHostAppWatcher({
+  settings,
+  createCompanionWindow,
+  findCompanionWindowForTool,
+  setCompanionOnTop,
+  systemPreferences
+}) {
   if (process.platform !== "darwin") {
     return;
+  }
+
+  function adoptExistingWindowForTool(frontTarget, frontProcess) {
+    if (typeof findCompanionWindowForTool !== "function") {
+      return null;
+    }
+    const existing = findCompanionWindowForTool(frontTarget.tool);
+    if (!existing || existing.isDestroyed()) {
+      return null;
+    }
+    dockedWindow = existing;
+    dockedTool = frontTarget.tool;
+    dockedProcessName = frontProcess;
+    updateDockedAnchor(dockedWindow, frontTarget, frontProcess);
+    dismissed = false;
+    return dockedWindow;
+  }
+
+  function clearDockedWindowRef() {
+    if (dockedWindow && !dockedWindow.isDestroyed()) {
+      return;
+    }
+    dockedWindow = null;
+    dockedTool = null;
+    dockedProcessName = null;
+    dockedDisplayId = null;
   }
 
   const tick = async () => {
@@ -272,8 +304,13 @@ function startHostAppWatcher({ settings, createCompanionWindow, setCompanionOnTo
         return;
       }
 
-      const creating = !dockedWindow || dockedWindow.isDestroyed();
-      if (creating) {
+      clearDockedWindowRef();
+
+      if (!dockedWindow) {
+        adoptExistingWindowForTool(frontTarget, frontProcess);
+      }
+
+      if (!dockedWindow) {
         dockedWindow = createCompanionWindow({
           anchorTool: frontTarget.tool,
           anchorProcessNames: frontTarget.processNames,
@@ -287,6 +324,11 @@ function startHostAppWatcher({ settings, createCompanionWindow, setCompanionOnTo
       }
 
       if (dockedTool !== frontTarget.tool) {
+        const existingForTool = adoptExistingWindowForTool(frontTarget, frontProcess);
+        if (existingForTool) {
+          await positionDockedWindowInitially(existingForTool, frontProcess, setCompanionOnTop);
+          return;
+        }
         updateDockedAnchor(dockedWindow, frontTarget, frontProcess);
         await positionDockedWindowInitially(dockedWindow, frontProcess, setCompanionOnTop);
         return;

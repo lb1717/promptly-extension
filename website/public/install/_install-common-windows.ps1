@@ -729,6 +729,10 @@ function Promptly-FinalizeWithPairCode {
   Write-Host "Stats: https://promptly-labs.com/account/statistics"
 }
 
+function Promptly-CompanionIsRunning {
+  return [bool](Get-Process -Name "Promptly Companion" -ErrorAction SilentlyContinue)
+}
+
 function Promptly-InstallCompanionWindows {
   param(
     [switch]$SkipLaunch
@@ -761,6 +765,11 @@ function Promptly-InstallCompanionWindows {
     if ($env:PROMPTLY_QUIET -eq "1") {
       Promptly-Ok "Open Promptly Companion from the Start menu when you are ready"
     }
+    return
+  }
+
+  if (Promptly-CompanionIsRunning) {
+    Promptly-Ok "Desktop app already running"
     return
   }
 
