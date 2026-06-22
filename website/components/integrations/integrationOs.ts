@@ -14,6 +14,12 @@ const INSTALL_SCRIPT_SLUG: Record<IdeToolId, string> = {
 
 export const ALL_AGENTS_SCRIPT_SLUG = "all-agents";
 export const SETUP_SCRIPT_SLUG = "setup";
+export const FULL_SETUP_SCRIPT_SLUG = "full-setup";
+export const COMPANION_SCRIPT_SLUG = "companion";
+
+export function quietEnvPrefix(os: OsId): string {
+  return os === "mac" ? "PROMPTLY_QUIET=1 " : '$env:PROMPTLY_QUIET="1"; ';
+}
 
 export function setupScriptUrl(os: OsId): string {
   return os === "mac"
@@ -31,16 +37,59 @@ export function subscriptionResyncCommand(os: OsId): string {
 }
 
 /** One curl command: install + pair + merge stats + sync hooks + subscription usage. */
-export function setupCurlCommand(os: OsId, code: string): string {
+export function setupCurlCommand(os: OsId, code: string, options?: { quiet?: boolean }): string {
   const url = setupScriptUrl(os);
+  const quiet = options?.quiet ? quietEnvPrefix(os) : "";
   if (os === "mac") {
-    return `curl -fsSL ${url} | bash -s -- ${code}`;
+    return `${quiet}curl -fsSL ${url} | bash -s -- ${code}`;
   }
-  return `irm ${url} | iex; Setup-PromptlyAgents -Code ${code}`;
+  return `${quiet}irm ${url} | iex; Setup-PromptlyAgents -Code ${code}`;
 }
 
-export function setupCommands(os: OsId, code: string): string[] {
-  return [setupCurlCommand(os, code)];
+export function setupCommands(os: OsId, code: string, options?: { quiet?: boolean }): string[] {
+  return [setupCurlCommand(os, code, options)];
+}
+
+export function fullSetupOnboardingCommands(os: OsId, code: string): string[] {
+  const url =
+    os === "mac"
+      ? `${INSTALL_BASE_URL}/${FULL_SETUP_SCRIPT_SLUG}-mac.sh`
+      : `${INSTALL_BASE_URL}/${FULL_SETUP_SCRIPT_SLUG}-windows.ps1`;
+  if (os === "mac") {
+    return [`curl -fsSL ${url} | bash -s -- ${code}`];
+  }
+  return [`irm ${url} | iex; Setup-PromptlyFull -Code ${code}`];
+}
+
+export function companionInstallCommands(os: OsId): string[] {
+  const url =
+    os === "mac"
+      ? `${INSTALL_BASE_URL}/${COMPANION_SCRIPT_SLUG}-mac.sh`
+      : `${INSTALL_BASE_URL}/${COMPANION_SCRIPT_SLUG}-windows.ps1`;
+  if (os === "mac") {
+    return [`${quietEnvPrefix("mac")}curl -fsSL ${url} | bash`];
+  }
+  return [`${quietEnvPrefix("windows")}irm ${url} | iex`];
+}
+
+export type OnboardingInstallMode = "combined" | "agents" | "desktop";
+
+export function onboardingSetupValidationItems(mode: OnboardingInstallMode): string[] {
+  const prefix = (item: string) => `✓ ${item}`;
+  if (mode === "desktop") {
+    return [prefix("Desktop app installed")];
+  }
+  const items = [
+    "Cursor completed",
+    "Claude Code completed",
+    "Codex completed",
+    "Account paired",
+    "Stats tracking verified"
+  ];
+  if (mode === "combined") {
+    items.push("Desktop app installed");
+  }
+  return items.map(prefix);
 }
 
 export function allAgentsInstallScriptUrl(os: OsId): string {
@@ -174,13 +223,7 @@ export function allAgentsFullSetupCommands(os: OsId, codes: AllAgentsPairCodes):
 }
 
 export function allAgentsSetupValidationItems(): string[] {
-  return [
-    "Promptly all-agents install summary",
-    '"Promptly installed for Cursor" (or skipped if that CLI is missing)',
-    'fix-account output shows "ok": true and live_tracking all ok',
-    "Subscription usage synced (browser may open once for Claude)",
-    "All three tools show matches_primary: true in status"
-  ];
+  return onboardingSetupValidationItems("agents");
 }
 
 /** Install then connect in one paste — install must run first (creates the login CLI). */

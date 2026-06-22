@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
-# One command: install Promptly for Claude Code + Cursor + Codex, pair to your account, merge stats, verify live tracking.
-# Usage: curl -fsSL https://promptly-labs.com/install/setup-mac.sh | bash -s -- YOUR_CODE
+# One command: coding agents + stats tracking + Promptly desktop app (Mac).
+# Usage: curl -fsSL https://promptly-labs.com/install/full-setup-mac.sh | bash -s -- YOUR_CODE
 set -euo pipefail
 
+export PROMPTLY_QUIET=1
 PLUGIN_PACK_URL="${PROMPTLY_PLUGIN_PACK_URL:-https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.12}"
 INTEGRATIONS="${HOME}/integrations"
 PROMPTLY_INSTALL_BASE="${PROMPTLY_INSTALL_BASE:-https://promptly-labs.com/install}"
 CODE="${1:-${PROMPTLY_PAIR_CODE:-}}"
 
 if [[ -z "${CODE}" ]]; then
-  echo "Usage: curl -fsSL ${PROMPTLY_INSTALL_BASE}/setup-mac.sh | bash -s -- YOUR_CODE"
+  echo "Usage: curl -fsSL ${PROMPTLY_INSTALL_BASE}/full-setup-mac.sh | bash -s -- YOUR_CODE"
   echo ""
   echo "Get YOUR_CODE at https://promptly-labs.com/integrations while signed into the Promptly account you want."
   exit 1
@@ -36,3 +37,4 @@ promptly_verify_plugin_pack "${INTEGRATIONS}" || exit 1
 
 promptly_install_all_agents "${INTEGRATIONS}" || exit 1
 promptly_finalize_with_pair_code "${CODE}" "${INTEGRATIONS}"
+promptly_install_companion_mac

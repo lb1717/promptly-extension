@@ -24,10 +24,9 @@ import {
 import { listenForGoogleSignInReturn, signInWithGoogleInteractive } from "@/lib/firebaseGoogleAuth";
 import { EmailVerificationNotice } from "@/components/auth/EmailVerificationNotice";
 import { GetStartedAiSelection } from "@/components/onboarding/GetStartedAiSelection";
-import { GetStartedAllAgentsInstall } from "@/components/onboarding/GetStartedAllAgentsInstall";
+import { GetStartedPromptlyInstall } from "@/components/onboarding/GetStartedPromptlyInstall";
 import { OnboardingBrowserExtensionInstall } from "@/components/onboarding/OnboardingBrowserExtensionInstall";
 import { OnboardingDoneStep } from "@/components/onboarding/OnboardingDoneStep";
-import { OnboardingDesktopAppsInstall } from "@/components/onboarding/OnboardingDesktopAppsInstall";
 import { OnboardingInstallOsToggle } from "@/components/onboarding/OnboardingInstallOsToggle";
 import { canFinishOnboardingInstall, activeOnboardingInstallSegments, onboardingInstallStepNumber } from "@/lib/onboardingInstallProgress";
 import type { OsId } from "@/components/integrations/integrationOs";
@@ -129,6 +128,7 @@ export function GeneralOnboardingClient() {
   const wantsWeb = productSelection.web;
   const wantsCodingAgents = hasAnyCodingAgent(productSelection);
   const wantsDesktopApps = productSelection.desktop_apps;
+  const usesCombinedInstall = wantsDesktopApps && wantsCodingAgents;
   const installSegments = useMemo(
     () => activeOnboardingInstallSegments(productSelection),
     [productSelection]
@@ -144,7 +144,8 @@ export function GeneralOnboardingClient() {
         browserStoreClicked,
         codingAgentsSetupCopied,
         desktopAppsCommandCopied,
-        desktopAppsDownloadClicked
+        desktopAppsDownloadClicked,
+        usesCombinedInstall
       }),
     [
       wantsWeb,
@@ -154,13 +155,20 @@ export function GeneralOnboardingClient() {
       browserStoreClicked,
       codingAgentsSetupCopied,
       desktopAppsCommandCopied,
-      desktopAppsDownloadClicked
+      desktopAppsDownloadClicked,
+      usesCombinedInstall
     ]
   );
 
-  const noteAgentCommandCopy = useCallback(() => {
+  const noteInstallCommandCopy = useCallback(() => {
     setCodingAgentsSetupCopied(true);
-  }, []);
+    if (usesCombinedInstall || (wantsDesktopApps && installOs === "mac")) {
+      setDesktopAppsCommandCopied(true);
+    }
+    if (usesCombinedInstall && installOs === "windows") {
+      setDesktopAppsDownloadClicked(true);
+    }
+  }, [usesCombinedInstall, wantsDesktopApps, installOs]);
 
   const handleInstallOsChange = useCallback((next: OsId) => {
     setInstallOs(next);
@@ -611,28 +619,43 @@ export function GeneralOnboardingClient() {
 
         {step === 4 ? (
           <div className="mt-6 space-y-4">
-            {wantsDesktopApps ? (
-              <OnboardingDesktopAppsInstall
+            {usesCombinedInstall ? (
+              <GetStartedPromptlyInstall
+                mode="combined"
                 os={installOs}
                 stepNumber={onboardingInstallStepNumber(installSegments, "desktop_apps")}
-                onCommandCopy={() => setDesktopAppsCommandCopied(true)}
-                onDownloadClick={() => setDesktopAppsDownloadClicked(true)}
+                onCommandCopy={noteInstallCommandCopy}
               />
-            ) : null}
+            ) : (
+              <>
+                {wantsDesktopApps ? (
+                  <GetStartedPromptlyInstall
+                    mode="desktop"
+                    os={installOs}
+                    stepNumber={onboardingInstallStepNumber(installSegments, "desktop_apps")}
+                    onCommandCopy={() => {
+                      setDesktopAppsCommandCopied(true);
+                      setDesktopAppsDownloadClicked(true);
+                    }}
+                  />
+                ) : null}
+
+                {wantsCodingAgents ? (
+                  <GetStartedPromptlyInstall
+                    mode="agents"
+                    os={installOs}
+                    stepNumber={onboardingInstallStepNumber(installSegments, "coding_agents")}
+                    onCommandCopy={noteInstallCommandCopy}
+                  />
+                ) : null}
+              </>
+            )}
 
             {wantsWeb ? (
               <OnboardingBrowserExtensionInstall
                 stepNumber={onboardingInstallStepNumber(installSegments, "web")}
                 extensionDetected={extensionDetected}
                 onStoreClick={() => setBrowserStoreClicked(true)}
-              />
-            ) : null}
-
-            {wantsCodingAgents ? (
-              <GetStartedAllAgentsInstall
-                os={installOs}
-                stepNumber={onboardingInstallStepNumber(installSegments, "coding_agents")}
-                onCommandCopy={noteAgentCommandCopy}
               />
             ) : null}
 

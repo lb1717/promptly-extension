@@ -36,17 +36,17 @@ export type OnboardingProductKey = keyof OnboardingProductSelection;
 
 export const ONBOARDING_WEB_OPTION = {
   key: "web" as const,
-  label: "Web AI Browsers",
+  label: "Web Browser",
   description: "ChatGPT, Claude, and Gemini in Chrome or Edge"
 };
 
 export const ONBOARDING_CODING_AGENTS_OPTION = {
-  label: "Claude Code, Codex & Cursor",
-  description: "Coding agents in terminal or desktop"
+  label: "Coding Agents",
+  description: "Claude Code, Codex, Cursor"
 };
 
 export const ONBOARDING_DESKTOP_APPS_OPTION = {
-  label: "Claude/ChatGPT Desktop Apps",
+  label: "Desktop Apps",
   description: "Claude Cowork, ChatGPT Desktop Chat etc."
 };
 

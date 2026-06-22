@@ -398,6 +398,18 @@ function Promptly-PrintInstallSummary {
     [string[]]$Skipped,
     [string[]]$Failed
   )
+  if ($env:PROMPTLY_QUIET -eq "1") {
+    foreach ($label in $Installed) {
+      Write-Host "✓ $label completed"
+    }
+    foreach ($label in $Skipped) {
+      Write-Host "✓ $label skipped (CLI not installed)"
+    }
+    foreach ($label in $Failed) {
+      Write-Host "X $label failed"
+    }
+    return
+  }
   Write-Host ""
   Write-Host "========================================"
   Write-Host "Promptly all-agents install summary"
@@ -405,6 +417,32 @@ function Promptly-PrintInstallSummary {
   if ($Skipped.Count) { Write-Host "  WARN Skipped (CLI not available): $($Skipped -join ', ')" }
   if ($Failed.Count) { Write-Host "  X Failed: $($Failed -join ', ')" }
   Write-Host "========================================"
+}
+
+function Promptly-SyncSubscriptionUsage {
+  param([string]$Integrations = (Join-Path $env:USERPROFILE "integrations"))
+  $cli = Join-Path $Integrations "packages\telemetry-cli\bin\promptly-telemetry.mjs"
+  if (-not (Test-Path $cli)) {
+    if ($env:PROMPTLY_QUIET -ne "1") {
+      Write-Host "WARN Subscription sync skipped - telemetry CLI missing."
+    }
+    return
+  }
+  if ($env:PROMPTLY_QUIET -eq "1") {
+    Promptly-RunNode -Args @($cli, "usage-sync", "--login-claude") -AllowFailure | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+      Write-Host "✓ Subscription usage synced"
+    }
+    return
+  }
+  Write-Host "-> Syncing AI subscription usage (Claude, Codex, Cursor)..."
+  Write-Host "  First-time setup opens your browser once for claude.ai sign-in."
+  Promptly-RunNode -Args @($cli, "usage-sync", "--login-claude") -AllowFailure
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "WARN Subscription sync incomplete - resync anytime at https://promptly-labs.com/integrations#resync-subscriptions"
+  } else {
+    Write-Host "OK Subscription usage synced - use Refresh on your stats page anytime."
+  }
 }
 
 function Promptly-CoerceExitCode {
@@ -436,23 +474,6 @@ function Promptly-InstallAllAgents {
   Promptly-PrintInstallSummary -Installed $installed -Skipped $skipped -Failed $failed
   if (-not $installed.Count) { return 1 }
   return 0
-}
-
-function Promptly-SyncSubscriptionUsage {
-  param([string]$Integrations = (Join-Path $env:USERPROFILE "integrations"))
-  $cli = Join-Path $Integrations "packages\telemetry-cli\bin\promptly-telemetry.mjs"
-  if (-not (Test-Path $cli)) {
-    Write-Host "WARN Subscription sync skipped - telemetry CLI missing."
-    return
-  }
-  Write-Host "-> Syncing AI subscription usage (Claude, Codex, Cursor)..."
-  Write-Host "  First-time setup opens your browser once for claude.ai sign-in."
-  Promptly-RunNode -Args @($cli, "usage-sync", "--login-claude") -AllowFailure
-  if ($LASTEXITCODE -ne 0) {
-    Write-Host "WARN Subscription sync incomplete - resync anytime at https://promptly-labs.com/integrations#resync-subscriptions"
-  } else {
-    Write-Host "OK Subscription usage synced - use Refresh on your stats page anytime."
-  }
 }
 
 function Promptly-ValidateHookJson {
@@ -581,6 +602,14 @@ function Promptly-FinalizeWithPairCode {
     exit 1
   }
 
+  $quiet = $env:PROMPTLY_QUIET -eq "1"
+  if ($quiet) {
+    Promptly-RunNode -Args @($cli, "fix-account", "--quiet", $Code)
+    Promptly-SyncAllAgentRuntimes -Integrations $Integrations | Out-Null
+    Promptly-SyncSubscriptionUsage -Integrations $Integrations | Out-Null
+    return
+  }
+
   Write-Host "-> Pairing all agents, merging stats, and verifying live uploads..."
   Promptly-RunNode -Args @($cli, "fix-account", $Code)
 
@@ -603,6 +632,27 @@ function Promptly-FinalizeWithPairCode {
   Write-Host "  Claude Code: run /reload-plugins once"
   Write-Host ""
   Write-Host "Stats: https://promptly-labs.com/account/statistics"
+}
+
+function Promptly-InstallCompanionWindows {
+  $apiUrl = "https://promptly-labs.com/api/companion/download"
+  $fallback = "https://github.com/lb1717/promptly-extension/releases/download/companion-v0.2.0/Promptly-Companion-0.2.0-win.exe"
+  $exeUrl = $null
+  if ($env:PROMPTLY_COMPANION_WIN_URL) {
+    $exeUrl = $env:PROMPTLY_COMPANION_WIN_URL
+  } else {
+    try {
+      $json = Invoke-RestMethod -Uri $apiUrl -Method Get
+      if ($json.winUrl) { $exeUrl = [string]$json.winUrl }
+    } catch {}
+  }
+  if (-not $exeUrl) { $exeUrl = $fallback }
+
+  $exePath = Join-Path $env:TEMP "Promptly-Companion-setup.exe"
+  Invoke-WebRequest -Uri $exeUrl -OutFile $exePath -UseBasicParsing
+  Start-Process -FilePath $exePath -ArgumentList "/S" -Wait
+  Remove-Item $exePath -Force -ErrorAction SilentlyContinue
+  Write-Host "✓ Desktop app installed"
 }
 
 function Promptly-ClaudeMarketplaceRefresh {

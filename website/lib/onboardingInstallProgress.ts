@@ -50,8 +50,17 @@ export function canFinishOnboardingInstall(input: {
   codingAgentsSetupCopied: boolean;
   desktopAppsCommandCopied: boolean;
   desktopAppsDownloadClicked: boolean;
+  usesCombinedInstall?: boolean;
 }): boolean {
   const webOk = !input.wantsWeb || input.browserStoreClicked;
+  const combinedOk = input.codingAgentsSetupCopied;
+
+  if (input.usesCombinedInstall) {
+    const combinedInstallOk =
+      (!input.wantsDesktopApps && !input.wantsCodingAgents) || combinedOk;
+    return webOk && combinedInstallOk;
+  }
+
   const agentsOk = !input.wantsCodingAgents || input.codingAgentsSetupCopied;
   const desktopOk =
     !input.wantsDesktopApps ||

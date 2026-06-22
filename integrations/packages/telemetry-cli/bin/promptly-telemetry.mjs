@@ -2860,6 +2860,21 @@ async function cmdFixAccount(flags) {
   const code = normalizePairCode(flags.code || flags._rest[0] || flags["set-primary"]);
   const apiUrl = (flags["api-url"] || DEFAULT_API_URL).replace(/\/$/, "");
   const anchorTool = normalizeTool(flags.tool) || "claude_code";
+  const quiet =
+    flags.quiet === true ||
+    flags.quiet === "true" ||
+    process.env.PROMPTLY_QUIET === "1";
+  const toolLabels = {
+    claude_code: "Claude Code",
+    cursor: "Cursor",
+    codex: "Codex"
+  };
+  const detail = (message) => {
+    if (!quiet) console.log(message);
+  };
+  const ok = (message) => {
+    console.log(`✓ ${message}`);
+  };
 
   if (code.length !== 8) {
     console.error("Usage: promptly-telemetry fix-account ABCD1234");
@@ -2870,7 +2885,7 @@ async function cmdFixAccount(flags) {
   const sourceUidsBefore = collectAllKnownLocalUids();
   clearDevicePrimary();
 
-  console.log("Step 1/4: Pairing with your code…");
+  detail("Step 1/4: Pairing with your code…");
   let body;
   try {
     body = await exchangePrimaryFromCode(apiUrl, anchorTool, code);
@@ -2881,19 +2896,22 @@ async function cmdFixAccount(flags) {
 
   const targetUid = String(body.uid || "").trim();
   const targetEmail = body.email || targetUid;
-  console.log(`Main Promptly account on this computer: ${targetEmail}`);
+  detail(`Main Promptly account on this computer: ${targetEmail}`);
+  if (quiet) ok("Account paired");
 
-  console.log("Step 2/4: Re-pairing Claude Code, Cursor, and Codex to that account…");
+  detail("Step 2/4: Re-pairing Claude Code, Cursor, and Codex to that account…");
   const aligned = [];
   for (const tool of ALL_TOOLS) {
     if (tool === anchorTool) {
       aligned.push(tool);
+      if (quiet) ok(`${toolLabels[tool] || tool} connected`);
       continue;
     }
     try {
       const sibling = await exchangeSiblingTool(apiUrl, anchorTool, tool);
       saveCredentialsFromExchange(tool, sibling, apiUrl);
       aligned.push(tool);
+      if (quiet) ok(`${toolLabels[tool] || tool} connected`);
     } catch (err) {
       console.error(`[promptly] Could not pair ${tool}: ${String(err?.message || err)}`);
     }
@@ -2902,7 +2920,7 @@ async function cmdFixAccount(flags) {
   stampAllCredentialsForTarget(targetUid, targetEmail, apiUrl);
   stripLegacyCredentialsIfStale(targetUid);
 
-  console.log("Step 3/4: Merging any split stats onto that account…");
+  detail("Step 3/4: Merging any split stats onto that account…");
   const sourceUids = [...new Set([...sourceUidsBefore, ...collectAllKnownLocalUids()])].filter(
     (uid) => uid && uid !== targetUid
   );
@@ -2912,15 +2930,15 @@ async function cmdFixAccount(flags) {
     try {
       consolidation = await consolidateStatsOnServer(apiUrl, sourceUids);
       const moved = consolidation.eventsMoved ?? 0;
-      const devices = consolidation.devicesMoved ?? 0;
-      console.log(`Merged ${moved} historical events and ${devices} devices onto ${targetEmail}.`);
+      detail(`Merged ${moved} historical events and ${consolidation.devicesMoved ?? 0} devices onto ${targetEmail}.`);
+      if (quiet && moved > 0) ok("Stats merged");
     } catch (err) {
-      console.error(
-        `[promptly] Could not merge old stats (${String(err?.message || err)}). New prompts will still track to ${targetEmail}.`
-      );
+      const message = `[promptly] Could not merge old stats (${String(err?.message || err)}). New prompts will still track to ${targetEmail}.`;
+      if (quiet) detail(message);
+      else console.error(message);
     }
   } else {
-    console.log("No split stats found to merge.");
+    detail("No split stats found to merge.");
   }
 
   const liveChecks = await verifyLiveTrackingForAllTools();
@@ -2949,6 +2967,11 @@ async function cmdFixAccount(flags) {
       "[promptly] Pairing succeeded but live test uploads failed for some agents. Re-run fix-account after restarting Claude Code, Cursor, and Codex."
     );
     process.exit(1);
+  }
+
+  if (quiet) {
+    ok("Stats tracking verified");
+    return;
   }
 
   console.log(

@@ -1,5 +1,18 @@
 # Promptly install helpers — source via: eval "$(curl -fsSL .../_install-common-mac.sh)"
 
+promptly_is_quiet() {
+  [[ "${PROMPTLY_QUIET:-}" == "1" ]]
+}
+
+promptly_detail() {
+  promptly_is_quiet && return
+  echo "$@"
+}
+
+promptly_ok() {
+  echo "✓ $1"
+}
+
 promptly_unzip_plugin_pack() {
   local zip_path="${1:-${HOME}/promptly.zip}"
   local dest="${2:-${HOME}}"
@@ -44,11 +57,11 @@ promptly_claude_marketplace_add() {
   local code=$?
   set -e
   if [[ $code -eq 0 ]]; then
-    echo "✓ Marketplace added"
+    promptly_detail "✓ Marketplace added"
     return 0
   fi
   if echo "${out}" | grep -qiE 'already installed|already exists'; then
-    echo "✓ Marketplace promptly-labs already installed (refreshing from ~/integrations)"
+    promptly_detail "✓ Marketplace promptly-labs already installed (refreshing from ~/integrations)"
     return 0
   fi
   echo "✗ Failed to add marketplace: ${out}"
@@ -60,17 +73,17 @@ promptly_claude_marketplace_refresh() {
   set +e
   claude plugin marketplace update promptly-labs >/dev/null 2>&1
   set -e
-  echo "✓ Marketplace refreshed"
+  promptly_detail "✓ Marketplace refreshed"
 }
 
 promptly_claude_plugin_reinstall() {
   set +e
   if claude plugin list 2>/dev/null | grep -q 'promptly-claude-code'; then
-    echo "→ Removing previous Promptly Claude Code plugin…"
+    promptly_detail "→ Removing previous Promptly Claude Code plugin…"
     claude plugin uninstall promptly-claude-code@promptly-labs 2>/dev/null
   fi
   set -e
-  echo "→ Installing fresh Promptly plugin…"
+  promptly_detail "→ Installing fresh Promptly plugin…"
   claude plugin install promptly-claude-code@promptly-labs
 }
 
@@ -82,11 +95,11 @@ promptly_codex_marketplace_add() {
   local code=$?
   set -e
   if [[ $code -eq 0 ]]; then
-    echo "✓ Marketplace added"
+    promptly_detail "✓ Marketplace added"
     return 0
   fi
   if echo "${out}" | grep -qiE 'already installed|already exists'; then
-    echo "✓ Marketplace promptly-labs already installed (using updated files from ~/integrations)"
+    promptly_detail "✓ Marketplace promptly-labs already installed (using updated files from ~/integrations)"
     return 0
   fi
   echo "✗ Failed to add marketplace: ${out}"
@@ -96,12 +109,12 @@ promptly_codex_marketplace_add() {
 promptly_codex_plugin_reinstall() {
   set +e
   if codex plugin list 2>/dev/null | grep -q 'promptly-codex'; then
-    echo "→ Removing previous Promptly Codex plugin…"
+    promptly_detail "→ Removing previous Promptly Codex plugin…"
     codex plugin remove promptly-codex@promptly-labs 2>/dev/null \
       || codex plugin remove promptly-codex --marketplace promptly-labs 2>/dev/null
   fi
   set -e
-  echo "→ Installing fresh Promptly plugin…"
+  promptly_detail "→ Installing fresh Promptly plugin…"
   codex plugin add promptly-codex@promptly-labs 2>/dev/null \
     || codex plugin install promptly-codex@promptly-labs
 }
@@ -366,12 +379,12 @@ promptly_refresh_telemetry_cli() {
   local raw_url="https://raw.githubusercontent.com/lb1717/promptly-extension/main/integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs"
   mkdir -p "$(dirname "${dest}")"
   if promptly_telemetry_cli_is_stale "${dest}"; then
-    echo "→ Refreshing telemetry CLI from GitHub (plugin pack zip was stale)…"
+    promptly_detail "→ Refreshing telemetry CLI from GitHub (plugin pack zip was stale)…"
     if curl -fsSL "${raw_url}" -o "${dest}.tmp"; then
       mv "${dest}.tmp" "${dest}"
     else
       rm -f "${dest}.tmp"
-      echo "⚠ Could not refresh telemetry CLI — timing stats may be inaccurate until the plugin pack updates"
+      promptly_detail "⚠ Could not refresh telemetry CLI — timing stats may be inaccurate until the plugin pack updates"
     fi
   fi
 }
@@ -381,17 +394,17 @@ promptly_prepare_plugin_pack() {
   promptly_refresh_telemetry_cli "${integrations}"
   local sync_script="${integrations}/scripts/sync-plugin-pack.mjs"
   if [[ -f "${sync_script}" ]] && command -v node >/dev/null 2>&1; then
-    echo "→ Syncing plugin pack hooks and CLIs…"
+    promptly_detail "→ Syncing plugin pack hooks and CLIs…"
     node "${sync_script}" >/dev/null 2>&1 || true
   fi
   if [[ ! -f "${integrations}/cursor/hooks/hooks.json" ]] \
     || ! grep -q 'afterAgentResponse' "${integrations}/cursor/hooks/hooks.json" 2>/dev/null; then
-    echo "→ Patching Cursor hooks (afterAgentResponse)…"
+    promptly_detail "→ Patching Cursor hooks (afterAgentResponse)…"
     promptly_write_cursor_hooks_json "${integrations}/cursor/hooks/hooks.json"
   fi
   if [[ ! -f "${integrations}/codex/hooks/hooks.json" ]] \
     || ! grep -q 'UserPromptSubmit' "${integrations}/codex/hooks/hooks.json" 2>/dev/null; then
-    echo "→ Patching Codex hooks (UserPromptSubmit)…"
+    promptly_detail "→ Patching Codex hooks (UserPromptSubmit)…"
     promptly_write_codex_hooks_json "${integrations}/codex/hooks/hooks.json"
   fi
 }
@@ -411,7 +424,7 @@ promptly_verify_plugin_pack() {
     return 1
   fi
   promptly_prepare_plugin_pack "${integrations}"
-  echo "✓ Plugin pack OK"
+  promptly_is_quiet && promptly_ok "Plugin pack ready" || echo "✓ Plugin pack OK"
   return 0
 }
 
@@ -419,8 +432,8 @@ promptly_install_for_cursor() {
   local integrations="${1:-${HOME}/integrations}"
   local source_cursor="${integrations}/cursor"
   local cursor_plugin="${HOME}/.cursor/plugins/local/promptly-cursor"
-  echo ""
-  echo "━━━ Cursor ━━━"
+  promptly_detail ""
+  promptly_detail "━━━ Cursor ━━━"
   if [[ ! -d "${source_cursor}" ]]; then
     echo "✗ Cursor plugin files missing from ${integrations}/cursor"
     return 1
@@ -452,15 +465,15 @@ promptly_install_for_cursor() {
     echo "✗ Missing /promptly command (~/.cursor/commands/promptly.md)"
     return 1
   fi
-  echo "✓ Promptly installed for Cursor"
+  promptly_is_quiet && promptly_ok "Cursor completed" || echo "✓ Promptly installed for Cursor"
   return 0
 }
 
 promptly_install_for_claude_code() {
   local integrations="${1:-${HOME}/integrations}"
   local claude_plugin="${integrations}/claude-code"
-  echo ""
-  echo "━━━ Claude Code ━━━"
+  promptly_detail ""
+  promptly_detail "━━━ Claude Code ━━━"
   if ! promptly_ensure_claude_cli; then
     return 2
   fi
@@ -492,15 +505,15 @@ promptly_install_for_claude_code() {
     echo "✗ Missing /promptly command (~/.claude/commands/promptly.md)"
     return 1
   fi
-  echo "✓ Promptly installed for Claude Code"
+  promptly_is_quiet && promptly_ok "Claude Code completed" || echo "✓ Promptly installed for Claude Code"
   return 0
 }
 
 promptly_install_for_codex() {
   local integrations="${1:-${HOME}/integrations}"
   local codex_plugin="${integrations}/codex"
-  echo ""
-  echo "━━━ Codex ━━━"
+  promptly_detail ""
+  promptly_detail "━━━ Codex ━━━"
   if ! promptly_ensure_codex_cli; then
     return 2
   fi
@@ -541,7 +554,7 @@ promptly_install_for_codex() {
     echo "✗ Missing /promptly skill (~/.codex/skills/promptly/SKILL.md)"
     return 1
   fi
-  echo "✓ Promptly installed for Codex"
+  promptly_is_quiet && promptly_ok "Codex completed" || echo "✓ Promptly installed for Codex"
   return 0
 }
 
@@ -569,19 +582,29 @@ promptly_install_all_agents() {
   _run_agent_install "Claude Code" promptly_install_for_claude_code "${integrations}"
   _run_agent_install "Codex" promptly_install_for_codex "${integrations}"
 
-  echo ""
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo "Promptly all-agents install summary"
-  if ((${#_installed[@]})); then
-    echo "  ✓ Installed: ${_installed[*]}"
+  if ! promptly_is_quiet; then
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "Promptly all-agents install summary"
+    if ((${#_installed[@]})); then
+      echo "  ✓ Installed: ${_installed[*]}"
+    fi
+    if ((${#_skipped[@]})); then
+      echo "  ⚠ Skipped (CLI not available): ${_skipped[*]}"
+    fi
+    if ((${#_failed[@]})); then
+      echo "  ✗ Failed: ${_failed[*]}"
+    fi
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  else
+    local label
+    for label in "${_skipped[@]}"; do
+      promptly_ok "${label} skipped (CLI not installed)"
+    done
+    for label in "${_failed[@]}"; do
+      echo "✗ ${label} failed" >&2
+    done
   fi
-  if ((${#_skipped[@]})); then
-    echo "  ⚠ Skipped (CLI not available): ${_skipped[*]}"
-  fi
-  if ((${#_failed[@]})); then
-    echo "  ✗ Failed: ${_failed[*]}"
-  fi
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
   ((${#_installed[@]} == 0)) && return 1
   return 0
@@ -591,20 +614,24 @@ promptly_sync_subscription_usage() {
   local integrations="${1:-${HOME}/integrations}"
   local cli="${integrations}/packages/telemetry-cli/bin/promptly-telemetry.mjs"
   if [[ ! -f "${cli}" ]]; then
-    echo "⚠ Subscription sync skipped — telemetry CLI missing."
+    promptly_detail "⚠ Subscription sync skipped — telemetry CLI missing."
     return 0
   fi
-  echo "→ Syncing AI subscription usage (Claude, Codex, Cursor)…"
-  echo "  First-time setup opens your browser once for claude.ai sign-in."
+  promptly_detail "→ Syncing AI subscription usage (Claude, Codex, Cursor)…"
+  promptly_detail "  First-time setup opens your browser once for claude.ai sign-in."
   set +e
-  node "${cli}" usage-sync --login-claude
+  if promptly_is_quiet; then
+    node "${cli}" usage-sync --login-claude >/dev/null 2>&1
+  else
+    node "${cli}" usage-sync --login-claude
+  fi
   local code=$?
   set -e
   if [[ $code -ne 0 ]]; then
-    echo "⚠ Subscription sync incomplete — resync anytime at https://promptly-labs.com/integrations#resync-subscriptions"
+    promptly_detail "⚠ Subscription sync incomplete — resync anytime at https://promptly-labs.com/integrations#resync-subscriptions"
     return 0
   fi
-  echo "✓ Subscription usage synced — use Refresh on your stats page anytime."
+  promptly_is_quiet && promptly_ok "Subscription usage synced" || echo "✓ Subscription usage synced — use Refresh on your stats page anytime."
 }
 
 promptly_finalize_with_pair_code() {
@@ -615,12 +642,61 @@ promptly_finalize_with_pair_code() {
     echo "✗ Could not install telemetry CLI from plugin pack."
     return 1
   fi
-  echo "→ Pairing all agents, merging stats, and verifying live uploads…"
+  if promptly_is_quiet; then
+    node "${cli}" fix-account --quiet "${code}"
+    promptly_sync_all_agent_runtimes "${integrations}" >/dev/null 2>&1 || promptly_sync_all_agent_runtimes "${integrations}"
+    promptly_sync_subscription_usage "${integrations}"
+    return 0
+  fi
+  promptly_detail "→ Pairing all agents, merging stats, and verifying live uploads…"
   node "${cli}" fix-account "${code}"
-  echo "→ Syncing hooks + telemetry into Claude Code, Cursor, and Codex runtimes…"
+  promptly_detail "→ Syncing hooks + telemetry into Claude Code, Cursor, and Codex runtimes…"
   promptly_sync_all_agent_runtimes "${integrations}"
   promptly_sync_subscription_usage "${integrations}"
   echo ""
   echo "✓ All set. Restart Claude Code, Cursor, and Codex if they were open, then send a test prompt."
   echo "  Stats go to the email shown above on https://promptly-labs.com/account/statistics"
+}
+
+promptly_install_companion_mac() {
+  local app_path="/Applications/Promptly Companion.app"
+  local api_url="https://promptly-labs.com/api/companion/download"
+  local fallback="https://github.com/lb1717/promptly-extension/releases/download/companion-v0.2.0/Promptly-Companion-0.2.0-mac.dmg"
+  local dmg_url="${PROMPTLY_COMPANION_DMG_URL:-}"
+  local tmp_dmg mount_vol src_app
+
+  if [[ -z "${dmg_url}" ]]; then
+    local json
+    json="$(curl -fsSL "${api_url}" 2>/dev/null || true)"
+    if [[ -n "${json}" ]] && command -v node >/dev/null 2>&1; then
+      dmg_url="$(printf '%s' "${json}" | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{try{const j=JSON.parse(d);process.stdout.write(j.macUrl||"")}catch{}})' 2>/dev/null || true)"
+    fi
+  fi
+  [[ -n "${dmg_url}" ]] || dmg_url="${fallback}"
+
+  tmp_dmg="$(mktemp /tmp/promptly-companion.XXXXXX.dmg)"
+  curl -fsSL -o "${tmp_dmg}" "${dmg_url}"
+
+  mount_vol="$(hdiutil attach "${tmp_dmg}" -nobrowse 2>/dev/null | grep -o '/Volumes/[^[:space:]]*' | head -1 || true)"
+  if [[ -z "${mount_vol}" || ! -d "${mount_vol}" ]]; then
+    rm -f "${tmp_dmg}"
+    echo "✗ Could not mount Promptly desktop installer."
+    return 1
+  fi
+
+  src_app="${mount_vol}/Promptly Companion.app"
+  if [[ ! -d "${src_app}" ]]; then
+    hdiutil detach "${mount_vol}" -quiet 2>/dev/null || true
+    rm -f "${tmp_dmg}"
+    echo "✗ Promptly Companion.app not found in the installer."
+    return 1
+  fi
+
+  rm -rf "${app_path}"
+  cp -R "${src_app}" "/Applications/"
+  hdiutil detach "${mount_vol}" -quiet 2>/dev/null || hdiutil detach "${mount_vol}" -force -quiet 2>/dev/null || true
+  rm -f "${tmp_dmg}"
+  xattr -cr "${app_path}" 2>/dev/null || true
+  promptly_ok "Desktop app installed"
+  return 0
 }

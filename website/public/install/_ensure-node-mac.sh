@@ -1,6 +1,12 @@
 # Promptly install helper — source via: eval "$(curl -fsSL .../_ensure-node-mac.sh)"
 # Provides: ensure_curl_mac, ensure_unzip_mac, ensure_node_mac
 
+if ! declare -f promptly_is_quiet >/dev/null 2>&1; then
+  promptly_is_quiet() { [[ "${PROMPTLY_QUIET:-}" == "1" ]]; }
+  promptly_detail() { promptly_is_quiet && return; echo "$@"; }
+  promptly_ok() { echo "✓ $1"; }
+fi
+
 ensure_curl_mac() {
   if command -v curl >/dev/null 2>&1; then
     return 0
@@ -51,12 +57,12 @@ _promptly_install_node_tarball_mac() {
 }
 
 ensure_node_mac() {
-  echo "→ Checking Node.js…"
+  promptly_detail "→ Checking Node.js…"
   if command -v node >/dev/null 2>&1; then
     local major
     major="$(node -p "parseInt(process.versions.node.split('.')[0], 10)" 2>/dev/null || echo 0)"
     if [[ "$major" -ge 18 ]]; then
-      node --version
+      promptly_detail "$(node --version)"
       if ! command -v npm >/dev/null 2>&1; then
         echo "✗ npm not found. Reinstall Node.js from https://nodejs.org/"
         exit 1
@@ -65,15 +71,15 @@ ensure_node_mac() {
         echo "✗ Node.js found but not runnable — close Terminal, reopen, and retry."
         exit 1
       fi
-      echo "✓ Node.js OK"
+      promptly_is_quiet && promptly_ok "Node.js ready" || echo "✓ Node.js OK"
       return 0
     fi
-    echo "  Found Node $(node --version) — need v18 or newer."
+    promptly_detail "  Found Node $(node --version) — need v18 or newer."
   else
-    echo "  Node.js not found on this Mac."
+    promptly_detail "  Node.js not found on this Mac."
   fi
 
-  echo "→ Installing Node.js (required for Promptly hooks)…"
+  promptly_detail "→ Installing Node.js (required for Promptly hooks)…"
 
   if command -v brew >/dev/null 2>&1; then
     echo "  Trying Homebrew…"
@@ -112,10 +118,10 @@ ensure_node_mac() {
     exit 1
   fi
 
-  node --version
+  promptly_detail "$(node --version)"
   if ! node -e "process.exit(0)" >/dev/null 2>&1; then
     echo "✗ Node.js installed but not runnable — close Terminal, reopen, and retry."
     exit 1
   fi
-  echo "✓ Node.js OK"
+  promptly_is_quiet && promptly_ok "Node.js ready" || echo "✓ Node.js OK"
 }
