@@ -1,7 +1,7 @@
-import type { IdeToolId, OsId } from "@/components/integrations/integrationOs";
-import { hasAnyCodingAgent, type OnboardingProductSelection } from "@/lib/onboardingProducts";
+import type { IdeToolId } from "@/components/integrations/integrationOs";
+import type { OnboardingProductSelection } from "@/lib/onboardingProducts";
 
-export type OnboardingInstallSegment = "coding_agents" | "web" | "desktop_apps";
+export type OnboardingInstallSegment = "web" | "desktop_apps";
 
 export function activeOnboardingInstallSegments(
   selection: OnboardingProductSelection
@@ -9,7 +9,6 @@ export function activeOnboardingInstallSegments(
   const segments: OnboardingInstallSegment[] = [];
   if (selection.desktop_apps) segments.push("desktop_apps");
   if (selection.web) segments.push("web");
-  if (hasAnyCodingAgent(selection)) segments.push("coding_agents");
   return segments;
 }
 
@@ -43,31 +42,13 @@ export function formatSetupAgentList(agents: IdeToolId[]): string {
 
 export function canFinishOnboardingInstall(input: {
   wantsWeb: boolean;
-  wantsCodingAgents: boolean;
   wantsDesktopApps: boolean;
-  installOs: OsId;
   browserStoreClicked: boolean;
-  codingAgentsSetupCopied: boolean;
-  desktopAppsCommandCopied: boolean;
-  desktopAppsDownloadClicked: boolean;
-  usesCombinedInstall?: boolean;
+  installCommandCopied: boolean;
 }): boolean {
   const webOk = !input.wantsWeb || input.browserStoreClicked;
-  const combinedOk = input.codingAgentsSetupCopied;
-
-  if (input.usesCombinedInstall) {
-    const combinedInstallOk =
-      (!input.wantsDesktopApps && !input.wantsCodingAgents) || combinedOk;
-    return webOk && combinedInstallOk;
-  }
-
-  const agentsOk = !input.wantsCodingAgents || input.codingAgentsSetupCopied;
-  const desktopOk =
-    !input.wantsDesktopApps ||
-    (input.installOs === "windows"
-      ? input.desktopAppsDownloadClicked
-      : input.desktopAppsCommandCopied);
-  return webOk && agentsOk && desktopOk;
+  const desktopOk = !input.wantsDesktopApps || input.installCommandCopied;
+  return webOk && desktopOk;
 }
 
 export function showBrowserTryLinksOnDone(browserStoreClicked: boolean): boolean {

@@ -86,13 +86,20 @@ export function GetStartedPromptlyInstall({
           <CopyBlock lines={commandLines} label={terminalLabel} onCopy={onCommandCopy} />
           <StepValidation items={onboardingSetupValidationItems(mode)} compact />
           {showsMacDesktopFix ? (
-            <div className="mt-3 text-xs text-muted">
-              <p>
-                If macOS says &ldquo;damaged&rdquo; or &ldquo;unidentified developer&rdquo; when opening the desktop
-                app, run this in Terminal:
-              </p>
-              <CopyBlock lines={[PROMPTLY_MAC_INSTALL_COMMAND]} label="Terminal" />
-            </div>
+            <details className="group mt-3 rounded-lg border border-line/60 bg-cream/40">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 text-left text-xs text-muted marker:hidden [&::-webkit-details-marker]:hidden">
+                <span>
+                  If macOS says &ldquo;damaged&rdquo; or &ldquo;unidentified developer&rdquo; when opening the desktop
+                  app, run this command in Terminal
+                </span>
+                <span className="shrink-0 text-faint transition group-open:rotate-180" aria-hidden="true">
+                  ▼
+                </span>
+              </summary>
+              <div className="border-t border-line/60 px-3 pb-3 pt-2">
+                <CopyBlock lines={[PROMPTLY_MAC_INSTALL_COMMAND]} label="Terminal" />
+              </div>
+            </details>
           ) : null}
           {mode !== "desktop" ? (
             <p className="mt-2 text-xs text-muted">

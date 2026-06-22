@@ -128,9 +128,7 @@ export function SalesJoinClient({ slug }: { slug: string }) {
   const [productSelection, setProductSelection] = useState<OnboardingProductSelection>(
     DEFAULT_ONBOARDING_PRODUCT_SELECTION
   );
-  const [codingAgentsSetupCopied, setCodingAgentsSetupCopied] = useState(false);
-  const [desktopAppsCommandCopied, setDesktopAppsCommandCopied] = useState(false);
-  const [desktopAppsDownloadClicked, setDesktopAppsDownloadClicked] = useState(false);
+  const [installCommandCopied, setInstallCommandCopied] = useState(false);
   const [installOs, setInstallOs] = useState<OsId>("mac");
 
   const [emailAuthMode, setEmailAuthMode] = useState<"signin" | "register">("register");
@@ -152,9 +150,7 @@ export function SalesJoinClient({ slug }: { slug: string }) {
 
   const planInfo = link ? planDetailsForTier(link.tier) : null;
   const wantsWeb = productSelection.web;
-  const wantsCodingAgents = hasAnyCodingAgent(productSelection);
   const wantsDesktopApps = productSelection.desktop_apps;
-  const usesCombinedInstall = wantsDesktopApps && wantsCodingAgents;
   const installSegments = useMemo(
     () => activeOnboardingInstallSegments(productSelection),
     [productSelection]
@@ -164,42 +160,20 @@ export function SalesJoinClient({ slug }: { slug: string }) {
     () =>
       canFinishOnboardingInstall({
         wantsWeb,
-        wantsCodingAgents,
         wantsDesktopApps,
-        installOs,
         browserStoreClicked,
-        codingAgentsSetupCopied,
-        desktopAppsCommandCopied,
-        desktopAppsDownloadClicked,
-        usesCombinedInstall
+        installCommandCopied
       }),
-    [
-      wantsWeb,
-      wantsCodingAgents,
-      wantsDesktopApps,
-      installOs,
-      browserStoreClicked,
-      codingAgentsSetupCopied,
-      desktopAppsCommandCopied,
-      desktopAppsDownloadClicked,
-      usesCombinedInstall
-    ]
+    [wantsWeb, wantsDesktopApps, browserStoreClicked, installCommandCopied]
   );
 
   const noteInstallCommandCopy = useCallback(() => {
-    setCodingAgentsSetupCopied(true);
-    if (usesCombinedInstall || (wantsDesktopApps && installOs === "mac")) {
-      setDesktopAppsCommandCopied(true);
-    }
-    if (usesCombinedInstall && installOs === "windows") {
-      setDesktopAppsDownloadClicked(true);
-    }
-  }, [usesCombinedInstall, wantsDesktopApps, installOs]);
+    setInstallCommandCopied(true);
+  }, []);
 
   const handleInstallOsChange = useCallback((next: OsId) => {
     setInstallOs(next);
-    setDesktopAppsCommandCopied(false);
-    setDesktopAppsDownloadClicked(false);
+    setInstallCommandCopied(false);
   }, []);
 
   useEffect(() => {
@@ -569,7 +543,7 @@ export function SalesJoinClient({ slug }: { slug: string }) {
       <div className="rounded-2xl border border-line bg-cream p-6 shadow-card sm:p-8">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-2xl font-semibold text-ink">{stepTitle}</h1>
-          {step === INSTALL_STEP && (wantsCodingAgents || wantsDesktopApps) ? (
+          {step === INSTALL_STEP && wantsDesktopApps ? (
             <OnboardingInstallOsToggle os={installOs} onChange={handleInstallOsChange} />
           ) : null}
         </div>
@@ -707,9 +681,7 @@ export function SalesJoinClient({ slug }: { slug: string }) {
               type="button"
               onClick={() => {
                 setBrowserStoreClicked(false);
-                setCodingAgentsSetupCopied(false);
-                setDesktopAppsCommandCopied(false);
-                setDesktopAppsDownloadClicked(false);
+                setInstallCommandCopied(false);
                 goToStep(INSTALL_STEP);
               }}
               disabled={!hasAnyOnboardingProduct(productSelection)}
@@ -728,37 +700,14 @@ export function SalesJoinClient({ slug }: { slug: string }) {
 
         {step === 4 ? (
           <div className="mt-6 space-y-4">
-            {usesCombinedInstall ? (
+            {wantsDesktopApps ? (
               <GetStartedPromptlyInstall
                 mode="combined"
                 os={installOs}
                 stepNumber={onboardingInstallStepNumber(installSegments, "desktop_apps")}
                 onCommandCopy={noteInstallCommandCopy}
               />
-            ) : (
-              <>
-                {wantsDesktopApps ? (
-                  <GetStartedPromptlyInstall
-                    mode="desktop"
-                    os={installOs}
-                    stepNumber={onboardingInstallStepNumber(installSegments, "desktop_apps")}
-                    onCommandCopy={() => {
-                      setDesktopAppsCommandCopied(true);
-                      setDesktopAppsDownloadClicked(true);
-                    }}
-                  />
-                ) : null}
-
-                {wantsCodingAgents ? (
-                  <GetStartedPromptlyInstall
-                    mode="agents"
-                    os={installOs}
-                    stepNumber={onboardingInstallStepNumber(installSegments, "coding_agents")}
-                    onCommandCopy={noteInstallCommandCopy}
-                  />
-                ) : null}
-              </>
-            )}
+            ) : null}
 
             {wantsWeb ? (
               <OnboardingBrowserExtensionInstall

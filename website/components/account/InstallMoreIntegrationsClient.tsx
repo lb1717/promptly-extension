@@ -1,9 +1,8 @@
 "use client";
 
 import { GetStartedAiSelection } from "@/components/onboarding/GetStartedAiSelection";
-import { GetStartedAllAgentsInstall } from "@/components/onboarding/GetStartedAllAgentsInstall";
+import { GetStartedPromptlyInstall } from "@/components/onboarding/GetStartedPromptlyInstall";
 import { OnboardingBrowserExtensionInstall } from "@/components/onboarding/OnboardingBrowserExtensionInstall";
-import { OnboardingDesktopAppsInstall } from "@/components/onboarding/OnboardingDesktopAppsInstall";
 import { OnboardingInstallOsToggle } from "@/components/onboarding/OnboardingInstallOsToggle";
 import type { OsId } from "@/components/integrations/integrationOs";
 import { syncWebsiteSessionToExtension } from "@/lib/extensionBridge";
@@ -13,7 +12,6 @@ import {
 } from "@/lib/onboardingInstallProgress";
 import {
   DEFAULT_ONBOARDING_PRODUCT_SELECTION,
-  hasAnyCodingAgent,
   hasAnyOnboardingProduct,
   type OnboardingProductSelection
 } from "@/lib/onboardingProducts";
@@ -30,13 +28,11 @@ export function InstallMoreIntegrationsClient({ user }: { user: User }) {
   const [installOs, setInstallOs] = useState<OsId>("mac");
 
   const wantsWeb = productSelection.web;
-  const wantsCodingAgents = hasAnyCodingAgent(productSelection);
   const wantsDesktopApps = productSelection.desktop_apps;
   const installSegments = useMemo(
     () => activeOnboardingInstallSegments(productSelection),
     [productSelection]
   );
-  const showInstallOsToggle = wantsCodingAgents || wantsDesktopApps;
 
   useEffect(() => {
     if (step !== 2 || !wantsWeb || !user) return;
@@ -60,7 +56,7 @@ export function InstallMoreIntegrationsClient({ user }: { user: User }) {
         <h1 className="mt-2 text-2xl font-semibold text-ink sm:text-3xl">Install more integrations</h1>
         <p className="mt-2 text-sm text-muted">
           {step === 1
-            ? "Choose what you want to add. You can install browser and coding agents separately or together."
+            ? "Choose what you want to add. Desktop apps and coding agents install together in one command."
             : "Follow the steps below for each integration you selected."}
         </p>
       </div>
@@ -88,7 +84,7 @@ export function InstallMoreIntegrationsClient({ user }: { user: User }) {
         </div>
       ) : (
         <div className="mt-8 space-y-4">
-          {showInstallOsToggle ? (
+          {wantsDesktopApps ? (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-cream-dark px-4 py-3">
               <p className="text-sm font-semibold text-ink">Install Promptly</p>
               <OnboardingInstallOsToggle os={installOs} onChange={setInstallOs} />
@@ -96,7 +92,8 @@ export function InstallMoreIntegrationsClient({ user }: { user: User }) {
           ) : null}
 
           {wantsDesktopApps ? (
-            <OnboardingDesktopAppsInstall
+            <GetStartedPromptlyInstall
+              mode="combined"
               os={installOs}
               stepNumber={onboardingInstallStepNumber(installSegments, "desktop_apps")}
             />
@@ -106,13 +103,6 @@ export function InstallMoreIntegrationsClient({ user }: { user: User }) {
             <OnboardingBrowserExtensionInstall
               stepNumber={onboardingInstallStepNumber(installSegments, "web")}
               extensionDetected={extensionDetected}
-            />
-          ) : null}
-
-          {wantsCodingAgents ? (
-            <GetStartedAllAgentsInstall
-              os={installOs}
-              stepNumber={onboardingInstallStepNumber(installSegments, "coding_agents")}
             />
           ) : null}
 

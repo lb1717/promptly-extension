@@ -1,11 +1,9 @@
 "use client";
 
 import {
-  isCodingAgentsGroupSelected,
-  ONBOARDING_CODING_AGENTS_OPTION,
   ONBOARDING_DESKTOP_APPS_OPTION,
   ONBOARDING_WEB_OPTION,
-  setCodingAgentsGroupSelected,
+  setDesktopAppsSelected,
   type OnboardingProductSelection
 } from "@/lib/onboardingProducts";
 
@@ -47,8 +45,6 @@ export function GetStartedAiSelection({
   value: OnboardingProductSelection;
   onChange: (next: OnboardingProductSelection) => void;
 }) {
-  const codingAgentsChecked = isCodingAgentsGroupSelected(value);
-
   return (
     <div className="mt-6 space-y-4">
       <p className="text-sm text-muted">
@@ -57,7 +53,7 @@ export function GetStartedAiSelection({
       <div className="space-y-2">
         <SelectionRow
           checked={value.desktop_apps}
-          onChange={(checked) => onChange({ ...value, desktop_apps: checked })}
+          onChange={(checked) => onChange(setDesktopAppsSelected(value, checked))}
           label={ONBOARDING_DESKTOP_APPS_OPTION.label}
           description={ONBOARDING_DESKTOP_APPS_OPTION.description}
         />
@@ -66,12 +62,6 @@ export function GetStartedAiSelection({
           onChange={(checked) => onChange({ ...value, web: checked })}
           label={ONBOARDING_WEB_OPTION.label}
           description={ONBOARDING_WEB_OPTION.description}
-        />
-        <SelectionRow
-          checked={codingAgentsChecked}
-          onChange={(checked) => onChange(setCodingAgentsGroupSelected(value, checked))}
-          label={ONBOARDING_CODING_AGENTS_OPTION.label}
-          description={ONBOARDING_CODING_AGENTS_OPTION.description}
         />
       </div>
     </div>

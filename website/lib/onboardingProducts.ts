@@ -40,26 +40,19 @@ export const ONBOARDING_WEB_OPTION = {
   description: "ChatGPT, Claude, and Gemini in Chrome or Edge"
 };
 
-export const ONBOARDING_CODING_AGENTS_OPTION = {
-  label: "Coding Agents",
-  description: "Claude Code, Codex, Cursor"
-};
-
 export const ONBOARDING_DESKTOP_APPS_OPTION = {
   label: "Desktop Apps",
-  description: "Claude Cowork, ChatGPT Desktop Chat etc."
+  description: "Claude Code, Cowork, Codex, Cursor, etc."
 };
 
-export function isCodingAgentsGroupSelected(selected: OnboardingProductSelection): boolean {
-  return hasAnyCodingAgent(selected);
-}
-
-export function setCodingAgentsGroupSelected(
+/** Desktop apps and coding agents share one install command — keep agent flags in sync. */
+export function setDesktopAppsSelected(
   selected: OnboardingProductSelection,
   enabled: boolean
 ): OnboardingProductSelection {
   return {
     ...selected,
+    desktop_apps: enabled,
     claude_code: enabled,
     cursor: enabled,
     codex: enabled
