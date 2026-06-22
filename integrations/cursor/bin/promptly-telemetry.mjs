@@ -2683,6 +2683,14 @@ async function cmdLogin(flags) {
       const primary = readDevicePrimary() || writeDevicePrimary(getCredentials(tool), tool);
       console.log(`Connected ${tool} to the same Promptly account as ${anchorTool}: ${body.email || body.uid}`);
       console.log(`Device primary: ${primary.email || primary.uid} (first paired on this computer)`);
+      console.log("→ Syncing hooks + telemetry into agent runtime…");
+      const finalized = await finalizeAgentTracking(tool);
+      if (finalized.upload?.ok) {
+        console.log(`✓ Live tracking verified for ${tool}`);
+      } else {
+        console.error(`[promptly] Live upload check failed: ${finalized.upload?.error || "unknown"}`);
+      }
+      printAgentTrackingNextSteps(tool);
       console.log(`Verify: promptly-telemetry status --tool ${tool}`);
       return;
     } catch (err) {
@@ -2753,6 +2761,15 @@ async function cmdLogin(flags) {
   if (alignment.aligned.length) {
     console.log(`Also aligned: ${alignment.aligned.join(", ")}`);
   }
+  console.log("→ Syncing hooks + telemetry into agent runtime…");
+  const finalized = await finalizeAgentTracking(pairedTool);
+  if (finalized.upload?.ok) {
+    console.log(`✓ Live tracking verified for ${pairedTool}`);
+  } else {
+    console.error(`[promptly] Live upload check failed: ${finalized.upload?.error || "unknown"}`);
+    console.error(`Retry: promptly-telemetry test-send --tool ${pairedTool}`);
+  }
+  printAgentTrackingNextSteps(pairedTool);
   console.log(`Verify: promptly-telemetry status --tool ${pairedTool}`);
   console.log(
     "Pair other agents with: promptly-telemetry login --tool <cursor|codex|claude_code> --from-sibling"
@@ -2819,25 +2836,17 @@ async function verifyLiveTrackingForAllTools() {
   console.log("Step 4/4: Verifying live tracking (test upload per agent)…");
   const results = [];
   for (const tool of ALL_TOOLS) {
+    const creds = getCredentials(tool);
+    if (!creds?.device_token) {
+      results.push({ tool, ok: true, skipped: true, reason: "not_paired" });
+      continue;
+    }
     try {
-      const creds = getCredentials(tool);
-      if (!creds?.device_token) {
-        throw new Error("not paired");
+      const upload = await testSendForTool(tool);
+      if (!upload.ok) {
+        throw new Error(upload.error || "upload failed");
       }
-      enqueueEvent(tool, {
-        tool,
-        interaction_kind: "send",
-        composer_word_estimate: 1,
-        composer_char_estimate: 4,
-        client_occurred_ms: Date.now(),
-        model_label: "fix-account-verify",
-        model_bucket: "fix-account-verify"
-      });
-      const flush = await flushQueue(tool, TOOL_CLIENT[tool]);
-      if (!flush.ok) {
-        throw new Error(flush.error || "upload failed");
-      }
-      results.push({ tool, ok: true, written: flush.written ?? 1 });
+      results.push({ tool, ok: true, written: upload.written ?? 1 });
       console.log(`  OK ${tool}: live tracking OK`);
     } catch (err) {
       results.push({ tool, ok: false, error: String(err?.message || err) });
@@ -2915,7 +2924,9 @@ async function cmdFixAccount(flags) {
   }
 
   const liveChecks = await verifyLiveTrackingForAllTools();
-  const liveOk = liveChecks.every((row) => row.ok);
+  syncAgentRuntimeTelemetry();
+  const activeLiveChecks = liveChecks.filter((row) => !row.skipped);
+  const liveOk = activeLiveChecks.length === 0 || activeLiveChecks.every((row) => row.ok);
 
   const tools = ALL_TOOLS.map((tool) => {
     const creds = getCredentials(tool);
@@ -2928,8 +2939,8 @@ async function cmdFixAccount(flags) {
     };
   });
 
-  if (!tools.every((row) => row.connected && row.matches_primary)) {
-    console.error("[promptly] Warning: not all agents paired cleanly. Re-run fix-account with a fresh code.");
+  if (!tools.some((row) => row.connected && row.matches_primary && row.tool === anchorTool)) {
+    console.error("[promptly] Warning: anchor tool did not pair cleanly. Re-run fix-account with a fresh code.");
     process.exit(1);
   }
 
@@ -3401,19 +3412,17 @@ function cmdDiagnostics(flags) {
   console.log(JSON.stringify(output, null, 2));
 }
 
-async function cmdTestSend(flags) {
-  const tool = normalizeTool(flags.tool);
-  if (!tool) {
-    console.error("Usage: promptly-telemetry test-send --tool claude_code|cursor|codex");
-    process.exit(1);
+async function testSendForTool(tool) {
+  const normalized = normalizeTool(tool);
+  if (!normalized) {
+    return { ok: false, error: "invalid_tool" };
   }
-  const creds = getCredentials(tool);
+  const creds = getCredentials(normalized);
   if (!creds?.device_token) {
-    console.error(`Not connected for ${tool}. Run login --tool ${tool} first.`);
-    process.exit(1);
+    return { ok: false, error: "not_connected" };
   }
-  enqueueEvent(tool, {
-    tool,
+  enqueueEvent(normalized, {
+    tool: normalized,
     interaction_kind: "send",
     composer_word_estimate: 1,
     composer_char_estimate: 4,
@@ -3421,8 +3430,41 @@ async function cmdTestSend(flags) {
     model_label: "test-send",
     model_bucket: "test-send"
   });
-  const clientHeader = flags.client || TOOL_CLIENT[tool];
-  const result = await flushQueue(tool, clientHeader);
+  const result = await flushQueue(normalized, TOOL_CLIENT[normalized]);
+  return {
+    ok: Boolean(result.ok),
+    written: result.written ?? 0,
+    error: result.error || null
+  };
+}
+
+async function finalizeAgentTracking(tool) {
+  const normalized = normalizeTool(tool);
+  if (!normalized) {
+    return { ok: false, error: "invalid_tool" };
+  }
+  const sync = syncAgentRuntimeTelemetry();
+  const upload = await testSendForTool(normalized);
+  return { ok: upload.ok, sync, upload, tool: normalized };
+}
+
+function printAgentTrackingNextSteps(tool) {
+  if (tool === "claude_code") {
+    console.log("→ In Claude Code run /reload-plugins once, then send a test prompt.");
+  } else if (tool === "codex") {
+    console.log("→ Quit and reopen Codex, then send a test prompt.");
+  } else if (tool === "cursor") {
+    console.log("→ Reload Cursor (Cmd/Ctrl+Shift+P → Reload Window), allow hooks, then send a test prompt.");
+  }
+}
+
+async function cmdTestSend(flags) {
+  const tool = normalizeTool(flags.tool);
+  if (!tool) {
+    console.error("Usage: promptly-telemetry test-send --tool claude_code|cursor|codex");
+    process.exit(1);
+  }
+  const result = await testSendForTool(tool);
   if (!result.ok) {
     console.error(result.error || "Upload failed");
     process.exit(1);

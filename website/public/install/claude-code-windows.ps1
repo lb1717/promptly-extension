@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-$PluginPackUrl = if ($env:PROMPTLY_PLUGIN_PACK_URL) { $env:PROMPTLY_PLUGIN_PACK_URL } else { "https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.9" }
+$PluginPackUrl = if ($env:PROMPTLY_PLUGIN_PACK_URL) { $env:PROMPTLY_PLUGIN_PACK_URL } else { "https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.12" }
 $Integrations = Join-Path $env:USERPROFILE "integrations"
 $ZipPath = Join-Path $env:USERPROFILE "promptly.zip"
 $InstallBase = if ($env:PROMPTLY_INSTALL_BASE) { $env:PROMPTLY_INSTALL_BASE } else { "https://promptly-labs.com/install" }
@@ -45,6 +45,13 @@ if ($pluginList -notmatch "promptly-claude-code") {
   exit 1
 }
 
+Promptly-SyncClaudePluginCache | Out-Null
+$telemetryCli = Join-Path $Integrations "packages\telemetry-cli\bin\promptly-telemetry.mjs"
+if (Test-Path $telemetryCli) {
+  Write-Host "-> Syncing telemetry into Claude Code plugin cache..."
+  Promptly-RunNode -Args @($telemetryCli, "sync-runtimes") -AllowFailure | Out-Null
+}
+
 Write-Host ""
 Write-Host "Promptly installed for Claude Code"
-Write-Host "  Run /reload-plugins once, then type: /promptly your draft here"
+Write-Host "  After pairing: run /reload-plugins once, then send a test prompt."

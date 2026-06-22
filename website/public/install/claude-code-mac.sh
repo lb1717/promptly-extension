@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PLUGIN_PACK_URL="${PROMPTLY_PLUGIN_PACK_URL:-https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.7}"
+PLUGIN_PACK_URL="${PROMPTLY_PLUGIN_PACK_URL:-https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.12}"
 INTEGRATIONS="${HOME}/integrations"
 PROMPTLY_INSTALL_BASE="${PROMPTLY_INSTALL_BASE:-https://promptly-labs.com/install}"
 
@@ -71,7 +71,13 @@ if [[ ! -f "${HOME}/.claude/commands/promptly.md" ]]; then
 fi
 echo "✓ Hooks, MCP, and /promptly verified for Claude Code"
 
+TELEMETRY_CLI="${INTEGRATIONS}/packages/telemetry-cli/bin/promptly-telemetry.mjs"
+if [[ -f "${TELEMETRY_CLI}" ]]; then
+  echo "→ Syncing telemetry into Claude Code plugin cache…"
+  node "${TELEMETRY_CLI}" sync-runtimes >/dev/null 2>&1 || true
+fi
+
 echo ""
 echo "✓ Promptly installed for Claude Code"
-echo "  Run /reload-plugins once, then type: /promptly your draft here"
+echo "  After pairing: run /reload-plugins once, then send a test prompt."
 echo "  Re-pair only if you have not connected this agent yet (integrations page)."

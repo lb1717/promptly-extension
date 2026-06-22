@@ -84,7 +84,8 @@ function CodingAgentPanel({
           </p>
           <CopyBlock lines={fullSetupCommands(os, tool, pairCode)} onCopy={() => onCommandCopy?.(tool)} />
           <p className="text-[11px] text-faint">
-            Success: &quot;{installSuccessHint(tool)}&quot; and {toolStatusSnippet(tool)} in the status JSON
+            Success: &quot;{installSuccessHint(tool)}&quot;, &quot;Live tracking verified&quot;, and{" "}
+            {toolStatusSnippet(tool)} in the status JSON
           </p>
         </>
       ) : (
