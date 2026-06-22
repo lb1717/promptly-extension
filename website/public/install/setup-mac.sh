@@ -35,4 +35,5 @@ promptly_unzip_plugin_pack "${HOME}/promptly.zip" "${HOME}"
 promptly_verify_plugin_pack "${INTEGRATIONS}" || exit 1
 
 promptly_install_all_agents "${INTEGRATIONS}" || exit 1
-promptly_finalize_with_pair_code "${CODE}" "${INTEGRATIONS}"
+promptly_finalize_with_pair_code "${CODE}" "${INTEGRATIONS}" || exit 1
+promptly_print_install_success

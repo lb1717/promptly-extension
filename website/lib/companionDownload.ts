@@ -31,7 +31,8 @@ const FALLBACK_ASSETS: CompanionAssetUrls = {
 /** macOS bundle path after drag-to-Applications (matches electron-builder productName). */
 export const PROMPTLY_MAC_APP_PATH = "/Applications/Promptly Companion.app";
 
-export const PROMPTLY_MAC_INSTALL_COMMAND = `xattr -cr "${PROMPTLY_MAC_APP_PATH}"`;
+export const PROMPTLY_MAC_INSTALL_COMMAND =
+  'xattr -cr "/Applications/Promptly Companion.app" 2>/dev/null; xattr -cr "$HOME/Applications/Promptly Companion.app" 2>/dev/null';
 
 export const PROMPTLY_MAC_DMG_FALLBACK_URL = FALLBACK_ASSETS.macDmg!;
 

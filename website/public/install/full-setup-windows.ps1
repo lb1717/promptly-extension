@@ -36,6 +36,7 @@ function Setup-PromptlyFull {
   Invoke-Expression ([string]$setupText.TrimStart([char]0xFEFF))
   Setup-PromptlyAgents -Code $Code
   Promptly-InstallCompanionWindows
+  Write-Host "Promptly Successfully Installed"
 }
 
 if ($Code) {

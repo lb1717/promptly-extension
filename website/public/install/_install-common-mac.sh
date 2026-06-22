@@ -17,6 +17,10 @@ promptly_fail() {
   echo "✗ $1" >&2
 }
 
+promptly_print_install_success() {
+  echo "Promptly Successfully Installed"
+}
+
 promptly_normalize_pair_code() {
   printf '%s' "${1:-}" | tr '[:lower:]' '[:upper:]' | tr -cd 'A-Z0-9'
 }

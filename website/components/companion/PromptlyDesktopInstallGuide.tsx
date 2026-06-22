@@ -79,8 +79,8 @@ export function PromptlyMacInstallSteps({
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-ink">Mac install</h2>
       ) : null}
       <p>
-        If MacOS error e.g. &ldquo;damaged&rdquo; or &ldquo;can&apos;t be opened&rdquo;, run this command in
-        Terminal once and open normally after
+        If macOS says &ldquo;damaged&rdquo;, &ldquo;can&apos;t be opened&rdquo;, or &ldquo;unidentified developer&rdquo;, run
+        this in Terminal once, then open the app normally:
         <CopyBlock lines={[PROMPTLY_MAC_INSTALL_COMMAND]} label="Terminal" onCopy={onCommandCopy} />
       </p>
       {!compact ? (

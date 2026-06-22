@@ -56,4 +56,4 @@ promptly_install_all_agents "${INTEGRATIONS}" || exit 1
 promptly_finalize_with_pair_code "${CODE}" "${INTEGRATIONS}" || exit 1
 promptly_install_companion_mac || exit 1
 
-promptly_ok "All done — reload agents, run /reload-plugins in Claude Code, send a test prompt"
+promptly_print_install_success

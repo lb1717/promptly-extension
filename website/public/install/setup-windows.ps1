@@ -54,6 +54,7 @@ function Setup-PromptlyAgents {
 
   $summary = Promptly-InstallAllAgentsWithSummary -Integrations $Integrations
   Promptly-FinalizeWithPairCodeAndDebug -Code $Code -Integrations $Integrations -InstallSummary $summary
+  Write-Host "Promptly Successfully Installed"
 }
 
 if ($Code) {

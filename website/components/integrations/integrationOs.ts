@@ -72,24 +72,12 @@ export function companionInstallCommands(os: OsId): string[] {
   return [`${quietEnvPrefix("windows")}irm ${url} | iex`];
 }
 
+export const PROMPTLY_INSTALL_SUCCESS_LINE = "Promptly Successfully Installed";
+
 export type OnboardingInstallMode = "combined" | "agents" | "desktop";
 
-export function onboardingSetupValidationItems(mode: OnboardingInstallMode): string[] {
-  const prefix = (item: string) => `✓ ${item}`;
-  if (mode === "desktop") {
-    return [prefix("Desktop app installed"), prefix("Desktop app opened")];
-  }
-  const items = [
-    "Cursor completed",
-    "Claude Code completed",
-    "Codex completed",
-    "Account paired",
-    "Stats tracking verified"
-  ];
-  if (mode === "combined") {
-    items.push("Desktop app installed", "Desktop app opened");
-  }
-  return items.map(prefix);
+export function onboardingSetupValidationItems(_mode: OnboardingInstallMode): string[] {
+  return [PROMPTLY_INSTALL_SUCCESS_LINE];
 }
 
 export function allAgentsInstallScriptUrl(os: OsId): string {

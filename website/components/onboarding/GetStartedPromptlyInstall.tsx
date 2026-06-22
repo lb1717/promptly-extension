@@ -11,6 +11,7 @@ import {
 } from "@/components/integrations/integrationOs";
 import { useAllAgentsPairing } from "@/components/integrations/integrationPairing";
 import { StepValidation } from "@/components/integrations/integrationUi";
+import { PROMPTLY_MAC_INSTALL_COMMAND } from "@/lib/companionDownload";
 import { useEffect, useRef } from "react";
 
 function stepTitle(mode: OnboardingInstallMode): string {
@@ -31,6 +32,7 @@ export function GetStartedPromptlyInstall({
   stepNumber?: number;
 }) {
   const needsPairCode = mode === "combined" || mode === "agents";
+  const showsMacDesktopFix = os === "mac" && (mode === "combined" || mode === "desktop");
   const { loading, hasAllCodes, pairCodes, busy, error, signInAndConnect, refreshCodes } =
     useAllAgentsPairing();
   const autoGenAttempted = useRef(false);
@@ -83,6 +85,15 @@ export function GetStartedPromptlyInstall({
         <>
           <CopyBlock lines={commandLines} label={terminalLabel} onCopy={onCommandCopy} />
           <StepValidation items={onboardingSetupValidationItems(mode)} compact />
+          {showsMacDesktopFix ? (
+            <div className="mt-3 text-xs text-muted">
+              <p>
+                If macOS says &ldquo;damaged&rdquo; or &ldquo;unidentified developer&rdquo; when opening the desktop
+                app, run this in Terminal:
+              </p>
+              <CopyBlock lines={[PROMPTLY_MAC_INSTALL_COMMAND]} label="Terminal" />
+            </div>
+          ) : null}
           {mode !== "desktop" ? (
             <p className="mt-2 text-xs text-muted">
               <span className="font-medium text-ink">After install:</span>{" "}
@@ -90,11 +101,7 @@ export function GetStartedPromptlyInstall({
                 ? "Allow hooks when asked. Quit and reopen Codex. Reload Cursor. Run /reload-plugins in Claude Code."
                 : "Allow hooks when asked. In Codex run /hooks and trust Promptly if needed. Run /reload-plugins in Claude Code."}
             </p>
-          ) : (
-            <p className="mt-2 text-xs text-muted">
-              First launch only: if macOS still blocks the app, right-click it in Applications → Open.
-            </p>
-          )}
+          ) : null}
         </>
       ) : null}
 

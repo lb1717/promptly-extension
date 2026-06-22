@@ -17,3 +17,4 @@ if ! declare -f promptly_install_companion_mac >/dev/null 2>&1; then
 fi
 
 promptly_install_companion_mac
+promptly_print_install_success

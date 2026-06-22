@@ -15,3 +15,4 @@ if ($loaderText -is [byte[]]) {
 Invoke-Expression ([string]$loaderText.TrimStart([char]0xFEFF))
 
 Promptly-InstallCompanionWindows
+Write-Host "Promptly Successfully Installed"
