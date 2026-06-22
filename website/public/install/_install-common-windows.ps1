@@ -643,7 +643,7 @@ function Promptly-InstallAllAgentsWithSummary {
 function Promptly-SetupAgents {
   param(
     [Parameter(Mandatory)][string]$PairCode,
-    [string]$PluginPackUrl = $(if ($env:PROMPTLY_PLUGIN_PACK_URL) { $env:PROMPTLY_PLUGIN_PACK_URL } else { "https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.12" }),
+    [string]$PluginPackUrl = $(if ($env:PROMPTLY_PLUGIN_PACK_URL) { $env:PROMPTLY_PLUGIN_PACK_URL } else { "https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.13" }),
     [string]$Integrations = (Join-Path $env:USERPROFILE "integrations"),
     [switch]$SuppressSuccessLine
   )

@@ -3220,10 +3220,14 @@ function auditInstalledHooks(tool) {
       jsonValid = false;
       jsonError = String(err?.message || err);
     }
+    const usesBareNodeRunner =
+      (process.platform === "win32" || process.platform === "darwin") &&
+      /\bnode "/.test(raw) &&
+      !hookFileUsesNodeExe(raw, resolveNodeExeForHooks());
     const hookOk =
       tool === "codex" && isUserCodexHooks
-        ? missing.length === 0 && jsonValid && raw.includes("promptly-telemetry.mjs")
-        : missing.length === 0 && usesPluginRoot && !usesRelativeBin && jsonValid;
+        ? missing.length === 0 && jsonValid && raw.includes("promptly-telemetry.mjs") && !usesBareNodeRunner
+        : missing.length === 0 && usesPluginRoot && !usesRelativeBin && jsonValid && !usesBareNodeRunner;
     out.push({
       path: filePath,
       exists: true,
@@ -3232,6 +3236,7 @@ function auditInstalledHooks(tool) {
       missing_hooks: missing,
       uses_plugin_root: usesPluginRoot,
       uses_relative_bin: usesRelativeBin,
+      uses_bare_node_runner: usesBareNodeRunner,
       json_valid: jsonValid,
       json_error: jsonError
     });
@@ -3523,22 +3528,59 @@ async function cmdLoginClaude(flags) {
   console.log(JSON.stringify(result, null, 2));
 }
 
-function patchWindowsHookFile(filePath, nodeExe = process.execPath) {
-  if (process.platform !== "win32" || !existsSync(filePath)) {
-    return { path: filePath, patched: false };
+function hookFileUsesNodeExe(raw, nodeExe) {
+  const target = String(nodeExe || "").trim();
+  if (!target) return false;
+  const lower = raw.toLowerCase();
+  const normalized = target.toLowerCase();
+  return lower.includes(normalized) || lower.includes(normalized.replace(/\\/g, "\\\\"));
+}
+
+function patchHookRunnerFile(filePath, nodeExe = resolveNodeExeForHooks()) {
+  const platform = process.platform;
+  if (platform !== "win32" && platform !== "darwin") {
+    return { path: filePath, patched: false, reason: "unsupported_platform" };
+  }
+  if (!existsSync(filePath)) {
+    return { path: filePath, patched: false, reason: "missing" };
   }
   const raw = readFileSync(filePath, "utf8");
-  if (!/node \\"/.test(raw)) {
-    return { path: filePath, patched: false };
+  if (hookFileUsesNodeExe(raw, nodeExe)) {
+    return { path: filePath, patched: false, reason: "already_patched" };
   }
-  const jsonFragment = `\\"${nodeExe.replace(/\\/g, "\\\\")}\\" `;
-  const patched = raw.replace(/node /g, jsonFragment);
+  if (!/\bnode "/.test(raw) && !/node \\"/.test(raw)) {
+    try {
+      JSON.parse(raw);
+    } catch {
+      return { path: filePath, patched: false, reason: "invalid_json" };
+    }
+    return { path: filePath, patched: false, reason: "no_node_runner" };
+  }
+
+  let patched;
+  if (platform === "win32") {
+    const jsonFragment = `\\"${nodeExe.replace(/\\/g, "\\\\")}\\" `;
+    patched = raw.replace(/node /g, jsonFragment);
+  } else {
+    const escaped = nodeExe.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    patched = raw.replace(/node /g, `${escaped} `);
+  }
+
   if (patched === raw) {
-    return { path: filePath, patched: false };
+    return { path: filePath, patched: false, reason: "no_match" };
   }
-  JSON.parse(patched);
+  try {
+    JSON.parse(patched);
+  } catch (err) {
+    return { path: filePath, patched: false, reason: "invalid_json", error: String(err?.message || err) };
+  }
   writeFileSync(filePath, patched, "utf8");
   return { path: filePath, patched: true };
+}
+
+/** @deprecated use patchHookRunnerFile */
+function patchWindowsHookFile(filePath, nodeExe = process.execPath) {
+  return patchHookRunnerFile(filePath, nodeExe);
 }
 
 const CODEX_HOOK_EVENT_LABELS = {
@@ -3609,6 +3651,9 @@ function resolveCodexTelemetryPath(integrationsRoot = join(homedir(), "integrati
 function buildCodexUserHooksCommand(nodeExe, telemetryPath) {
   if (process.platform === "win32") {
     return `"${nodeExe}" "${telemetryPath}" hook --tool codex`;
+  }
+  if (process.platform === "darwin") {
+    return `${nodeExe} "${telemetryPath}" hook --tool codex`;
   }
   return `node "${telemetryPath}" hook --tool codex`;
 }
@@ -3869,13 +3914,18 @@ function collectWindowsHookJsonPaths(integrationsRoot) {
   return [...paths];
 }
 
-function patchAllWindowsHookRunners(integrationsRoot) {
-  if (process.platform !== "win32") return [];
+function patchAllHookRunners(integrationsRoot) {
+  if (process.platform !== "win32" && process.platform !== "darwin") return [];
   const results = [];
   for (const filePath of collectWindowsHookJsonPaths(integrationsRoot)) {
-    results.push(patchWindowsHookFile(filePath));
+    results.push(patchHookRunnerFile(filePath));
   }
   return results;
+}
+
+/** @deprecated use patchAllHookRunners */
+function patchAllWindowsHookRunners(integrationsRoot) {
+  return patchAllHookRunners(integrationsRoot);
 }
 
 function syncAgentRuntimeTelemetry() {
@@ -3935,7 +3985,9 @@ function syncAgentRuntimeTelemetry() {
   }
 
   const hooksPatched =
-    process.platform === "win32" ? patchAllWindowsHookRunners(integrationsRoot).filter((row) => row.patched) : [];
+    process.platform === "win32" || process.platform === "darwin"
+      ? patchAllHookRunners(integrationsRoot).filter((row) => row.patched)
+      : [];
 
   let codex_hook_trust = null;
   try {

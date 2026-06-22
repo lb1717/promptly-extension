@@ -19,26 +19,35 @@ function hookFileUsesNodeExe(raw, nodeExe) {
 }
 
 export function patchWindowsHookFile(filePath, nodeExe = resolveNodeExe()) {
-  if (process.platform !== "win32") {
-    return { path: filePath, patched: false, reason: "not_win32" };
+  if (process.platform !== "win32" && process.platform !== "darwin") {
+    return { path: filePath, patched: false, reason: "unsupported_platform" };
   }
   if (!existsSync(filePath)) {
     return { path: filePath, patched: false, reason: "missing" };
   }
   const raw = readFileSync(filePath, "utf8");
-  if (!/node \\"/.test(raw)) {
+  const target = String(nodeExe || "").trim();
+  if (target && raw.toLowerCase().includes(target.toLowerCase())) {
+    return { path: filePath, patched: false, reason: "already_patched" };
+  }
+  if (!/\bnode "/.test(raw) && !/node \\"/.test(raw)) {
     try {
       JSON.parse(raw);
-      if (hookFileUsesNodeExe(raw, nodeExe)) {
-        return { path: filePath, patched: false, reason: "already_patched" };
-      }
+      return { path: filePath, patched: false, reason: "no_node_runner" };
     } catch {
       return { path: filePath, patched: false, reason: "invalid_json" };
     }
-    return { path: filePath, patched: false, reason: "no_node_runner" };
   }
-  const jsonFragment = `\\"${nodeExe.replace(/\\/g, "\\\\")}\\" `;
-  const patched = raw.replace(/node /g, jsonFragment);
+
+  let patched;
+  if (process.platform === "win32") {
+    const jsonFragment = `\\"${nodeExe.replace(/\\/g, "\\\\")}\\" `;
+    patched = raw.replace(/node /g, jsonFragment);
+  } else {
+    const escaped = nodeExe.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    patched = raw.replace(/node /g, `${escaped} `);
+  }
+
   if (patched === raw) {
     return { path: filePath, patched: false, reason: "no_match" };
   }
@@ -56,7 +65,6 @@ export function collectWindowsHookJsonPaths(integrations = join(homedir(), "inte
   ]) {
     paths.add(join(integrations, rel));
   }
-  paths.add(join(homedir(), ".codex/hooks.json"));
   paths.add(join(homedir(), ".cursor/plugins/local/promptly-cursor/hooks/hooks.json"));
 
   for (const [cacheRoot, rels] of [
@@ -107,7 +115,7 @@ function runCli() {
     }
   }
   if (!patched) {
-    console.log("[promptly] no Windows hook files needed patching");
+    console.log("[promptly] no hook files needed patching");
   }
 }
 
