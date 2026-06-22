@@ -80,11 +80,19 @@ promptly_claude_plugin_reinstall() {
   set +e
   if claude plugin list 2>/dev/null | grep -q 'promptly-claude-code'; then
     promptly_detail "→ Removing previous Promptly Claude Code plugin…"
-    claude plugin uninstall promptly-claude-code@promptly-labs 2>/dev/null
+    if promptly_is_quiet; then
+      claude plugin uninstall promptly-claude-code@promptly-labs 2>/dev/null
+    else
+      claude plugin uninstall promptly-claude-code@promptly-labs 2>/dev/null
+    fi
   fi
   set -e
   promptly_detail "→ Installing fresh Promptly plugin…"
-  claude plugin install promptly-claude-code@promptly-labs
+  if promptly_is_quiet; then
+    claude plugin install promptly-claude-code@promptly-labs >/dev/null 2>&1
+  else
+    claude plugin install promptly-claude-code@promptly-labs
+  fi
 }
 
 promptly_codex_marketplace_add() {
@@ -110,13 +118,23 @@ promptly_codex_plugin_reinstall() {
   set +e
   if codex plugin list 2>/dev/null | grep -q 'promptly-codex'; then
     promptly_detail "→ Removing previous Promptly Codex plugin…"
-    codex plugin remove promptly-codex@promptly-labs 2>/dev/null \
-      || codex plugin remove promptly-codex --marketplace promptly-labs 2>/dev/null
+    if promptly_is_quiet; then
+      codex plugin remove promptly-codex@promptly-labs 2>/dev/null \
+        || codex plugin remove promptly-codex --marketplace promptly-labs 2>/dev/null
+    else
+      codex plugin remove promptly-codex@promptly-labs 2>/dev/null \
+        || codex plugin remove promptly-codex --marketplace promptly-labs 2>/dev/null
+    fi
   fi
   set -e
   promptly_detail "→ Installing fresh Promptly plugin…"
-  codex plugin add promptly-codex@promptly-labs 2>/dev/null \
-    || codex plugin install promptly-codex@promptly-labs
+  if promptly_is_quiet; then
+    codex plugin add promptly-codex@promptly-labs >/dev/null 2>&1 \
+      || codex plugin install promptly-codex@promptly-labs >/dev/null 2>&1
+  else
+    codex plugin add promptly-codex@promptly-labs 2>/dev/null \
+      || codex plugin install promptly-codex@promptly-labs
+  fi
 }
 
 promptly_sync_codex_plugin_cache() {
@@ -185,7 +203,7 @@ promptly_sync_claude_code_command_files() {
   if [[ -f "${plugin_dir}/skill/SKILL.md" ]]; then
     cp "${plugin_dir}/skill/SKILL.md" "${HOME}/.claude/skills/promptly/SKILL.md"
   fi
-  echo "→ Installed /promptly for Claude Code (~/.claude/commands + skills/promptly)"
+  promptly_detail "→ Installed /promptly for Claude Code (~/.claude/commands + skills/promptly)"
 }
 
 promptly_sync_cursor_command_files() {
@@ -198,7 +216,7 @@ promptly_sync_cursor_command_files() {
   mkdir -p "${HOME}/.cursor/commands"
   cp "${src}" "${HOME}/.cursor/commands/promptly.md"
   cp "${src}" "${plugin_dir}/commands/promptly.md"
-  echo "→ Installed /promptly for Cursor (~/.cursor/commands/promptly.md)"
+  promptly_detail "→ Installed /promptly for Cursor (~/.cursor/commands/promptly.md)"
 }
 
 promptly_install_codex_skill() {
@@ -211,13 +229,13 @@ promptly_install_codex_skill() {
   fi
   mkdir -p "${HOME}/.codex/skills/promptly"
   cp "${skill_src}" "${skill_dest}"
-  echo "→ Installed /promptly for Codex (~/.codex/skills/promptly/SKILL.md)"
+  promptly_detail "→ Installed /promptly for Codex (~/.codex/skills/promptly/SKILL.md)"
 }
 
 promptly_cursor_plugin_reinstall() {
   local integrations="${1:-${HOME}/integrations}"
   local dest="${HOME}/.cursor/plugins/local/promptly-cursor"
-  echo "→ Removing previous Promptly Cursor plugin…"
+  promptly_detail "→ Removing previous Promptly Cursor plugin…"
   rm -rf "${dest}"
   mkdir -p "${HOME}/.cursor/plugins/local"
   cp -R "${integrations}/cursor" "${dest}"
@@ -241,16 +259,16 @@ promptly_setup_npm_global_path() {
       echo "export PATH=\"${user_prefix}/bin:\$PATH\""
     } >>"${profile}"
   fi
-  echo "  Using user-level npm prefix (${user_prefix}) — global /usr/local is not writable"
+  promptly_detail "  Using user-level npm prefix (${user_prefix}) — global /usr/local is not writable"
 }
 
 promptly_ensure_claude_cli() {
   promptly_setup_npm_global_path
   if command -v claude >/dev/null 2>&1; then
-    claude --version
+    promptly_detail "$(claude --version 2>/dev/null || true)"
     return 0
   fi
-  echo "→ Claude Code CLI not found; installing @anthropic-ai/claude-code…"
+  promptly_detail "→ Claude Code CLI not found; installing @anthropic-ai/claude-code…"
   if ! npm install -g @anthropic-ai/claude-code; then
     echo "⚠ Could not install Claude Code CLI — skip Claude Code or install it manually"
     return 1
@@ -260,17 +278,17 @@ promptly_ensure_claude_cli() {
     echo "⚠ Claude Code CLI still not on PATH after install"
     return 1
   fi
-  claude --version
+  promptly_detail "$(claude --version 2>/dev/null || true)"
   return 0
 }
 
 promptly_ensure_codex_cli() {
   promptly_setup_npm_global_path
   if command -v codex >/dev/null 2>&1; then
-    codex --version
+    promptly_detail "$(codex --version 2>/dev/null || true)"
     return 0
   fi
-  echo "→ Codex CLI not found; installing @openai/codex…"
+  promptly_detail "→ Codex CLI not found; installing @openai/codex…"
   if ! npm install -g @openai/codex; then
     echo "⚠ Could not install Codex CLI — skip Codex or install it manually"
     return 1
@@ -280,7 +298,7 @@ promptly_ensure_codex_cli() {
     echo "⚠ Codex CLI still not on PATH after install"
     return 1
   fi
-  codex --version
+  promptly_detail "$(codex --version 2>/dev/null || true)"
   return 0
 }
 
@@ -598,12 +616,16 @@ promptly_install_all_agents() {
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   else
     local label
-    for label in "${_skipped[@]}"; do
-      promptly_ok "${label} skipped (CLI not installed)"
-    done
-    for label in "${_failed[@]}"; do
-      echo "✗ ${label} failed" >&2
-    done
+    if ((${#_skipped[@]})); then
+      for label in "${_skipped[@]}"; do
+        promptly_ok "${label} skipped (CLI not installed)"
+      done
+    fi
+    if ((${#_failed[@]})); then
+      for label in "${_failed[@]}"; do
+        echo "✗ ${label} failed" >&2
+      done
+    fi
   fi
 
   ((${#_installed[@]} == 0)) && return 1
