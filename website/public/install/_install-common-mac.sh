@@ -13,6 +13,53 @@ promptly_ok() {
   echo "✓ $1"
 }
 
+promptly_fail() {
+  echo "✗ $1" >&2
+}
+
+promptly_normalize_pair_code() {
+  printf '%s' "${1:-}" | tr '[:lower:]' '[:upper:]' | tr -cd 'A-Z0-9'
+}
+
+promptly_validate_pair_code() {
+  local normalized
+  normalized="$(promptly_normalize_pair_code "$1")"
+  if [[ ${#normalized} -ne 8 ]]; then
+    promptly_fail "Pairing code must be 8 letters/numbers (check https://promptly-labs.com/integrations)"
+    return 1
+  fi
+  printf '%s' "${normalized}"
+}
+
+promptly_require_cmd() {
+  local name="$1"
+  if command -v "${name}" >/dev/null 2>&1; then
+    return 0
+  fi
+  promptly_fail "${name} is required but not found."
+  return 1
+}
+
+promptly_run_fix_account() {
+  local code="$1"
+  local cli="$2"
+  local normalized
+  normalized="$(promptly_validate_pair_code "${code}")" || return 1
+  set +e
+  if promptly_is_quiet; then
+    node "${cli}" fix-account --quiet "${normalized}"
+  else
+    node "${cli}" fix-account "${normalized}"
+  fi
+  local exit_code=$?
+  set -e
+  if [[ $exit_code -ne 0 ]]; then
+    promptly_fail "Pairing failed — get a fresh code at https://promptly-labs.com/integrations"
+    return 1
+  fi
+  return 0
+}
+
 promptly_unzip_plugin_pack() {
   local zip_path="${1:-${HOME}/promptly.zip}"
   local dest="${2:-${HOME}}"
@@ -81,9 +128,9 @@ promptly_claude_plugin_reinstall() {
   if claude plugin list 2>/dev/null | grep -q 'promptly-claude-code'; then
     promptly_detail "→ Removing previous Promptly Claude Code plugin…"
     if promptly_is_quiet; then
-      claude plugin uninstall promptly-claude-code@promptly-labs 2>/dev/null
+      claude plugin uninstall promptly-claude-code@promptly-labs >/dev/null 2>&1 || true
     else
-      claude plugin uninstall promptly-claude-code@promptly-labs 2>/dev/null
+      claude plugin uninstall promptly-claude-code@promptly-labs 2>/dev/null || true
     fi
   fi
   set -e
@@ -119,11 +166,11 @@ promptly_codex_plugin_reinstall() {
   if codex plugin list 2>/dev/null | grep -q 'promptly-codex'; then
     promptly_detail "→ Removing previous Promptly Codex plugin…"
     if promptly_is_quiet; then
-      codex plugin remove promptly-codex@promptly-labs 2>/dev/null \
-        || codex plugin remove promptly-codex --marketplace promptly-labs 2>/dev/null
+      codex plugin remove promptly-codex@promptly-labs >/dev/null 2>&1 \
+        || codex plugin remove promptly-codex --marketplace promptly-labs >/dev/null 2>&1 || true
     else
       codex plugin remove promptly-codex@promptly-labs 2>/dev/null \
-        || codex plugin remove promptly-codex --marketplace promptly-labs 2>/dev/null
+        || codex plugin remove promptly-codex --marketplace promptly-labs 2>/dev/null || true
     fi
   fi
   set -e
@@ -407,6 +454,19 @@ promptly_refresh_telemetry_cli() {
   fi
 }
 
+promptly_pull_latest_telemetry_cli() {
+  local integrations="${1:-${HOME}/integrations}"
+  local dest="${integrations}/packages/telemetry-cli/bin/promptly-telemetry.mjs"
+  local raw_url="https://raw.githubusercontent.com/lb1717/promptly-extension/main/integrations/packages/telemetry-cli/bin/promptly-telemetry.mjs"
+  mkdir -p "$(dirname "${dest}")"
+  if curl -fsSL "${raw_url}" -o "${dest}.tmp" 2>/dev/null; then
+    mv "${dest}.tmp" "${dest}"
+    return 0
+  fi
+  rm -f "${dest}.tmp"
+  return 1
+}
+
 promptly_prepare_plugin_pack() {
   local integrations="${1:-${HOME}/integrations}"
   promptly_refresh_telemetry_cli "${integrations}"
@@ -661,17 +721,16 @@ promptly_finalize_with_pair_code() {
   local integrations="${2:-${HOME}/integrations}"
   local cli="${integrations}/packages/telemetry-cli/bin/promptly-telemetry.mjs"
   if [[ ! -f "${cli}" ]]; then
-    echo "✗ Could not install telemetry CLI from plugin pack."
+    promptly_fail "Could not install telemetry CLI from plugin pack."
     return 1
   fi
+  promptly_run_fix_account "${code}" "${cli}" || return 1
   if promptly_is_quiet; then
-    node "${cli}" fix-account --quiet "${code}"
-    promptly_sync_all_agent_runtimes "${integrations}" >/dev/null 2>&1 || promptly_sync_all_agent_runtimes "${integrations}"
-    promptly_sync_subscription_usage "${integrations}"
+    promptly_sync_all_agent_runtimes "${integrations}" >/dev/null 2>&1 \
+      || promptly_sync_all_agent_runtimes "${integrations}" || return 1
+    promptly_sync_subscription_usage "${integrations}" || true
     return 0
   fi
-  promptly_detail "→ Pairing all agents, merging stats, and verifying live uploads…"
-  node "${cli}" fix-account "${code}"
   promptly_detail "→ Syncing hooks + telemetry into Claude Code, Cursor, and Codex runtimes…"
   promptly_sync_all_agent_runtimes "${integrations}"
   promptly_sync_subscription_usage "${integrations}"
@@ -680,12 +739,35 @@ promptly_finalize_with_pair_code() {
   echo "  Stats go to the email shown above on https://promptly-labs.com/account/statistics"
 }
 
+promptly_pick_companion_app_dir() {
+  local system_dir="/Applications"
+  local system_apps="${system_dir}/Promptly Companion.app"
+  local user_apps="${HOME}/Applications/Promptly Companion.app"
+  if [[ -d "${system_apps}" ]]; then
+    printf '%s' "${system_apps}"
+    return 0
+  fi
+  if [[ -w "${system_dir}" ]] 2>/dev/null; then
+    printf '%s' "${system_apps}"
+    return 0
+  fi
+  mkdir -p "${HOME}/Applications"
+  printf '%s' "${user_apps}"
+}
+
 promptly_install_companion_mac() {
-  local app_path="/Applications/Promptly Companion.app"
+  local app_path
+  app_path="$(promptly_pick_companion_app_dir)"
   local api_url="https://promptly-labs.com/api/companion/download"
   local fallback="https://github.com/lb1717/promptly-extension/releases/download/companion-v0.2.0/Promptly-Companion-0.2.0-mac.dmg"
   local dmg_url="${PROMPTLY_COMPANION_DMG_URL:-}"
-  local tmp_dmg mount_vol src_app
+  local tmp_dmg mount_point src_app attempt
+
+  promptly_require_cmd curl || return 1
+  if ! command -v hdiutil >/dev/null 2>&1; then
+    promptly_fail "hdiutil is required to install the desktop app on macOS."
+    return 1
+  fi
 
   if [[ -z "${dmg_url}" ]]; then
     local json
@@ -697,28 +779,54 @@ promptly_install_companion_mac() {
   [[ -n "${dmg_url}" ]] || dmg_url="${fallback}"
 
   tmp_dmg="$(mktemp /tmp/promptly-companion.XXXXXX.dmg)"
-  curl -fsSL -o "${tmp_dmg}" "${dmg_url}"
+  mount_point="$(mktemp -d /tmp/promptly-mount.XXXXXX)"
 
-  mount_vol="$(hdiutil attach "${tmp_dmg}" -nobrowse 2>/dev/null | grep -o '/Volumes/[^[:space:]]*' | head -1 || true)"
-  if [[ -z "${mount_vol}" || ! -d "${mount_vol}" ]]; then
+  for attempt in 1 2; do
+    if curl -fsSL -o "${tmp_dmg}" "${dmg_url}"; then
+      break
+    fi
+    if [[ $attempt -eq 2 ]]; then
+      rm -f "${tmp_dmg}"
+      rm -rf "${mount_point}"
+      promptly_fail "Could not download Promptly desktop app."
+      return 1
+    fi
+    sleep 1
+  done
+
+  if ! hdiutil attach "${tmp_dmg}" -nobrowse -readonly -mountpoint "${mount_point}" -quiet 2>/dev/null; then
     rm -f "${tmp_dmg}"
-    echo "✗ Could not mount Promptly desktop installer."
+    rm -rf "${mount_point}"
+    promptly_fail "Could not mount Promptly desktop installer."
     return 1
   fi
 
-  src_app="${mount_vol}/Promptly Companion.app"
+  src_app="${mount_point}/Promptly Companion.app"
   if [[ ! -d "${src_app}" ]]; then
-    hdiutil detach "${mount_vol}" -quiet 2>/dev/null || true
+    hdiutil detach "${mount_point}" -quiet 2>/dev/null || true
     rm -f "${tmp_dmg}"
-    echo "✗ Promptly Companion.app not found in the installer."
+    rm -rf "${mount_point}"
+    promptly_fail "Promptly Companion.app not found in the installer."
     return 1
   fi
 
   rm -rf "${app_path}"
-  cp -R "${src_app}" "/Applications/"
-  hdiutil detach "${mount_vol}" -quiet 2>/dev/null || hdiutil detach "${mount_vol}" -force -quiet 2>/dev/null || true
+  if ! cp -R "${src_app}" "$(dirname "${app_path}")/"; then
+    hdiutil detach "${mount_point}" -quiet 2>/dev/null || true
+    rm -f "${tmp_dmg}"
+    rm -rf "${mount_point}"
+    promptly_fail "Could not copy Promptly to $(dirname "${app_path}"). Check disk space and permissions."
+    return 1
+  fi
+
+  hdiutil detach "${mount_point}" -quiet 2>/dev/null || hdiutil detach "${mount_point}" -force -quiet 2>/dev/null || true
   rm -f "${tmp_dmg}"
+  rm -rf "${mount_point}"
   xattr -cr "${app_path}" 2>/dev/null || true
-  promptly_ok "Desktop app installed"
+  if [[ "${app_path}" == "${HOME}/Applications/"* ]]; then
+    promptly_ok "Desktop app installed (~/Applications — no admin password needed)"
+  else
+    promptly_ok "Desktop app installed"
+  fi
   return 0
 }

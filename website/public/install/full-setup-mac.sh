@@ -27,14 +27,33 @@ if ! declare -f promptly_unzip_plugin_pack >/dev/null 2>&1; then
   echo "✗ Failed to load install helpers from ${PROMPTLY_INSTALL_BASE}/_install-common-mac.sh"
   exit 1
 fi
+
+CODE="$(promptly_validate_pair_code "${CODE}")" || exit 1
+
 ensure_unzip_mac
 ensure_node_mac
+promptly_require_cmd node || exit 1
 
 promptly_detail "→ Downloading Promptly plugin pack (Claude Code, Cursor, Codex)…"
-curl -fsSL -o "${HOME}/promptly.zip" "${PLUGIN_PACK_URL}"
+pack_ok=0
+for attempt in 1 2; do
+  if curl -fsSL -o "${HOME}/promptly.zip" "${PLUGIN_PACK_URL}"; then
+    pack_ok=1
+    break
+  fi
+  sleep 1
+done
+if [[ $pack_ok -ne 1 ]]; then
+  echo "✗ Could not download plugin pack — check your network and retry."
+  exit 1
+fi
+
 promptly_unzip_plugin_pack "${HOME}/promptly.zip" "${HOME}"
 promptly_verify_plugin_pack "${INTEGRATIONS}" || exit 1
+promptly_pull_latest_telemetry_cli "${INTEGRATIONS}" || promptly_refresh_telemetry_cli "${INTEGRATIONS}" || true
 
 promptly_install_all_agents "${INTEGRATIONS}" || exit 1
-promptly_finalize_with_pair_code "${CODE}" "${INTEGRATIONS}"
-promptly_install_companion_mac
+promptly_finalize_with_pair_code "${CODE}" "${INTEGRATIONS}" || exit 1
+promptly_install_companion_mac || exit 1
+
+promptly_ok "All done — reload agents, run /reload-plugins in Claude Code, send a test prompt"

@@ -605,14 +605,20 @@ function Promptly-FinalizeWithPairCode {
   $quiet = $env:PROMPTLY_QUIET -eq "1"
   if ($quiet) {
     Promptly-RunNode -Args @($cli, "fix-account", "--quiet", $Code)
+  } else {
+    Promptly-RunNode -Args @($cli, "fix-account", $Code)
+  }
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "X Pairing failed - get a fresh code at https://promptly-labs.com/integrations"
+    exit 1
+  }
+  if ($quiet) {
     Promptly-SyncAllAgentRuntimes -Integrations $Integrations | Out-Null
     Promptly-SyncSubscriptionUsage -Integrations $Integrations | Out-Null
     return
   }
 
   Write-Host "-> Pairing all agents, merging stats, and verifying live uploads..."
-  Promptly-RunNode -Args @($cli, "fix-account", $Code)
-
   Write-Host "-> Syncing hooks + telemetry into Claude Code, Cursor, and Codex runtimes..."
   Promptly-SyncAllAgentRuntimes -Integrations $Integrations
   Promptly-ValidateHookJson -Integrations $Integrations

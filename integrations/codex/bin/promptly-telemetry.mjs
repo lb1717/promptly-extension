@@ -2014,11 +2014,22 @@ function parseArgs(argv) {
   const command = args.shift() || "help";
   const flags = {};
   const rest = [];
+  const booleanFlags = new Set([
+    "quiet",
+    "force",
+    "debug",
+    "from-sibling",
+    "login-claude",
+    "no-login",
+    "force-claude-login"
+  ]);
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg.startsWith("--")) {
       const key = arg.slice(2);
-      if (i + 1 < args.length && !args[i + 1].startsWith("--")) {
+      if (booleanFlags.has(key)) {
+        flags[key] = true;
+      } else if (i + 1 < args.length && !args[i + 1].startsWith("--")) {
         flags[key] = args[++i];
       } else {
         flags[key] = true;
@@ -2857,13 +2868,20 @@ async function verifyLiveTrackingForAllTools() {
 }
 
 async function cmdFixAccount(flags) {
-  const code = normalizePairCode(flags.code || flags._rest[0] || flags["set-primary"]);
-  const apiUrl = (flags["api-url"] || DEFAULT_API_URL).replace(/\/$/, "");
-  const anchorTool = normalizeTool(flags.tool) || "claude_code";
   const quiet =
     flags.quiet === true ||
     flags.quiet === "true" ||
     process.env.PROMPTLY_QUIET === "1";
+  let code = normalizePairCode(flags.code || flags._rest[0] || flags["set-primary"]);
+  // Back-compat: older installs passed `--quiet CODE` before boolean flag parsing was fixed.
+  if (code.length !== 8 && typeof flags.quiet === "string") {
+    const maybeCode = normalizePairCode(flags.quiet);
+    if (maybeCode.length === 8) {
+      code = maybeCode;
+    }
+  }
+  const apiUrl = (flags["api-url"] || DEFAULT_API_URL).replace(/\/$/, "");
+  const anchorTool = normalizeTool(flags.tool) || "claude_code";
   const toolLabels = {
     claude_code: "Claude Code",
     cursor: "Cursor",
