@@ -119,13 +119,15 @@ function windowElapsedRatio(
   return resetsAtElapsedRatio(resetsAt, windowSeconds);
 }
 
-/** When weekly Claude utilization stopped being inverted (commit 397035b). */
+/** When weekly Claude utilization stopped being inverted (commit 397035b). @deprecated v3 migration supersedes date gates */
 export const CLAUDE_WEEKLY_UTIL_FIX_MS = Date.parse("2026-06-17T14:41:04.000Z");
 
-/** When five-hour Claude utilization stopped being inverted. */
+/** When five-hour Claude utilization stopped being inverted. @deprecated v3 migration supersedes date gates */
 export const CLAUDE_FIVE_HOUR_UTIL_FIX_MS = Date.parse("2026-06-18T00:00:00.000Z");
 
-/** Claude oauth/usage: prefer explicit used/remaining fields; `utilization` is percent used for all buckets. */
+export type ClaudeUtilizationHistoryPoint = { at_ms: number; utilization: number };
+
+/** Anthropic oauth `utilization` is percent remaining; used/remaining explicit fields override when present. */
 export function resolveClaudeWindowUsedPercent(
   window: Record<string, unknown> | null | undefined,
   _context: VendorWindowUsedPercentContext = {}
@@ -153,22 +155,78 @@ export function resolveClaudeWindowUsedPercent(
   if (pct > 0 && pct <= 1) pct *= 100;
   pct = Math.max(0, Math.min(100, pct));
 
-  return normalizeUtilizationPercent(pct);
+  return normalizeUtilizationPercent(100 - pct);
 }
 
-/** Undo mistaken 100-x inversion on stored Claude utilization snapshots. */
-export function correctLegacyClaudeStoredUtilization(
+/** True when stored Claude points look like percent-remaining (decreases as quota is consumed). */
+export function claudeUtilizationSeriesUsesRemainingSemantics(
+  points: ClaudeUtilizationHistoryPoint[]
+): boolean {
+  if (!points.length) return true;
+  if (points.length === 1) {
+    return normalizeUtilizationPercent(points[0].utilization) >= 45;
+  }
+  let decreasing = 0;
+  let increasing = 0;
+  for (let i = 1; i < points.length; i += 1) {
+    const delta = points[i].utilization - points[i - 1].utilization;
+    if (delta < -0.5) decreasing += 1;
+    if (delta > 0.5) increasing += 1;
+  }
+  if (decreasing === 0 && increasing === 0) {
+    return normalizeUtilizationPercent(points[0].utilization) >= 45;
+  }
+  return decreasing >= increasing;
+}
+
+export function normalizeClaudeStoredUtilizationToUsed(
   utilization: number,
-  windowSeconds: number | null | undefined,
-  recordedAtMs: number
+  usesRemainingSemantics: boolean
 ): number {
   const util = normalizeUtilizationPercent(utilization);
-  const window = windowSeconds ?? 5 * 3600;
-  const isWeekly = window >= 6 * 86400;
-  const wasInverted = isWeekly
-    ? recordedAtMs < CLAUDE_WEEKLY_UTIL_FIX_MS
-    : recordedAtMs < CLAUDE_FIVE_HOUR_UTIL_FIX_MS;
-  return wasInverted ? normalizeUtilizationPercent(100 - util) : util;
+  return usesRemainingSemantics ? normalizeUtilizationPercent(100 - util) : util;
+}
+
+/** Coerce mixed legacy Claude history (remaining vs used) into percent-used series. */
+export function migrateClaudeUtilizationHistoryToUsed(
+  points: ClaudeUtilizationHistoryPoint[],
+  windowSeconds: number | null | undefined
+): ClaudeUtilizationHistoryPoint[] {
+  if (!points.length) return [];
+  const windowMs = (windowSeconds ?? 5 * 3600) * 1000;
+  const sorted = [...points].sort((a, b) => a.at_ms - b.at_ms);
+  const segments: ClaudeUtilizationHistoryPoint[][] = [];
+  let current: ClaudeUtilizationHistoryPoint[] = [];
+  for (const point of sorted) {
+    const prev = current[current.length - 1];
+    if (prev && point.at_ms - prev.at_ms > windowMs * 0.6) {
+      segments.push(current);
+      current = [];
+    }
+    current.push(point);
+  }
+  if (current.length) segments.push(current);
+
+  const out: ClaudeUtilizationHistoryPoint[] = [];
+  for (const segment of segments) {
+    const remainingSemantics = claudeUtilizationSeriesUsesRemainingSemantics(segment);
+    for (const point of segment) {
+      out.push({
+        at_ms: point.at_ms,
+        utilization: normalizeClaudeStoredUtilizationToUsed(point.utilization, remainingSemantics)
+      });
+    }
+  }
+  return out.sort((a, b) => a.at_ms - b.at_ms);
+}
+
+/** Undo mistaken remaining-as-used Claude snapshots before v3 normalization. */
+export function correctLegacyClaudeStoredUtilization(
+  utilization: number,
+  _windowSeconds: number | null | undefined,
+  _recordedAtMs: number
+): number {
+  return normalizeClaudeStoredUtilizationToUsed(utilization, true);
 }
 
 /** Normalize vendor quota windows (Claude, Codex, Cursor) to percent used — not remaining. */

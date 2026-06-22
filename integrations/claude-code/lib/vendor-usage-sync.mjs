@@ -495,7 +495,7 @@ function resolveClaudeWindowUsedPercent(window, context = {}) {
   if (pct > 0 && pct <= 1) pct *= 100;
   pct = Math.max(0, Math.min(100, pct));
 
-  return normalizeUtilizationPercent(pct);
+  return normalizeUtilizationPercent(100 - pct);
 }
 
 function extractClaudeUsageWindow(usage, ...keys) {
