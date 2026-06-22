@@ -659,6 +659,25 @@ function Promptly-InstallCompanionWindows {
   Start-Process -FilePath $exePath -ArgumentList "/S" -Wait
   Remove-Item $exePath -Force -ErrorAction SilentlyContinue
   Write-Host "✓ Desktop app installed"
+
+  $launchCandidates = @(
+    (Join-Path $env:LOCALAPPDATA "Programs\Promptly Companion\Promptly Companion.exe"),
+    (Join-Path $env:ProgramFiles "Promptly Companion\Promptly Companion.exe"),
+    (Join-Path ${env:ProgramFiles(x86)} "Promptly Companion\Promptly Companion.exe")
+  )
+  foreach ($launchPath in $launchCandidates) {
+    if (Test-Path $launchPath) {
+      Start-Process -FilePath $launchPath | Out-Null
+      Write-Host "✓ Desktop app opened"
+      return
+    }
+  }
+
+  $startMenuShortcut = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Promptly Companion.lnk"
+  if (Test-Path $startMenuShortcut) {
+    Start-Process -FilePath $startMenuShortcut | Out-Null
+    Write-Host "✓ Desktop app opened"
+  }
 }
 
 function Promptly-ClaudeMarketplaceRefresh {

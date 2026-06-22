@@ -755,6 +755,23 @@ promptly_pick_companion_app_dir() {
   printf '%s' "${user_apps}"
 }
 
+promptly_open_companion_mac() {
+  local app_path="$1"
+  if [[ ! -d "${app_path}" ]]; then
+    return 1
+  fi
+  if ! command -v open >/dev/null 2>&1; then
+    promptly_detail "→ Open ${app_path} manually to finish setup."
+    return 0
+  fi
+  if open "${app_path}" >/dev/null 2>&1; then
+    promptly_ok "Desktop app opened"
+    return 0
+  fi
+  promptly_detail "→ Desktop app installed — open it from Applications if it did not launch automatically."
+  return 0
+}
+
 promptly_install_companion_mac() {
   local app_path
   app_path="$(promptly_pick_companion_app_dir)"
@@ -828,5 +845,6 @@ promptly_install_companion_mac() {
   else
     promptly_ok "Desktop app installed"
   fi
+  promptly_open_companion_mac "${app_path}"
   return 0
 }

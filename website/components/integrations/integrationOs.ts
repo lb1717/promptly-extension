@@ -77,7 +77,7 @@ export type OnboardingInstallMode = "combined" | "agents" | "desktop";
 export function onboardingSetupValidationItems(mode: OnboardingInstallMode): string[] {
   const prefix = (item: string) => `✓ ${item}`;
   if (mode === "desktop") {
-    return [prefix("Desktop app installed")];
+    return [prefix("Desktop app installed"), prefix("Desktop app opened")];
   }
   const items = [
     "Cursor completed",
@@ -87,7 +87,7 @@ export function onboardingSetupValidationItems(mode: OnboardingInstallMode): str
     "Stats tracking verified"
   ];
   if (mode === "combined") {
-    items.push("Desktop app installed");
+    items.push("Desktop app installed", "Desktop app opened");
   }
   return items.map(prefix);
 }
