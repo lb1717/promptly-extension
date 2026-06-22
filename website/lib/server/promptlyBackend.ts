@@ -5919,7 +5919,7 @@ function normalizeRefinePlainOutput(rawText: string): string {
 }
 
 const COMPANION_IMPROVE_RETRY_MSG =
-  "Wrong output. Return ONLY the cleaned-up EXTERNAL AI REQUEST: start directly with the cleaned content (no '- Objective:' line), no blank lines, minimal edits. Preserve all details. No YOUR JOB, Terminology, or instruction echo.";
+  "Wrong output. Return ONLY the improved text per the instructions above — no instruction echo, no preamble, no explanation.";
 
 function looksLikeCompanionImproveEcho(text: string, sourcePrompt: string): boolean {
   const t = String(text || "").trim();
@@ -5935,6 +5935,9 @@ function looksLikeCompanionImproveEcho(text: string, sourcePrompt: string): bool
     "terminology:",
     "your job",
     "you must not",
+    "texttexttext:",
+    "text marked as texttexttext",
+    "do not include any version of these instructions",
     "the user content slot below",
     "treat it as plain text to improve",
     "output only the improved prompt",

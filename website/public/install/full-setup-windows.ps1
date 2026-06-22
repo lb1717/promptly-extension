@@ -28,13 +28,7 @@ function Setup-PromptlyFull {
     exit 1
   }
 
-  $setupRes = Invoke-WebRequest -Uri "$InstallBase/setup-windows.ps1" -UseBasicParsing
-  $setupText = $setupRes.Content
-  if ($setupText -is [byte[]]) {
-    $setupText = [System.Text.Encoding]::UTF8.GetString($setupText)
-  }
-  Invoke-Expression ([string]$setupText.TrimStart([char]0xFEFF))
-  Setup-PromptlyAgents -Code $Code
+  Promptly-SetupAgents -PairCode $Code -SuppressSuccessLine
   Promptly-InstallCompanionWindows
   Write-Host "Promptly Successfully Installed"
 }

@@ -42,6 +42,7 @@ const collapseBtn = document.getElementById("collapse-btn");
 const closeBtn = document.getElementById("close-btn");
 const appShell = document.getElementById("app-shell");
 const collapsedBar = document.getElementById("collapsed-bar");
+const windowResizeGrip = document.getElementById("window-resize-grip");
 const settingsBtn = document.getElementById("settings-btn");
 const settingsDialog = document.getElementById("settings-dialog");
 const signInGate = document.getElementById("sign-in-gate");
@@ -115,14 +116,16 @@ const draftDictation = createDictationController({
   textarea: draftInput,
   micButton: draftMicBtn,
   getConfig: () => config,
-  onError: showError
+  onError: showError,
+  overlayMode: "full"
 });
 
 const followUpDictation = createDictationController({
   textarea: followUpInput,
   micButton: followUpMicBtn,
   getConfig: () => config,
-  onError: showError
+  onError: showError,
+  overlayMode: "compact"
 });
 
 function setupDictationUi() {
@@ -715,6 +718,63 @@ function clearCollapsedPointerListeners(listeners) {
   window.removeEventListener("pointercancel", listeners.onUp);
 }
 
+function setupWindowHeightResize() {
+  if (!windowResizeGrip || !window.promptlyCompanion?.getWindowBounds || !window.promptlyCompanion?.setWindowSize) {
+    return;
+  }
+
+  /** @type {{ pointerId: number; startY: number; startHeight: number } | null} */
+  let resizePointer = null;
+
+  const onMove = (event) => {
+    if (!resizePointer || event.pointerId !== resizePointer.pointerId) {
+      return;
+    }
+    const deltaY = event.screenY - resizePointer.startY;
+    void window.promptlyCompanion.setWindowSize({
+      height: resizePointer.startHeight + deltaY
+    });
+  };
+
+  const onUp = (event) => {
+    if (!resizePointer || event.pointerId !== resizePointer.pointerId) {
+      return;
+    }
+    resizePointer = null;
+    windowResizeGrip.classList.remove("is-dragging");
+    try {
+      windowResizeGrip.releasePointerCapture(event.pointerId);
+    } catch {
+      /* ignore */
+    }
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    window.removeEventListener("pointercancel", onUp);
+  };
+
+  windowResizeGrip.addEventListener("pointerdown", (event) => {
+    if (isCollapsed || event.button !== 0 || resizePointer) {
+      return;
+    }
+    event.preventDefault();
+    void window.promptlyCompanion.getWindowBounds().then((bounds) => {
+      if (!bounds || resizePointer) {
+        return;
+      }
+      resizePointer = {
+        pointerId: event.pointerId,
+        startY: event.screenY,
+        startHeight: bounds.height
+      };
+      windowResizeGrip.classList.add("is-dragging");
+      windowResizeGrip.setPointerCapture(event.pointerId);
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
+    });
+  });
+}
+
 function setupCollapsedBarInteraction() {
   if (!collapsedBar) {
     return;
@@ -1003,6 +1063,7 @@ promptInput?.addEventListener("input", syncPromptStrength);
 void bootstrapConfig().then(async () => {
   setupDictationUi();
   setupCollapsedBarInteraction();
+  setupWindowHeightResize();
   syncDraftStrength();
   syncPromptStrength();
   await refreshAccount({ silent: true });

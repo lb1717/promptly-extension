@@ -47,6 +47,7 @@ win:
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
+  runAfterFinish: false
   shortcutName: Promptly Companion
 linux:
   target:

@@ -96,10 +96,7 @@ export function GetStartedPromptlyInstall({
           ) : null}
           {mode !== "desktop" ? (
             <p className="mt-2 text-xs text-muted">
-              <span className="font-medium text-ink">After install:</span>{" "}
-              {os === "windows"
-                ? "Allow hooks when asked. Quit and reopen Codex. Reload Cursor. Run /reload-plugins in Claude Code."
-                : "Allow hooks when asked. In Codex run /hooks and trust Promptly if needed. Run /reload-plugins in Claude Code."}
+              After install, allow hooks when prompted and, if necessary, trust Promptly.
             </p>
           ) : null}
         </>

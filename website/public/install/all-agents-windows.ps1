@@ -12,16 +12,16 @@ if (-not $Code) {
   exit 1
 }
 
-$__setupRes = Invoke-WebRequest -Uri "$InstallBase/setup-windows.ps1" -UseBasicParsing
-$__setupText = $__setupRes.Content
-if ($__setupText -is [byte[]]) {
-  $__setupText = [System.Text.Encoding]::UTF8.GetString($__setupText)
+$__loaderRes = Invoke-WebRequest -Uri "$InstallBase/_load-helpers-windows.ps1" -UseBasicParsing
+$__loaderText = $__loaderRes.Content
+if ($__loaderText -is [byte[]]) {
+  $__loaderText = [System.Text.Encoding]::UTF8.GetString($__loaderText)
 }
-Invoke-Expression ([string]$__setupText.TrimStart([char]0xFEFF))
+Invoke-Expression ([string]$__loaderText.TrimStart([char]0xFEFF))
 
-if (-not (Get-Command Setup-PromptlyAgents -ErrorAction SilentlyContinue)) {
-  Write-Host "X Failed to load setup script from $InstallBase"
+if (-not (Get-Command Promptly-SetupAgents -ErrorAction SilentlyContinue)) {
+  Write-Host "X Failed to load Promptly install helpers from $InstallBase"
   exit 1
 }
 
-Setup-PromptlyAgents -Code $Code
+Promptly-SetupAgents -PairCode $Code

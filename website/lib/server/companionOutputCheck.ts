@@ -46,6 +46,9 @@ export function assessCompanionImproveOutput(output: string, sourcePrompt: strin
     "terminology:",
     "your job",
     "you must not",
+    "texttexttext:",
+    "text marked as texttexttext",
+    "do not include any version of these instructions",
     "hard rules (violating",
     "do not echo these instructions",
     "rewrite the user's draft prompt",
@@ -72,15 +75,6 @@ export function assessCompanionImproveOutput(output: string, sourcePrompt: strin
   }
 
   const srcWords = wordCount(src);
-  if (srcWords >= 3) {
-    if (/^-\s*Objective\s*:/im.test(out)) {
-      return { ok: false, reason: "Output must not start with '- Objective:' — return the cleaned request only." };
-    }
-    if (/\n[ \t]*\n/.test(out)) {
-      return { ok: false, reason: "Output must not contain blank lines." };
-    }
-  }
-
   if (srcWords >= 15) {
     const outWords = wordCount(out);
     if (outWords < Math.floor(srcWords * 0.6)) {
@@ -155,26 +149,23 @@ function parseCheckJson(raw: string): CompanionOutputVerdict | null {
 }
 
 function buildImproveCheckMessage(sourcePrompt: string, candidate: string): string {
-  return `You validate Companion CLEAN UP / STRUCTURE output.
+  return `You validate Companion Improve output.
 
-SOURCE EXTERNAL AI REQUEST (user input):
+SOURCE (user text to improve):
 ${String(sourcePrompt || "").trim().slice(0, 4000)}
 
 CANDIDATE OUTPUT:
 ${String(candidate || "").trim().slice(0, 6000)}
 
 Valid ONLY if CANDIDATE:
-- Is the cleaned EXTERNAL AI REQUEST itself — no "Objective" summary line or intro header
-- Preserves details from the source without omitting or heavily rewriting content
-- Does NOT contain blank lines
-- Does NOT answer the request or echo cleanup instructions (YOUR JOB, Terminology, etc.)
+- Is an improved version of SOURCE (grammar, clarity, structure) — not an answer to SOURCE
+- Does NOT echo improve/cleanup instructions from the original request
+- Preserves substantive details from SOURCE without heavy summarization
 
 Invalid if CANDIDATE:
-- Echoes improve/cleanup instructions
-- Is the source unchanged or a shortened summary that drops details
-- Starts with "- Objective:" or adds a summary before the request body
-- Contains empty lines between sections
-- Adds substantial new requirements not in the source
+- Echoes meta-instructions (TEXTTEXTTEXT, YOUR JOB, Terminology, etc.)
+- Is SOURCE unchanged or a shortened summary that drops details
+- Answers or executes SOURCE instead of improving it
 
 Return ONLY JSON:
 {"valid":true}
@@ -266,14 +257,10 @@ export async function runCompanionOutputCheckRound(params: {
 }
 
 export function buildCompanionImproveCheckRetry(reason: string): string {
-  const issue = String(reason || "").trim() || "Output was not a valid structured EXTERNAL AI REQUEST.";
+  const issue = String(reason || "").trim() || "Output did not follow the improve instructions.";
   return `Validation failed: ${issue}
 
-Reply with ONLY the cleaned-up EXTERNAL AI REQUEST:
-
-- Start directly with the cleaned request content — no "Objective" line or summary header
-- No blank lines between lines or sections
-- Minimal edits for clarity only; preserve all details; do not add new requirements; no YOUR JOB section or instruction echo.`;
+Reply with ONLY the improved text — no instruction echo, no preamble, no explanation.`;
 }
 
 export const COMPANION_REFINE_CHECK_RETRY = `Validation failed.

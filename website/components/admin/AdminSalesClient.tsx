@@ -584,11 +584,14 @@ export function AdminSalesClient({ embedded = false }: { embedded?: boolean }) {
           </li>
           <li>Deactivate a link to stop new signups without deleting history. Delete removes the link permanently.</li>
           <li>Optionally enable a free trial and/or skip credit card collection at checkout.</li>
-          <li>Send the link — recipients see a 5-step flow: welcome → account → plan → install extension → try it out.</li>
+          <li>
+            Send the link — recipients see welcome → account → choose platforms → install → activate plan → done.
+          </li>
           <li>
             When they activate the plan, Stripe Checkout opens with your trial and payment settings. Affiliate-only
-            links show Stripe&apos;s promo code field; pre-applied links use your coupon automatically. After payment,
-            they get Chrome/Edge install instructions and links to open ChatGPT, Claude, or Gemini.
+            links show Stripe&apos;s promo code field; pre-applied links use your coupon automatically. Install step uses
+            the same unified setup as /get-started: one terminal command for desktop + coding agents when both are
+            selected, plus optional browser extension install.
           </li>
         </ol>
       </section>

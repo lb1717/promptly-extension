@@ -591,6 +591,46 @@ function Promptly-InstallAllAgentsWithSummary {
   }
 }
 
+function Promptly-SetupAgents {
+  param(
+    [Parameter(Mandatory)][string]$PairCode,
+    [string]$PluginPackUrl = $(if ($env:PROMPTLY_PLUGIN_PACK_URL) { $env:PROMPTLY_PLUGIN_PACK_URL } else { "https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.12" }),
+    [string]$Integrations = (Join-Path $env:USERPROFILE "integrations"),
+    [switch]$SuppressSuccessLine
+  )
+
+  $normalizedCode = [string]$PairCode
+  if ($normalizedCode.Trim().Length -lt 6) {
+    Write-Host "Get YOUR_CODE at https://promptly-labs.com/integrations while signed into the Promptly account you want."
+    exit 1
+  }
+
+  if (-not (Get-Command Ensure-NodeJs -ErrorAction SilentlyContinue)) {
+    Write-Host "X Install helpers are missing. Re-run the setup command from promptly-labs.com/get-started."
+    exit 1
+  }
+
+  Ensure-NodeJs
+
+  $zipPath = Join-Path $env:USERPROFILE "promptly.zip"
+  Write-Host "-> Downloading Promptly plugin pack (Claude Code, Cursor, Codex)..."
+  Invoke-WebRequest -Uri $PluginPackUrl -OutFile $zipPath -UseBasicParsing
+  Promptly-UnzipPluginPack -ZipPath $zipPath -Dest $env:USERPROFILE
+  if (-not (Promptly-VerifyPluginPack -Integrations $Integrations)) {
+    if ($env:PROMPTLY_INSTALL_DEBUG -eq "1") {
+      Promptly-PrintInstallDebugReport -Integrations $Integrations -PairCode $normalizedCode
+    }
+    exit 1
+  }
+
+  $summary = Promptly-InstallAllAgentsWithSummary -Integrations $Integrations
+  Promptly-FinalizeWithPairCodeAndDebug -Code $normalizedCode -Integrations $Integrations -InstallSummary $summary
+
+  if (-not $SuppressSuccessLine) {
+    Write-Host "Promptly Successfully Installed"
+  }
+}
+
 function Promptly-FinalizeWithPairCode {
   param(
     [Parameter(Mandatory)][string]$Code,
@@ -641,6 +681,10 @@ function Promptly-FinalizeWithPairCode {
 }
 
 function Promptly-InstallCompanionWindows {
+  param(
+    [switch]$SkipLaunch
+  )
+
   $apiUrl = "https://promptly-labs.com/api/companion/download"
   $fallback = "https://github.com/lb1717/promptly-extension/releases/download/companion-v0.2.0/Promptly-Companion-0.2.0-win.exe"
   $exeUrl = $null
@@ -656,9 +700,18 @@ function Promptly-InstallCompanionWindows {
 
   $exePath = Join-Path $env:TEMP "Promptly-Companion-setup.exe"
   Invoke-WebRequest -Uri $exeUrl -OutFile $exePath -UseBasicParsing
+  Unblock-File -LiteralPath $exePath -ErrorAction SilentlyContinue
   Start-Process -FilePath $exePath -ArgumentList "/S" -Wait
   Remove-Item $exePath -Force -ErrorAction SilentlyContinue
   Write-Host "✓ Desktop app installed"
+
+  $shouldLaunch = -not $SkipLaunch -and $env:PROMPTLY_QUIET -ne "1" -and $env:PROMPTLY_SKIP_COMPANION_LAUNCH -ne "1"
+  if (-not $shouldLaunch) {
+    if ($env:PROMPTLY_QUIET -eq "1") {
+      Write-Host "✓ Open Promptly Companion from the Start menu when you are ready"
+    }
+    return
+  }
 
   $launchCandidates = @(
     (Join-Path $env:LOCALAPPDATA "Programs\Promptly Companion\Promptly Companion.exe"),
@@ -667,6 +720,7 @@ function Promptly-InstallCompanionWindows {
   )
   foreach ($launchPath in $launchCandidates) {
     if (Test-Path $launchPath) {
+      Unblock-File -LiteralPath $launchPath -ErrorAction SilentlyContinue
       Start-Process -FilePath $launchPath | Out-Null
       Write-Host "✓ Desktop app opened"
       return

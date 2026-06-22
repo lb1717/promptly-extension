@@ -34,7 +34,9 @@ const ANCHOR_POLL_MS = 900;
 const HOST_FOCUS_TRACK_MS = 1200;
 const PRODUCTION_API_URL = "https://promptly-labs.com";
 const EXPANDED_DEFAULT = { width: 380, height: 580, minWidth: 320, minHeight: 420 };
-const COLLAPSED_HEIGHT = 44;
+const COLLAPSED_HEIGHT = 35;
+const COLLAPSED_WIDTH_RATIO = 0.7;
+const COLLAPSED_WIDTH_INSET_RATIO = 0.15;
 const COLLAPSED_BG = "#6d5ce8";
 const EXPANDED_BG = "#f4f5f7";
 
@@ -331,19 +333,22 @@ function setWindowCollapsed(win, collapsed) {
     state.expandedBounds = { ...bounds };
     state.collapsed = true;
 
+    const collapsedWidth = Math.max(1, Math.round(bounds.width * COLLAPSED_WIDTH_RATIO));
+    const xInset = Math.round(bounds.width * COLLAPSED_WIDTH_INSET_RATIO);
+
     win.setResizable(true);
     win.setMaximumSize(10000, 10000);
     win.setMinimumSize(1, 1);
     win.setBounds({
-      x: bounds.x,
+      x: bounds.x + xInset,
       y: bounds.y,
-      width: bounds.width,
+      width: collapsedWidth,
       height: COLLAPSED_HEIGHT
     });
     win.setBackgroundColor(COLLAPSED_BG);
     win.setResizable(false);
-    win.setMinimumSize(bounds.width, COLLAPSED_HEIGHT);
-    win.setMaximumSize(bounds.width, COLLAPSED_HEIGHT);
+    win.setMinimumSize(collapsedWidth, COLLAPSED_HEIGHT);
+    win.setMaximumSize(collapsedWidth, COLLAPSED_HEIGHT);
   } else {
     state.collapsed = false;
 
@@ -491,6 +496,14 @@ function syncExpandedBoundsOrigin(win) {
   };
 }
 
+function syncExpandedBoundsSize(win) {
+  const state = getChromeState(win);
+  if (state.collapsed) {
+    return;
+  }
+  state.expandedBounds = { ...win.getBounds() };
+}
+
 function registerCompanionWindow(win, options = {}) {
   companionWindows.add(win);
   applyWindowAnchor(win, options);
@@ -539,6 +552,10 @@ function registerCompanionWindow(win, options = {}) {
 
   win.on("move", () => {
     syncExpandedBoundsOrigin(win);
+  });
+
+  win.on("resize", () => {
+    syncExpandedBoundsSize(win);
   });
 
   win.on("closed", () => {
@@ -656,6 +673,30 @@ ipcMain.handle("promptly:set-window-position", (event, position) => {
     state.expandedBounds.y = y;
   }
   return { ok: true };
+});
+ipcMain.handle("promptly:set-window-size", (event, size) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win || win.isDestroyed()) {
+    return { ok: false };
+  }
+  const state = getChromeState(win);
+  if (state.collapsed) {
+    return { ok: false };
+  }
+  const bounds = win.getBounds();
+  const height = Math.round(Number(size?.height));
+  if (!Number.isFinite(height)) {
+    return { ok: false, error: "Invalid height" };
+  }
+  const nextHeight = Math.max(EXPANDED_DEFAULT.minHeight, Math.min(10_000, height));
+  win.setBounds({
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: nextHeight
+  });
+  syncExpandedBoundsSize(win);
+  return { ok: true, height: nextHeight };
 });
 ipcMain.handle("promptly:paste-to-host", async (event, text) => {
   if (

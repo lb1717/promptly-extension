@@ -5,8 +5,6 @@ param(
   [string]$Code = $env:PROMPTLY_PAIR_CODE
 )
 
-$PluginPackUrl = if ($env:PROMPTLY_PLUGIN_PACK_URL) { $env:PROMPTLY_PLUGIN_PACK_URL } else { "https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.12" }
-$Integrations = Join-Path $env:USERPROFILE "integrations"
 $InstallBase = if ($env:PROMPTLY_INSTALL_BASE) { $env:PROMPTLY_INSTALL_BASE } else { "https://promptly-labs.com/install" }
 
 # Load shared helpers at script scope (must not run inside a function).
@@ -16,7 +14,7 @@ if ($__loaderText -is [byte[]]) {
   $__loaderText = [System.Text.Encoding]::UTF8.GetString($__loaderText)
 }
 Invoke-Expression ([string]$__loaderText.TrimStart([char]0xFEFF))
-if (-not (Get-Command Promptly-UnzipPluginPack -ErrorAction SilentlyContinue)) {
+if (-not (Get-Command Promptly-SetupAgents -ErrorAction SilentlyContinue)) {
   Write-Host "X Failed to load Promptly install helpers from $InstallBase"
   exit 1
 }
@@ -34,27 +32,7 @@ function Setup-PromptlyAgents {
     exit 1
   }
 
-  if (-not (Get-Command Ensure-NodeJs -ErrorAction SilentlyContinue)) {
-    Write-Host "X Install helpers are missing. Re-run: irm ${InstallBase}/setup-windows.ps1 | iex"
-    exit 1
-  }
-
-  Ensure-NodeJs
-
-  $zipPath = Join-Path $env:USERPROFILE "promptly.zip"
-  Write-Host "-> Downloading Promptly plugin pack (Claude Code, Cursor, Codex)..."
-  Invoke-WebRequest -Uri $PluginPackUrl -OutFile $zipPath -UseBasicParsing
-  Promptly-UnzipPluginPack -ZipPath $zipPath -Dest $env:USERPROFILE
-  if (-not (Promptly-VerifyPluginPack -Integrations $Integrations)) {
-    if ($env:PROMPTLY_INSTALL_DEBUG -eq "1") {
-      Promptly-PrintInstallDebugReport -Integrations $Integrations -PairCode $Code
-    }
-    exit 1
-  }
-
-  $summary = Promptly-InstallAllAgentsWithSummary -Integrations $Integrations
-  Promptly-FinalizeWithPairCodeAndDebug -Code $Code -Integrations $Integrations -InstallSummary $summary
-  Write-Host "Promptly Successfully Installed"
+  Promptly-SetupAgents -PairCode $Code
 }
 
 if ($Code) {
