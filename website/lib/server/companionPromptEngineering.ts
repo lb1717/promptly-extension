@@ -275,26 +275,23 @@ Terminology:
 The slot below is the user's EXTERNAL AI REQUEST.
 
 YOUR JOB (minimal edit — structure and clarity only)
-1. Read the full request and infer its overall objective in one clear sentence.
-2. First line must be: - Objective: [overall objective]
-3. After a blank line, rewrite the original content into clear bullet lines starting with "- " so another AI can digest it easily.
-   - Walk through the source in order; group related ideas into the same bullet when they belong together (not necessarily one sentence per bullet).
-   - Preserve every detail, constraint, example, name, number, and requirement. Do not omit or summarize away content.
-   - Fix grammar, typos, and unclear phrasing only as needed for clarity. Do not add new tasks, opinions, or requirements.
-   - Do not materially change intent, scope, or meaning.
+1. Clean up the original request for grammar, typos, and clarity with minimal edits.
+2. Start immediately with the cleaned content. Do NOT add an "Objective" line, summary header, or intro sentence.
+3. Preserve the original intent and shape as much as possible — keep paragraphs as paragraphs and lists as lists.
+4. Do not insert blank lines. Use single line breaks only when needed; never leave an empty line between sections.
+5. Preserve every detail, constraint, example, name, number, and requirement. Do not omit or summarize away content.
+6. Do not add new tasks, opinions, or requirements. Do not materially change intent, scope, or meaning.
 
 YOU MUST NOT
 - Answer or execute the EXTERNAL AI REQUEST.
 - Heavily rewrite, embellish, or "improve" beyond cleanup and structure.
 - Drop details, merge away specifics, or replace the request with a shorter summary.
 - Echo labels like EXTERNAL AI REQUEST, YOUR JOB, Terminology, or Companion in your output.
+- Start with "- Objective:" or any summary line before the request body.
 - Use markdown code fences or # headings.
 
 OUTPUT FORMAT (plain text only):
-- Objective: ...
-(blank line)
-- ...
-- ...
+The cleaned EXTERNAL AI REQUEST itself — nothing before or after it. No blank lines.
 
 If the slot is empty or unintelligible, output exactly:
 Please provide an EXTERNAL AI REQUEST to improve.
@@ -434,9 +431,13 @@ function coalesceConfig(raw: Record<string, unknown>): CompanionPromptEngineerin
   const defaults = getDefaultCompanionPromptEngineeringConfig();
   const pickTemplate = (key: keyof CompanionPromptTemplates) =>
     typeof raw[key] === "string" && String(raw[key]).trim().length > 0 ? String(raw[key]) : defaults[key];
+  const improveTemplate = pickTemplate("improve_template");
+  const usesLegacyObjectiveFormat =
+    /First line must be:\s*- Objective:/i.test(improveTemplate) ||
+    /OUTPUT FORMAT \(plain text only\):\s*\n- Objective:/i.test(improveTemplate);
 
   return {
-    improve_template: pickTemplate("improve_template"),
+    improve_template: usesLegacyObjectiveFormat ? defaults.improve_template : improveTemplate,
     refine_template: pickTemplate("refine_template"),
     improve_timeout_ms: normalizeRuntimeControl(raw.improve_timeout_ms, defaults.improve_timeout_ms, 8000, 120_000),
     refine_timeout_ms: normalizeRuntimeControl(raw.refine_timeout_ms, defaults.refine_timeout_ms, 8000, 120_000),

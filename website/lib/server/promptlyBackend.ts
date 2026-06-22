@@ -5919,7 +5919,7 @@ function normalizeRefinePlainOutput(rawText: string): string {
 }
 
 const COMPANION_IMPROVE_RETRY_MSG =
-  "Wrong output. Return ONLY the cleaned-up EXTERNAL AI REQUEST: first line '- Objective: ...', then blank line, then '- ' bullets restructuring the source with minimal edits. Preserve all details. No YOUR JOB, Terminology, or instruction echo.";
+  "Wrong output. Return ONLY the cleaned-up EXTERNAL AI REQUEST: start directly with the cleaned content (no '- Objective:' line), no blank lines, minimal edits. Preserve all details. No YOUR JOB, Terminology, or instruction echo.";
 
 function looksLikeCompanionImproveEcho(text: string, sourcePrompt: string): boolean {
   const t = String(text || "").trim();

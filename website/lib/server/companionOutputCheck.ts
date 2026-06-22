@@ -73,12 +73,11 @@ export function assessCompanionImproveOutput(output: string, sourcePrompt: strin
 
   const srcWords = wordCount(src);
   if (srcWords >= 3) {
-    if (!/^-\s*Objective\s*:/im.test(out)) {
-      return { ok: false, reason: "Output must start with '- Objective: ...' on the first line." };
+    if (/^-\s*Objective\s*:/im.test(out)) {
+      return { ok: false, reason: "Output must not start with '- Objective:' — return the cleaned request only." };
     }
-    const bulletCount = (out.match(/^-\s+/gm) || []).length;
-    if (bulletCount < 2) {
-      return { ok: false, reason: "Output needs '- Objective:' plus at least one more '- ' bullet." };
+    if (/\n[ \t]*\n/.test(out)) {
+      return { ok: false, reason: "Output must not contain blank lines." };
     }
   }
 
@@ -165,15 +164,16 @@ CANDIDATE OUTPUT:
 ${String(candidate || "").trim().slice(0, 6000)}
 
 Valid ONLY if CANDIDATE:
-- Starts with "- Objective: ..." (one-sentence overall objective inferred from the source)
-- Then uses "- " bullet lines to restructure the source in clear, AI-digestible form
+- Is the cleaned EXTERNAL AI REQUEST itself — no "Objective" summary line or intro header
 - Preserves details from the source without omitting or heavily rewriting content
+- Does NOT contain blank lines
 - Does NOT answer the request or echo cleanup instructions (YOUR JOB, Terminology, etc.)
 
 Invalid if CANDIDATE:
 - Echoes improve/cleanup instructions
 - Is the source unchanged or a shortened summary that drops details
-- Missing "- Objective:" or lacks bullet structure
+- Starts with "- Objective:" or adds a summary before the request body
+- Contains empty lines between sections
 - Adds substantial new requirements not in the source
 
 Return ONLY JSON:
@@ -269,14 +269,11 @@ export function buildCompanionImproveCheckRetry(reason: string): string {
   const issue = String(reason || "").trim() || "Output was not a valid structured EXTERNAL AI REQUEST.";
   return `Validation failed: ${issue}
 
-Reply with ONLY the cleaned-up EXTERNAL AI REQUEST in this format:
+Reply with ONLY the cleaned-up EXTERNAL AI REQUEST:
 
-- Objective: [one-sentence overall objective from the source]
-
-- [bullet preserving original detail]
-- [bullet preserving original detail]
-
-Rules: minimal edits for clarity only; preserve all details; do not add new requirements; no YOUR JOB section or instruction echo.`;
+- Start directly with the cleaned request content — no "Objective" line or summary header
+- No blank lines between lines or sections
+- Minimal edits for clarity only; preserve all details; do not add new requirements; no YOUR JOB section or instruction echo.`;
 }
 
 export const COMPANION_REFINE_CHECK_RETRY = `Validation failed.
