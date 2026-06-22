@@ -1,5 +1,6 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { getFirebaseAdminDb } from "@/lib/server/firebaseAdmin";
+import { interpolateDailyUtilizationMap, normalizeUtilizationPercent } from "@/lib/vendorPlanPricing";
 import { listVendorUsageProfiles, type VendorUsageProfileView } from "@/lib/server/vendorUsage";
 
 const COMPANIES_COLLECTION = "companies";
@@ -433,6 +434,18 @@ function memberLabel(member: CompanyMember): string {
   return member.display_name || member.email || member.user_id.slice(0, 8);
 }
 
+function planUsageSeriesKey(memberId: string, profile: VendorUsageProfileView): string {
+  return `${memberId}__${profile.provider}__${profile.profile_id}`;
+}
+
+function planUsageSeriesLabel(memberLabel: string, profile: VendorUsageProfileView): string {
+  const provider =
+    profile.provider === "claude_code" ? "Claude" : profile.provider === "codex" ? "Codex" : "Cursor";
+  const plan = profile.plan_display || "Plan";
+  const email = profile.vendor_email ? ` · ${profile.vendor_email}` : "";
+  return `${memberLabel} · ${provider} ${plan}${email}`;
+}
+
 function activeWindow(profile: VendorUsageProfileView) {
   return profile.secondary_window || profile.primary_window;
 }
@@ -515,23 +528,60 @@ export async function getCompanyStatsForAdmin(uid: string, days: number) {
   );
 
   const planUsagePoints = new Map<string, Record<string, number | string>>();
+  const planUsageSeries: Array<{ key: string; label: string; member_id: string }> = [];
+  const planUsageSeriesKeys = new Set<string>();
+  const sparsePlanUsageBySeries = new Map<string, Map<string, number>>();
+  const exactPlanUsageEndBySeries = new Map<string, { day: string; utilization: number }>();
   for (const { member, profiles } of profilesByMember) {
     const pricedProfiles = profiles.filter((profile) => profile.plan_monthly_usd != null);
     const totals = memberTotals.get(member.user_id);
     if (totals) {
       totals.plan_monthly_usd = pricedProfiles.reduce((sum, profile) => sum + (profile.plan_monthly_usd ?? 0), 0);
     }
+    const label = memberLabel(member);
     for (const profile of profiles) {
       const window = activeWindow(profile);
       const history = profile.secondary_window ? profile.usage_history.secondary : profile.usage_history.primary;
       const points = history.length ? history : window ? [{ at_ms: profile.synced_at_ms, utilization: window.utilization }] : [];
+      if (!points.length) continue;
+      const seriesKey = planUsageSeriesKey(member.user_id, profile);
+      if (!planUsageSeriesKeys.has(seriesKey)) {
+        planUsageSeriesKeys.add(seriesKey);
+        planUsageSeries.push({
+          key: seriesKey,
+          label: planUsageSeriesLabel(label, profile),
+          member_id: member.user_id
+        });
+      }
+      const sparse = sparsePlanUsageBySeries.get(seriesKey) || new Map<string, number>();
       for (const point of points) {
         if (!point.at_ms || point.at_ms < Date.now() - rangeDays * 86_400_000) continue;
         const key = new Date(point.at_ms).toISOString().slice(0, 10);
-        const row = planUsagePoints.get(key) || { day: key };
-        row[member.user_id] = Math.max(0, Math.min(150, Math.round(Number(point.utilization || 0))));
-        planUsagePoints.set(key, row);
+        sparse.set(key, Math.max(0, Math.min(150, Math.round(normalizeUtilizationPercent(Number(point.utilization || 0))))));
       }
+      sparsePlanUsageBySeries.set(seriesKey, sparse);
+      if (window) {
+        exactPlanUsageEndBySeries.set(seriesKey, {
+          day: endDay,
+          utilization: normalizeUtilizationPercent(window.utilization)
+        });
+      }
+    }
+  }
+
+  for (const series of planUsageSeries) {
+    const filled = interpolateDailyUtilizationMap(sparsePlanUsageBySeries.get(series.key) || new Map(), daysList, {
+      anchorStartDay: startDay,
+      anchorStartUtil: 0,
+      exactEndDay: exactPlanUsageEndBySeries.get(series.key)?.day,
+      exactEndUtil: exactPlanUsageEndBySeries.get(series.key)?.utilization ?? null
+    });
+    for (const day of daysList) {
+      const value = filled.get(day);
+      if (value == null) continue;
+      const row = planUsagePoints.get(day) || { day };
+      row[series.key] = Math.max(0, Math.min(150, Math.round(value)));
+      planUsagePoints.set(day, row);
     }
   }
 
@@ -571,6 +621,7 @@ export async function getCompanyStatsForAdmin(uid: string, days: number) {
     plan_usage_timeline: [...planUsagePoints.values()].sort((a, b) =>
       String(a.day).localeCompare(String(b.day))
     ),
+    plan_usage_series: planUsageSeries.sort((a, b) => a.label.localeCompare(b.label)),
     subscription_profiles: profilesByMember.flatMap(({ member, profiles }) =>
       profiles.map((profile) => ({
         member_id: member.user_id,

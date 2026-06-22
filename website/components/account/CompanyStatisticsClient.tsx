@@ -78,10 +78,12 @@ type CompanyStatsPayload = {
     by_member: Record<string, number>;
   }>;
   plan_usage_timeline: Array<Record<string, number | string>>;
+  plan_usage_series?: Array<{ key: string; label: string; member_id: string }>;
   subscription_profiles: Array<{
     member_id: string;
     member_label: string;
     provider: string;
+    profile_id?: string;
     plan_display: string | null;
     plan_monthly_usd: number | null;
     primary_window: { utilization: number } | null;
@@ -195,6 +197,12 @@ export function CompanyStatisticsClient({ user }: { user: User | null }) {
       })),
     [data?.screen_time_timeline, members]
   );
+
+  const planUsageSeries = useMemo(() => {
+    const rows = data?.plan_usage_series || [];
+    if (selectedMemberId === "all") return rows;
+    return rows.filter((series) => series.member_id === selectedMemberId);
+  }, [data?.plan_usage_series, selectedMemberId]);
 
   const selectedMember = members.find((member) => member.user_id === selectedMemberId) || null;
   const selectedTotals =
@@ -328,7 +336,9 @@ export function CompanyStatisticsClient({ user }: { user: User | null }) {
         <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-faint">Subscription plan use</h3>
-            <p className="mt-1 text-xs text-faint">Percent of AI plan used over time, one line per person.</p>
+            <p className="mt-1 text-xs text-faint">
+              Percent of each AI plan used over time — separate lines when someone has multiple accounts.
+            </p>
           </div>
           <p className="text-xs text-muted">{formatCurrency(data?.totals.plan_monthly_usd || 0)}/mo total plans</p>
         </div>
@@ -340,18 +350,33 @@ export function CompanyStatisticsClient({ user }: { user: User | null }) {
               <YAxis tick={{ fontSize: 11 }} domain={[0, 100]} unit="%" />
               <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
-              {visibleMembers.map((member, index) => (
-                <Line
-                  key={member.user_id}
-                  type="monotone"
-                  dataKey={member.user_id}
-                  name={member.label}
-                  stroke={CHART_COLORS[index % CHART_COLORS.length]}
-                  strokeWidth={2.25}
-                  dot={false}
-                  connectNulls
-                />
-              ))}
+              {planUsageSeries.length > 0 ? (
+                planUsageSeries.map((series, index) => (
+                  <Line
+                    key={series.key}
+                    type="monotone"
+                    dataKey={series.key}
+                    name={series.label}
+                    stroke={CHART_COLORS[index % CHART_COLORS.length]}
+                    strokeWidth={2.25}
+                    dot={{ r: 2.5, strokeWidth: 0 }}
+                    connectNulls
+                  />
+                ))
+              ) : (
+                visibleMembers.map((member, index) => (
+                  <Line
+                    key={member.user_id}
+                    type="monotone"
+                    dataKey={member.user_id}
+                    name={member.label}
+                    stroke={CHART_COLORS[index % CHART_COLORS.length]}
+                    strokeWidth={2.25}
+                    dot={false}
+                    connectNulls
+                  />
+                ))
+              )}
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -385,7 +410,11 @@ export function CompanyStatisticsClient({ user }: { user: User | null }) {
                     <td className="py-3 pr-4 tabular-nums">{formatScreenTimeMinutes(member.totals.screen_time_minutes)}</td>
                     <td className="py-3 pr-4 text-xs">
                       {plans.length
-                        ? plans.map((profile) => `${providerLabel(profile.provider)} ${profile.plan_display || ""}`.trim()).join(", ")
+                        ? plans
+                            .map((profile) =>
+                              `${providerLabel(profile.provider)} ${profile.plan_display || ""}`.trim()
+                            )
+                            .join(" · ")
                         : "—"}
                     </td>
                     <td className="py-3 tabular-nums">{formatCurrency(member.totals.plan_monthly_usd)}/mo</td>

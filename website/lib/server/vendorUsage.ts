@@ -326,12 +326,20 @@ export async function clearVendorUsageProfiles(uid: string, providers: VendorUsa
   return deleted;
 }
 
-async function pruneStaleClaudeProfiles(uid: string, keepDocId: string): Promise<void> {
+const MULTI_PROFILE_PROVIDERS = new Set<VendorUsageProvider>(["claude_code", "codex"]);
+
+async function pruneUnlistedProfiles(
+  uid: string,
+  provider: VendorUsageProvider,
+  keepDocIds: Set<string>
+): Promise<void> {
+  if (!MULTI_PROFILE_PROVIDERS.has(provider) || keepDocIds.size === 0) return;
+  const prefix = `${provider}_`;
   const snap = await getFirebaseAdminDb().collection("users").doc(uid).collection("vendor_usage_profiles").get();
   const batch = getFirebaseAdminDb().batch();
   let pending = 0;
   for (const doc of snap.docs) {
-    if (doc.id.startsWith("claude_code_") && doc.id !== keepDocId) {
+    if (doc.id.startsWith(prefix) && !keepDocIds.has(doc.id)) {
       batch.delete(doc.ref);
       pending += 1;
     }
@@ -347,22 +355,62 @@ function profileViewScore(row: VendorUsageProfileView): number {
   );
 }
 
-function dedupeProfilesByProvider(views: VendorUsageProfileView[]): VendorUsageProfileView[] {
-  const best = new Map<VendorUsageProvider, VendorUsageProfileView>();
+function dedupeProfilesById(views: VendorUsageProfileView[]): VendorUsageProfileView[] {
+  const best = new Map<string, VendorUsageProfileView>();
   for (const row of views) {
-    const prev = best.get(row.provider);
+    const key = `${row.provider}:${row.profile_id}`;
+    const prev = best.get(key);
     if (!prev || profileViewScore(row) > profileViewScore(prev)) {
-      best.set(row.provider, row);
+      best.set(key, row);
     }
   }
   return [...best.values()];
+}
+
+function pickExistingProfileForLiveRefresh(
+  existing: VendorUsageProfileView[],
+  provider: VendorUsageProvider
+): VendorUsageProfileView | undefined {
+  const rows = existing.filter((row) => row.provider === provider);
+  if (!rows.length) return undefined;
+  if (provider === "claude_code") {
+    return rows.find((row) => row.profile_id === CLAUDE_SUBSCRIPTION_PROFILE_ID) || rows[0];
+  }
+  if (provider === "codex") {
+    return rows.find((row) => row.profile_label === "Default" || row.config_dir?.endsWith("/.codex")) || rows[0];
+  }
+  return rows[0];
+}
+
+function existingProfileIdsForLiveRefresh(
+  existing: VendorUsageProfileView[]
+): Partial<Record<VendorUsageProvider, string>> {
+  const out: Partial<Record<VendorUsageProvider, string>> = {};
+  for (const provider of ["claude_code", "codex", "cursor"] as const) {
+    const row = pickExistingProfileForLiveRefresh(existing, provider);
+    if (row) out[provider] = row.profile_id;
+  }
+  if (!out.claude_code) out.claude_code = CLAUDE_SUBSCRIPTION_PROFILE_ID;
+  return out;
+}
+
+function existingProfilesForLiveRefresh(
+  existing: VendorUsageProfileView[]
+): Partial<Record<VendorUsageProvider, VendorUsageProfileSnapshot>> {
+  const out: Partial<Record<VendorUsageProvider, VendorUsageProfileSnapshot>> = {};
+  for (const provider of ["claude_code", "codex", "cursor"] as const) {
+    const row = pickExistingProfileForLiveRefresh(existing, provider);
+    if (row) out[provider] = row;
+  }
+  return out;
 }
 
 export async function persistVendorUsageSnapshots(
   uid: string,
   snapshots: VendorUsageProfileSnapshot[],
   clearProviders: VendorUsageProvider[] = [],
-  syncDiagnostics: VendorUsageSyncDiagnostics | null = null
+  syncDiagnostics: VendorUsageSyncDiagnostics | null = null,
+  opts?: { prune_unlisted_profiles?: boolean }
 ): Promise<number> {
   await clearVendorUsageProfiles(uid, clearProviders);
   if (syncDiagnostics) {
@@ -376,7 +424,10 @@ export async function persistVendorUsageSnapshots(
   }
   if (!snapshots.length) return 0;
   let written = 0;
-  let keptClaudeDocId: string | null = null;
+  const keptDocIdsByProvider = new Map<VendorUsageProvider, Set<string>>();
+  for (const provider of MULTI_PROFILE_PROVIDERS) {
+    keptDocIdsByProvider.set(provider, new Set());
+  }
   for (const incoming of snapshots.slice(0, 24)) {
     let snap = incoming;
     if (snap.provider !== "claude_code" && snap.provider !== "codex" && snap.provider !== "cursor") continue;
@@ -415,10 +466,15 @@ export async function persistVendorUsageSnapshots(
       { merge: true }
     );
     written += 1;
-    if (snap.provider === "claude_code") keptClaudeDocId = docId;
+    keptDocIdsByProvider.get(snap.provider)?.add(docId);
   }
-  if (keptClaudeDocId) {
-    await pruneStaleClaudeProfiles(uid, keptClaudeDocId);
+  if (opts?.prune_unlisted_profiles) {
+    for (const provider of MULTI_PROFILE_PROVIDERS) {
+      const keepIds = keptDocIdsByProvider.get(provider);
+      if (keepIds?.size) {
+        await pruneUnlistedProfiles(uid, provider, keepIds);
+      }
+    }
   }
   return written;
 }
@@ -467,10 +523,17 @@ export async function listVendorUsageProfiles(uid: string): Promise<VendorUsageP
       )
     );
   }
-  return dedupeProfilesByProvider(views).sort(
-    (a, b) => b.synced_at_ms - a.synced_at_ms || a.profile_label.localeCompare(b.profile_label)
+  return dedupeProfilesById(views).sort(
+    (a, b) =>
+      PROVIDER_SORT.indexOf(a.provider) - PROVIDER_SORT.indexOf(b.provider) ||
+      (a.vendor_email || a.profile_label || a.profile_id).localeCompare(
+        b.vendor_email || b.profile_label || b.profile_id
+      ) ||
+      b.synced_at_ms - a.synced_at_ms
   );
 }
+
+const PROVIDER_SORT: VendorUsageProvider[] = ["claude_code", "codex", "cursor"];
 
 export async function getVendorUsagePayload(uid: string, viewerEmail: string | null = null) {
   const [settingsSnap, profiles] = await Promise.all([
@@ -644,32 +707,32 @@ export async function mergeSnapshotsFromStoredTokens(
   tokens: StoredVendorTokens | null
 ): Promise<VendorUsageProfileSnapshot[]> {
   if (!tokens) return snapshots;
-  const succeeded = new Set(
-    snapshots.filter((row) => snapshotSucceeded(row)).map((row) => row.provider)
+  const succeededIds = new Set(
+    snapshots.filter((row) => snapshotSucceeded(row)).map((row) => `${row.provider}:${row.profile_id}`)
   );
   const missing: VendorUsageProvider[] = [];
-  if (tokens.claude_code?.access_token && !succeeded.has("claude_code")) missing.push("claude_code");
-  if (tokens.codex?.access_token && !succeeded.has("codex")) missing.push("codex");
-  if (tokens.cursor?.access_token && !succeeded.has("cursor")) missing.push("cursor");
+  if (tokens.claude_code?.access_token && !snapshots.some((row) => snapshotSucceeded(row) && row.provider === "claude_code" && row.profile_id === CLAUDE_SUBSCRIPTION_PROFILE_ID)) {
+    missing.push("claude_code");
+  }
+  if (tokens.codex?.access_token && !snapshots.some((row) => snapshotSucceeded(row) && row.provider === "codex")) {
+    missing.push("codex");
+  }
+  if (tokens.cursor?.access_token && !snapshots.some((row) => snapshotSucceeded(row) && row.provider === "cursor")) {
+    missing.push("cursor");
+  }
   if (!missing.length) return snapshots;
 
   const existing = await listVendorUsageProfiles(uid);
-  const existingIds = Object.fromEntries(existing.map((row) => [row.provider, row.profile_id])) as Partial<
-    Record<VendorUsageProvider, string>
-  >;
-  const existingProfiles = Object.fromEntries(existing.map((row) => [row.provider, row])) as Partial<
-    Record<VendorUsageProvider, VendorUsageProfileSnapshot>
-  >;
-  if (tokens.claude_code?.access_token && !existingIds.claude_code) {
-    existingIds.claude_code = CLAUDE_SUBSCRIPTION_PROFILE_ID;
-  }
+  const existingIds = existingProfileIdsForLiveRefresh(existing);
+  const existingProfiles = existingProfilesForLiveRefresh(existing);
 
   const live = await fetchLiveVendorUsageSnapshots(tokens, existingIds, existingProfiles);
   const out = [...snapshots];
   for (const row of live) {
-    if (snapshotSucceeded(row) && !succeeded.has(row.provider)) {
+    const key = `${row.provider}:${row.profile_id}`;
+    if (snapshotSucceeded(row) && !succeededIds.has(key)) {
       out.push(row);
-      succeeded.add(row.provider);
+      succeededIds.add(key);
     }
   }
   return out;
@@ -685,15 +748,8 @@ export async function refreshVendorUsageLive(uid: string): Promise<{ refreshed: 
     return { refreshed: 0, error: tokenStatus.has_blob ? "tokens_unreadable" : "no_tokens" };
   }
   const existing = await listVendorUsageProfiles(uid);
-  const existingIds = Object.fromEntries(existing.map((row) => [row.provider, row.profile_id])) as Partial<
-    Record<VendorUsageProvider, string>
-  >;
-  const existingProfiles = Object.fromEntries(existing.map((row) => [row.provider, row])) as Partial<
-    Record<VendorUsageProvider, VendorUsageProfileSnapshot>
-  >;
-  if (tokens.claude_code?.access_token && !existingIds.claude_code) {
-    existingIds.claude_code = CLAUDE_SUBSCRIPTION_PROFILE_ID;
-  }
+  const existingIds = existingProfileIdsForLiveRefresh(existing);
+  const existingProfiles = existingProfilesForLiveRefresh(existing);
   const snapshots = await fetchLiveVendorUsageSnapshots(tokens, existingIds, existingProfiles);
   if (!snapshots.length) {
     return { refreshed: 0, error: "fetch_failed" };

@@ -111,7 +111,9 @@ export async function POST(request: Request) {
       const tokens = (await getVendorUsageTokens(user.uid)) ?? null;
       snapshots = await mergeSnapshotsFromStoredTokens(user.uid, snapshots, tokens);
     }
-    const written = await persistVendorUsageSnapshots(user.uid, snapshots, clearProviders, syncDiagnostics);
+    const written = await persistVendorUsageSnapshots(user.uid, snapshots, clearProviders, syncDiagnostics, {
+      prune_unlisted_profiles: true
+    });
     return NextResponse.json({ ok: true, written, tokens_stored: tokensStored }, { status: 200, headers: buildPromptlyCorsHeaders(origin) });
   } catch (error) {
     return NextResponse.json(

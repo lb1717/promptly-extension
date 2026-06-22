@@ -310,6 +310,64 @@ function aggregateDailyUsagePoints(
     }));
 }
 
+function fillDailyUsagePointsWithInterpolation(
+  sparsePoints: { at_ms: number; utilization: number; dayIndex: number }[],
+  cycleStartMs: number,
+  nowMs: number,
+  lastDayIndex: number,
+  exactLatestUtil: number | null
+): { at_ms: number; utilization: number; dayIndex: number }[] {
+  if (lastDayIndex <= 0) return sparsePoints;
+
+  const knownByDay = new Map<number, number>();
+  knownByDay.set(1, 0);
+  for (const point of sparsePoints) {
+    knownByDay.set(point.dayIndex, point.utilization);
+  }
+  if (exactLatestUtil != null) {
+    knownByDay.set(lastDayIndex, exactLatestUtil);
+  }
+
+  const knownDays = [...knownByDay.keys()].sort((a, b) => a - b);
+  const valueForDay = (dayIndex: number): number => {
+    if (knownByDay.has(dayIndex)) return knownByDay.get(dayIndex)!;
+    let prevDay = knownDays[0];
+    let nextDay = knownDays[knownDays.length - 1];
+    for (const day of knownDays) {
+      if (day <= dayIndex) prevDay = day;
+      if (day >= dayIndex) {
+        nextDay = day;
+        break;
+      }
+    }
+    const prevUtil = knownByDay.get(prevDay)!;
+    const nextUtil = knownByDay.get(nextDay)!;
+    if (prevDay === nextDay) return prevUtil;
+    const t = (dayIndex - prevDay) / (nextDay - prevDay);
+    return prevUtil + t * (nextUtil - prevUtil);
+  };
+
+  const filled: { at_ms: number; utilization: number; dayIndex: number }[] = [];
+  for (let dayIndex = 1; dayIndex <= lastDayIndex; dayIndex += 1) {
+    const isLast = dayIndex === lastDayIndex;
+    const dayMidMs = startOfLocalDayMs(cycleStartMs) + (dayIndex - 1) * DAY_MS + DAY_MS / 2;
+    filled.push({
+      at_ms: isLast && exactLatestUtil != null ? nowMs : dayMidMs,
+      utilization: Math.max(0, valueForDay(dayIndex)),
+      dayIndex
+    });
+  }
+  return filled;
+}
+
+function sparseDailyLatestUtil(history: UsageHistoryPoint[], cycleStartMs: number, cycleEndMs: number): number | null {
+  const points = history
+    .filter((point) => point.at_ms >= cycleStartMs && point.at_ms <= cycleEndMs)
+    .sort((a, b) => a.at_ms - b.at_ms);
+  if (!points.length) return null;
+  return displayUtilization(points[points.length - 1].utilization);
+}
+
 function chartYDomainMax(values: number[]): number {
   const peak = values.reduce((max, value) => (Number.isFinite(value) ? Math.max(max, value) : max), 0);
   if (peak <= 100) return 100;
@@ -639,25 +697,18 @@ function buildBillingCycleChartRows(
   const spanMs = Math.max(cycleEndMs - cycleStartMs, 1);
   const currentUtil = isCurrentPeriod ? displayUtilization(currentWindow.utilization) : null;
 
-  const dailyPoints = aggregateDailyUsagePoints(history, currentUtil, cycleStartMs, nowMs);
-  if (dailyPoints.length === 0 && currentUtil != null) {
-    dailyPoints.push({
-      at_ms: dayChartMs(nowMs),
-      utilization: currentUtil,
-      dayIndex: cycleDayIndex(cycleStartMs, nowMs)
-    });
-  }
+  const dailyPoints = fillDailyUsagePointsWithInterpolation(
+    aggregateDailyUsagePoints(history, currentUtil, cycleStartMs, nowMs),
+    cycleStartMs,
+    nowMs,
+    isCurrentPeriod ? cycleDayIndex(cycleStartMs, nowMs) : totalCycleDays(cycleStartMs, cycleEndMs),
+    isCurrentPeriod ? currentUtil : sparseDailyLatestUtil(history, cycleStartMs, cycleEndMs)
+  );
 
-  const currentDayIndex = isCurrentPeriod ? cycleDayIndex(cycleStartMs, nowMs) : totalCycleDays(cycleStartMs, cycleEndMs);
-  if (isCurrentPeriod && dailyPoints.length > 0 && currentUtil != null) {
-    dailyPoints[dailyPoints.length - 1] = {
-      ...dailyPoints[dailyPoints.length - 1],
-      at_ms: nowMs,
-      utilization: currentUtil,
-      dayIndex: currentDayIndex
-    };
-  }
   const latestUtil = dailyPoints[dailyPoints.length - 1]?.utilization ?? 0;
+  const currentDayIndex = isCurrentPeriod
+    ? cycleDayIndex(cycleStartMs, nowMs)
+    : totalCycleDays(cycleStartMs, cycleEndMs);
   const dailyAverage = latestUtil / Math.max(1, currentDayIndex);
   const cycleDays = totalCycleDays(cycleStartMs, cycleEndMs);
   const projectedEndFromDisplay = dailyAverage * cycleDays;
@@ -962,12 +1013,22 @@ function PeriodNavigator({
   );
 }
 
+function profileHeading(profile: VendorProfile, providerProfileCount: number): string {
+  if (providerProfileCount <= 1) {
+    return PROVIDER_LABEL[profile.provider];
+  }
+  const account = profile.vendor_email || profile.profile_label || profile.profile_id.slice(0, 8);
+  return `${PROVIDER_LABEL[profile.provider]} · ${account}`;
+}
+
 function SubscriptionUsageRow({
   profile,
-  rangeDays
+  rangeDays,
+  providerProfileCount
 }: {
   profile: VendorProfile;
   rangeDays: number;
+  providerProfileCount: number;
 }) {
   const labels = windowLabels(profile.provider);
   const hasPrimary = Boolean(profile.primary_window);
@@ -1027,11 +1088,12 @@ function SubscriptionUsageRow({
     <article className="rounded-xl border border-line bg-white p-4 sm:p-5">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-ink">{PROVIDER_LABEL[profile.provider]}</p>
+          <p className="text-sm font-semibold text-ink">{profileHeading(profile, providerProfileCount)}</p>
           <p className="mt-0.5 truncate text-sm text-muted">
             <span>{profile.plan_display || "Unknown plan"}</span>
             {priceLabel ? <span> · {priceLabel}</span> : null}
-            {profile.vendor_email ? <span> · {profile.vendor_email}</span> : null}
+            {providerProfileCount > 1 && profile.profile_label ? <span> · {profile.profile_label}</span> : null}
+            {profile.vendor_email && providerProfileCount <= 1 ? <span> · {profile.vendor_email}</span> : null}
           </p>
         </div>
         {activeWindow ? (
@@ -1184,9 +1246,21 @@ const VendorUsageSection = forwardRef<
   const profiles = useMemo(() => {
     const rows = (data?.profiles ?? []).filter((p) => !p.sync_error);
     return [...rows].sort(
-      (a, b) => PROVIDER_ORDER.indexOf(a.provider) - PROVIDER_ORDER.indexOf(b.provider)
+      (a, b) =>
+        PROVIDER_ORDER.indexOf(a.provider) - PROVIDER_ORDER.indexOf(b.provider) ||
+        (a.vendor_email || a.profile_label || a.profile_id).localeCompare(
+          b.vendor_email || b.profile_label || b.profile_id
+        )
     );
   }, [data]);
+
+  const providerProfileCounts = useMemo(() => {
+    const counts = new Map<VendorProfile["provider"], number>();
+    for (const profile of profiles) {
+      counts.set(profile.provider, (counts.get(profile.provider) || 0) + 1);
+    }
+    return counts;
+  }, [profiles]);
 
   const errorProfiles = useMemo(() => (data?.profiles ?? []).filter((p) => p.sync_error), [data]);
   const hasCursor = profiles.some((p) => p.provider === "cursor");
@@ -1223,6 +1297,7 @@ const VendorUsageSection = forwardRef<
               key={`${profile.provider}-${profile.profile_id}`}
               profile={profile}
               rangeDays={rangeDays}
+              providerProfileCount={providerProfileCounts.get(profile.provider) || 1}
             />
           ))}
         </div>

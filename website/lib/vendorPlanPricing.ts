@@ -298,3 +298,63 @@ export function dollarsUnusedFromUtilization(monthlyUsd: number, utilizationPerc
   const proratedPlan = monthlyUsd * (window / monthSeconds);
   return Math.round(((100 - util) / 100) * proratedPlan * 100) / 100;
 }
+
+function dayKeyToMs(dayKey: string): number {
+  return Date.parse(`${dayKey}T12:00:00.000Z`);
+}
+
+/** Fill every day in dayKeys with linear interpolation between known readings. */
+export function interpolateDailyUtilizationMap(
+  sparse: Map<string, number>,
+  dayKeys: string[],
+  opts?: {
+    anchorStartDay?: string;
+    anchorStartUtil?: number;
+    exactEndDay?: string;
+    exactEndUtil?: number | null;
+  }
+): Map<string, number> {
+  if (!dayKeys.length) return new Map();
+
+  const known = new Map(sparse);
+  if (opts?.anchorStartDay != null && opts.anchorStartUtil != null) {
+    known.set(opts.anchorStartDay, normalizeUtilizationPercent(opts.anchorStartUtil));
+  }
+  if (opts?.exactEndDay && opts.exactEndUtil != null) {
+    known.set(opts.exactEndDay, normalizeUtilizationPercent(opts.exactEndUtil));
+  }
+
+  const sortedKnownDays = dayKeys.filter((day) => known.has(day)).sort();
+  if (!sortedKnownDays.length) {
+    const out = new Map<string, number>();
+    for (const day of dayKeys) out.set(day, 0);
+    return out;
+  }
+
+  const valueForDay = (day: string): number => {
+    if (known.has(day)) return known.get(day)!;
+    const dayMs = dayKeyToMs(day);
+    let prevDay = sortedKnownDays[0];
+    let nextDay = sortedKnownDays[sortedKnownDays.length - 1];
+    for (const candidate of sortedKnownDays) {
+      if (dayKeyToMs(candidate) <= dayMs) prevDay = candidate;
+      if (dayKeyToMs(candidate) >= dayMs) {
+        nextDay = candidate;
+        break;
+      }
+    }
+    const prevUtil = known.get(prevDay)!;
+    const nextUtil = known.get(nextDay)!;
+    const prevMs = dayKeyToMs(prevDay);
+    const nextMs = dayKeyToMs(nextDay);
+    if (prevMs === nextMs) return prevUtil;
+    const t = (dayMs - prevMs) / (nextMs - prevMs);
+    return normalizeUtilizationPercent(prevUtil + t * (nextUtil - prevUtil));
+  };
+
+  const out = new Map<string, number>();
+  for (const day of dayKeys) {
+    out.set(day, Math.max(0, valueForDay(day)));
+  }
+  return out;
+}
