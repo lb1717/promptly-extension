@@ -78,6 +78,17 @@ body {
   }
 }
 
+@keyframes researchRipple {
+  0% {
+    transform: scale(0.5);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
 .onboarding-tour-spotlight-target {
   position: relative;
   z-index: 203 !important;

@@ -1,15 +1,14 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { AmbientBackground } from "@/components/AmbientBackground";
-import { DemoSection } from "@/components/DemoSection";
 import { Footer } from "@/components/Footer";
 import { Navbar } from "@/components/Navbar";
 import { Button } from "@/components/ui/Button";
 import { PAPER_ENTRIES, TIMELINE_STEPS, type TimelineStep } from "@/lib/researchContent";
 
-const ResearchHeuristicDemoLazy = dynamic(
-  () => import("@/components/ResearchHeuristicDemo").then((m) => ({ default: m.ResearchHeuristicDemo })),
-  { ssr: false, loading: () => <p className="text-sm text-faint">Loading demo…</p> }
+const ResearchCompanionDemoLazy = dynamic(
+  () => import("@/components/ResearchCompanionDemo").then((m) => ({ default: m.ResearchCompanionDemo })),
+  { ssr: false, loading: () => <p className="py-16 text-center text-sm text-faint">Loading demo…</p> }
 );
 
 const FAQS = [
@@ -167,16 +166,8 @@ export function ResearchLabsPage(_props?: Props) {
               <h1 className="mt-4 text-4xl font-semibold leading-tight text-ink sm:text-6xl">
                 Prompt engineering research
               </h1>
-              <p className="mx-auto mt-6 max-w-3xl text-lg leading-relaxed text-muted sm:text-xl">
-                Promptly turns a raw prompt into a parameterised instruction specification, then reconstructs an
-                optimised prompt using retrieved prompt patterns and search-based prompt optimisation.
-              </p>
-              <p className="mx-auto mt-6 max-w-3xl text-sm leading-relaxed text-muted sm:text-base">
-                This page presents a conceptual architecture for that workflow, links it to research literature, and
-                includes a deterministic demo of how an optimisation pipeline could look in product form.
-              </p>
               <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-                <Button href="#promptly-in-action">Try the demo</Button>
+                <Button href="#companion-demo">See it in action</Button>
                 <Button href="/papers" variant="ghost">
                   Browse papers
                 </Button>
@@ -188,7 +179,7 @@ export function ResearchLabsPage(_props?: Props) {
           </div>
         </section>
 
-        <DemoSection />
+        <ResearchCompanionDemoLazy />
 
         <section className="border-t border-line px-4 pb-4 pt-2 sm:pb-6">
           <div className="mx-auto max-w-6xl text-center">
@@ -462,28 +453,6 @@ export function ResearchLabsPage(_props?: Props) {
                   url: PAPER_ENTRIES[5].url
                 },
                 { label: "The Prompt Report: A Systematic Survey of Prompt Engineering Techniques", url: PAPER_ENTRIES[2].url }
-              ]}
-            />
-          </div>
-        </section>
-
-        <section id="promptly-in-action" className="scroll-mt-24 px-4 py-10">
-          <div className="mx-auto max-w-6xl">
-            <div className="mb-10 max-w-3xl">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-faint">Promptly in action</p>
-              <h2 className="mt-3 text-3xl font-semibold text-ink sm:text-4xl">A deterministic demo of the product workflow</h2>
-              <p className="mt-4 text-sm leading-relaxed text-muted sm:text-base">
-                The component below is deliberately heuristic. It does not call a model; it illustrates how Promptly can
-                analyse a raw prompt, assign tags, reconstruct a clearer instruction contract, and show the delta in a
-                readable interface.
-              </p>
-            </div>
-            <ResearchHeuristicDemoLazy />
-            <SourcesBlock
-              items={[
-                { label: "Effective Prompts for AI: The Essentials", url: PAPER_ENTRIES[0].url },
-                { label: "The Prompt Report: A Systematic Survey of Prompt Engineering Techniques", url: PAPER_ENTRIES[2].url },
-                { label: "Automatic Prompt Optimization with \"Gradient Descent\" and Beam Search", url: PAPER_ENTRIES[3].url }
               ]}
             />
           </div>
