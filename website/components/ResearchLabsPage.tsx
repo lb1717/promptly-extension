@@ -3,12 +3,16 @@ import Link from "next/link";
 import { AmbientBackground } from "@/components/AmbientBackground";
 import { Footer } from "@/components/Footer";
 import { Navbar } from "@/components/Navbar";
-import { Button } from "@/components/ui/Button";
 import { PAPER_ENTRIES, TIMELINE_STEPS, type TimelineStep } from "@/lib/researchContent";
 
 const ResearchCompanionDemoLazy = dynamic(
   () => import("@/components/ResearchCompanionDemo").then((m) => ({ default: m.ResearchCompanionDemo })),
   { ssr: false, loading: () => <p className="py-16 text-center text-sm text-faint">Loading demo…</p> }
+);
+
+const DemoSectionLazy = dynamic(
+  () => import("@/components/DemoSection").then((m) => ({ default: m.DemoSection })),
+  { ssr: false, loading: () => <p className="py-8 text-center text-sm text-faint">Loading demo…</p> }
 );
 
 const FAQS = [
@@ -164,22 +168,20 @@ export function ResearchLabsPage(_props?: Props) {
             <div className="mx-auto max-w-4xl text-center">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-faint">Research</p>
               <h1 className="mt-4 text-4xl font-semibold leading-tight text-ink sm:text-6xl">
-                Prompt engineering research
+                Prompt Engineering
               </h1>
-              <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-                <Button href="#companion-demo">See it in action</Button>
-                <Button href="/papers" variant="ghost">
-                  Browse papers
-                </Button>
-                <Button href="/" variant="ghost">
-                  Product page
-                </Button>
-              </div>
             </div>
           </div>
         </section>
 
         <ResearchCompanionDemoLazy />
+
+        <section id="browser-extension-demo" className="scroll-mt-24 border-t border-line px-4 py-8 sm:py-10">
+          <div className="mx-auto max-w-6xl">
+            <h2 className="mb-6 text-center text-2xl font-semibold text-ink sm:mb-8 sm:text-3xl">In Chrome or Edge:</h2>
+            <DemoSectionLazy embedded />
+          </div>
+        </section>
 
         <section className="border-t border-line px-4 pb-4 pt-2 sm:pb-6">
           <div className="mx-auto max-w-6xl text-center">

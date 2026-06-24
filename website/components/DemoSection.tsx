@@ -9,7 +9,7 @@ const ORIGINAL_PROMPT = "read this pdf and explain the arguments with evidence";
 const IMPROVED_PROMPT =
   "Read the attached PDF and summarize the main arguments with supporting evidence. Use explicit quotes from the text and do not include any extraneous information.";
 
-export function DemoSection() {
+export function DemoSection({ embedded = false }: { embedded?: boolean }) {
   const [promptText, setPromptText] = useState("");
   const [isAnimating, setIsAnimating] = useState(false);
   const [tabText, setTabText] = useState("Promptly");
@@ -175,25 +175,18 @@ export function DemoSection() {
   const showImproved = promptText === IMPROVED_PROMPT;
   const displayPromptText = promptText || (!isAnimating ? ORIGINAL_PROMPT : "");
 
-  return (
-    <section id="how-it-works" className="overflow-x-hidden px-3 pb-5 pt-4 sm:px-4 sm:pb-8 sm:pt-8">
-      <div className="mx-auto max-w-6xl">
-        <p className="mb-3 text-center sm:mb-4">
-          <Link
-            href="/research"
-            className="group inline-flex items-center gap-2 text-sm font-semibold text-ink transition hover:text-muted sm:text-base"
-          >
-            Explore our prompt engineering tools
-            <span aria-hidden className="transition-transform group-hover:translate-x-0.5">
-              →
-            </span>
-          </Link>
-        </p>
-        <div className="relative mx-auto max-w-5xl rounded-2xl border border-line bg-cream px-3 pb-4 pt-16 shadow-card sm:rounded-3xl sm:px-8 sm:pb-8 sm:pt-20">
-          <div
-            ref={promptBoxRef}
-            className="relative mx-auto max-w-[980px] rounded-[18px] border border-slate-300/70 bg-white px-3 py-3 shadow-[0_12px_30px_rgba(2,6,23,0.12)] sm:rounded-[26px] sm:px-5 sm:py-4"
-          >
+  const demoFrame = (
+    <div
+      className={
+        embedded
+          ? "relative mx-auto max-w-5xl px-3 pb-4 pt-16 sm:px-8 sm:pb-8 sm:pt-20"
+          : "relative mx-auto max-w-5xl rounded-2xl border border-line bg-cream px-3 pb-4 pt-16 shadow-card sm:rounded-3xl sm:px-8 sm:pb-8 sm:pt-20"
+      }
+    >
+      <div
+        ref={promptBoxRef}
+        className="relative mx-auto max-w-[980px] rounded-[18px] border border-slate-300/70 bg-white px-3 py-3 shadow-[0_12px_30px_rgba(2,6,23,0.12)] sm:rounded-[26px] sm:px-5 sm:py-4"
+      >
             <div className="flex min-w-0 items-center gap-2 sm:gap-4">
               <p className="min-w-0 flex-1 break-words pl-1 text-left text-[13px] leading-snug text-slate-800 sm:pl-[10px] sm:text-[24px] sm:leading-tight">
                 {showImproved ? (
@@ -303,8 +296,28 @@ export function DemoSection() {
               <span className="relative z-10 ml-auto pr-0 text-right text-cream/80 sm:pr-1">Auto</span>
             </motion.div>
           </div>
-        </div>
+    </div>
+  );
 
+  if (embedded) {
+    return demoFrame;
+  }
+
+  return (
+    <section id="how-it-works" className="overflow-x-hidden px-3 pb-5 pt-4 sm:px-4 sm:pb-8 sm:pt-8">
+      <div className="mx-auto max-w-6xl">
+        <p className="mb-3 text-center sm:mb-4">
+          <Link
+            href="/research"
+            className="group inline-flex items-center gap-2 text-sm font-semibold text-ink transition hover:text-muted sm:text-base"
+          >
+            Explore our prompt engineering tools
+            <span aria-hidden className="transition-transform group-hover:translate-x-0.5">
+              →
+            </span>
+          </Link>
+        </p>
+        {demoFrame}
       </div>
     </section>
   );
