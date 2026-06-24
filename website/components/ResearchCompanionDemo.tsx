@@ -494,7 +494,7 @@ export function ResearchCompanionDemo() {
       <div className="mx-auto max-w-6xl">
         <div
           ref={sceneRef}
-          className="research-companion-scene relative mx-auto flex h-[380px] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-[#d8dce5] bg-white shadow-[0_20px_50px_rgba(15,23,42,0.12)] sm:h-[420px]"
+          className="research-companion-scene relative mx-auto flex h-[380px] w-full max-w-[min(100%,570px)] flex-col overflow-hidden rounded-lg border border-[#d8dce5] bg-white shadow-[0_20px_50px_rgba(15,23,42,0.12)] sm:h-[420px] sm:max-w-[min(100%,630px)]"
         >
           <div className="flex h-10 shrink-0 items-center gap-2 border-b border-[#e5e7eb] bg-[#fafafa] px-4">
             <span className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]" />
