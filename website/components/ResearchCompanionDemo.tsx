@@ -24,6 +24,8 @@ type CompanionView = "draft" | "pasted";
 type RecordingPhase = "idle" | "listening" | "transcribing";
 
 const HOST_CAROUSEL_MS = 2600;
+const CURSOR_TRAVEL_MS = 800;
+const CURSOR_MOVE_EASE: [number, number, number, number] = [0.32, 0.72, 0, 1];
 
 const HOST_APPS: Array<{
   label: string;
@@ -366,6 +368,16 @@ export function ResearchCompanionDemo() {
       return id;
     };
 
+    const resetCursorStart = () => {
+      const scene = sceneRef.current;
+      if (!scene) return;
+      const sceneRect = scene.getBoundingClientRect();
+      setCursorPos({
+        x: sceneRect.width * 0.58,
+        y: sceneRect.height * 0.26
+      });
+    };
+
     const cursorAt = (target: HTMLElement | null, offsetX = 0, offsetY = 0) => {
       const scene = sceneRef.current;
       if (!scene || !target) return;
@@ -385,6 +397,7 @@ export function ResearchCompanionDemo() {
       setImproving(false);
       setImprovedRevealKey((prev) => prev + 1);
       setShowCursor(false);
+      resetCursorStart();
       setMicPulse(false);
       setStopPulse(false);
       setImprovePulse(false);
@@ -397,10 +410,10 @@ export function ResearchCompanionDemo() {
       let t = 400;
 
       pushTimer(() => {
-        cursorAt(micBtnRef.current, 0, 4);
         setShowCursor(true);
+        cursorAt(micBtnRef.current, 0, 4);
       }, t);
-      t += 900;
+      t += CURSOR_TRAVEL_MS + 120;
 
       pushTimer(() => {
         setMicPulse(true);
@@ -413,7 +426,7 @@ export function ResearchCompanionDemo() {
       pushTimer(() => {
         cursorAt(stopBtnRef.current, 0, 4);
       }, t);
-      t += 900;
+      t += CURSOR_TRAVEL_MS + 120;
 
       pushTimer(() => {
         setStopPulse(true);
@@ -438,10 +451,10 @@ export function ResearchCompanionDemo() {
       t += 500;
 
       pushTimer(() => {
-        cursorAt(improveBtnRef.current, 0, 2);
         setShowCursor(true);
+        cursorAt(improveBtnRef.current, 0, 2);
       }, t);
-      t += 900;
+      t += CURSOR_TRAVEL_MS + 120;
 
       pushTimer(() => {
         setImprovePulse(true);
@@ -577,18 +590,23 @@ export function ResearchCompanionDemo() {
             </motion.div>
           </div>
 
-          {showCursor ? (
-            <motion.img
-              src="/images/mac-cursor.png"
-              alt=""
-              aria-hidden="true"
-              className="pointer-events-none absolute z-30 hidden h-[30px] w-[23px] sm:block"
-              style={{ left: cursorPos.x - 2, top: cursorPos.y + 4 }}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: 0.12 }}
-            />
-          ) : null}
+          <motion.img
+            src="/images/mac-cursor.png"
+            alt=""
+            aria-hidden="true"
+            className="pointer-events-none absolute z-30 hidden h-[30px] w-[23px] sm:block"
+            initial={false}
+            animate={{
+              left: cursorPos.x - 2,
+              top: cursorPos.y + 4,
+              opacity: showCursor ? 1 : 0
+            }}
+            transition={{
+              left: { duration: CURSOR_TRAVEL_MS / 1000, ease: CURSOR_MOVE_EASE },
+              top: { duration: CURSOR_TRAVEL_MS / 1000, ease: CURSOR_MOVE_EASE },
+              opacity: { duration: 0.15 }
+            }}
+          />
         </div>
       </div>
     </section>
