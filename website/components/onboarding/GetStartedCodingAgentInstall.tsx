@@ -3,6 +3,7 @@
 import { CopyBlock } from "@/components/integrations/integrationCopyBlock";
 import { fullSetupCommands, type IdeToolId, type OsId } from "@/components/integrations/integrationOs";
 import { useIntegrationPairing } from "@/components/integrations/integrationPairing";
+import { OnboardingInstallOsToggle } from "@/components/onboarding/OnboardingInstallOsToggle";
 import { useState } from "react";
 
 const TOOLS: { id: IdeToolId; label: string; bg: string; hooks: string }[] = [
@@ -126,20 +127,7 @@ export function GetStartedCodingAgentInstall({
         <p className="text-base font-semibold text-ink">
           2. Coding agents <span className="text-sm font-normal text-muted">(optional)</span>
         </p>
-        <div className="flex gap-1">
-          {(["mac", "windows"] as const).map((id) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setOs(id)}
-              className={`rounded-md border px-2 py-0.5 text-[10px] font-medium ${
-                os === id ? "border-ink bg-ink text-cream" : "border-line text-muted hover:text-ink"
-              }`}
-            >
-              {id === "mac" ? "Mac" : "Windows"}
-            </button>
-          ))}
-        </div>
+        <OnboardingInstallOsToggle os={os} onChange={setOs} />
       </div>
       <p className="mt-1 text-xs text-muted">
         Set up one or all three — each agent needs its own pairing code. Prompt and screen-time stats stay separate per
