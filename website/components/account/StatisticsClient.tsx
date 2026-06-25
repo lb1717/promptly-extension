@@ -9,6 +9,7 @@ import { StatisticsPrintReport } from "@/components/account/StatisticsPrintRepor
 import VendorUsageSection, { type VendorUsageSectionHandle } from "@/components/account/VendorUsageSection";
 import { AutoDismissNoticeBar } from "@/components/ui/AutoDismissNoticeBar";
 import { buildStatisticsReportData, downloadStatisticsReportPdf } from "@/lib/statisticsReport";
+import { buildMemberColorLookup, getMemberChartColor } from "@/lib/memberChartColors";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Bar,
@@ -1171,19 +1172,6 @@ export type CompanyStatisticsConfig = {
   onOverviewRefresh?: () => void;
   planUsageSection?: ReactNode;
 };
-
-const MEMBER_CHART_COLORS = [
-  "#111827",
-  "#2563eb",
-  "#16a34a",
-  "#f97316",
-  "#9333ea",
-  "#dc2626",
-  "#0891b2",
-  "#ca8a04",
-  "#4f46e5",
-  "#0f766e"
-];
 
 type ModelEngagementByModelRow = {
   bucket: string;
@@ -2655,16 +2643,25 @@ export function StatisticsClient({
     setSelectedMemberFilters(new Set(companyMemberBreakdown.members.map((member) => member.user_id)));
   }, [companyMemberBreakdown, companyMemberIdsKey]);
 
+  const memberColorById = useMemo(
+    () => buildMemberColorLookup(companyMemberBreakdown?.members ?? []),
+    [companyMemberBreakdown?.members]
+  );
+
   const memberChartSeries = useMemo(() => {
     if (!companyMemberBreakdown) return [];
+    const total = companyMemberBreakdown.members.length;
     return companyMemberBreakdown.members
       .filter((member) => selectedMemberFilters.has(member.user_id))
-      .map((member, index) => ({
-        user_id: member.user_id,
-        label: member.label,
-        color: MEMBER_CHART_COLORS[index % MEMBER_CHART_COLORS.length] ?? COLOR_UNKNOWN,
-        dataKey: member.user_id
-      }));
+      .map((member) => {
+        const index = companyMemberBreakdown.members.findIndex((row) => row.user_id === member.user_id);
+        return {
+          user_id: member.user_id,
+          label: member.label,
+          color: getMemberChartColor(Math.max(0, index), total),
+          dataKey: member.user_id
+        };
+      });
   }, [companyMemberBreakdown, selectedMemberFilters]);
 
   const memberPromptVolumeChartRows = useMemo(() => {
@@ -3717,8 +3714,7 @@ export function StatisticsClient({
                 </span>
                 {chartGroupMode === "member"
                   ? (companyMemberBreakdown?.members ?? []).map((member) => {
-                      const series = memberChartSeries.find((row) => row.user_id === member.user_id);
-                      const color = series?.color ?? COLOR_UNKNOWN;
+                      const color = memberColorById.get(member.user_id) ?? COLOR_UNKNOWN;
                       const pressed = selectedMemberFilters.has(member.user_id);
                       return (
                         <PromptVolumeAiToggleButton
@@ -4226,7 +4222,7 @@ export function StatisticsClient({
               <section className="mb-8 w-full rounded-2xl border border-line bg-white p-3 shadow-card sm:p-4">
                 <div className="mb-3 grid grid-cols-1 items-center gap-x-2 gap-y-2 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
                   <h2 className="text-base font-semibold uppercase tracking-[0.22em] text-ink sm:justify-self-start">
-                    How you spend your time
+                    {companyStatistics ? "Time spend breakdown" : "How you spend your time"}
                   </h2>
                   <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-muted sm:justify-self-center">
                     {ENGAGEMENT_OVER_TIME_SERIES.map((series) => (

@@ -1,6 +1,7 @@
 "use client";
 
 import type { User } from "firebase/auth";
+import { buildMemberColorLookup } from "@/lib/memberChartColors";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { StatisticsClient, type CompanyStatisticsConfig } from "@/components/account/StatisticsClient";
 import { CompanyPlanUsageSection } from "@/components/account/CompanyPlanUsageSection";
@@ -94,6 +95,8 @@ export function CompanyStatisticsClient({ user }: { user: User | null }) {
     [members, selectedMemberIds]
   );
   const multiMemberView = visibleMemberIds.length !== 1;
+
+  const memberColorById = useMemo(() => buildMemberColorLookup(members), [members]);
 
   const loadOverview = useCallback(async () => {
     if (!user) return;
@@ -215,6 +218,7 @@ export function CompanyStatisticsClient({ user }: { user: User | null }) {
               {members.map((member) => {
                 const active =
                   !selectedMemberIds.length || selectedMemberIds.includes(member.user_id);
+                const memberColor = memberColorById.get(member.user_id) ?? "#64748b";
                 return (
                   <button
                     key={member.user_id}
@@ -222,9 +226,14 @@ export function CompanyStatisticsClient({ user }: { user: User | null }) {
                     onClick={() => toggleMember(member.user_id)}
                     className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
                       active
-                        ? "border-ink bg-ink text-cream"
+                        ? "text-cream"
                         : "border-line bg-white text-muted hover:bg-cream-dark"
                     }`}
+                    style={
+                      active
+                        ? { backgroundColor: memberColor, borderColor: memberColor }
+                        : { borderColor: memberColor, color: memberColor }
+                    }
                   >
                     {member.label}
                   </button>

@@ -1,5 +1,6 @@
 "use client";
 
+import { buildMemberColorLookup, getMemberPlanLineColors } from "@/lib/memberChartColors";
 import { useMemo } from "react";
 import {
   CartesianGrid,
@@ -11,19 +12,6 @@ import {
   XAxis,
   YAxis
 } from "recharts";
-
-const CHART_COLORS = [
-  "#111827",
-  "#2563eb",
-  "#16a34a",
-  "#f97316",
-  "#9333ea",
-  "#dc2626",
-  "#0891b2",
-  "#ca8a04",
-  "#4f46e5",
-  "#0f766e"
-];
 
 const CHART_TOOLTIP_STYLE = {
   background: "#ffffff",
@@ -66,21 +54,25 @@ export function CompanyPlanUsageSection({
 }: CompanyPlanUsageProps) {
   const visibleSet = useMemo(() => new Set(visibleMemberIds), [visibleMemberIds]);
 
+  const memberColorById = useMemo(() => buildMemberColorLookup(members), [members]);
+
   const chartsByMember = useMemo(() => {
     return members
       .filter((member) => visibleSet.has(member.user_id))
-      .map((member, memberIndex) => {
+      .map((member) => {
         const series = planUsageSeries.filter((row) => row.member_id === member.user_id);
-        const colorOffset = memberIndex * CHART_COLORS.length;
+        const memberColor = memberColorById.get(member.user_id) ?? "#64748b";
+        const lineColors = getMemberPlanLineColors(memberColor, series.length);
         return {
           member,
+          memberColor,
           series: series.map((row, index) => ({
             ...row,
-            color: CHART_COLORS[(colorOffset + index) % CHART_COLORS.length]!
+            color: lineColors[index] ?? memberColor
           }))
         };
       });
-  }, [members, visibleSet, planUsageSeries]);
+  }, [members, visibleSet, planUsageSeries, memberColorById]);
 
   if (loading) {
     return (
