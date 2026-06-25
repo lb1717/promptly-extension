@@ -1,18 +1,19 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { AmbientBackground } from "@/components/AmbientBackground";
+import { BrowserExtensionDemoShell, ResearchCompanionDemoShell } from "@/components/DemoAnimationShells";
 import { Footer } from "@/components/Footer";
 import { Navbar } from "@/components/Navbar";
 import { PAPER_ENTRIES } from "@/lib/researchContent";
 
 const ResearchCompanionDemoLazy = dynamic(
   () => import("@/components/ResearchCompanionDemo").then((m) => ({ default: m.ResearchCompanionDemo })),
-  { ssr: false, loading: () => <p className="py-16 text-center text-sm text-faint">Loading demo…</p> }
+  { ssr: false, loading: () => <ResearchCompanionDemoShell /> }
 );
 
 const DemoSectionLazy = dynamic(
   () => import("@/components/DemoSection").then((m) => ({ default: m.DemoSection })),
-  { ssr: false, loading: () => <p className="py-8 text-center text-sm text-faint">Loading demo…</p> }
+  { ssr: false, loading: () => <BrowserExtensionDemoShell embedded /> }
 );
 
 const FAQS = [

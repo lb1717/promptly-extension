@@ -31,7 +31,7 @@ export function Hero() {
   }, []);
 
   const heroCtaClass =
-    "relative overflow-hidden px-8 py-4 text-base font-bold uppercase tracking-wide sm:px-10 sm:py-4 sm:text-lg";
+    "relative overflow-hidden px-8 py-4 text-base !font-bold uppercase tracking-wide sm:px-10 sm:py-4 sm:text-lg";
 
   return (
     <section className="relative overflow-hidden bg-transparent px-4 pb-4 pt-3 sm:pb-5 sm:pt-7">

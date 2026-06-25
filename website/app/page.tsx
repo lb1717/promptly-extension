@@ -1,4 +1,6 @@
+import dynamic from "next/dynamic";
 import { AmbientBackground } from "@/components/AmbientBackground";
+import { ResearchCompanionDemoShell } from "@/components/DemoAnimationShells";
 import { HomeAnalyticsSection } from "@/components/HomeAnalyticsSection";
 import { DemoSection } from "@/components/DemoSection";
 import { FinalCTA } from "@/components/FinalCTA";
@@ -9,6 +11,11 @@ import { Navbar } from "@/components/Navbar";
 import { PricingSection } from "@/components/PricingSection";
 import { ProductPageJsonLd } from "@/components/JsonLd";
 import { buildPageMetadata, PRODUCT_KEYWORDS } from "@/lib/seo";
+
+const ResearchCompanionDemoLazy = dynamic(
+  () => import("@/components/ResearchCompanionDemo").then((m) => ({ default: m.ResearchCompanionDemo })),
+  { ssr: false, loading: () => <ResearchCompanionDemoShell compactTop /> }
+);
 
 export const metadata = buildPageMetadata({
   title: "Promptly | Improve and Track AI Use for ChatGPT, Claude & Gemini",
@@ -26,6 +33,7 @@ export default function HomePage() {
       <div className="relative z-10">
         <Navbar />
         <Hero />
+        <ResearchCompanionDemoLazy compactTop />
         <HomeAnalyticsSection />
         <DemoSection />
         <IntegratedWith />

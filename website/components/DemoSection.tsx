@@ -1,8 +1,8 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import Link from "next/link";
 import { DEMO_TIMING } from "@/lib/constants";
+import { DEMO_PROMPT_FONT_CLASS } from "@/lib/demoPromptStyles";
 import { useEffect, useRef, useState } from "react";
 
 const ORIGINAL_PROMPT = "read this pdf and explain the arguments with evidence";
@@ -188,7 +188,9 @@ export function DemoSection({ embedded = false }: { embedded?: boolean }) {
         className="relative mx-auto max-w-[980px] rounded-[18px] border border-slate-300/70 bg-white px-3 py-3 shadow-[0_12px_30px_rgba(2,6,23,0.12)] sm:rounded-[26px] sm:px-5 sm:py-4"
       >
             <div className="flex min-w-0 items-center gap-2 sm:gap-4">
-              <p className="min-w-0 flex-1 break-words pl-1 text-left text-[13px] leading-snug text-slate-800 sm:pl-[10px] sm:text-[24px] sm:leading-tight">
+              <p
+                className={`min-w-0 flex-1 break-words pl-1 text-left text-[13px] leading-snug sm:pl-[10px] sm:text-[24px] sm:leading-tight ${DEMO_PROMPT_FONT_CLASS}`}
+              >
                 {showImproved ? (
                   <motion.span
                     key={`improved-inline-${improvedRevealKey}`}
@@ -306,17 +308,22 @@ export function DemoSection({ embedded = false }: { embedded?: boolean }) {
   return (
     <section id="how-it-works" className="overflow-x-hidden px-3 pb-5 pt-4 sm:px-4 sm:pb-8 sm:pt-8">
       <div className="mx-auto max-w-6xl">
-        <p className="mb-3 text-center sm:mb-4">
-          <Link
-            href="/research"
-            className="group inline-flex items-center gap-2 text-sm font-semibold text-ink transition hover:text-muted sm:text-base"
-          >
-            Explore our prompt engineering tools
-            <span aria-hidden className="transition-transform group-hover:translate-x-0.5">
-              →
-            </span>
-          </Link>
-        </p>
+        <h2 className="mb-6 flex flex-wrap items-center justify-center gap-x-2.5 gap-y-2 text-center text-2xl font-semibold text-ink sm:mb-8 sm:text-3xl">
+          <span>Also works in</span>
+          <span className="inline-flex items-center gap-2">
+            <img
+              src="/images/browser-chrome.png"
+              alt="Chrome"
+              className="h-7 w-7 shrink-0 object-contain sm:h-8 sm:w-8"
+            />
+            <span aria-hidden="true">&</span>
+            <img
+              src="/images/browser-edge.png"
+              alt="Edge"
+              className="h-7 w-7 shrink-0 object-contain sm:h-8 sm:w-8"
+            />
+          </span>
+        </h2>
         {demoFrame}
       </div>
     </section>

@@ -13,8 +13,14 @@ export function Navbar() {
       <div className="mx-auto grid w-full max-w-6xl grid-cols-[auto_1fr_auto] items-center gap-2 px-3 py-3 sm:grid-cols-[1fr_auto_1fr] sm:px-4">
         <Link
           href="/"
-          className="hidden min-w-0 justify-self-start text-sm font-semibold text-ink hover:text-muted sm:block"
+          className="hidden min-w-0 items-center gap-1.5 justify-self-start text-sm font-semibold text-ink hover:text-muted sm:flex"
         >
+          <img
+            src="/images/promptly-logo.png"
+            alt=""
+            aria-hidden
+            className="h-[1em] w-auto shrink-0 object-contain"
+          />
           {SITE.navBrand}
         </Link>
         <nav className="flex items-center justify-start gap-4 sm:justify-center sm:gap-10">

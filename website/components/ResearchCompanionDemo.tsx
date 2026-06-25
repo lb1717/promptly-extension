@@ -3,6 +3,13 @@
 import { ChatGptLogo, ClaudeLogo } from "@/components/onboarding/AiServiceLogos";
 import { AnimatePresence, motion } from "framer-motion";
 import { DEMO_TIMING } from "@/lib/constants";
+import {
+  DEMO_COMPANION_LABEL_CLASS,
+  DEMO_COMPANION_MUTED_CLASS,
+  DEMO_MONO_CLASS,
+  DEMO_PROMPT_FONT_CLASS,
+  DEMO_PROMPT_PLACEHOLDER_CLASS
+} from "@/lib/demoPromptStyles";
 import { useEffect, useRef, useState, type ComponentType, type RefObject } from "react";
 
 const ORIGINAL_PROMPT =
@@ -88,10 +95,10 @@ function HostAppCarousel({
           <span
             className={
               variant === "title"
-                ? "text-xs font-medium leading-none text-[#9ca3af]"
+                ? `text-xs font-medium leading-none ${DEMO_PROMPT_PLACEHOLDER_CLASS}`
                 : compact
-                  ? "min-w-0 whitespace-pre-line text-lg font-semibold leading-[1.08] tracking-tight text-[#141820] sm:text-2xl"
-                  : "min-w-0 whitespace-pre-line text-xl font-semibold leading-[1.08] tracking-tight text-[#141820] sm:text-3xl"
+                  ? `min-w-0 whitespace-pre-line text-lg font-semibold leading-[1.08] tracking-tight ${DEMO_PROMPT_FONT_CLASS} sm:text-2xl`
+                  : `min-w-0 whitespace-pre-line text-xl font-semibold leading-[1.08] tracking-tight ${DEMO_PROMPT_FONT_CLASS} sm:text-3xl`
             }
           >
             {displayLabel}
@@ -158,9 +165,9 @@ function PromptImproverHeader({ wordCount }: { wordCount: number }) {
         draggable={false}
       />
       <div className="flex flex-1 items-center justify-center gap-1.5">
-        <span className="text-[9px] font-semibold text-[#374151]">Prompt Improver</span>
+        <span className={`text-[9px] font-semibold ${DEMO_COMPANION_LABEL_CLASS}`}>Prompt Improver</span>
         <span className="h-3 w-px shrink-0 bg-[#d8dce5]" aria-hidden="true" />
-        <span className="text-[9px] font-medium text-[#6b7280]">{wordCount} words</span>
+        <span className={`text-[9px] font-medium ${DEMO_COMPANION_MUTED_CLASS}`}>{wordCount} words</span>
       </div>
     </div>
   );
@@ -203,11 +210,11 @@ function CompanionChrome({
             <PromptImproverHeader wordCount={wordCount} />
             <div className="relative min-h-0 flex-1">
               <div
-                className={`h-full overflow-hidden break-words px-2 py-1.5 text-[10px] leading-snug text-[#141820] ${showMicButton ? "pr-9" : ""}`}
+                className={`h-full overflow-hidden break-words px-2 py-1.5 text-[10px] leading-snug ${DEMO_PROMPT_FONT_CLASS} ${showMicButton ? "pr-9" : ""}`}
               >
                 {draftText}
                 {recordingPhase === "idle" && !draftText ? (
-                  <span className="text-[#6b7280]">Type your prompt here…</span>
+                  <span className={DEMO_PROMPT_PLACEHOLDER_CLASS}>Type your prompt here…</span>
                 ) : null}
                 {recordingPhase === "idle" && draftText && !improving ? (
                   <span className="ml-0.5 inline-block h-3 w-px animate-pulse bg-[#6b7280]" />
@@ -243,7 +250,7 @@ function CompanionChrome({
                       </motion.button>
                     </div>
                     <p
-                      className={`text-[9px] font-medium text-[#6b7280] ${
+                      className={`text-[9px] font-medium ${DEMO_COMPANION_MUTED_CLASS} ${
                         recordingPhase === "transcribing" ? "animate-pulse" : ""
                       }`}
                     >
@@ -268,7 +275,7 @@ function CompanionChrome({
               aria-hidden="true"
               animate={{ scale: improvePulse ? [1, 0.96, 1] : 1 }}
               transition={{ duration: 0.22 }}
-              className="mt-1.5 shrink-0 w-full rounded-md border border-[#141820] bg-[#6d5ce8] px-2 py-1.5 text-[11px] font-semibold text-white"
+              className={`mt-1.5 shrink-0 w-full rounded-md border border-[#141820] bg-[#6d5ce8] px-2 py-1.5 text-[11px] font-semibold text-white ${DEMO_MONO_CLASS}`}
             >
               Improve
             </motion.button>
@@ -285,7 +292,7 @@ function CompanionChrome({
                 animate={{ opacity: 1, height: "auto", marginBottom: 6 }}
                 exit={{ opacity: 0, height: 0, marginBottom: 0 }}
                 transition={{ duration: 0.2 }}
-                className="shrink-0 overflow-hidden rounded-md border border-[#86efac] bg-[#dcfce7] px-2 py-1 text-center text-[9px] font-semibold text-[#166534]"
+                className={`shrink-0 overflow-hidden rounded-md border border-[#86efac] bg-[#dcfce7] px-2 py-1 text-center text-[9px] font-semibold text-[#166534] ${DEMO_MONO_CLASS}`}
               >
                 Prompt Pasted
               </motion.div>
@@ -294,7 +301,7 @@ function CompanionChrome({
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-[#d8dce5] bg-white">
             <PromptImproverHeader wordCount={0} />
             <div className="relative min-h-0 flex-1">
-              <div className="h-full overflow-hidden px-2 py-1.5 text-[10px] leading-snug text-[#6b7280]">
+              <div className={`h-full overflow-hidden px-2 py-1.5 text-[10px] leading-snug ${DEMO_COMPANION_MUTED_CLASS}`}>
                 Edit prompt further...
               </div>
             </div>
@@ -303,7 +310,7 @@ function CompanionChrome({
             type="button"
             aria-hidden="true"
             tabIndex={-1}
-            className="mt-1.5 shrink-0 w-full rounded-md border border-[#141820] bg-[#6d5ce8] px-2 py-1 text-[10px] font-semibold text-white"
+            className={`mt-1.5 shrink-0 w-full rounded-md border border-[#141820] bg-[#6d5ce8] px-2 py-1 text-[10px] font-semibold text-white ${DEMO_MONO_CLASS}`}
           >
             Apply Feedback
           </button>
@@ -314,7 +321,7 @@ function CompanionChrome({
   );
 }
 
-export function ResearchCompanionDemo() {
+export function ResearchCompanionDemo({ compactTop = false }: { compactTop?: boolean }) {
   const sceneRef = useRef<HTMLDivElement | null>(null);
   const micBtnRef = useRef<HTMLButtonElement | null>(null);
   const stopBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -503,7 +510,10 @@ export function ResearchCompanionDemo() {
   }, []);
 
   return (
-    <section id="companion-demo" className="scroll-mt-24 px-4 py-8 sm:py-10">
+    <section
+      id="companion-demo"
+      className={`scroll-mt-24 px-4 pb-8 sm:pb-10 ${compactTop ? "pt-2 sm:pt-3" : "py-8 sm:py-10"}`}
+    >
       <div className="mx-auto max-w-6xl">
         <div
           ref={sceneRef}
@@ -569,12 +579,14 @@ export function ResearchCompanionDemo() {
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     transition={{ duration: 0.35 }}
-                    className="max-h-[120px] overflow-hidden whitespace-pre-wrap text-[10px] leading-snug text-[#374151] sm:max-h-[136px] sm:text-[11px]"
+                    className={`max-h-[120px] overflow-hidden whitespace-pre-wrap text-[10px] leading-snug sm:max-h-[136px] sm:text-[11px] ${DEMO_PROMPT_FONT_CLASS}`}
                   >
                     {hostPrompt}
                   </motion.div>
                 ) : (
-                  <span className="block text-[11px] leading-none text-[#9ca3af]">Type prompt...</span>
+                  <span className={`block text-[11px] leading-none ${DEMO_PROMPT_PLACEHOLDER_CLASS}`}>
+                    Type prompt...
+                  </span>
                 )}
               </div>
               <button
