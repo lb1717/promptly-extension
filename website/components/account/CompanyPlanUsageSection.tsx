@@ -11,7 +11,7 @@ import {
   type UsageWindow
 } from "@/lib/companyPlanUsageCharts";
 import { buildMemberColorLookup } from "@/lib/memberChartColors";
-import { normalizeUtilizationPercent } from "@/lib/vendorPlanPricing";
+import { displayVendorUtilizationAsUsedPercent } from "@/lib/vendorPlanPricing";
 import { useEffect, useMemo, useState } from "react";
 import {
   CartesianGrid,
@@ -57,6 +57,7 @@ type PlanUsageSubscription = {
 type SubscriptionProfile = {
   member_id: string;
   subscription_id?: string;
+  provider?: string;
   plan_monthly_usd: number | null;
   synced_at_ms?: number;
   primary_window: {
@@ -116,7 +117,7 @@ function activeHistory(profile: SubscriptionProfile): UsageHistoryPoint[] {
 function profileUtilization(profile: SubscriptionProfile): number | null {
   const window = activeWindow(profile);
   if (!window) return null;
-  return normalizeUtilizationPercent(window.utilization);
+  return displayVendorUtilizationAsUsedPercent(profile.provider ?? "codex", window.utilization);
 }
 
 function PeriodNavigator({
@@ -338,6 +339,7 @@ export function CompanyPlanUsageSection({
               memberId,
               label: memberLabelById.get(memberId) || memberId.slice(0, 8),
               color: memberColorById.get(memberId) ?? "#64748b",
+              provider: profile.provider ?? subscription.provider,
               window: activeWindow(profile),
               history: activeHistory(profile),
               syncedAtMs: profile.synced_at_ms ?? Date.now()

@@ -1,4 +1,4 @@
-import { normalizeUtilizationPercent } from "@/lib/vendorPlanPricing";
+import { displayVendorUtilizationAsUsedPercent } from "@/lib/vendorPlanPricing";
 
 export type UsageWindow = {
   utilization: number;
@@ -25,6 +25,7 @@ export type CompanyMemberSeries = {
   memberId: string;
   label: string;
   color: string;
+  provider: string;
   window: UsageWindow | null;
   history: UsageHistoryPoint[];
   syncedAtMs: number;
@@ -43,8 +44,8 @@ export type CompanyMultiMemberCycleChart = {
 
 const DAY_MS = 86_400_000;
 
-function displayUtilization(raw: number): number {
-  return normalizeUtilizationPercent(raw);
+function displayUtilization(provider: string, raw: number): number {
+  return displayVendorUtilizationAsUsedPercent(provider, raw);
 }
 
 function resolveBillingCycleBounds(window: UsageWindow, referenceMs: number) {
@@ -180,6 +181,7 @@ export function buildPeriodNavState(
 }
 
 function aggregateDailyUsagePoints(
+  provider: string,
   history: UsageHistoryPoint[],
   currentUtil: number | null,
   cycleStartMs: number,
@@ -197,7 +199,7 @@ function aggregateDailyUsagePoints(
   };
 
   for (const point of history) {
-    upsert(point.at_ms, displayUtilization(point.utilization));
+    upsert(point.at_ms, displayUtilization(provider, point.utilization));
   }
   if (currentUtil != null) {
     upsert(nowMs, currentUtil);
@@ -262,12 +264,17 @@ function fillDailyUsagePointsWithInterpolation(
   return filled;
 }
 
-function sparseDailyLatestUtil(history: UsageHistoryPoint[], cycleStartMs: number, cycleEndMs: number): number | null {
+function sparseDailyLatestUtil(
+  provider: string,
+  history: UsageHistoryPoint[],
+  cycleStartMs: number,
+  cycleEndMs: number
+): number | null {
   const points = history
     .filter((point) => point.at_ms >= cycleStartMs && point.at_ms <= cycleEndMs)
     .sort((a, b) => a.at_ms - b.at_ms);
   if (!points.length) return null;
-  return displayUtilization(points[points.length - 1].utilization);
+  return displayUtilization(provider, points[points.length - 1].utilization);
 }
 
 function chartYDomainMax(values: number[]): number {
@@ -340,12 +347,18 @@ export function buildCompanyMultiMemberCycleChart(
 
   for (const member of series) {
     if (!member.window) continue;
-    const currentUtil = isCurrentPeriod ? displayUtilization(member.window.utilization) : null;
+    const currentUtil = isCurrentPeriod ? displayUtilization(member.provider, member.window.utilization) : null;
     const exactLatestUtil =
       isCurrentPeriod
         ? currentUtil
-        : sparseDailyLatestUtil(member.history, cycleStartMs, cycleEndMs);
-    const sparse = aggregateDailyUsagePoints(member.history, currentUtil, cycleStartMs, periodEndMs);
+        : sparseDailyLatestUtil(member.provider, member.history, cycleStartMs, cycleEndMs);
+    const sparse = aggregateDailyUsagePoints(
+      member.provider,
+      member.history,
+      currentUtil,
+      cycleStartMs,
+      periodEndMs
+    );
     const filled = fillDailyUsagePointsWithInterpolation(
       sparse,
       cycleStartMs,

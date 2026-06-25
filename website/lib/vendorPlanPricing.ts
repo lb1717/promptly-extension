@@ -71,6 +71,21 @@ export function normalizeUtilizationPercent(value: unknown): number {
   return Math.round(Math.max(0, Math.min(100, pct)));
 }
 
+/** Claude subscription quota is often stored as percent remaining — show percent used in charts. */
+export function displayClaudeUtilizationAsUsedPercent(utilization: unknown): number {
+  return normalizeUtilizationPercent(100 - normalizeUtilizationPercent(utilization));
+}
+
+export function displayVendorUtilizationAsUsedPercent(
+  provider: string,
+  utilization: unknown
+): number {
+  if (provider === "claude_code") {
+    return displayClaudeUtilizationAsUsedPercent(utilization);
+  }
+  return normalizeUtilizationPercent(utilization);
+}
+
 export type VendorWindowUsedPercentContext = {
   limitReached?: boolean;
   previousUtilization?: number | null;
