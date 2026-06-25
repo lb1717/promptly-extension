@@ -2,40 +2,8 @@
 
 import type { User } from "firebase/auth";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Legend,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis
-} from "recharts";
-
-const CHART_COLORS = [
-  "#111827",
-  "#2563eb",
-  "#16a34a",
-  "#f97316",
-  "#9333ea",
-  "#dc2626",
-  "#0891b2",
-  "#ca8a04",
-  "#4f46e5",
-  "#0f766e"
-];
-const CHART_TOOLTIP_STYLE = {
-  background: "#ffffff",
-  border: "1px solid #e8e8e8",
-  borderRadius: 8,
-  padding: "6px 8px",
-  fontSize: 11,
-  color: "#111111",
-  boxShadow: "0 2px 8px rgba(17, 17, 17, 0.08)"
-};
+import { StatisticsClient, type CompanyStatisticsConfig } from "@/components/account/StatisticsClient";
+import { CompanyPlanUsageSection } from "@/components/account/CompanyPlanUsageSection";
 
 type CompanyMember = {
   user_id: string;
@@ -67,16 +35,6 @@ type CompanyStatsPayload = {
     generated: number;
     plan_monthly_usd: number;
   };
-  timeline: Array<{
-    day: string;
-    total_prompts: number;
-    by_member: Record<string, { prompts: number; auto: number; manual: number; generated: number }>;
-  }>;
-  screen_time_timeline: Array<{
-    day: string;
-    total_screen_time_minutes: number;
-    by_member: Record<string, number>;
-  }>;
   plan_usage_timeline: Array<Record<string, number | string>>;
   plan_usage_series?: Array<{ key: string; label: string; member_id: string }>;
   subscription_profiles: Array<{
@@ -90,13 +48,6 @@ type CompanyStatsPayload = {
     secondary_window: { utilization: number } | null;
   }>;
 };
-
-const RANGE_OPTIONS = [
-  { label: "1W", days: 7 },
-  { label: "1M", days: 30 },
-  { label: "3M", days: 90 },
-  { label: "1Y", days: 365 }
-];
 
 function formatNumber(value: number) {
   return Intl.NumberFormat("en-US").format(Math.max(0, Math.round(Number(value || 0))));
@@ -115,11 +66,6 @@ function formatScreenTimeMinutes(minutes: number) {
   return mins ? `${hours}h ${mins}m` : `${hours}h`;
 }
 
-function shortDate(day: string) {
-  const d = new Date(`${day}T12:00:00.000Z`);
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
 function providerLabel(provider: string) {
   if (provider === "claude_code") return "Claude";
   if (provider === "codex") return "Codex";
@@ -127,26 +73,32 @@ function providerLabel(provider: string) {
   return provider;
 }
 
-function StatCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-2xl border border-line bg-cream p-4 shadow-card">
-      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-faint">{label}</p>
-      <p className="mt-2 text-2xl font-semibold text-ink">{value}</p>
-    </div>
-  );
+function resolveVisibleMemberIds(allMembers: CompanyMember[], selectedMemberIds: string[]): string[] {
+  if (!allMembers.length) return [];
+  if (!selectedMemberIds.length) return allMembers.map((member) => member.user_id);
+  const allowed = new Set(allMembers.map((member) => member.user_id));
+  const filtered = selectedMemberIds.filter((id) => allowed.has(id));
+  return filtered.length ? filtered : allMembers.map((member) => member.user_id);
 }
 
 export function CompanyStatisticsClient({ user }: { user: User | null }) {
+  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
   const [days, setDays] = useState(30);
-  const [selectedMemberId, setSelectedMemberId] = useState<string>("all");
-  const [data, setData] = useState<CompanyStatsPayload | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [overview, setOverview] = useState<CompanyStatsPayload | null>(null);
+  const [overviewLoading, setOverviewLoading] = useState(false);
+  const [overviewError, setOverviewError] = useState("");
 
-  const load = useCallback(async () => {
+  const members = overview?.members ?? [];
+  const visibleMemberIds = useMemo(
+    () => resolveVisibleMemberIds(members, selectedMemberIds),
+    [members, selectedMemberIds]
+  );
+  const multiMemberView = visibleMemberIds.length !== 1;
+
+  const loadOverview = useCallback(async () => {
     if (!user) return;
-    setLoading(true);
-    setError("");
+    setOverviewLoading(true);
+    setOverviewError("");
     try {
       const token = await user.getIdToken(false);
       const res = await fetch(`/api/account/company/stats?days=${days}`, {
@@ -157,230 +109,147 @@ export function CompanyStatisticsClient({ user }: { user: User | null }) {
       if (!res.ok) {
         throw new Error(json.error || `Request failed (${res.status})`);
       }
-      setData(json);
-      if (selectedMemberId !== "all" && !json.members.some((member) => member.user_id === selectedMemberId)) {
-        setSelectedMemberId("all");
-      }
+      setOverview(json);
+      setSelectedMemberIds((prev) => {
+        if (!prev.length) return [];
+        const allowed = new Set(json.members.map((member) => member.user_id));
+        const next = prev.filter((id) => allowed.has(id));
+        return next.length ? next : [];
+      });
     } catch (e) {
-      setData(null);
-      setError(String(e instanceof Error ? e.message : e));
+      setOverview(null);
+      setOverviewError(String(e instanceof Error ? e.message : e));
     } finally {
-      setLoading(false);
+      setOverviewLoading(false);
     }
-  }, [days, selectedMemberId, user]);
+  }, [days, user]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void loadOverview();
+  }, [loadOverview]);
 
-  const members = data?.members || [];
-  const visibleMembers = selectedMemberId === "all"
-    ? members
-    : members.filter((member) => member.user_id === selectedMemberId);
+  const toggleMember = useCallback((memberId: string) => {
+    setSelectedMemberIds((prev) => {
+      const allIds = members.map((member) => member.user_id);
+      const current = prev.length ? prev : allIds;
+      const next = new Set(current);
+      if (next.has(memberId)) {
+        if (next.size <= 1) return current;
+        next.delete(memberId);
+      } else {
+        next.add(memberId);
+      }
+      return [...next];
+    });
+  }, [members]);
 
-  const promptRows = useMemo(
-    () =>
-      (data?.timeline || []).map((row) => ({
-        day: row.day,
-        label: shortDate(row.day),
-        ...Object.fromEntries(members.map((member) => [member.user_id, row.by_member[member.user_id]?.prompts || 0]))
-      })),
-    [data?.timeline, members]
-  );
+  const selectAllMembers = useCallback(() => {
+    setSelectedMemberIds([]);
+  }, []);
 
-  const screenTimeRows = useMemo(
-    () =>
-      (data?.screen_time_timeline || []).map((row) => ({
-        day: row.day,
-        label: shortDate(row.day),
-        ...Object.fromEntries(members.map((member) => [member.user_id, row.by_member[member.user_id] || 0]))
-      })),
-    [data?.screen_time_timeline, members]
-  );
+  const companyStatistics = useMemo((): CompanyStatisticsConfig | undefined => {
+    if (!user || !members.length) return undefined;
+    return {
+      user,
+      memberIds: visibleMemberIds,
+      memberOptions: members.map((member) => ({ user_id: member.user_id, label: member.label })),
+      multiMemberView,
+      days,
+      onDaysChange: setDays,
+      onOverviewRefresh: () => void loadOverview(),
+      planUsageSection: (
+        <CompanyPlanUsageSection
+          members={members}
+          visibleMemberIds={visibleMemberIds}
+          planUsageTimeline={overview?.plan_usage_timeline ?? []}
+          planUsageSeries={overview?.plan_usage_series ?? []}
+          totalPlanMonthlyUsd={overview?.totals.plan_monthly_usd ?? 0}
+          loading={overviewLoading}
+        />
+      )
+    };
+  }, [user, members, visibleMemberIds, multiMemberView, days, loadOverview, overview, overviewLoading]);
 
-  const planUsageSeries = useMemo(() => {
-    const rows = data?.plan_usage_series || [];
-    if (selectedMemberId === "all") return rows;
-    return rows.filter((series) => series.member_id === selectedMemberId);
-  }, [data?.plan_usage_series, selectedMemberId]);
-
-  const selectedMember = members.find((member) => member.user_id === selectedMemberId) || null;
-  const selectedTotals =
-    selectedMemberId === "all"
-      ? data?.totals
-      : selectedMember?.totals;
+  const visibleMembersForTable = useMemo(() => {
+    const allowed = new Set(visibleMemberIds);
+    return members.filter((member) => allowed.has(member.user_id));
+  }, [members, visibleMemberIds]);
 
   if (!user) {
-    return <p className="rounded-2xl border border-line bg-cream p-6 text-sm text-muted">Sign in to view company statistics.</p>;
+    return (
+      <p className="rounded-2xl border border-line bg-cream p-6 text-sm text-muted">
+        Sign in to view company statistics.
+      </p>
+    );
   }
 
   return (
     <div className="space-y-6">
       <section className="rounded-2xl border border-line bg-cream p-5 shadow-card">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="flex items-center gap-3">
-            {data?.company.logo_url ? (
-              <img src={data.company.logo_url} alt="" className="h-12 w-12 rounded-xl object-contain" />
+            {overview?.company.logo_url ? (
+              <img src={overview.company.logo_url} alt="" className="h-12 w-12 rounded-xl object-contain" />
             ) : null}
             <div>
               <h2 className="text-2xl font-semibold tracking-tight text-ink">
-                {data?.company.name || "Company Statistics"}
+                {overview?.company.name || "Company Statistics"}
               </h2>
               <p className="mt-1 text-sm text-faint">
-                {members.length ? `${members.length} people` : loading ? "Loading team…" : "No members yet"}
+                {members.length ? `${members.length} people` : overviewLoading ? "Loading team…" : "No members yet"}
               </p>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <select
-              value={selectedMemberId}
-              onChange={(e) => setSelectedMemberId(e.target.value)}
-              className="rounded-lg border border-line bg-white px-3 py-2 text-sm text-ink"
-            >
-              <option value="all">All people</option>
-              {members.map((member) => (
-                <option key={member.user_id} value={member.user_id}>
-                  {member.label}
-                </option>
-              ))}
-            </select>
-            <div className="rounded-xl border border-line bg-white p-1">
-              {RANGE_OPTIONS.map((option) => (
-                <button
-                  key={option.days}
-                  type="button"
-                  onClick={() => setDays(option.days)}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
-                    days === option.days ? "bg-ink text-cream" : "text-muted hover:bg-cream-dark"
-                  }`}
-                >
-                  {option.label}
-                </button>
-              ))}
+          <div className="min-w-[16rem] flex-1 lg:max-w-xl">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-faint">People</p>
+              <button
+                type="button"
+                onClick={selectAllMembers}
+                className="text-xs font-medium text-muted hover:text-ink"
+              >
+                Select all
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={() => void load()}
-              disabled={loading}
-              className="shrink-0 whitespace-nowrap rounded-lg border border-line px-3 py-2 text-xs font-semibold text-muted hover:bg-cream-dark disabled:opacity-60"
-            >
-              {loading ? "Refreshing…" : "Refresh"}
-            </button>
-          </div>
-        </div>
-        {error ? <p className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-700">{error}</p> : null}
-      </section>
-
-      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Prompts" value={formatNumber(selectedTotals?.prompts || 0)} />
-        <StatCard label="AI screen time" value={formatScreenTimeMinutes(selectedTotals?.screen_time_minutes || 0)} />
-        <StatCard label="AI plan cost" value={`${formatCurrency(selectedTotals?.plan_monthly_usd || 0)}/mo`} />
-        <StatCard label="Generated" value={formatNumber(selectedTotals?.generated || 0)} />
-      </section>
-
-      <section className="rounded-2xl border border-line bg-cream p-5 shadow-card">
-        <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-faint">Prompts by person</h3>
-        <div className="mt-4 h-72 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={promptRows} margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.08)" vertical={false} />
-              <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} />
-              <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
-              <Legend wrapperStyle={{ fontSize: 11 }} />
-              {visibleMembers.map((member, index) => (
-                <Bar
-                  key={member.user_id}
-                  dataKey={member.user_id}
-                  name={member.label}
-                  stackId="people"
-                  fill={CHART_COLORS[index % CHART_COLORS.length]}
-                  maxBarSize={42}
-                />
-              ))}
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </section>
-
-      <section className="rounded-2xl border border-line bg-cream p-5 shadow-card">
-        <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-faint">AI screen time by person</h3>
-        <p className="mt-1 text-xs text-faint">Minutes spent drafting, waiting, and reading AI output in the IDE.</p>
-        <div className="mt-4 h-72 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={screenTimeRows} margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.08)" vertical={false} />
-              <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} unit="m" />
-              <Tooltip
-                contentStyle={CHART_TOOLTIP_STYLE}
-                formatter={(value: number) => [`${formatNumber(value)} min`, ""]}
-              />
-              <Legend wrapperStyle={{ fontSize: 11 }} />
-              {visibleMembers.map((member, index) => (
-                <Bar
-                  key={member.user_id}
-                  dataKey={member.user_id}
-                  name={member.label}
-                  stackId="people"
-                  fill={CHART_COLORS[index % CHART_COLORS.length]}
-                  maxBarSize={42}
-                />
-              ))}
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </section>
-
-      <section className="rounded-2xl border border-line bg-cream p-5 shadow-card">
-        <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-faint">Subscription plan use</h3>
-            <p className="mt-1 text-xs text-faint">
-              Percent of each AI plan used over time — separate lines when someone has multiple accounts.
+            <div className="mt-2 flex flex-wrap gap-2">
+              {members.map((member) => {
+                const active =
+                  !selectedMemberIds.length || selectedMemberIds.includes(member.user_id);
+                return (
+                  <button
+                    key={member.user_id}
+                    type="button"
+                    onClick={() => toggleMember(member.user_id)}
+                    className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                      active
+                        ? "border-ink bg-ink text-cream"
+                        : "border-line bg-white text-muted hover:bg-cream-dark"
+                    }`}
+                  >
+                    {member.label}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-2 text-[11px] text-faint">
+              {multiMemberView
+                ? "Charts group by person. Select exactly one person to filter by service or model."
+                : "One person selected — use the filters below to group by service or model."}
             </p>
           </div>
-          <p className="text-xs text-muted">{formatCurrency(data?.totals.plan_monthly_usd || 0)}/mo total plans</p>
         </div>
-        <div className="mt-4 h-80 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={data?.plan_usage_timeline || []} margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.08)" vertical={false} />
-              <XAxis dataKey="day" tick={{ fontSize: 11 }} tickFormatter={(value) => shortDate(String(value))} />
-              <YAxis tick={{ fontSize: 11 }} domain={[0, 100]} unit="%" />
-              <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
-              <Legend wrapperStyle={{ fontSize: 11 }} />
-              {planUsageSeries.length > 0 ? (
-                planUsageSeries.map((series, index) => (
-                  <Line
-                    key={series.key}
-                    type="monotone"
-                    dataKey={series.key}
-                    name={series.label}
-                    stroke={CHART_COLORS[index % CHART_COLORS.length]}
-                    strokeWidth={2.25}
-                    dot={{ r: 2.5, strokeWidth: 0 }}
-                    connectNulls
-                  />
-                ))
-              ) : (
-                visibleMembers.map((member, index) => (
-                  <Line
-                    key={member.user_id}
-                    type="monotone"
-                    dataKey={member.user_id}
-                    name={member.label}
-                    stroke={CHART_COLORS[index % CHART_COLORS.length]}
-                    strokeWidth={2.25}
-                    dot={false}
-                    connectNulls
-                  />
-                ))
-              )}
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
+        {overviewError ? (
+          <p className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-700">
+            {overviewError}
+          </p>
+        ) : null}
       </section>
+
+      {companyStatistics ? (
+        <StatisticsClient embedded companyStatistics={companyStatistics} />
+      ) : overviewLoading ? (
+        <p className="rounded-2xl border border-line bg-cream p-6 text-sm text-muted">Loading statistics…</p>
+      ) : null}
 
       <section className="rounded-2xl border border-line bg-cream p-5 shadow-card">
         <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-faint">People and plans</h3>
@@ -397,8 +266,10 @@ export function CompanyStatisticsClient({ user }: { user: User | null }) {
               </tr>
             </thead>
             <tbody className="text-muted">
-              {members.map((member) => {
-                const plans = (data?.subscription_profiles || []).filter((profile) => profile.member_id === member.user_id);
+              {visibleMembersForTable.map((member) => {
+                const plans = (overview?.subscription_profiles || []).filter(
+                  (profile) => profile.member_id === member.user_id
+                );
                 return (
                   <tr key={member.user_id} className="border-b border-line/80">
                     <td className="py-3 pr-4">
@@ -407,7 +278,9 @@ export function CompanyStatisticsClient({ user }: { user: User | null }) {
                     </td>
                     <td className="py-3 pr-4 capitalize">{member.role === "admin" ? "Admin" : "Normal"}</td>
                     <td className="py-3 pr-4 tabular-nums">{formatNumber(member.totals.prompts)}</td>
-                    <td className="py-3 pr-4 tabular-nums">{formatScreenTimeMinutes(member.totals.screen_time_minutes)}</td>
+                    <td className="py-3 pr-4 tabular-nums">
+                      {formatScreenTimeMinutes(member.totals.screen_time_minutes)}
+                    </td>
                     <td className="py-3 pr-4 text-xs">
                       {plans.length
                         ? plans

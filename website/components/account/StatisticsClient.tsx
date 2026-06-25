@@ -159,6 +159,21 @@ type HostPassiveLite = {
   likely_truncated: boolean;
 };
 
+type CompanyMemberBreakdown = {
+  members: Array<{ user_id: string; label: string }>;
+  prompt_timeline: Array<{ bucket: string; by_member: Record<string, number> }>;
+  screen_time_timeline: Array<{ bucket: string; by_member: Record<string, number> }>;
+  engagement_by_member: Record<
+    string,
+    {
+      drafting_minutes: number;
+      waiting_minutes: number;
+      reading_idle_minutes: number;
+      total_minutes: number;
+    }
+  >;
+};
+
 type IdeStatsPayload = {
   range_days: number;
   granularity: "day" | "week";
@@ -238,6 +253,9 @@ type IdeStatsPayload = {
     uid: string;
     is_primary: boolean;
   }>;
+  company_multi_member?: boolean;
+  selected_member_ids?: string[];
+  company_member_breakdown?: CompanyMemberBreakdown;
 };
 
 function emptyIdeStats(days: number, granularity: "day" | "week"): IdeStatsPayload {
@@ -517,6 +535,9 @@ type ExtendedStatsPayload = {
   host_passive_listener: HostPassiveLite;
   quota_exceeded?: boolean;
   footnotes: string[];
+  company_multi_member?: boolean;
+  selected_member_ids?: string[];
+  company_member_breakdown?: CompanyMemberBreakdown;
 };
 
 function getRecentDaysClient(count: number): string[] {
@@ -1138,7 +1159,31 @@ const DEFAULT_PROMPT_VOLUME_AI_FILTERS: PromptVolumeAiFilterState = {
   codex: true
 };
 
-type StatsGroupMode = "service" | "model";
+type StatsGroupMode = "service" | "model" | "member";
+
+export type CompanyStatisticsConfig = {
+  user: User;
+  memberIds: string[];
+  memberOptions: Array<{ user_id: string; label: string }>;
+  multiMemberView: boolean;
+  days: number;
+  onDaysChange: (days: number) => void;
+  onOverviewRefresh?: () => void;
+  planUsageSection?: ReactNode;
+};
+
+const MEMBER_CHART_COLORS = [
+  "#111827",
+  "#2563eb",
+  "#16a34a",
+  "#f97316",
+  "#9333ea",
+  "#dc2626",
+  "#0891b2",
+  "#ca8a04",
+  "#4f46e5",
+  "#0f766e"
+];
 
 type ModelEngagementByModelRow = {
   bucket: string;
@@ -1772,10 +1817,10 @@ function StatsGroupModeToggle({
   value,
   onChange
 }: {
-  value: StatsGroupMode;
-  onChange: (value: StatsGroupMode) => void;
+  value: Exclude<StatsGroupMode, "member">;
+  onChange: (value: Exclude<StatsGroupMode, "member">) => void;
 }) {
-  const options: Array<{ value: StatsGroupMode; label: string }> = [
+  const options: Array<{ value: Exclude<StatsGroupMode, "member">; label: string }> = [
     { value: "service", label: "By service" },
     { value: "model", label: "By model" }
   ];
@@ -1831,10 +1876,28 @@ function ModeMiniChart({
   );
 }
 
-export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [days, setDays] = useState(30);
+export function StatisticsClient({
+  embedded = false,
+  companyStatistics
+}: {
+  embedded?: boolean;
+  companyStatistics?: CompanyStatisticsConfig;
+}) {
+  const [user, setUser] = useState<User | null>(companyStatistics?.user ?? null);
+  const [loading, setLoading] = useState(!companyStatistics);
+  const [days, setDaysInternal] = useState(companyStatistics?.days ?? 30);
+  useEffect(() => {
+    if (companyStatistics?.days != null) {
+      setDaysInternal(companyStatistics.days);
+    }
+  }, [companyStatistics?.days]);
+  const setDays = useCallback(
+    (nextDays: number) => {
+      setDaysInternal(nextDays);
+      companyStatistics?.onDaysChange(nextDays);
+    },
+    [companyStatistics]
+  );
   const rangeSummaryLabel = days >= 400 ? "All time" : `Last ${days} days`;
   const [granularity, setGranularity] = useState<"day" | "week">("day");
   const [stats, setStats] = useState<ExtendedStatsPayload | null>(null);
@@ -1851,6 +1914,10 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
   const [promptVolumeAiFilters, setPromptVolumeAiFilters] =
     useState<PromptVolumeAiFilterState>(DEFAULT_PROMPT_VOLUME_AI_FILTERS);
   const [statsGroupMode, setStatsGroupMode] = useState<StatsGroupMode>("service");
+  const [selectedMemberFilters, setSelectedMemberFilters] = useState<Set<string>>(new Set());
+  const companyMultiMember = Boolean(companyStatistics?.multiMemberView);
+  const chartGroupMode: StatsGroupMode = companyMultiMember ? "member" : statsGroupMode;
+  const companyMemberIdsKey = (companyStatistics?.memberIds ?? []).join(",");
   const [selectedModelService, setSelectedModelService] = useState<PromptVolumeAiKey>("chatgpt");
   const [selectedModelBuckets, setSelectedModelBuckets] = useState<Set<string>>(new Set());
   const [modelCatalogWeb, setModelCatalogWeb] = useState<
@@ -1946,12 +2013,25 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
   }, []);
 
   useEffect(() => {
+    if (companyStatistics?.days != null && companyStatistics.days !== days) {
+      setDaysInternal(companyStatistics.days);
+    }
+  }, [companyStatistics?.days, days]);
+
+  useEffect(() => {
+    if (!companyStatistics) return;
+    setUser(companyStatistics.user);
+    setLoading(false);
+  }, [companyStatistics]);
+
+  useEffect(() => {
+    if (companyStatistics) return;
     const auth = getFirebaseAuth();
     return onAuthStateChanged(auth, (next) => {
       setUser(next);
       setLoading(false);
     });
-  }, []);
+  }, [companyStatistics]);
 
   const loadExtended = useCallback(
     async (
@@ -1960,7 +2040,8 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
       g: "day" | "week",
       scopeParams?: URLSearchParams,
       refresh = false,
-      captureCatalog = false
+      captureCatalog = false,
+      memberIds?: string[]
     ) => {
     if (!current) {
       setStats(null);
@@ -1975,10 +2056,16 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
         granularity: g
       });
       if (refresh) params.set("refresh", "1");
+      if (memberIds?.length) {
+        params.set("member_ids", memberIds.join(","));
+      }
       for (const [key, value] of scopeParams?.entries() ?? []) {
         params.set(key, value);
       }
-      const res = await fetch(`/api/account/stats/extended?${params.toString()}`, {
+      const endpoint = memberIds?.length
+        ? `/api/account/company/stats/extended?${params.toString()}`
+        : `/api/account/stats/extended?${params.toString()}`;
+      const res = await fetch(endpoint, {
         headers: { Authorization: `Bearer ${token}` },
         cache: refresh ? "no-store" : "default"
       });
@@ -2013,7 +2100,8 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
       availableByTool?: Record<IdeToolKey, string[]>,
       scopeParams?: URLSearchParams,
       refresh = false,
-      captureCatalog = false
+      captureCatalog = false,
+      memberIds?: string[]
     ) => {
     if (!current) {
       setIdeStats(null);
@@ -2028,11 +2116,17 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
         granularity: g
       });
       if (refresh) params.set("refresh", "1");
+      if (memberIds?.length) {
+        params.set("member_ids", memberIds.join(","));
+      }
       appendIdeEmailFilterParams(params, emailSelection, availableByTool);
       for (const [key, value] of scopeParams?.entries() ?? []) {
         params.set(key, value);
       }
-      const res = await fetch(`/api/account/stats/ide?${params.toString()}`, {
+      const endpoint = memberIds?.length
+        ? `/api/account/company/stats/ide?${params.toString()}`
+        : `/api/account/stats/ide?${params.toString()}`;
+      const res = await fetch(endpoint, {
         headers: { Authorization: `Bearer ${token}` },
         cache: refresh ? "no-store" : "default"
       });
@@ -2116,16 +2210,18 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
   }, [user, stats, statsGroupMode, days, granularity, selectedModelService, STATS_FILTER_STICKY_TOP_PX]);
 
   const statsScopeParams = useMemo(
-    () => buildStatsScopeSearchParams(statsGroupMode, selectedModelService),
-    [statsGroupMode, selectedModelService]
+    () => (companyMultiMember ? new URLSearchParams() : buildStatsScopeSearchParams(statsGroupMode, selectedModelService)),
+    [companyMultiMember, statsGroupMode, selectedModelService]
   );
+
+  const statsMemberIds = companyStatistics?.memberIds;
 
   const effectivePromptVolumeAiFilters = useMemo(
     () =>
-      statsGroupMode === "model"
+      chartGroupMode === "model"
         ? singleServiceFilterState(selectedModelService)
         : promptVolumeAiFilters,
-    [statsGroupMode, selectedModelService, promptVolumeAiFilters]
+    [chartGroupMode, selectedModelService, promptVolumeAiFilters]
   );
 
   const modelOptionsForSelectedService = useMemo(() => {
@@ -2374,8 +2470,8 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
     if (!user) return;
     saveScrollPosition();
     pendingScrollRestoreRef.current = true;
-    const captureCatalog = statsGroupMode !== "model";
-    void loadExtended(user, days, granularity, statsScopeParams, true, captureCatalog);
+    const captureCatalog = chartGroupMode !== "model";
+    void loadExtended(user, days, granularity, statsScopeParams, true, captureCatalog, statsMemberIds);
     void loadIdeStats(
       user,
       days,
@@ -2384,9 +2480,14 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
       ideStats?.agent_emails_by_tool,
       statsScopeParams,
       true,
-      captureCatalog
+      captureCatalog,
+      statsMemberIds
     );
-    vendorUsageRef.current?.refreshInBackground();
+    if (!companyStatistics) {
+      vendorUsageRef.current?.refreshInBackground();
+    } else {
+      companyStatistics.onOverviewRefresh?.();
+    }
   }, [
     user,
     days,
@@ -2396,8 +2497,10 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
     loadExtended,
     loadIdeStats,
     statsScopeParams,
-    statsGroupMode,
-    saveScrollPosition
+    chartGroupMode,
+    saveScrollPosition,
+    statsMemberIds,
+    companyStatistics
   ]);
 
   useEffect(() => {
@@ -2438,8 +2541,8 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
 
   useEffect(() => {
     if (!user || loading) return;
-    const captureCatalog = statsGroupMode !== "model";
-    void loadExtended(user, days, granularity, statsScopeParams, false, captureCatalog);
+    const captureCatalog = chartGroupMode !== "model";
+    void loadExtended(user, days, granularity, statsScopeParams, false, captureCatalog, statsMemberIds);
     void loadIdeStats(
       user,
       days,
@@ -2448,7 +2551,8 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
       ideStats?.agent_emails_by_tool,
       statsScopeParams,
       false,
-      captureCatalog
+      captureCatalog,
+      statsMemberIds
     );
   }, [
     user,
@@ -2456,9 +2560,11 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
     days,
     granularity,
     statsScopeParams,
-    statsGroupMode,
+    chartGroupMode,
     loadExtended,
-    loadIdeStats
+    loadIdeStats,
+    statsMemberIds,
+    companyMemberIdsKey
   ]);
 
   useEffect(() => {
@@ -2466,8 +2572,8 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
     const intervalMs = 30_000;
     const tick = () => {
       if (document.visibilityState !== "visible") return;
-      const captureCatalog = statsGroupMode !== "model";
-      void loadExtended(user, days, granularity, statsScopeParams, false, captureCatalog);
+      const captureCatalog = chartGroupMode !== "model";
+      void loadExtended(user, days, granularity, statsScopeParams, false, captureCatalog, statsMemberIds);
       void loadIdeStats(
         user,
         days,
@@ -2476,7 +2582,8 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
         ideStats?.agent_emails_by_tool,
         statsScopeParams,
         false,
-        captureCatalog
+        captureCatalog,
+        statsMemberIds
       );
     };
     const id = window.setInterval(tick, intervalMs);
@@ -2537,6 +2644,100 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
       label: g === "week" ? `wk ${formatShortDay(row.bucket)}` : formatShortDay(row.bucket)
     }));
   }, [displayStats, displayIdeStats, granularity]);
+
+  const companyMemberBreakdown = useMemo(
+    () => displayStats?.company_member_breakdown ?? displayIdeStats?.company_member_breakdown ?? null,
+    [displayStats, displayIdeStats]
+  );
+
+  useEffect(() => {
+    if (!companyMemberBreakdown?.members.length) return;
+    setSelectedMemberFilters(new Set(companyMemberBreakdown.members.map((member) => member.user_id)));
+  }, [companyMemberBreakdown, companyMemberIdsKey]);
+
+  const memberChartSeries = useMemo(() => {
+    if (!companyMemberBreakdown) return [];
+    return companyMemberBreakdown.members
+      .filter((member) => selectedMemberFilters.has(member.user_id))
+      .map((member, index) => ({
+        user_id: member.user_id,
+        label: member.label,
+        color: MEMBER_CHART_COLORS[index % MEMBER_CHART_COLORS.length] ?? COLOR_UNKNOWN,
+        dataKey: member.user_id
+      }));
+  }, [companyMemberBreakdown, selectedMemberFilters]);
+
+  const memberPromptVolumeChartRows = useMemo(() => {
+    if (!companyMemberBreakdown) return [];
+    const g = displayStats?.granularity ?? displayIdeStats?.granularity ?? granularity;
+    return companyMemberBreakdown.prompt_timeline.map((row) => ({
+      bucket: row.bucket,
+      label: g === "week" ? `wk ${formatShortDay(row.bucket)}` : formatShortDay(row.bucket),
+      ...row.by_member
+    }));
+  }, [companyMemberBreakdown, displayStats, displayIdeStats, granularity]);
+
+  const memberScreenTimeChartRows = useMemo(() => {
+    if (!companyMemberBreakdown) return [];
+    const g = displayStats?.granularity ?? displayIdeStats?.granularity ?? granularity;
+    return companyMemberBreakdown.screen_time_timeline.map((row) => ({
+      bucket: row.bucket,
+      label: g === "week" ? `wk ${formatShortDay(row.bucket)}` : formatShortDay(row.bucket),
+      ...row.by_member
+    }));
+  }, [companyMemberBreakdown, displayStats, displayIdeStats, granularity]);
+
+  const memberScreenTimeInstantRows = useMemo(() => {
+    if (!companyMemberBreakdown) return [];
+    const totals = new Map<string, number>();
+    for (const row of companyMemberBreakdown.screen_time_timeline) {
+      for (const [memberId, minutes] of Object.entries(row.by_member)) {
+        totals.set(memberId, (totals.get(memberId) || 0) + minutes);
+      }
+    }
+    return memberChartSeries
+      .map((series) => ({
+        member: series.label,
+        key: series.user_id,
+        minutes: Math.round((totals.get(series.user_id) || 0) * 10) / 10,
+        fill: series.color
+      }))
+      .filter((row) => row.minutes > 0)
+      .sort((a, b) => b.minutes - a.minutes);
+  }, [companyMemberBreakdown, memberChartSeries]);
+
+  const memberEngagementPies = useMemo(() => {
+    if (!companyMemberBreakdown) return [];
+    return memberChartSeries
+      .map((series) => {
+        const row = companyMemberBreakdown.engagement_by_member[series.user_id];
+        if (!row || row.total_minutes <= 0) return null;
+        const slices: EngagementSlice[] = [
+          { name: "Drafting", value: row.drafting_minutes, fill: COLOR_DRAFTING },
+          { name: "Waiting", value: row.waiting_minutes, fill: COLOR_PROMPTLY },
+          { name: "Reading", value: row.reading_idle_minutes, fill: COLOR_READING_IDLE }
+        ].filter((slice) => slice.value > 0);
+        return {
+          key: series.user_id,
+          label: series.label,
+          accent: series.color,
+          totalMinutes: row.total_minutes,
+          slices,
+          hasData: slices.length > 0
+        };
+      })
+      .filter((row): row is NonNullable<typeof row> => Boolean(row));
+  }, [companyMemberBreakdown, memberChartSeries]);
+
+  const toggleMemberFilter = useCallback((memberId: string) => {
+    setSelectedMemberFilters((prev) => {
+      if (prev.has(memberId) && prev.size <= 1) return prev;
+      const next = new Set(prev);
+      if (next.has(memberId)) next.delete(memberId);
+      else next.add(memberId);
+      return next;
+    });
+  }, []);
 
   const promptVolumeUsageByService = useMemo(
     () => promptVolumeUsageCounts(stackedTimeline, displayStats, displayIdeStats),
@@ -2971,8 +3172,13 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
   }, [effectivePromptVolumeAiFilters]);
 
   const engagementInstantPies = useMemo(
-    () => (statsGroupMode === "model" ? engagementByModelPies : engagementByServicePies),
-    [statsGroupMode, engagementByModelPies, engagementByServicePies]
+    () =>
+      chartGroupMode === "member"
+        ? memberEngagementPies
+        : chartGroupMode === "model"
+          ? engagementByModelPies
+          : engagementByServicePies,
+    [chartGroupMode, memberEngagementPies, engagementByModelPies, engagementByServicePies]
   );
 
   const ENGAGEMENT_PIES_INITIAL_COUNT = 3;
@@ -3379,9 +3585,13 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
       className={`statistics-charts mx-auto w-full max-w-6xl ${embedded ? "pb-8" : "px-4 py-6 pb-16"}`}
     >
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-2xl font-semibold text-ink">AI Statistics</h1>
+        {!companyStatistics ? (
+          <h1 className="text-2xl font-semibold text-ink">AI Statistics</h1>
+        ) : (
+          <div />
+        )}
         <div className="flex flex-wrap items-center gap-2">
-          {!embedded ? (
+          {!embedded && !companyStatistics ? (
             <Link
               href="/account"
               className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-ink hover:bg-cream-dark sm:text-sm"
@@ -3454,8 +3664,15 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                     ))}
                   </div>
                   <div className="hidden h-5 w-px shrink-0 bg-line sm:block" aria-hidden />
-                  <StatsGroupModeToggle value={statsGroupMode} onChange={setStatsGroupMode} />
-                  {statsGroupMode === "model" ? (
+                  {!companyMultiMember ? (
+                    <StatsGroupModeToggle
+                      value={statsGroupMode === "member" ? "service" : statsGroupMode}
+                      onChange={setStatsGroupMode}
+                    />
+                  ) : (
+                    <span className={`${STATS_FILTER_LABEL_CLASS}`}>By person</span>
+                  )}
+                  {chartGroupMode === "model" ? (
                     <label className={`flex items-center gap-1.5 ${STATS_FILTER_LABEL_CLASS}`}>
                       Service
                       <select
@@ -3496,9 +3713,25 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
               </div>
               <div className="flex flex-wrap items-center gap-x-2 gap-y-2 border-t border-line/70 pt-2">
                 <span className={`mr-1 shrink-0 ${STATS_FILTER_LABEL_CLASS}`}>
-                  Show
+                  {chartGroupMode === "member" ? "People" : "Show"}
                 </span>
-                {statsGroupMode === "service"
+                {chartGroupMode === "member"
+                  ? (companyMemberBreakdown?.members ?? []).map((member) => {
+                      const series = memberChartSeries.find((row) => row.user_id === member.user_id);
+                      const color = series?.color ?? COLOR_UNKNOWN;
+                      const pressed = selectedMemberFilters.has(member.user_id);
+                      return (
+                        <PromptVolumeAiToggleButton
+                          key={member.user_id}
+                          label={member.label}
+                          color={color}
+                          pressed={pressed}
+                          disabled={pressed && selectedMemberFilters.size <= 1}
+                          onToggle={() => toggleMemberFilter(member.user_id)}
+                        />
+                      );
+                    })
+                  : chartGroupMode === "service"
                   ? sortedPromptVolumeAiFilters.map((filter) => (
                       <PromptVolumeAiToggleButton
                         key={filter.key}
@@ -3579,7 +3812,33 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
             </div>
             <div className="h-72 w-full sm:h-80">
               <ResponsiveContainer width="100%" height="100%">
-                {statsGroupMode === "model" && activeModelChartSeries.length ? (
+                {chartGroupMode === "member" && memberChartSeries.length ? (
+                  <BarChart data={memberPromptVolumeChartRows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
+                    <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
+                    <YAxis stroke={CHART_X_DATE_STROKE} allowDecimals={false} width={32} tick={CHART_Y_TICK} />
+                    <Tooltip
+                      cursor={{ fill: CHART_CURSOR_FILL }}
+                      contentStyle={CHART_TOOLTIP_STYLE}
+                      formatter={(value: number, name: string) => [formatChartNumber(value), name]}
+                    />
+                    <Legend wrapperStyle={CHART_LEGEND_STYLE} />
+                    {memberChartSeries.map((series, index, visible) => (
+                      <Bar
+                        key={series.dataKey}
+                        dataKey={series.dataKey}
+                        name={series.label}
+                        stackId="member_prompts"
+                        fill={series.color}
+                        radius={
+                          index === visible.length - 1
+                            ? ([2, 2, 0, 0] as [number, number, number, number])
+                            : undefined
+                        }
+                      />
+                    ))}
+                  </BarChart>
+                ) : chartGroupMode === "model" && activeModelChartSeries.length ? (
                   <BarChart data={modelPromptVolumeChartRows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
                     <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
@@ -3685,7 +3944,11 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
               <section className="mb-8 w-full rounded-2xl border border-line bg-white p-3 shadow-card sm:p-4">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <h2 className="text-base font-semibold uppercase tracking-[0.22em] text-ink">
-                    {statsGroupMode === "model" ? "Screen time by model" : "Screen time by service"}
+                    {chartGroupMode === "member"
+                      ? "Screen time by person"
+                      : chartGroupMode === "model"
+                        ? "Screen time by model"
+                        : "Screen time by service"}
                   </h2>
                   <div className="flex flex-wrap items-center gap-2">
                     {screenTimeView === "instant" ? (
@@ -3694,12 +3957,82 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
                     <StatsChartHorizonToggle value={screenTimeView} onChange={setScreenTimeView} />
                   </div>
                 </div>
-                {screenTimeView === "instant" && statsGroupMode !== "model" ? (
+                {screenTimeView === "instant" && chartGroupMode === "service" ? (
                   <p className="mb-3 text-[11px] text-faint">
                     Total foreground minutes in the selected range — filtered by Show above.
                   </p>
                 ) : null}
-                {statsGroupMode === "model" ? (
+                {chartGroupMode === "member" ? (
+                  memberChartSeries.length ? (
+                    screenTimeView === "over_time" ? (
+                      memberScreenTimeChartRows.length ? (
+                        <div key="screen-member-over-time" className="h-72 w-full sm:h-80">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={memberScreenTimeChartRows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} vertical={false} />
+                              <XAxis dataKey="label" stroke={CHART_X_DATE_STROKE} tick={CHART_X_DATE_TICK} />
+                              <YAxis stroke={CHART_X_DATE_STROKE} allowDecimals={false} width={32} tick={CHART_Y_TICK} unit=" min" />
+                              <Tooltip
+                                cursor={{ fill: CHART_CURSOR_FILL }}
+                                contentStyle={CHART_TOOLTIP_STYLE}
+                                formatter={(value: number, name: string) => [`${formatChartNumber(value)} min`, name]}
+                              />
+                              <Legend wrapperStyle={CHART_LEGEND_STYLE} />
+                              {memberChartSeries.map((series, index, visible) => (
+                                <Bar
+                                  key={series.dataKey}
+                                  dataKey={series.dataKey}
+                                  name={series.label}
+                                  stackId="member_screen_time"
+                                  fill={series.color}
+                                  radius={
+                                    index === visible.length - 1
+                                      ? ([2, 2, 0, 0] as [number, number, number, number])
+                                      : undefined
+                                  }
+                                />
+                              ))}
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted">No screen time over time for the selected people in this range yet.</p>
+                      )
+                    ) : memberScreenTimeInstantRows.length ? (
+                      <div
+                        key="screen-member-instant"
+                        className="w-full"
+                        style={{ height: Math.max(120, memberScreenTimeInstantRows.length * 44 + 24) }}
+                      >
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart
+                            data={memberScreenTimeInstantRows}
+                            layout="vertical"
+                            margin={{ top: 4, right: 12, bottom: 4, left: 4 }}
+                            barCategoryGap="12%"
+                          >
+                            <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_STROKE} horizontal={false} />
+                            <XAxis type="number" stroke={CHART_X_DATE_STROKE} tick={CHART_Y_TICK} unit=" min" />
+                            <YAxis type="category" dataKey="member" stroke={CHART_X_DATE_STROKE} tick={CHART_Y_TICK_11} width={120} />
+                            <Tooltip
+                              contentStyle={CHART_TOOLTIP_STYLE}
+                              formatter={(value: number) => [`${formatChartNumber(value)} min`, "Screen time"]}
+                            />
+                            <Bar dataKey="minutes" name="Screen time" radius={[0, 4, 4, 0]} barSize={18}>
+                              {memberScreenTimeInstantRows.map((entry) => (
+                                <Cell key={entry.key} fill={entry.fill} fillOpacity={0.95} />
+                              ))}
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted">No screen time for the selected people in this range yet.</p>
+                    )
+                  ) : (
+                    <p className="text-sm text-muted">Select at least one person under People to view screen time.</p>
+                  )
+                ) : chartGroupMode === "model" ? (
                   activeModelChartSeries.length ? (
                     screenTimeView === "over_time" ? (
                       modelScreenTimeOverTimeHasData ? (
@@ -4230,7 +4563,11 @@ export function StatisticsClient({ embedded = false }: { embedded?: boolean }) {
 
           <div className="my-10 border-t border-line" role="separator" />
 
-          <VendorUsageSection ref={vendorUsageRef} user={user} rangeDays={days} />
+          {!companyStatistics ? (
+            <VendorUsageSection ref={vendorUsageRef} user={user} rangeDays={days} />
+          ) : (
+            companyStatistics.planUsageSection
+          )}
 
           <h2 className="mb-6 text-base font-semibold uppercase tracking-[0.22em] text-ink">Promptly Labs Diagnostics</h2>
 
