@@ -63,7 +63,6 @@ export const WEBSITE_PLANS: readonly WebsitePlan[] = [
     priceDisplay: "$70.00/mo",
     subtitle: "Firm-wide prompt quality, diagnostics, and spend visibility.",
     details: [
-      "Everything in Pro for power users and team leads",
       "Aggregate statistics on prompt volume, engagement, and tool adoption",
       "Track Claude Code, Cursor, and Codex usage across your organization",
       "Subscription spend tracking and budget visibility for AI plans",
@@ -87,6 +86,19 @@ export const GET_STARTED_PLANS = WEBSITE_PLANS.filter((plan) => plan.available &
 export const PRICING_PAGE_PLANS = WEBSITE_PLANS.filter((plan) => plan.available);
 
 export const ACCOUNT_PLANS = WEBSITE_PLANS;
+
+const PLAN_TIER_RANK: Record<PlanKey, number> = {
+  free: 0,
+  student: 1,
+  pro: 2,
+  enterprise: 3
+};
+
+/** Account page: current tier and upgrades only — never show cheaper plans. */
+export function accountPlansForCurrentTier(currentTier: PlanKey): readonly WebsitePlan[] {
+  const currentRank = PLAN_TIER_RANK[currentTier] ?? 0;
+  return ACCOUNT_PLANS.filter((plan) => plan.available && PLAN_TIER_RANK[plan.key] >= currentRank);
+}
 
 export function isPaidPlanKey(key: string): key is PaidPlanKey {
   return key === "pro" || key === "student" || key === "enterprise";

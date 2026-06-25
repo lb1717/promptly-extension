@@ -36,7 +36,7 @@ import { EmailVerificationNotice } from "@/components/auth/EmailVerificationNoti
 import { AccountPromptVolumeChart } from "@/components/account/AccountPromptVolumeChart";
 import { listenForGoogleSignInReturn, signInWithGoogleInteractive } from "@/lib/firebaseGoogleAuth";
 import { useEmailVerificationStatus } from "@/lib/useEmailVerificationStatus";
-import { ACCOUNT_PLANS, isPaidPlanKey, type PaidPlanKey } from "@/lib/plans";
+import { accountPlansForCurrentTier, isPaidPlanKey, type PaidPlanKey, type PlanKey } from "@/lib/plans";
 function formatJoinDate(user: User | null): string {
   if (!user?.metadata?.creationTime) return "—";
   try {
@@ -337,13 +337,18 @@ export function AccountClient({
     return msgs;
   }, [error, billingError]);
 
-  const currentTierKey = useMemo(() => {
+  const currentTierKey = useMemo((): PlanKey => {
     const raw = String(billing?.subscriptionTier || "free").toLowerCase();
     if (raw === "pro" || raw === "plus" || raw === "professional") return "pro";
     if (raw === "enterprise") return "enterprise";
     if (raw === "student") return "student";
     return "free";
   }, [billing?.subscriptionTier]);
+
+  const visibleAccountPlans = useMemo(
+    () => accountPlansForCurrentTier(currentTierKey),
+    [currentTierKey]
+  );
 
   const currentPlanLabel = useMemo(
     () => {
@@ -950,7 +955,7 @@ export function AccountClient({
             </p>
 
             <div className="mt-6 grid gap-4 lg:grid-cols-2">
-              {ACCOUNT_PLANS.filter((plan) => plan.available).map((plan) => {
+              {visibleAccountPlans.map((plan) => {
                 const isCurrent = currentTierKey === plan.key;
                 const isPopular = Boolean(plan.featured);
                 const paidTier = isPaidPlanKey(plan.key);
