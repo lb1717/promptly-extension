@@ -1,15 +1,10 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { AmbientBackground } from "@/components/AmbientBackground";
-import { BrowserExtensionDemoShell, ResearchCompanionDemoShell } from "@/components/DemoAnimationShells";
+import { BrowserExtensionDemoShell } from "@/components/DemoAnimationShells";
 import { Footer } from "@/components/Footer";
 import { Navbar } from "@/components/Navbar";
 import { PAPER_ENTRIES } from "@/lib/researchContent";
-
-const ResearchCompanionDemoLazy = dynamic(
-  () => import("@/components/ResearchCompanionDemo").then((m) => ({ default: m.ResearchCompanionDemo })),
-  { ssr: false, loading: () => <ResearchCompanionDemoShell /> }
-);
 
 const DemoSectionLazy = dynamic(
   () => import("@/components/DemoSection").then((m) => ({ default: m.DemoSection })),
@@ -111,11 +106,8 @@ export function ResearchLabsPage(_props?: Props) {
           </div>
         </section>
 
-        <ResearchCompanionDemoLazy />
-
-        <section id="browser-extension-demo" className="scroll-mt-24 border-t border-line px-4 py-8 sm:py-10">
+        <section id="browser-extension-demo" className="scroll-mt-24 px-4 pb-6 pt-2 sm:pb-8 sm:pt-4">
           <div className="mx-auto max-w-6xl">
-            <h2 className="mb-6 text-center text-2xl font-semibold text-ink sm:mb-8 sm:text-3xl">In Chrome or Edge:</h2>
             <DemoSectionLazy embedded />
           </div>
         </section>
