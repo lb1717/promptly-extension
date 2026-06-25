@@ -27,10 +27,11 @@ export const PUBLIC_SITEMAP_ROUTES: Array<{ path: string; changeFrequency: Sitem
   [
     { path: "/", changeFrequency: "weekly", priority: 1 },
     { path: "/get-started", changeFrequency: "weekly", priority: 0.9 },
-    { path: "/research", changeFrequency: "monthly", priority: 0.45 },
-    { path: "/papers", changeFrequency: "monthly", priority: 0.35 },
+    { path: "/companion", changeFrequency: "weekly", priority: 0.75 },
+    { path: "/research", changeFrequency: "monthly", priority: 0.7 },
+    { path: "/papers", changeFrequency: "monthly", priority: 0.5 },
     { path: "/privacy", changeFrequency: "yearly", priority: 0.3 },
-    { path: "/help", changeFrequency: "monthly", priority: 0.35 }
+    { path: "/help", changeFrequency: "monthly", priority: 0.65 }
   ];
 
 export function getSiteUrl(): string {

@@ -22,7 +22,7 @@ export function Footer() {
           <a href="/research" className="hover:text-ink">
             Research
           </a>
-          <a href="#" className="hover:text-ink">
+          <a href="/terms" className="hover:text-ink">
             Terms
           </a>
           <a href={SITE.chromeStoreUrl} className="hover:text-ink">

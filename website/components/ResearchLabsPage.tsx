@@ -4,41 +4,12 @@ import { AmbientBackground } from "@/components/AmbientBackground";
 import { BrowserExtensionDemoShell } from "@/components/DemoAnimationShells";
 import { Footer } from "@/components/Footer";
 import { Navbar } from "@/components/Navbar";
-import { PAPER_ENTRIES } from "@/lib/researchContent";
+import { PAPER_ENTRIES, RESEARCH_FAQS } from "@/lib/researchContent";
 
 const DemoSectionLazy = dynamic(
   () => import("@/components/DemoSection").then((m) => ({ default: m.DemoSection })),
   { ssr: false, loading: () => <BrowserExtensionDemoShell embedded /> }
 );
-
-const FAQS = [
-  {
-    question: "What is prompt engineering?",
-    answer:
-      "MIT Sloan defines prompt engineering as the practice of designing prompts to guide an AI model's output, including setting roles, specifying format, adding constraints, or giving examples.[1]"
-  },
-  {
-    question: "Why do prompts drift in long chats?",
-    answer:
-      "Prompt stability can weaken over long multi-turn dialogs. Recent work measures meaningful instruction drift within several rounds and links part of the effect to attention decay, so it is useful to restate important constraints and output contracts.[2]"
-  },
-  {
-    question: "Can prompts be optimised automatically?",
-    answer:
-      "Yes, at least conceptually and sometimes algorithmically. Research on automatic prompt optimisation, APE, and OPRO treats prompts as search objects that can be critiqued, rescored, and revised, although exact gains depend on task, model, and evaluation setup.[2][3][4]"
-  },
-  {
-    question: "Do templates help?",
-    answer:
-      "Templates can help when the task benefits from a repeatable structure. MIT's guidance on context and specificity, together with survey work on prompt taxonomies, supports using reusable prompt patterns and explicit output contracts when consistency matters.[5][6]"
-  },
-  {
-    question: "What should I do if the model makes things up?",
-    answer:
-      "Tighten the prompt's evidence boundary: specify the allowed sources, request explicit assumptions, and require the model to distinguish grounded statements from open uncertainty. That does not eliminate hallucinations, but it makes them easier to inspect and catch.[1][5]"
-  }
-];
-
 function SourcesBlock({
   title = "Sources",
   items
@@ -253,7 +224,7 @@ export function ResearchLabsPage(_props?: Props) {
               <h2 className="mt-3 text-3xl font-semibold text-ink sm:text-4xl">Common questions about prompt engineering and optimisation</h2>
             </div>
             <div className="divide-y divide-line overflow-hidden rounded-3xl border border-line bg-cream backdrop-blur-sm">
-              {FAQS.map((item) => (
+              {RESEARCH_FAQS.map((item) => (
                 <article key={item.question} className="px-6 py-6 sm:px-8">
                   <h3 className="text-lg font-semibold text-ink">{item.question}</h3>
                   <p className="mt-3 text-sm leading-relaxed text-muted">{item.answer}</p>

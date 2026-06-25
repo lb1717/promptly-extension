@@ -1,21 +1,31 @@
 import Link from "next/link";
 import { AmbientBackground } from "@/components/AmbientBackground";
 import { AccountHelpSection } from "@/components/account/AccountHelpSection";
+import { ContentPageJsonLd } from "@/components/JsonLd";
 import { Footer } from "@/components/Footer";
 import { Navbar } from "@/components/Navbar";
+import { ACCOUNT_FAQ } from "@/lib/accountHelpContent";
 import { SITE } from "@/lib/constants";
 import { buildPageMetadata } from "@/lib/seo";
 
+const HELP_DESCRIPTION =
+  "FAQ and troubleshooting for Promptly — install the extension, fix missing UI, and get support for ChatGPT, Claude, and Gemini.";
+
 export const metadata = buildPageMetadata({
   title: "Help",
-  description:
-    "FAQ and troubleshooting for Promptly — install the extension, fix missing UI, and get support for ChatGPT, Claude, and Gemini.",
+  description: HELP_DESCRIPTION,
   path: "/help"
 });
 
 export default function HelpPage() {
   return (
     <main className="relative min-h-screen bg-page text-ink">
+      <ContentPageJsonLd
+        path="/help"
+        name="Help — Promptly"
+        description={HELP_DESCRIPTION}
+        faqs={ACCOUNT_FAQ.map((item) => ({ question: item.q, answer: item.a }))}
+      />
       <AmbientBackground variant="static" />
       <div className="relative z-10">
         <Navbar />

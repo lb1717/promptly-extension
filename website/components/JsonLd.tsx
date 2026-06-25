@@ -85,3 +85,51 @@ export function ProductPageJsonLd() {
     />
   );
 }
+
+type FaqItem = { question: string; answer: string };
+
+/** Marketing content pages with optional FAQ schema for richer indexing signals. */
+export function ContentPageJsonLd({
+  path,
+  name,
+  description,
+  faqs
+}: {
+  path: string;
+  name: string;
+  description: string;
+  faqs?: FaqItem[];
+}) {
+  const pageUrl = absoluteUrl(path);
+  const graph: Array<Record<string, unknown>> = [
+    {
+      "@context": "https://schema.org",
+      "@type": "WebPage",
+      "@id": `${pageUrl}#webpage`,
+      url: pageUrl,
+      name,
+      description,
+      isPartOf: { "@type": "WebSite", url: getSiteUrl(), name: "Promptly" },
+      primaryImageOfPage: absoluteUrl("/icon-512.png")
+    }
+  ];
+
+  if (faqs?.length) {
+    graph.push({
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "@id": `${pageUrl}#faq`,
+      url: pageUrl,
+      mainEntity: faqs.map((item) => ({
+        "@type": "Question",
+        name: item.question,
+        acceptedAnswer: {
+          "@type": "Answer",
+          text: item.answer
+        }
+      }))
+    });
+  }
+
+  return <JsonLd data={graph} />;
+}

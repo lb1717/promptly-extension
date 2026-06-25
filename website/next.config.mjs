@@ -21,6 +21,26 @@ const nextConfig = {
         permanent: true
       },
       {
+        source: "/terms",
+        destination: "/privacy",
+        permanent: true
+      },
+      {
+        source: "/account/statistics",
+        destination: "/account",
+        permanent: true
+      },
+      {
+        source: "/account/install-integrations",
+        destination: "/integrations",
+        permanent: true
+      },
+      {
+        source: "/account/troubleshoot-integrations",
+        destination: "/integrations",
+        permanent: true
+      },
+      {
         source: "/downloads/companion/Promptly-Companion-mac.dmg",
         destination: "/downloads/companion/mac",
         permanent: false

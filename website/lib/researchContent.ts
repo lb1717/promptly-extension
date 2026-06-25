@@ -105,3 +105,31 @@ export const PAPER_ENTRIES: CitationEntry[] = [
       "Explores optimisation by prompting (OPRO), where an LLM iteratively proposes new candidates after seeing prior solutions and scores."
   }
 ];
+
+export const RESEARCH_FAQS = [
+  {
+    question: "What is prompt engineering?",
+    answer:
+      "MIT Sloan defines prompt engineering as the practice of designing prompts to guide an AI model's output, including setting roles, specifying format, adding constraints, or giving examples."
+  },
+  {
+    question: "Why do prompts drift in long chats?",
+    answer:
+      "Prompt stability can weaken over long multi-turn dialogs. Recent work measures meaningful instruction drift within several rounds and links part of the effect to attention decay, so it is useful to restate important constraints and output contracts."
+  },
+  {
+    question: "Can prompts be optimised automatically?",
+    answer:
+      "Yes, at least conceptually and sometimes algorithmically. Research on automatic prompt optimisation, APE, and OPRO treats prompts as search objects that can be critiqued, rescored, and revised, although exact gains depend on task, model, and evaluation setup."
+  },
+  {
+    question: "Do templates help?",
+    answer:
+      "Templates can help when the task benefits from a repeatable structure. MIT's guidance on context and specificity, together with survey work on prompt taxonomies, supports using reusable prompt patterns and explicit output contracts when consistency matters."
+  },
+  {
+    question: "What should I do if the model makes things up?",
+    answer:
+      "Tighten the prompt's evidence boundary: specify the allowed sources, request explicit assumptions, and require the model to distinguish grounded statements from open uncertainty. That does not eliminate hallucinations, but it makes them easier to inspect and catch."
+  }
+] as const;

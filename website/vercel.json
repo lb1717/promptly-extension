@@ -5,6 +5,30 @@
   "buildCommand": "npm run build",
   "redirects": [
     {
+      "source": "/labs/papers",
+      "has": [{ "type": "host", "value": "www.promptly-labs.com" }],
+      "destination": "https://promptly-labs.com/papers",
+      "permanent": true
+    },
+    {
+      "source": "/labs",
+      "has": [{ "type": "host", "value": "www.promptly-labs.com" }],
+      "destination": "https://promptly-labs.com/research",
+      "permanent": true
+    },
+    {
+      "source": "/product",
+      "has": [{ "type": "host", "value": "www.promptly-labs.com" }],
+      "destination": "https://promptly-labs.com/",
+      "permanent": true
+    },
+    {
+      "source": "/terms",
+      "has": [{ "type": "host", "value": "www.promptly-labs.com" }],
+      "destination": "https://promptly-labs.com/privacy",
+      "permanent": true
+    },
+    {
       "source": "/:path*",
       "has": [{ "type": "host", "value": "www.promptly-labs.com" }],
       "destination": "https://promptly-labs.com/:path*",
