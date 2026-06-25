@@ -62,8 +62,13 @@ type CompanyStatsPayload = {
     vendor_email?: string | null;
     plan_display: string | null;
     plan_monthly_usd: number | null;
-    primary_window: { utilization: number } | null;
-    secondary_window: { utilization: number } | null;
+    synced_at_ms?: number;
+    primary_window: { utilization: number; resets_at?: string | null; window_seconds?: number | null } | null;
+    secondary_window: { utilization: number; resets_at?: string | null; window_seconds?: number | null } | null;
+    usage_history?: {
+      primary: Array<{ at_ms: number; utilization: number }>;
+      secondary: Array<{ at_ms: number; utilization: number }>;
+    };
   }>;
 };
 
@@ -181,8 +186,6 @@ export function CompanyStatisticsClient({ user }: { user: User | null }) {
         <CompanyPlanUsageSection
           members={members}
           visibleMemberIds={visibleMemberIds}
-          planUsageTimeline={overview?.plan_usage_timeline ?? []}
-          planUsageSeries={overview?.plan_usage_series ?? []}
           planUsageSubscriptions={overview?.plan_usage_subscriptions ?? []}
           subscriptionProfiles={overview?.subscription_profiles ?? []}
           totalPlanMonthlyUsd={overview?.totals.plan_monthly_usd ?? 0}

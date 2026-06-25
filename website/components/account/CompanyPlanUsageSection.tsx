@@ -1,19 +1,38 @@
 "use client";
 
+import {
+  buildCompanyMultiMemberCycleChart,
+  chartYTicks,
+  formatChartXLabel,
+  formatCycleBoundaryLabel,
+  type CompanyMemberSeries,
+  type PeriodNavState,
+  type UsageHistoryPoint,
+  type UsageWindow
+} from "@/lib/companyPlanUsageCharts";
 import { buildMemberColorLookup } from "@/lib/memberChartColors";
 import { normalizeUtilizationPercent } from "@/lib/vendorPlanPricing";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CartesianGrid,
   Legend,
   Line,
   LineChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis
 } from "recharts";
 
+const CHART_FONT_FAMILY = "var(--font-roboto-chart), Roboto, sans-serif";
+const CHART_Y_TICK = { fill: "#5C5C5C", fontSize: 10, fontFamily: CHART_FONT_FAMILY };
+const CHART_X_DATE_TICK = {
+  fill: "#2a2a2a",
+  fontSize: 11,
+  fontWeight: 600 as const,
+  fontFamily: CHART_FONT_FAMILY
+};
 const CHART_TOOLTIP_STYLE = {
   background: "#ffffff",
   border: "1px solid #e8e8e8",
@@ -21,15 +40,8 @@ const CHART_TOOLTIP_STYLE = {
   padding: "6px 8px",
   fontSize: 11,
   color: "#111111",
+  fontFamily: CHART_FONT_FAMILY,
   boxShadow: "0 2px 8px rgba(17, 17, 17, 0.08)"
-};
-
-type PlanUsageSeries = {
-  key: string;
-  label: string;
-  member_id: string;
-  subscription_id: string;
-  subscription_label: string;
 };
 
 type PlanUsageSubscription = {
@@ -46,42 +58,250 @@ type SubscriptionProfile = {
   member_id: string;
   subscription_id?: string;
   plan_monthly_usd: number | null;
-  primary_window: { utilization: number } | null;
-  secondary_window: { utilization: number } | null;
+  synced_at_ms?: number;
+  primary_window: {
+    utilization: number;
+    resets_at?: string | null;
+    window_seconds?: number | null;
+  } | null;
+  secondary_window: {
+    utilization: number;
+    resets_at?: string | null;
+    window_seconds?: number | null;
+  } | null;
+  usage_history?: {
+    primary: UsageHistoryPoint[];
+    secondary: UsageHistoryPoint[];
+  };
+};
+
+type SubscriptionChartModel = {
+  subscription: PlanUsageSubscription;
+  planName: string;
+  accountCount: number;
+  monthlyUsd: number | null;
+  averageUtilization: number | null;
+  memberSeries: CompanyMemberSeries[];
 };
 
 type CompanyPlanUsageProps = {
   members: Array<{ user_id: string; label: string }>;
   visibleMemberIds: string[];
-  planUsageTimeline: Array<Record<string, number | string>>;
-  planUsageSeries: PlanUsageSeries[];
   planUsageSubscriptions: PlanUsageSubscription[];
   subscriptionProfiles: SubscriptionProfile[];
   totalPlanMonthlyUsd: number;
   loading?: boolean;
 };
 
-function shortDate(day: string) {
-  const d = new Date(`${day}T12:00:00.000Z`);
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
 function formatCurrency(value: number) {
   if (!Number.isFinite(value)) return "—";
   return value >= 100 ? `$${Math.round(value)}` : `$${value.toFixed(2)}`;
 }
 
-function profileUtilization(profile: SubscriptionProfile): number | null {
+function activeWindow(profile: SubscriptionProfile): UsageWindow | null {
   const window = profile.secondary_window || profile.primary_window;
   if (!window) return null;
+  return {
+    utilization: window.utilization,
+    resets_at: window.resets_at ?? null,
+    window_seconds: window.window_seconds ?? null
+  };
+}
+
+function activeHistory(profile: SubscriptionProfile): UsageHistoryPoint[] {
+  if (profile.secondary_window) return profile.usage_history?.secondary ?? [];
+  return profile.usage_history?.primary ?? [];
+}
+
+function profileUtilization(profile: SubscriptionProfile): number | null {
+  const window = activeWindow(profile);
+  if (!window) return null;
   return normalizeUtilizationPercent(window.utilization);
+}
+
+function PeriodNavigator({
+  state,
+  onChange
+}: {
+  state: PeriodNavState;
+  onChange: (offset: number) => void;
+}) {
+  const arrowClass = (enabled: boolean) =>
+    `px-1 text-sm font-semibold transition-colors ${
+      enabled ? "text-sky-700 hover:text-sky-900" : "cursor-default text-faint/45"
+    }`;
+
+  return (
+    <div className="flex items-center justify-center gap-2 text-xs font-medium">
+      <button
+        type="button"
+        aria-label="Previous period"
+        disabled={!state.canGoBack || state.previousOffset == null}
+        onClick={() => {
+          if (state.previousOffset != null) onChange(state.previousOffset);
+        }}
+        className={arrowClass(state.canGoBack)}
+      >
+        &lt;
+      </button>
+      <span className="min-w-[6.25rem] text-center text-sky-700">{state.label}</span>
+      <button
+        type="button"
+        aria-label="Next period"
+        disabled={!state.canGoForward || state.nextOffset == null}
+        onClick={() => {
+          if (state.nextOffset != null) onChange(state.nextOffset);
+        }}
+        className={arrowClass(state.canGoForward)}
+      >
+        &gt;
+      </button>
+    </div>
+  );
+}
+
+function SubscriptionPlanChart({ chart }: { chart: SubscriptionChartModel }) {
+  const [periodOffset, setPeriodOffset] = useState(0);
+
+  useEffect(() => {
+    setPeriodOffset(0);
+  }, [chart.subscription.id, chart.memberSeries.length]);
+
+  const cycleChart = useMemo(
+    () => buildCompanyMultiMemberCycleChart(chart.memberSeries, periodOffset),
+    [chart.memberSeries, periodOffset]
+  );
+
+  useEffect(() => {
+    if (cycleChart && cycleChart.periodNav.selectedOffset !== periodOffset) {
+      setPeriodOffset(cycleChart.periodNav.selectedOffset);
+    }
+  }, [cycleChart, periodOffset]);
+
+  const spanMs = cycleChart ? Math.max(cycleChart.cycleEndMs - cycleChart.cycleStartMs, 1) : 1;
+
+  return (
+    <div className="rounded-2xl border border-line bg-white p-4 shadow-card sm:p-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h3 className="text-lg font-semibold text-ink">{chart.planName}</h3>
+          <p className="mt-1 text-sm text-muted">
+            {chart.monthlyUsd != null ? (
+              <>
+                <span className="font-semibold tabular-nums text-ink">{formatCurrency(chart.monthlyUsd)}</span>
+                /mo per account
+              </>
+            ) : (
+              "Cost unavailable"
+            )}
+            <span className="mx-2 text-faint">·</span>
+            <span className="font-semibold tabular-nums text-ink">{chart.accountCount}</span>{" "}
+            {chart.accountCount === 1 ? "user" : "users"}
+            {chart.averageUtilization != null ? (
+              <>
+                <span className="mx-2 text-faint">·</span>
+                <span className="font-semibold tabular-nums text-ink">{chart.averageUtilization}%</span> avg used
+              </>
+            ) : null}
+          </p>
+        </div>
+        {cycleChart ? <PeriodNavigator state={cycleChart.periodNav} onChange={setPeriodOffset} /> : null}
+      </div>
+
+      <div className="mt-5 h-80 w-full sm:h-96">
+        {cycleChart && chart.memberSeries.length ? (
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={cycleChart.rows} margin={{ top: 12, right: 18, bottom: 8, left: 6 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" vertical={false} />
+              <XAxis
+                dataKey="at_ms"
+                type="number"
+                domain={[cycleChart.cycleStartMs, cycleChart.cycleEndMs]}
+                allowDataOverflow
+                stroke="#525252"
+                tick={CHART_X_DATE_TICK}
+                minTickGap={28}
+                tickFormatter={(value) =>
+                  formatChartXLabel(Number(value), spanMs, cycleChart.windowSeconds)
+                }
+              />
+              <YAxis
+                domain={[0, cycleChart.yMax]}
+                stroke="#8A8A8A"
+                allowDecimals={false}
+                width={52}
+                tick={CHART_Y_TICK}
+                ticks={chartYTicks(cycleChart.yMax)}
+                unit="%"
+              />
+              <Tooltip
+                contentStyle={CHART_TOOLTIP_STYLE}
+                formatter={(value: number, name) => {
+                  const member = chart.memberSeries.find((row) => row.memberId === String(name));
+                  return [`${Math.round(value)}% used`, member?.label ?? String(name)];
+                }}
+                labelFormatter={(_, payload) => {
+                  const atMs = payload?.[0]?.payload?.at_ms;
+                  return typeof atMs === "number"
+                    ? new Date(atMs).toLocaleString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                        hour: "numeric",
+                        minute: "2-digit"
+                      })
+                    : "";
+                }}
+              />
+              <ReferenceLine
+                x={cycleChart.cycleStartMs}
+                stroke="#cbd5e1"
+                strokeWidth={1}
+                label={{
+                  value: `Start · ${formatCycleBoundaryLabel(cycleChart.cycleStartMs)}`,
+                  position: "insideTopLeft",
+                  fill: "#64748b",
+                  fontSize: 9
+                }}
+              />
+              <ReferenceLine
+                x={cycleChart.cycleEndMs}
+                stroke="#cbd5e1"
+                strokeWidth={1}
+                label={{
+                  value: `End · ${formatCycleBoundaryLabel(cycleChart.cycleEndMs)}`,
+                  position: "insideTopRight",
+                  fill: "#64748b",
+                  fontSize: 9
+                }}
+              />
+              <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
+              {chart.memberSeries.map((member) => (
+                <Line
+                  key={member.memberId}
+                  type="linear"
+                  dataKey={member.memberId}
+                  name={member.label}
+                  stroke={member.color}
+                  strokeWidth={2.75}
+                  connectNulls
+                  dot={false}
+                  activeDot={{ r: 4, stroke: "#ffffff", strokeWidth: 1.5 }}
+                  isAnimationActive={false}
+                />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        ) : (
+          <p className="flex h-full items-center justify-center text-sm text-muted">No usage history yet.</p>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export function CompanyPlanUsageSection({
   members,
   visibleMemberIds,
-  planUsageTimeline,
-  planUsageSeries,
   planUsageSubscriptions,
   subscriptionProfiles,
   totalPlanMonthlyUsd,
@@ -110,16 +330,21 @@ export function CompanyPlanUsageSection({
         if (!visibleMemberIdsForSub.length) return null;
 
         const profilesByMember = profilesBySubscriptionMember.get(subscription.id);
-        const seriesByMember = new Map<string, PlanUsageSeries & { color: string }>();
-        for (const row of planUsageSeries) {
-          if (row.subscription_id !== subscription.id || !visibleSet.has(row.member_id)) continue;
-          if (seriesByMember.has(row.member_id)) continue;
-          seriesByMember.set(row.member_id, {
-            ...row,
-            label: memberLabelById.get(row.member_id) || row.label,
-            color: memberColorById.get(row.member_id) ?? "#64748b"
-          });
-        }
+        const memberSeries: CompanyMemberSeries[] = visibleMemberIdsForSub
+          .map((memberId) => {
+            const profile = profilesByMember?.get(memberId);
+            if (!profile) return null;
+            return {
+              memberId,
+              label: memberLabelById.get(memberId) || memberId.slice(0, 8),
+              color: memberColorById.get(memberId) ?? "#64748b",
+              window: activeWindow(profile),
+              history: activeHistory(profile),
+              syncedAtMs: profile.synced_at_ms ?? Date.now()
+            };
+          })
+          .filter((row): row is CompanyMemberSeries => row != null)
+          .sort((a, b) => a.label.localeCompare(b.label));
 
         const utilizationValues = visibleMemberIdsForSub
           .map((memberId) => profilesByMember?.get(memberId))
@@ -134,22 +359,16 @@ export function CompanyPlanUsageSection({
 
         return {
           subscription,
+          planName: subscription.plan_display || subscription.label,
           accountCount: visibleMemberIdsForSub.length,
           monthlyUsd: subscription.plan_monthly_usd,
           averageUtilization,
-          series: [...seriesByMember.values()].sort((a, b) => a.label.localeCompare(b.label))
-        };
+          memberSeries
+        } satisfies SubscriptionChartModel;
       })
-      .filter((chart): chart is NonNullable<typeof chart> => chart != null)
-      .sort((a, b) => a.subscription.label.localeCompare(b.subscription.label));
-  }, [
-    planUsageSubscriptions,
-    subscriptionProfiles,
-    planUsageSeries,
-    visibleSet,
-    memberColorById,
-    memberLabelById
-  ]);
+      .filter((chart): chart is SubscriptionChartModel => chart != null)
+      .sort((a, b) => a.planName.localeCompare(b.planName));
+  }, [planUsageSubscriptions, subscriptionProfiles, visibleSet, memberColorById, memberLabelById]);
 
   const filteredTotalMonthlyUsd = useMemo(
     () => chartsBySubscription.reduce((sum, chart) => sum + (chart.monthlyUsd ?? 0), 0),
@@ -180,63 +399,16 @@ export function CompanyPlanUsageSection({
         <div>
           <h2 className="text-base font-semibold uppercase tracking-[0.22em] text-ink">Subscription plan use</h2>
           <p className="mt-1 text-xs text-faint">
-            Percent of each AI subscription used over time — one chart per subscription, one line per account.
+            One billing cycle at a time — one chart per subscription, one solid line per user.
           </p>
         </div>
         <p className="text-xs text-muted">
           {formatCurrency(filteredTotalMonthlyUsd || totalPlanMonthlyUsd)}/mo total plans
         </p>
       </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        {chartsBySubscription.map(({ subscription, accountCount, monthlyUsd, averageUtilization, series }) => (
-          <div key={subscription.id} className="rounded-2xl border border-line bg-white p-3 shadow-card sm:p-4">
-            <h3 className="text-sm font-semibold text-ink">{subscription.label}</h3>
-            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
-              <span>
-                <span className="font-semibold tabular-nums text-ink">{accountCount}</span>{" "}
-                {accountCount === 1 ? "account" : "accounts"}
-              </span>
-              <span>
-                <span className="font-semibold tabular-nums text-ink">
-                  {monthlyUsd != null ? formatCurrency(monthlyUsd) : "—"}
-                </span>
-                /mo
-              </span>
-              <span>
-                <span className="font-semibold tabular-nums text-ink">
-                  {averageUtilization != null ? `${averageUtilization}%` : "—"}
-                </span>{" "}
-                avg used
-              </span>
-            </div>
-            <div className="mt-4 h-64 w-full">
-              {series.length ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={planUsageTimeline} margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.08)" vertical={false} />
-                    <XAxis dataKey="day" tick={{ fontSize: 11 }} tickFormatter={(value) => shortDate(String(value))} />
-                    <YAxis tick={{ fontSize: 11 }} domain={[0, 100]} unit="%" />
-                    <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
-                    <Legend wrapperStyle={{ fontSize: 11 }} />
-                    {series.map((row) => (
-                      <Line
-                        key={row.key}
-                        type="monotone"
-                        dataKey={row.key}
-                        name={row.label}
-                        stroke={row.color}
-                        strokeWidth={2.25}
-                        dot={{ r: 2.5, strokeWidth: 0 }}
-                        connectNulls
-                      />
-                    ))}
-                  </LineChart>
-                </ResponsiveContainer>
-              ) : (
-                <p className="flex h-full items-center justify-center text-sm text-muted">No usage history yet.</p>
-              )}
-            </div>
-          </div>
+      <div className="space-y-6">
+        {chartsBySubscription.map((chart) => (
+          <SubscriptionPlanChart key={chart.subscription.id} chart={chart} />
         ))}
       </div>
     </section>

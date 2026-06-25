@@ -445,13 +445,10 @@ function subscriptionKey(profile: VendorUsageProfileView): string {
 }
 
 function subscriptionLabel(profile: VendorUsageProfileView): string {
+  if (profile.plan_display?.trim()) return profile.plan_display.trim();
   const provider =
     profile.provider === "claude_code" ? "Claude" : profile.provider === "codex" ? "Codex" : "Cursor";
-  const plan = profile.plan_display || "Plan";
-  const email = profile.vendor_email ? ` · ${profile.vendor_email}` : "";
-  const profileHint =
-    !profile.vendor_email && profile.profile_label ? ` · ${profile.profile_label}` : "";
-  return `${provider} ${plan}${email}${profileHint}`;
+  return `${provider} Plan`;
 }
 
 function planUsageSeriesLabel(memberLabel: string, profile: VendorUsageProfileView): string {
@@ -696,7 +693,8 @@ export async function getCompanyStatsForAdmin(uid: string, days: number) {
         plan_monthly_usd: profile.plan_monthly_usd,
         primary_window: profile.primary_window,
         secondary_window: profile.secondary_window,
-        synced_at_ms: profile.synced_at_ms
+        synced_at_ms: profile.synced_at_ms,
+        usage_history: profile.usage_history
       }))
     )
   };
