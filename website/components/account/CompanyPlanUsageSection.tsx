@@ -11,7 +11,7 @@ import {
   type UsageWindow
 } from "@/lib/companyPlanUsageCharts";
 import { buildMemberColorLookup } from "@/lib/memberChartColors";
-import { displayVendorUtilizationAsUsedPercent } from "@/lib/vendorPlanPricing";
+import { normalizeUtilizationPercent } from "@/lib/vendorPlanPricing";
 import { useEffect, useMemo, useState } from "react";
 import {
   CartesianGrid,
@@ -117,7 +117,7 @@ function activeHistory(profile: SubscriptionProfile): UsageHistoryPoint[] {
 function profileUtilization(profile: SubscriptionProfile): number | null {
   const window = activeWindow(profile);
   if (!window) return null;
-  return displayVendorUtilizationAsUsedPercent(profile.provider ?? "codex", window.utilization);
+  return normalizeUtilizationPercent(window.utilization);
 }
 
 function PeriodNavigator({

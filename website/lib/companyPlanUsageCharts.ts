@@ -1,4 +1,4 @@
-import { displayVendorUtilizationAsUsedPercent } from "@/lib/vendorPlanPricing";
+import { normalizeUtilizationPercent } from "@/lib/vendorPlanPricing";
 
 export type UsageWindow = {
   utilization: number;
@@ -44,8 +44,8 @@ export type CompanyMultiMemberCycleChart = {
 
 const DAY_MS = 86_400_000;
 
-function displayUtilization(provider: string, raw: number): number {
-  return displayVendorUtilizationAsUsedPercent(provider, raw);
+function displayUtilization(_provider: string, raw: number): number {
+  return normalizeUtilizationPercent(raw);
 }
 
 function resolveBillingCycleBounds(window: UsageWindow, referenceMs: number) {

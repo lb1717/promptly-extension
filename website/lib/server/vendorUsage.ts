@@ -158,43 +158,109 @@ function readUsageHistory(raw: unknown): VendorUsageWindowHistory {
   };
 }
 
+function claudeSeriesUsesRemainingSemantics(
+  historySeries: VendorUsageHistoryPoint[],
+  window: VendorUsageWindow | null
+): boolean {
+  if (historySeries.length > 0) {
+    return claudeUtilizationSeriesUsesRemainingSemantics(historySeries);
+  }
+  if (!window) return true;
+  // Window-only snapshots from live sync are already percent-used.
+  return false;
+}
+
 function migrateClaudeProfileUtilization(
   primary: VendorUsageWindow | null,
   secondary: VendorUsageWindow | null,
-  history: VendorUsageWindowHistory
+  history: VendorUsageWindowHistory,
+  opts: { legacyWindowRepair?: boolean } = {}
 ): { primary: VendorUsageWindow | null; secondary: VendorUsageWindow | null; history: VendorUsageWindowHistory } {
-  const primarySemantics = claudeUtilizationSeriesUsesRemainingSemantics(
-    history.primary.length
-      ? history.primary
-      : primary
-        ? [{ at_ms: Date.now(), utilization: primary.utilization }]
-        : []
-  );
-  const secondarySemantics = claudeUtilizationSeriesUsesRemainingSemantics(
-    history.secondary.length
-      ? history.secondary
-      : secondary
-        ? [{ at_ms: Date.now(), utilization: secondary.utilization }]
-        : []
-  );
-  return {
-    primary: primary
-      ? {
-          ...primary,
-          utilization: normalizeClaudeStoredUtilizationToUsed(primary.utilization, primarySemantics)
-        }
-      : null,
-    secondary: secondary
-      ? {
-          ...secondary,
-          utilization: normalizeClaudeStoredUtilizationToUsed(secondary.utilization, secondarySemantics)
-        }
-      : null,
-    history: {
-      primary: migrateClaudeUtilizationHistoryToUsed(history.primary, primary?.window_seconds),
-      secondary: migrateClaudeUtilizationHistoryToUsed(history.secondary, secondary?.window_seconds)
-    }
+  const primarySemantics = claudeSeriesUsesRemainingSemantics(history.primary, primary);
+  const secondarySemantics = claudeSeriesUsesRemainingSemantics(history.secondary, secondary);
+  const migratedHistory = {
+    primary: migrateClaudeUtilizationHistoryToUsed(history.primary, primary?.window_seconds),
+    secondary: migrateClaudeUtilizationHistoryToUsed(history.secondary, secondary?.window_seconds)
   };
+
+  const windowUtilization = (
+    window: VendorUsageWindow | null,
+    migratedSeries: VendorUsageHistoryPoint[],
+    usesRemainingSemantics: boolean
+  ): VendorUsageWindow | null => {
+    if (!window) return null;
+    if (migratedSeries.length > 0) {
+      return {
+        ...window,
+        utilization: migratedSeries[migratedSeries.length - 1]!.utilization
+      };
+    }
+    if (opts.legacyWindowRepair && normalizeUtilizationPercent(window.utilization) >= 45) {
+      return {
+        ...window,
+        utilization: normalizeClaudeStoredUtilizationToUsed(window.utilization, true)
+      };
+    }
+    return {
+      ...window,
+      utilization: normalizeClaudeStoredUtilizationToUsed(window.utilization, usesRemainingSemantics)
+    };
+  };
+
+  return {
+    primary: windowUtilization(primary, migratedHistory.primary, primarySemantics),
+    secondary: windowUtilization(secondary, migratedHistory.secondary, secondarySemantics),
+    history: migratedHistory
+  };
+}
+
+function usageHistoryChanged(
+  before: VendorUsageWindowHistory,
+  after: VendorUsageWindowHistory
+): boolean {
+  const sameSeries = (left: VendorUsageHistoryPoint[], right: VendorUsageHistoryPoint[]) =>
+    left.length === right.length &&
+    left.every(
+      (point, index) =>
+        point.at_ms === right[index]?.at_ms &&
+        Math.abs(point.utilization - (right[index]?.utilization ?? NaN)) < 0.5
+    );
+  return !sameSeries(before.primary, after.primary) || !sameSeries(before.secondary, after.secondary);
+}
+
+function windowsChanged(
+  beforePrimary: VendorUsageWindow | null,
+  beforeSecondary: VendorUsageWindow | null,
+  afterPrimary: VendorUsageWindow | null,
+  afterSecondary: VendorUsageWindow | null
+): boolean {
+  const windowChanged = (before: VendorUsageWindow | null, after: VendorUsageWindow | null) => {
+    if (!before && !after) return false;
+    if (!before || !after) return true;
+    return Math.abs(before.utilization - after.utilization) >= 0.5;
+  };
+  return windowChanged(beforePrimary, afterPrimary) || windowChanged(beforeSecondary, afterSecondary);
+}
+
+async function persistClaudeUtilizationRepair(
+  uid: string,
+  docId: string,
+  primary: VendorUsageWindow | null,
+  secondary: VendorUsageWindow | null,
+  history: VendorUsageWindowHistory
+): Promise<void> {
+  await profileRef(uid, docId).set(
+    {
+      primary_window: primary,
+      secondary_window: secondary,
+      usage_history: history,
+      usage_history_corrected_v3: true,
+      usage_history_corrected_v4: true,
+      usage_history_corrected_v2: true,
+      updated_at: FieldValue.serverTimestamp()
+    },
+    { merge: true }
+  );
 }
 
 function appendHistoryPoint(
@@ -437,12 +503,12 @@ export async function persistVendorUsageSnapshots(
     const existingData = existingSnap.exists ? existingSnap.data() : null;
     const existingHistory = readUsageHistory(existingData?.usage_history);
     let usage_history = mergeUsageHistory(existingHistory, snap);
-    const historyAlreadyCorrected = existingData?.usage_history_corrected_v3 === true;
-    if (snap.provider === "claude_code" && !historyAlreadyCorrected) {
+    if (snap.provider === "claude_code") {
       const migrated = migrateClaudeProfileUtilization(
         snap.primary_window,
         snap.secondary_window,
-        usage_history
+        usage_history,
+        { legacyWindowRepair: existingData?.usage_history_corrected_v4 !== true }
       );
       usage_history = migrated.history;
       snap = {
@@ -458,6 +524,8 @@ export async function persistVendorUsageSnapshots(
         usage_history,
         usage_history_corrected_v3:
           snap.provider === "claude_code" ? true : existingData?.usage_history_corrected_v3 === true,
+        usage_history_corrected_v4:
+          snap.provider === "claude_code" ? true : existingData?.usage_history_corrected_v4 === true,
         usage_history_corrected_v2:
           snap.provider === "claude_code" ? true : existingData?.usage_history_corrected_v2 === true,
         uid,
@@ -492,15 +560,24 @@ export async function listVendorUsageProfiles(uid: string): Promise<VendorUsageP
     const sync_error = typeof raw.sync_error === "string" ? raw.sync_error : null;
     if (sync_error && !primary_window && !secondary_window) continue;
     const synced_at_ms = typeof raw.synced_at_ms === "number" ? raw.synced_at_ms : 0;
-    const historyAlreadyCorrected = raw.usage_history_corrected_v3 === true;
     let usage_history = readUsageHistory(raw.usage_history);
     let normalizedPrimary = primary_window;
     let normalizedSecondary = secondary_window;
-    if (provider === "claude_code" && !historyAlreadyCorrected) {
-      const migrated = migrateClaudeProfileUtilization(primary_window, secondary_window, usage_history);
+    if (provider === "claude_code") {
+      const migrated = migrateClaudeProfileUtilization(primary_window, secondary_window, usage_history, {
+        legacyWindowRepair: raw.usage_history_corrected_v4 !== true
+      });
       normalizedPrimary = migrated.primary;
       normalizedSecondary = migrated.secondary;
       usage_history = migrated.history;
+
+      const needsPersist =
+        raw.usage_history_corrected_v4 !== true ||
+        usageHistoryChanged(readUsageHistory(raw.usage_history), usage_history) ||
+        windowsChanged(primary_window, secondary_window, normalizedPrimary, normalizedSecondary);
+      if (needsPersist) {
+        await persistClaudeUtilizationRepair(uid, doc.id, normalizedPrimary, normalizedSecondary, usage_history);
+      }
     }
     views.push(
       enrichProfile(
