@@ -438,12 +438,24 @@ function planUsageSeriesKey(memberId: string, profile: VendorUsageProfileView): 
   return `${memberId}__${profile.provider}__${profile.profile_id}`;
 }
 
-function planUsageSeriesLabel(memberLabel: string, profile: VendorUsageProfileView): string {
+function subscriptionKey(profile: VendorUsageProfileView): string {
+  const email = profile.vendor_email?.trim().toLowerCase();
+  if (email) return `${profile.provider}__${email}`;
+  return `${profile.provider}__profile__${profile.profile_id}`;
+}
+
+function subscriptionLabel(profile: VendorUsageProfileView): string {
   const provider =
     profile.provider === "claude_code" ? "Claude" : profile.provider === "codex" ? "Codex" : "Cursor";
   const plan = profile.plan_display || "Plan";
   const email = profile.vendor_email ? ` · ${profile.vendor_email}` : "";
-  return `${memberLabel} · ${provider} ${plan}${email}`;
+  const profileHint =
+    !profile.vendor_email && profile.profile_label ? ` · ${profile.profile_label}` : "";
+  return `${provider} ${plan}${email}${profileHint}`;
+}
+
+function planUsageSeriesLabel(memberLabel: string, profile: VendorUsageProfileView): string {
+  return memberLabel;
 }
 
 function activeWindow(profile: VendorUsageProfileView) {
@@ -528,8 +540,26 @@ export async function getCompanyStatsForAdmin(uid: string, days: number) {
   );
 
   const planUsagePoints = new Map<string, Record<string, number | string>>();
-  const planUsageSeries: Array<{ key: string; label: string; member_id: string }> = [];
+  const planUsageSeries: Array<{
+    key: string;
+    label: string;
+    member_id: string;
+    subscription_id: string;
+    subscription_label: string;
+  }> = [];
   const planUsageSeriesKeys = new Set<string>();
+  const planUsageSubscriptions = new Map<
+    string,
+    {
+      id: string;
+      label: string;
+      provider: string;
+      plan_display: string | null;
+      vendor_email: string | null;
+      plan_monthly_usd: number | null;
+      member_ids: Set<string>;
+    }
+  >();
   const sparsePlanUsageBySeries = new Map<string, Map<string, number>>();
   const exactPlanUsageEndBySeries = new Map<string, { day: string; utilization: number }>();
   for (const { member, profiles } of profilesByMember) {
@@ -540,6 +570,25 @@ export async function getCompanyStatsForAdmin(uid: string, days: number) {
     }
     const label = memberLabel(member);
     for (const profile of profiles) {
+      const subId = subscriptionKey(profile);
+      let subscription = planUsageSubscriptions.get(subId);
+      if (!subscription) {
+        subscription = {
+          id: subId,
+          label: subscriptionLabel(profile),
+          provider: profile.provider,
+          plan_display: profile.plan_display,
+          vendor_email: profile.vendor_email,
+          plan_monthly_usd: profile.plan_monthly_usd,
+          member_ids: new Set<string>()
+        };
+        planUsageSubscriptions.set(subId, subscription);
+      }
+      subscription.member_ids.add(member.user_id);
+      if (subscription.plan_monthly_usd == null && profile.plan_monthly_usd != null) {
+        subscription.plan_monthly_usd = profile.plan_monthly_usd;
+      }
+
       const window = activeWindow(profile);
       const history = profile.secondary_window ? profile.usage_history.secondary : profile.usage_history.primary;
       const points = history.length ? history : window ? [{ at_ms: profile.synced_at_ms, utilization: window.utilization }] : [];
@@ -550,7 +599,9 @@ export async function getCompanyStatsForAdmin(uid: string, days: number) {
         planUsageSeries.push({
           key: seriesKey,
           label: planUsageSeriesLabel(label, profile),
-          member_id: member.user_id
+          member_id: member.user_id,
+          subscription_id: subId,
+          subscription_label: subscriptionLabel(profile)
         });
       }
       const sparse = sparsePlanUsageBySeries.get(seriesKey) || new Map<string, number>();
@@ -621,13 +672,26 @@ export async function getCompanyStatsForAdmin(uid: string, days: number) {
     plan_usage_timeline: [...planUsagePoints.values()].sort((a, b) =>
       String(a.day).localeCompare(String(b.day))
     ),
-    plan_usage_series: planUsageSeries.sort((a, b) => a.label.localeCompare(b.label)),
+    plan_usage_series: planUsageSeries.sort((a, b) => a.subscription_label.localeCompare(b.subscription_label)),
+    plan_usage_subscriptions: [...planUsageSubscriptions.values()]
+      .map((subscription) => ({
+        id: subscription.id,
+        label: subscription.label,
+        provider: subscription.provider,
+        plan_display: subscription.plan_display,
+        vendor_email: subscription.vendor_email,
+        plan_monthly_usd: subscription.plan_monthly_usd,
+        member_ids: [...subscription.member_ids]
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
     subscription_profiles: profilesByMember.flatMap(({ member, profiles }) =>
       profiles.map((profile) => ({
         member_id: member.user_id,
         member_label: memberLabel(member),
+        subscription_id: subscriptionKey(profile),
         provider: profile.provider,
         profile_id: profile.profile_id,
+        vendor_email: profile.vendor_email,
         plan_display: profile.plan_display,
         plan_monthly_usd: profile.plan_monthly_usd,
         primary_window: profile.primary_window,

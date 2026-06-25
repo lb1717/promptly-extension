@@ -37,12 +37,29 @@ type CompanyStatsPayload = {
     plan_monthly_usd: number;
   };
   plan_usage_timeline: Array<Record<string, number | string>>;
-  plan_usage_series?: Array<{ key: string; label: string; member_id: string }>;
+  plan_usage_series?: Array<{
+    key: string;
+    label: string;
+    member_id: string;
+    subscription_id: string;
+    subscription_label: string;
+  }>;
+  plan_usage_subscriptions?: Array<{
+    id: string;
+    label: string;
+    provider: string;
+    plan_display: string | null;
+    vendor_email: string | null;
+    plan_monthly_usd: number | null;
+    member_ids: string[];
+  }>;
   subscription_profiles: Array<{
     member_id: string;
     member_label: string;
+    subscription_id?: string;
     provider: string;
     profile_id?: string;
+    vendor_email?: string | null;
     plan_display: string | null;
     plan_monthly_usd: number | null;
     primary_window: { utilization: number } | null;
@@ -166,6 +183,8 @@ export function CompanyStatisticsClient({ user }: { user: User | null }) {
           visibleMemberIds={visibleMemberIds}
           planUsageTimeline={overview?.plan_usage_timeline ?? []}
           planUsageSeries={overview?.plan_usage_series ?? []}
+          planUsageSubscriptions={overview?.plan_usage_subscriptions ?? []}
+          subscriptionProfiles={overview?.subscription_profiles ?? []}
           totalPlanMonthlyUsd={overview?.totals.plan_monthly_usd ?? 0}
           loading={overviewLoading}
         />
