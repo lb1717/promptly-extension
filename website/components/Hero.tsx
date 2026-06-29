@@ -2,7 +2,6 @@
 
 import { Button } from "@/components/ui/Button";
 import { SITE } from "@/lib/constants";
-import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
 export function Hero() {
@@ -54,15 +53,6 @@ export function Hero() {
           </h1>
           <p className="mx-auto mb-5 max-w-2xl text-muted sm:mb-6">
             Promptly Labs is an extension that optimizes prompts and measures how efficiently you are using AI.
-          </p>
-          <p className="mx-auto mb-5 max-w-2xl text-sm text-faint sm:mb-6">
-            <Link href="/research" className="hover:text-muted">
-              Prompt engineering research
-            </Link>
-            <span className="mx-2 opacity-60">·</span>
-            <Link href="/help" className="hover:text-muted">
-              Help &amp; troubleshooting
-            </Link>
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3">
             <Button

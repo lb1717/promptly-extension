@@ -5,7 +5,7 @@ import { SITE } from "@/lib/constants";
 export function CompanionDesktopPromoBanner({ className = "" }: { className?: string }) {
   return (
     <Link
-      href={SITE.companionPath}
+      href={SITE.companionInstallPath}
       className={`relative block overflow-hidden rounded-2xl bg-blue-800 px-4 py-4 text-white shadow-card transition hover:bg-blue-900 sm:px-5 sm:py-5 ${className}`.trim()}
     >
       <NotificationDot className="absolute right-3 top-3 ring-blue-800" />

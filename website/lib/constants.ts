@@ -50,6 +50,8 @@ export const SITE = {
   getStartedPath: "/get-started",
   /** Shareable desktop app download — always resolves the latest release. */
   companionPath: "/companion",
+  /** Install-only desktop setup (get-started install step). */
+  companionInstallPath: "/companion/install",
   chromeStoreUrl: `https://chromewebstore.google.com/detail/promptly/${CHROME_EXTENSION_ID}`,
   edgeAddonsUrl: String(
     process.env.NEXT_PUBLIC_EDGE_ADDONS_URL ||
