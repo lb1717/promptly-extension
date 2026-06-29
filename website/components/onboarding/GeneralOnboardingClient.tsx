@@ -39,7 +39,7 @@ import {
 } from "@/lib/onboardingProducts";
 import { canProceedWithEmailAccount } from "@/lib/emailVerification";
 import { useEmailVerificationStatus } from "@/lib/useEmailVerificationStatus";
-import { GET_STARTED_PLANS, type PaidPlanKey, type PlanKey } from "@/lib/plans";
+import { GET_STARTED_PLANS, WEBSITE_PLANS, type PaidPlanKey, type PlanKey } from "@/lib/plans";
 import {
   detectAuthTransition,
   markAuthHydrated,
@@ -69,13 +69,33 @@ type CheckoutStatus = {
   stripeConfigured: boolean;
 };
 
-function normalizeTier(raw: string): PlanKey | "pro" | "student" | "other" {
+function normalizeTier(raw: string): PlanKey | "other" {
   const t = raw.toLowerCase();
   if (t === "free") return "free";
   if (t === "enterprise") return "enterprise";
-  if (t === "pro" || t === "plus") return "pro";
+  if (t === "pro" || t === "plus" || t === "professional") return "pro";
   if (t === "student") return "student";
   return "other";
+}
+
+function planNameForTier(tier: PlanKey): string {
+  return WEBSITE_PLANS.find((plan) => plan.key === tier)?.name ?? tier;
+}
+
+function isActivePaidTier(
+  billing: BillingPayload | null,
+  tier: PlanKey | "other"
+): tier is Exclude<PlanKey, "free"> {
+  if (!billing || tier === "free" || tier === "other") return false;
+  const status = String(billing.subscriptionStatus || "").toLowerCase();
+  if (status && status !== "active" && status !== "trialing") return false;
+  return tier === "student" || tier === "pro" || tier === "enterprise";
+}
+
+function upgradeOptionsForTier(tier: Exclude<PlanKey, "free" | "enterprise">): PaidPlanKey[] {
+  if (tier === "student") return ["pro", "enterprise"];
+  if (tier === "pro") return ["enterprise"];
+  return [];
 }
 
 export function GeneralOnboardingClient() {
@@ -91,6 +111,7 @@ export function GeneralOnboardingClient() {
 
   const [selectedPlan, setSelectedPlan] = useState<PlanKey>("pro");
   const [billing, setBilling] = useState<BillingPayload | null>(null);
+  const [billingLoading, setBillingLoading] = useState(false);
   const [checkoutStatus, setCheckoutStatus] = useState<CheckoutStatus>({
     loading: true,
     stripeConfigured: false
@@ -122,6 +143,16 @@ export function GeneralOnboardingClient() {
   } = useEmailVerificationStatus(user);
 
   const currentTier = useMemo(() => normalizeTier(billing?.subscriptionTier || "free"), [billing?.subscriptionTier]);
+
+  const activePaidTier = useMemo((): Exclude<PlanKey, "free"> | null => {
+    if (billingLoading || !isActivePaidTier(billing, currentTier)) return null;
+    return currentTier;
+  }, [billing, billingLoading, currentTier]);
+
+  const planUpgradeOptions = useMemo(() => {
+    if (!activePaidTier || activePaidTier === "enterprise") return [];
+    return upgradeOptionsForTier(activePaidTier);
+  }, [activePaidTier]);
 
   const wantsWeb = productSelection.web;
   const wantsDesktopApps = productSelection.desktop_apps;
@@ -202,6 +233,7 @@ export function GeneralOnboardingClient() {
   }, []);
 
   const loadBilling = useCallback(async (currentUser: User) => {
+    setBillingLoading(true);
     try {
       const token = await currentUser.getIdToken();
       const res = await fetch("/api/account/billing", {
@@ -210,14 +242,18 @@ export function GeneralOnboardingClient() {
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok) setBilling(data as BillingPayload);
+      else setBilling(null);
     } catch {
       setBilling(null);
+    } finally {
+      setBillingLoading(false);
     }
   }, []);
 
   useEffect(() => {
     if (!user) {
       setBilling(null);
+      setBillingLoading(false);
       return;
     }
     loadBilling(user);
@@ -414,9 +450,9 @@ export function GeneralOnboardingClient() {
     if (step === 2) return "Create your account";
     if (step === 3) return "What AI platforms do you use?";
     if (step === 4) return "Install Promptly";
-    if (step === 5) return "Choose your plan";
+    if (step === 5) return billingLoading || activePaidTier ? "Your plan" : "Choose your plan";
     return "Setup complete";
-  }, [step]);
+  }, [step, activePaidTier, billingLoading]);
 
   return (
     <div className="mx-auto w-full max-w-xl px-4 py-10 pb-24">
@@ -627,55 +663,102 @@ export function GeneralOnboardingClient() {
 
         {step === 5 ? (
           <div className="mt-6 space-y-4">
-            <p className="text-sm text-muted">Select the plan that fits you. You can change it later from your account.</p>
-            <div className="space-y-3">
-              {GET_STARTED_PLANS.map((plan) => {
-                const isSelected = selectedPlan === plan.key;
-                return (
-                  <button
-                    key={plan.key}
-                    type="button"
-                    onClick={() => setSelectedPlan(plan.key)}
-                    className={`w-full rounded-xl border p-4 text-left transition-colors ${
-                      isSelected ? "border-ink bg-cream-dark shadow-sm" : "border-line bg-cream hover:bg-cream-dark/80"
-                    }`}
-                  >
-                    <div>
-                      <p className="font-semibold text-ink">{plan.name}</p>
-                      <p className="text-sm font-medium text-muted">{plan.priceDisplay}</p>
-                    </div>
-                    <p className="mt-1 text-xs text-faint">{plan.subtitle}</p>
-                    <ul className="mt-2 space-y-1 text-xs text-muted">
-                      {plan.details.map((d) => (
-                        <li key={d}>• {d}</li>
+            {billingLoading ? (
+              <p className="text-sm text-muted">Checking your plan…</p>
+            ) : activePaidTier ? (
+              <>
+                <div className="rounded-xl border border-line bg-cream-dark px-4 py-5 text-center">
+                  <p className="text-sm text-muted">You&apos;re already subscribed.</p>
+                  <p className="mt-2 text-xl font-semibold text-ink">
+                    You&apos;re on the {planNameForTier(activePaidTier)} plan.
+                  </p>
+                </div>
+
+                {planUpgradeOptions.length > 0 ? (
+                  <div className="space-y-3">
+                    <p className="text-sm text-muted">Want more from Promptly? You can upgrade now, or continue with your current plan.</p>
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      {planUpgradeOptions.map((tier) => (
+                        <button
+                          key={tier}
+                          type="button"
+                          onClick={() => void startCheckout(tier)}
+                          disabled={checkoutBusy || !checkoutStatus.stripeConfigured}
+                          className="inline-flex flex-1 items-center justify-center rounded-xl border border-line bg-cream px-4 py-3 text-sm font-semibold text-ink hover:bg-cream-dark disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {checkoutBusy ? "Redirecting…" : `Upgrade to ${planNameForTier(tier)}`}
+                        </button>
                       ))}
-                    </ul>
-                  </button>
-                );
-              })}
-            </div>
-            <button
-              type="button"
-              onClick={continueWithFreePlan}
-              className="w-full text-center text-xs text-faint transition-colors hover:text-muted"
-            >
-              Begin with a limited-use free plan instead
-            </button>
-            {checkoutResult === "cancel" ? (
-              <p className="text-sm text-muted">Checkout was cancelled. Pick a plan and try again.</p>
-            ) : null}
-            <button
-              type="button"
-              onClick={continueFromPlan}
-              disabled={checkoutBusy || !user}
-              className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:opacity-60"
-            >
-              {checkoutBusy
-                ? "Redirecting to Stripe…"
-                : currentTier !== selectedPlan
-                  ? "Continue to payment"
-                  : "Finish setup"}
-            </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {checkoutResult === "cancel" ? (
+                  <p className="text-sm text-muted">Checkout was cancelled. You can upgrade later from your account.</p>
+                ) : null}
+
+                <button
+                  type="button"
+                  onClick={() => goToStep(DONE_STEP)}
+                  disabled={checkoutBusy}
+                  className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:opacity-60"
+                >
+                  No, continue
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-muted">Select the plan that fits you. You can change it later from your account.</p>
+                <div className="space-y-3">
+                  {GET_STARTED_PLANS.map((plan) => {
+                    const isSelected = selectedPlan === plan.key;
+                    return (
+                      <button
+                        key={plan.key}
+                        type="button"
+                        onClick={() => setSelectedPlan(plan.key)}
+                        className={`w-full rounded-xl border p-4 text-left transition-colors ${
+                          isSelected ? "border-ink bg-cream-dark shadow-sm" : "border-line bg-cream hover:bg-cream-dark/80"
+                        }`}
+                      >
+                        <div>
+                          <p className="font-semibold text-ink">{plan.name}</p>
+                          <p className="text-sm font-medium text-muted">{plan.priceDisplay}</p>
+                        </div>
+                        <p className="mt-1 text-xs text-faint">{plan.subtitle}</p>
+                        <ul className="mt-2 space-y-1 text-xs text-muted">
+                          {plan.details.map((d) => (
+                            <li key={d}>• {d}</li>
+                          ))}
+                        </ul>
+                      </button>
+                    );
+                  })}
+                </div>
+                <button
+                  type="button"
+                  onClick={continueWithFreePlan}
+                  className="w-full text-center text-xs text-faint transition-colors hover:text-muted"
+                >
+                  Begin with a limited-use free plan instead
+                </button>
+                {checkoutResult === "cancel" ? (
+                  <p className="text-sm text-muted">Checkout was cancelled. Pick a plan and try again.</p>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={continueFromPlan}
+                  disabled={checkoutBusy || !user}
+                  className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:opacity-60"
+                >
+                  {checkoutBusy
+                    ? "Redirecting to Stripe…"
+                    : currentTier !== selectedPlan
+                      ? "Continue to payment"
+                      : "Finish setup"}
+                </button>
+              </>
+            )}
             <button type="button" onClick={() => goToStep(INSTALL_STEP)} className="text-xs text-faint hover:text-ink">
               ← Back
             </button>
