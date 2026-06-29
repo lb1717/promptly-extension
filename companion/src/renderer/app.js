@@ -105,6 +105,8 @@ let promptAiEnhanced = false;
 let suggestionOptions = [];
 
 let statusFadeTimer = null;
+let authBootstrapPending = true;
+let signInPollTimer = null;
 
 function scheduleStatusFade(ms = 4200) {
   if (statusFadeTimer) {
@@ -245,7 +247,8 @@ function updateAccountUi() {
 function setSignedInUi(signedIn) {
   isSignedIn = Boolean(signedIn);
   if (signInGate) {
-    signInGate.classList.toggle("hidden", isSignedIn);
+    const hideGate = isSignedIn || authBootstrapPending;
+    signInGate.classList.toggle("hidden", hideGate);
   }
   if (!isSignedIn) {
     draftView?.classList.add("hidden");
@@ -297,10 +300,7 @@ async function refreshAccount(options = {}) {
   }
 }
 
-async function refreshAuthFromDisk() {
-  if (window.promptlyCompanion?.saveSettings) {
-    await window.promptlyCompanion.saveSettings({ signedOut: false });
-  }
+async function reloadCredentialsFromDisk() {
   if (window.promptlyCompanion?.refreshConfig) {
     const defaults = await window.promptlyCompanion.refreshConfig();
     mergeConfig({
@@ -308,14 +308,61 @@ async function refreshAuthFromDisk() {
       token: defaults?.token || "",
       client: defaults?.client || "promptly-cursor"
     });
-  } else {
-    await bootstrapConfig();
+    return;
   }
-  await refreshAccount();
-  if (isSignedIn) {
+  await bootstrapConfig();
+}
+
+function stopSignInPoll() {
+  if (signInPollTimer) {
+    clearInterval(signInPollTimer);
+    signInPollTimer = null;
+  }
+}
+
+function startSignInPoll() {
+  stopSignInPoll();
+  signInPollTimer = setInterval(() => {
+    void attemptAutoConnectFromDisk({ silent: true }).then((connected) => {
+      if (connected) stopSignInPoll();
+    });
+  }, 2000);
+  setTimeout(stopSignInPoll, 120000);
+}
+
+async function attemptAutoConnectFromDisk(options = {}) {
+  const { silent = true, notifyOnSuccess = false, clearSignedOut = true } = options;
+  if (isSignedIn) return true;
+
+  if (clearSignedOut && window.promptlyCompanion?.saveSettings) {
+    await window.promptlyCompanion.saveSettings({ signedOut: false });
+  }
+  await reloadCredentialsFromDisk();
+  if (!config.token) return false;
+
+  await refreshAccount({ silent });
+  if (isSignedIn && notifyOnSuccess) {
     clearStatus();
     showSuccess("Connected to Promptly.");
   }
+  return isSignedIn;
+}
+
+async function refreshAuthFromDisk() {
+  await attemptAutoConnectFromDisk({ silent: false, notifyOnSuccess: true });
+}
+
+async function tryRestoreSession(options = {}) {
+  const { silent = true } = options;
+  if (isSignedIn) return true;
+
+  const settings = window.promptlyCompanion?.getSettings ? await window.promptlyCompanion.getSettings() : null;
+  if (settings?.signedOut) return false;
+
+  await reloadCredentialsFromDisk();
+  if (!config.token) return false;
+  await refreshAccount({ silent });
+  return isSignedIn;
 }
 
 function openSignInPage() {
@@ -324,6 +371,7 @@ function openSignInPage() {
     autoFade: false
   });
   openExternalUrl(url);
+  startSignInPoll();
 }
 
 function openAccountPage() {
@@ -339,6 +387,7 @@ function closeSettings() {
 }
 
 async function signOut() {
+  stopSignInPoll();
   if (window.promptlyCompanion?.saveSettings) {
     await window.promptlyCompanion.saveSettings({ signedOut: true });
   }
@@ -1102,5 +1151,22 @@ void bootstrapConfig().then(async () => {
   syncDraftStrength();
   syncPromptStrength();
   await refreshAccount({ silent: true });
+  if (!isSignedIn) {
+    await tryRestoreSession({ silent: true });
+  }
+  if (!isSignedIn) {
+    await attemptAutoConnectFromDisk({ silent: true });
+  }
+  authBootstrapPending = false;
+  setSignedInUi(isSignedIn);
   await maybeShowPermissionsOnboarding();
+});
+
+window.promptlyCompanion?.onWindowFocus?.(() => {
+  if (isSignedIn) return;
+  void tryRestoreSession({ silent: true }).then((connected) => {
+    if (!connected) {
+      void attemptAutoConnectFromDisk({ silent: true });
+    }
+  });
 });

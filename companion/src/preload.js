@@ -17,5 +17,11 @@ contextBridge.exposeInMainWorld("promptlyCompanion", {
   setWindowPosition: (position) => ipcRenderer.invoke("promptly:set-window-position", position),
   setWindowSize: (size) => ipcRenderer.invoke("promptly:set-window-size", size),
   pasteToHost: (text) => ipcRenderer.invoke("promptly:paste-to-host", text),
-  requestMicrophoneAccess: () => ipcRenderer.invoke("promptly:request-microphone-access")
+  requestMicrophoneAccess: () => ipcRenderer.invoke("promptly:request-microphone-access"),
+  onWindowFocus: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    const handler = () => callback();
+    ipcRenderer.on("promptly:window-focus", handler);
+    return () => ipcRenderer.removeListener("promptly:window-focus", handler);
+  }
 });

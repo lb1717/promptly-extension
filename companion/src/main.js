@@ -593,6 +593,7 @@ function registerCompanionWindow(win, options = {}) {
   win.on("focus", () => {
     stopAnchorWatch(win);
     setCompanionOnTop(win, true);
+    win.webContents.send("promptly:window-focus");
   });
 
   win.on("blur", () => {

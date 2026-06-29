@@ -240,13 +240,26 @@ dialog {
 }
 
 .icon-btn {
+  width: 28px;
+  height: 28px;
+  box-sizing: border-box;
   border: 1px solid var(--border);
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  font-size: 14px;
-  padding: 3px 6px;
+  padding: 0;
   border-radius: var(--radius);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+}
+
+.icon-btn-svg {
+  width: 14px;
+  height: 14px;
+  display: block;
 }
 
 .icon-btn-subtle {
