@@ -49,7 +49,7 @@ export function Navbar() {
           <Link
             href="/account"
             data-onboarding-tour="account-nav"
-            className={`relative inline-flex items-center gap-2 ${
+            className={`relative inline-flex items-center ${
               onAccountPage
                 ? "rounded-lg border border-line px-2.5 py-1 text-xs text-ink hover:bg-cream-dark sm:px-3 sm:py-1.5 sm:text-sm"
                 : "rounded-lg border border-ink bg-blue-800 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-900 sm:px-3 sm:py-1.5 sm:text-sm"
@@ -57,7 +57,7 @@ export function Navbar() {
           >
             My Account
             {showNotificationDot ? (
-              <NotificationDot className={onAccountPage ? "ring-page" : "ring-blue-800"} />
+              <NotificationDot corner className={onAccountPage ? "ring-page" : "ring-blue-800"} />
             ) : null}
           </Link>
         </div>

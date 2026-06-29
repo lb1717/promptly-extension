@@ -137,9 +137,9 @@ export function AccountHubClient() {
                   : "-mb-px border-b-2 border-transparent pb-2 text-base font-medium text-muted hover:text-ink sm:text-lg"
               }
             >
-              <span className="inline-flex items-center gap-2">
+              <span className="relative inline-block">
                 {item.label}
-                {item.id === "settings" && showNotificationDot ? <NotificationDot /> : null}
+                {item.id === "settings" && showNotificationDot ? <NotificationDot corner /> : null}
               </span>
             </button>
           );
