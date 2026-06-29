@@ -9,7 +9,7 @@ import { useCompanionAdoptionPromo } from "@/lib/useCompanionAdoptionPromo";
 export function Navbar() {
   const pathname = usePathname();
   const onAccountPage = pathname === "/account" || pathname.startsWith("/account/");
-  const { showPromo: showCompanionPromo } = useCompanionAdoptionPromo();
+  const { showNotificationDot } = useCompanionAdoptionPromo();
 
   return (
     <header className="sticky top-0 z-50 border-b border-line bg-page/90 backdrop-blur-xl">
@@ -56,7 +56,9 @@ export function Navbar() {
             }`}
           >
             My Account
-            {showCompanionPromo ? <NotificationDot className="ring-blue-800" /> : null}
+            {showNotificationDot ? (
+              <NotificationDot className={onAccountPage ? "ring-page" : "ring-blue-800"} />
+            ) : null}
           </Link>
         </div>
       </div>

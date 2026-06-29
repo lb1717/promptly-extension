@@ -39,7 +39,7 @@ export function AccountHubClient() {
   const [user, setUser] = useState<User | null>(null);
   const [isCompanyAdmin, setIsCompanyAdmin] = useState(false);
   const [companyContextLoaded, setCompanyContextLoaded] = useState(false);
-  const { showPromo: showCompanionPromo } = useCompanionAdoptionPromo();
+  const { showNotificationDot } = useCompanionAdoptionPromo();
 
   const setTab = useCallback(
     (next: AccountHubTab) => {
@@ -139,7 +139,7 @@ export function AccountHubClient() {
             >
               <span className="inline-flex items-center gap-2">
                 {item.label}
-                {item.id === "settings" && showCompanionPromo ? <NotificationDot /> : null}
+                {item.id === "settings" && showNotificationDot ? <NotificationDot /> : null}
               </span>
             </button>
           );

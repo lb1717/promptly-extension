@@ -14,8 +14,10 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       ok: true,
+      /** Set when the Promptly Companion desktop app successfully calls /api/companion/* for this user. */
       adopted: hasCompanionDesktopAdopted(data),
-      adoptedAt: adoptedAt?.toISOString() ?? null
+      adoptedAt: adoptedAt?.toISOString() ?? null,
+      check: "firestore.users.companionDesktopAdoptedAt"
     });
   } catch (error) {
     const message = String(error instanceof Error ? error.message : error);

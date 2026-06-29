@@ -155,7 +155,7 @@ export function AccountClient({
   const [emailAuthName, setEmailAuthName] = useState("");
   const [emailAuthMode, setEmailAuthMode] = useState<"signin" | "register">("signin");
   const [authProviderHint, setAuthProviderHint] = useState<AuthProviderHint>(null);
-  const { showPromo: showCompanionPromo } = useCompanionAdoptionPromo();
+  const { showNotificationDot } = useCompanionAdoptionPromo();
 
   function clearAuthGuidance() {
     setAuthProviderHint(null);
@@ -786,7 +786,7 @@ export function AccountClient({
 
       {user ? (
         <div className="space-y-6">
-          {showCompanionPromo ? <CompanionDesktopPromoBanner /> : null}
+          {showNotificationDot ? <CompanionDesktopPromoBanner /> : null}
           <section
             data-onboarding-tour="account-section"
             className="rounded-2xl border border-line bg-cream p-4 backdrop-blur-md sm:p-5"

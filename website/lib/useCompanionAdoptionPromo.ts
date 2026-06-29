@@ -6,8 +6,10 @@ import { useCallback, useEffect, useState } from "react";
 
 type CompanionAdoptionState = {
   loading: boolean;
-  showPromo: boolean;
+  /** True only after the server confirms Companion desktop has connected for this account. */
   adopted: boolean | null;
+  /** Red dot + promo banner — only when signed in and server verified `adopted: false`. */
+  showNotificationDot: boolean;
 };
 
 export function useCompanionAdoptionPromo(): CompanionAdoptionState {
@@ -29,8 +31,8 @@ export function useCompanionAdoptionPromo(): CompanionAdoptionState {
         cache: "no-store"
       });
       const data = await res.json().catch(() => ({}));
-      if (res.ok) {
-        setAdopted(Boolean(data.adopted));
+      if (res.ok && typeof data.adopted === "boolean") {
+        setAdopted(data.adopted);
       } else {
         setAdopted(null);
       }
@@ -60,9 +62,11 @@ export function useCompanionAdoptionPromo(): CompanionAdoptionState {
     };
   }, [adopted, refresh, user]);
 
+  const showNotificationDot = Boolean(user && !loading && adopted === false);
+
   return {
     loading,
     adopted,
-    showPromo: Boolean(user && adopted === false)
+    showNotificationDot
   };
 }
