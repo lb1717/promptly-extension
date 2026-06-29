@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { markCompanionDesktopAdopted } from "@/lib/server/companionAdoption";
 import {
   buildCreditsEnvelope,
   buildPromptlyCorsHeaders,
@@ -38,6 +39,7 @@ export async function POST(request: Request) {
   const origin = request.headers.get("Origin");
   try {
     const auth = await requirePromptlyOptimizeUser(request);
+    await markCompanionDesktopAdopted(auth.user.uid);
     const payload = await request.json().catch(() => null);
     if (!payload || typeof payload !== "object") {
       return NextResponse.json(

@@ -21,9 +21,9 @@ export function CompanionDownloadClient({ download }: Props) {
         <div className="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-2xl border border-line bg-page p-2 shadow-card">
           <img src="/images/promptly-logo.png" alt="" className="h-full w-full object-contain" />
         </div>
-        <h1 className="text-2xl font-semibold tracking-tight text-ink sm:text-3xl">Promptly</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-ink sm:text-3xl">Try Promptly on Desktop</h1>
         <p className="mt-2 text-sm text-muted sm:text-base">
-          The desktop app — draft a prompt, improve it with Promptly, refine with feedback, then paste into any AI app.
+          Download the desktop app — draft a prompt, improve it with Promptly, refine with feedback, then paste into any AI app.
         </p>
         {download.version ? (
           <p className="mt-2 text-xs text-muted">Latest version {download.version}</p>

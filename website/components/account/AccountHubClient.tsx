@@ -3,12 +3,14 @@
 import { AccountClient } from "@/components/account/AccountClient";
 import { CompanyStatisticsClient } from "@/components/account/CompanyStatisticsClient";
 import { StatisticsClient } from "@/components/account/StatisticsClient";
+import { NotificationDot } from "@/components/ui/NotificationDot";
 import { getFirebaseAuth } from "@/lib/firebaseClient";
 import {
   ONBOARDING_TOUR_EVENT,
   readOnboardingTour,
   type OnboardingTourStep
 } from "@/lib/onboardingTour";
+import { useCompanionAdoptionPromo } from "@/lib/useCompanionAdoptionPromo";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -37,6 +39,7 @@ export function AccountHubClient() {
   const [user, setUser] = useState<User | null>(null);
   const [isCompanyAdmin, setIsCompanyAdmin] = useState(false);
   const [companyContextLoaded, setCompanyContextLoaded] = useState(false);
+  const { showPromo: showCompanionPromo } = useCompanionAdoptionPromo();
 
   const setTab = useCallback(
     (next: AccountHubTab) => {
@@ -134,7 +137,10 @@ export function AccountHubClient() {
                   : "-mb-px border-b-2 border-transparent pb-2 text-base font-medium text-muted hover:text-ink sm:text-lg"
               }
             >
-              {item.label}
+              <span className="inline-flex items-center gap-2">
+                {item.label}
+                {item.id === "settings" && showCompanionPromo ? <NotificationDot /> : null}
+              </span>
             </button>
           );
         })}

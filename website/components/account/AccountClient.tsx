@@ -33,9 +33,11 @@ import {
   type AuthProviderHint
 } from "@/lib/firebaseAuthAccountHints";
 import { EmailVerificationNotice } from "@/components/auth/EmailVerificationNotice";
+import { CompanionDesktopPromoBanner } from "@/components/companion/CompanionDesktopPromoBanner";
 import { AccountPromptVolumeChart } from "@/components/account/AccountPromptVolumeChart";
 import { listenForGoogleSignInReturn, signInWithGoogleInteractive } from "@/lib/firebaseGoogleAuth";
 import { useEmailVerificationStatus } from "@/lib/useEmailVerificationStatus";
+import { useCompanionAdoptionPromo } from "@/lib/useCompanionAdoptionPromo";
 import { accountPlansForCurrentTier, isPaidPlanKey, type PaidPlanKey, type PlanKey } from "@/lib/plans";
 function formatJoinDate(user: User | null): string {
   if (!user?.metadata?.creationTime) return "—";
@@ -153,6 +155,7 @@ export function AccountClient({
   const [emailAuthName, setEmailAuthName] = useState("");
   const [emailAuthMode, setEmailAuthMode] = useState<"signin" | "register">("signin");
   const [authProviderHint, setAuthProviderHint] = useState<AuthProviderHint>(null);
+  const { showPromo: showCompanionPromo } = useCompanionAdoptionPromo();
 
   function clearAuthGuidance() {
     setAuthProviderHint(null);
@@ -783,6 +786,7 @@ export function AccountClient({
 
       {user ? (
         <div className="space-y-6">
+          {showCompanionPromo ? <CompanionDesktopPromoBanner /> : null}
           <section
             data-onboarding-tour="account-section"
             className="rounded-2xl border border-line bg-cream p-4 backdrop-blur-md sm:p-5"

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getFirebaseAdminDb } from "@/lib/server/firebaseAdmin";
+import { markCompanionDesktopAdopted } from "@/lib/server/companionAdoption";
 import {
   buildCompanionCorsHeaders,
   getCreditsForUser,
@@ -19,6 +20,7 @@ export async function GET(request: Request) {
   const origin = request.headers.get("Origin");
   try {
     const auth = await requirePromptlyOptimizeUser(request);
+    await markCompanionDesktopAdopted(auth.user.uid);
     const creditsResult = await getCreditsForUser(auth.user, request);
     const userSnap = await getFirebaseAdminDb().collection(USER_COLLECTION).doc(auth.user.uid).get();
     const userData = (userSnap.data() || {}) as Record<string, unknown>;

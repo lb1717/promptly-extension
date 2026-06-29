@@ -2,11 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { NotificationDot } from "@/components/ui/NotificationDot";
 import { NAV_LINKS, SITE } from "@/lib/constants";
+import { useCompanionAdoptionPromo } from "@/lib/useCompanionAdoptionPromo";
 
 export function Navbar() {
   const pathname = usePathname();
   const onAccountPage = pathname === "/account" || pathname.startsWith("/account/");
+  const { showPromo: showCompanionPromo } = useCompanionAdoptionPromo();
 
   return (
     <header className="sticky top-0 z-50 border-b border-line bg-page/90 backdrop-blur-xl">
@@ -46,13 +49,14 @@ export function Navbar() {
           <Link
             href="/account"
             data-onboarding-tour="account-nav"
-            className={
+            className={`relative inline-flex items-center gap-2 ${
               onAccountPage
                 ? "rounded-lg border border-line px-2.5 py-1 text-xs text-ink hover:bg-cream-dark sm:px-3 sm:py-1.5 sm:text-sm"
                 : "rounded-lg border border-ink bg-blue-800 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-900 sm:px-3 sm:py-1.5 sm:text-sm"
-            }
+            }`}
           >
-            Account
+            My Account
+            {showCompanionPromo ? <NotificationDot className="ring-blue-800" /> : null}
           </Link>
         </div>
       </div>

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { markCompanionDesktopAdopted } from "@/lib/server/companionAdoption";
 import {
   buildPromptlyCorsHeaders,
   handlePromptlyPreflight,
@@ -18,7 +19,8 @@ export async function OPTIONS(request: Request) {
 
 async function handleSuggestionsRequest(request: Request, promptText: string) {
   const origin = request.headers.get("Origin");
-  await requirePromptlyOptimizeUser(request);
+  const auth = await requirePromptlyOptimizeUser(request);
+  await markCompanionDesktopAdopted(auth.user.uid);
   const prompt = String(promptText || "").trim();
   if (!prompt) {
     return NextResponse.json(
