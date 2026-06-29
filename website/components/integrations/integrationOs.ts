@@ -67,9 +67,9 @@ export function companionInstallCommands(os: OsId): string[] {
       ? `${INSTALL_BASE_URL}/${COMPANION_SCRIPT_SLUG}-mac.sh`
       : `${INSTALL_BASE_URL}/${COMPANION_SCRIPT_SLUG}-windows.ps1`;
   if (os === "mac") {
-    return [`${quietEnvPrefix("mac")}curl -fsSL ${url} | bash`];
+    return [`curl -fsSL ${url} | bash`];
   }
-  return [`${quietEnvPrefix("windows")}irm ${url} | iex`];
+  return [`irm ${url} | iex`];
 }
 
 export const PROMPTLY_INSTALL_SUCCESS_LINE = "Promptly Successfully Installed";
