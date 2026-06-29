@@ -2,7 +2,7 @@ import { createHash } from "crypto";
 import { FieldValue } from "firebase-admin/firestore";
 import { getFirebaseAdminDb } from "@/lib/server/firebaseAdmin";
 import {
-  claudeUtilizationSeriesUsesRemainingSemantics,
+  inferClaudeStoredSeriesSemantics,
   migrateClaudeUtilizationHistoryToUsed,
   normalizeClaudeStoredUtilizationToUsed,
   dollarsUnusedFromUtilization,
@@ -163,7 +163,7 @@ function claudeSeriesUsesRemainingSemantics(
   window: VendorUsageWindow | null
 ): boolean {
   if (historySeries.length > 0) {
-    return claudeUtilizationSeriesUsesRemainingSemantics(historySeries);
+    return inferClaudeStoredSeriesSemantics(historySeries, window?.window_seconds);
   }
   if (!window) return true;
   // Window-only snapshots from live sync are already percent-used.
@@ -174,13 +174,15 @@ function migrateClaudeProfileUtilization(
   primary: VendorUsageWindow | null,
   secondary: VendorUsageWindow | null,
   history: VendorUsageWindowHistory,
-  opts: { legacyWindowRepair?: boolean } = {}
+  opts: { legacyWindowRepair?: boolean; trustLatestAtMs?: number } = {}
 ): { primary: VendorUsageWindow | null; secondary: VendorUsageWindow | null; history: VendorUsageWindowHistory } {
-  const primarySemantics = claudeSeriesUsesRemainingSemantics(history.primary, primary);
-  const secondarySemantics = claudeSeriesUsesRemainingSemantics(history.secondary, secondary);
+  const migrateSeries = (series: VendorUsageHistoryPoint[], window: VendorUsageWindow | null) =>
+    migrateClaudeUtilizationHistoryToUsed(series, window?.window_seconds, {
+      trustLatestAtMs: opts.trustLatestAtMs
+    });
   const migratedHistory = {
-    primary: migrateClaudeUtilizationHistoryToUsed(history.primary, primary?.window_seconds),
-    secondary: migrateClaudeUtilizationHistoryToUsed(history.secondary, secondary?.window_seconds)
+    primary: migrateSeries(history.primary, primary),
+    secondary: migrateSeries(history.secondary, secondary)
   };
 
   const windowUtilization = (
@@ -208,8 +210,12 @@ function migrateClaudeProfileUtilization(
   };
 
   return {
-    primary: windowUtilization(primary, migratedHistory.primary, primarySemantics),
-    secondary: windowUtilization(secondary, migratedHistory.secondary, secondarySemantics),
+    primary: windowUtilization(primary, migratedHistory.primary, claudeSeriesUsesRemainingSemantics(history.primary, primary)),
+    secondary: windowUtilization(
+      secondary,
+      migratedHistory.secondary,
+      claudeSeriesUsesRemainingSemantics(history.secondary, secondary)
+    ),
     history: migratedHistory
   };
 }
@@ -256,6 +262,7 @@ async function persistClaudeUtilizationRepair(
       usage_history: history,
       usage_history_corrected_v3: true,
       usage_history_corrected_v4: true,
+      usage_history_corrected_v5: true,
       usage_history_corrected_v2: true,
       updated_at: FieldValue.serverTimestamp()
     },
@@ -263,14 +270,23 @@ async function persistClaudeUtilizationRepair(
   );
 }
 
+function utcDayKey(atMs: number): string {
+  return new Date(atMs).toISOString().slice(0, 10);
+}
+
 function appendHistoryPoint(
   series: VendorUsageHistoryPoint[],
   utilization: number,
-  at_ms: number
+  at_ms: number,
+  opts?: { refresh?: boolean }
 ): VendorUsageHistoryPoint[] {
   const util = normalizeUtilizationPercent(utilization);
   const next = [...series];
   const last = next[next.length - 1];
+  if (last && opts?.refresh && utcDayKey(last.at_ms) === utcDayKey(at_ms)) {
+    next[next.length - 1] = { at_ms, utilization: util };
+    return next.slice(-USAGE_HISTORY_CAP);
+  }
   if (last && at_ms - last.at_ms < USAGE_HISTORY_MIN_GAP_MS && Math.abs(last.utilization - util) < 0.5) {
     next[next.length - 1] = { at_ms, utilization: util };
   } else {
@@ -281,16 +297,24 @@ function appendHistoryPoint(
 
 function mergeUsageHistory(
   existing: VendorUsageWindowHistory,
-  snapshot: VendorUsageProfileSnapshot
-): VendorUsageWindowHistory {
+  snapshot: VendorUsageProfileSnapshot,
+  opts?: { refresh?: boolean }
+): { history: VendorUsageWindowHistory; trustedLatestAtMs: number | null } {
   const at_ms = snapshot.synced_at_ms || Date.now();
+  let trustedLatestAtMs: number | null = null;
+  let primary = existing.primary;
+  let secondary = existing.secondary;
+  if (snapshot.primary_window) {
+    primary = appendHistoryPoint(existing.primary, snapshot.primary_window.utilization, at_ms, opts);
+    if (opts?.refresh) trustedLatestAtMs = at_ms;
+  }
+  if (snapshot.secondary_window) {
+    secondary = appendHistoryPoint(existing.secondary, snapshot.secondary_window.utilization, at_ms, opts);
+    if (opts?.refresh) trustedLatestAtMs = at_ms;
+  }
   return {
-    primary: snapshot.primary_window
-      ? appendHistoryPoint(existing.primary, snapshot.primary_window.utilization, at_ms)
-      : existing.primary,
-    secondary: snapshot.secondary_window
-      ? appendHistoryPoint(existing.secondary, snapshot.secondary_window.utilization, at_ms)
-      : existing.secondary
+    history: { primary, secondary },
+    trustedLatestAtMs
   };
 }
 
@@ -476,7 +500,7 @@ export async function persistVendorUsageSnapshots(
   snapshots: VendorUsageProfileSnapshot[],
   clearProviders: VendorUsageProvider[] = [],
   syncDiagnostics: VendorUsageSyncDiagnostics | null = null,
-  opts?: { prune_unlisted_profiles?: boolean }
+  opts?: { prune_unlisted_profiles?: boolean; refresh_reconcile?: boolean }
 ): Promise<number> {
   await clearVendorUsageProfiles(uid, clearProviders);
   if (syncDiagnostics) {
@@ -502,13 +526,19 @@ export async function persistVendorUsageSnapshots(
     const existingSnap = await profileRef(uid, docId).get();
     const existingData = existingSnap.exists ? existingSnap.data() : null;
     const existingHistory = readUsageHistory(existingData?.usage_history);
-    let usage_history = mergeUsageHistory(existingHistory, snap);
+    const merged = mergeUsageHistory(existingHistory, snap, { refresh: opts?.refresh_reconcile });
+    let usage_history = merged.history;
     if (snap.provider === "claude_code") {
       const migrated = migrateClaudeProfileUtilization(
         snap.primary_window,
         snap.secondary_window,
         usage_history,
-        { legacyWindowRepair: existingData?.usage_history_corrected_v4 !== true }
+        {
+          legacyWindowRepair:
+            existingData?.usage_history_corrected_v5 !== true &&
+            existingData?.usage_history_corrected_v4 !== true,
+          trustLatestAtMs: opts?.refresh_reconcile ? merged.trustedLatestAtMs ?? undefined : undefined
+        }
       );
       usage_history = migrated.history;
       snap = {
@@ -526,6 +556,8 @@ export async function persistVendorUsageSnapshots(
           snap.provider === "claude_code" ? true : existingData?.usage_history_corrected_v3 === true,
         usage_history_corrected_v4:
           snap.provider === "claude_code" ? true : existingData?.usage_history_corrected_v4 === true,
+        usage_history_corrected_v5:
+          snap.provider === "claude_code" ? true : existingData?.usage_history_corrected_v5 === true,
         usage_history_corrected_v2:
           snap.provider === "claude_code" ? true : existingData?.usage_history_corrected_v2 === true,
         uid,
@@ -565,13 +597,14 @@ export async function listVendorUsageProfiles(uid: string): Promise<VendorUsageP
     let normalizedSecondary = secondary_window;
     if (provider === "claude_code") {
       const migrated = migrateClaudeProfileUtilization(primary_window, secondary_window, usage_history, {
-        legacyWindowRepair: raw.usage_history_corrected_v4 !== true
+        legacyWindowRepair: raw.usage_history_corrected_v5 !== true && raw.usage_history_corrected_v4 !== true
       });
       normalizedPrimary = migrated.primary;
       normalizedSecondary = migrated.secondary;
       usage_history = migrated.history;
 
       const needsPersist =
+        raw.usage_history_corrected_v5 !== true ||
         raw.usage_history_corrected_v4 !== true ||
         usageHistoryChanged(readUsageHistory(raw.usage_history), usage_history) ||
         windowsChanged(primary_window, secondary_window, normalizedPrimary, normalizedSecondary);
@@ -835,6 +868,6 @@ export async function refreshVendorUsageLive(uid: string): Promise<{ refreshed: 
     at_ms: Date.now(),
     skipped: [],
     skip_details: {}
-  });
+  }, { refresh_reconcile: true });
   return { refreshed: snapshots.length };
 }

@@ -173,25 +173,182 @@ export function resolveClaudeWindowUsedPercent(
   return normalizeUtilizationPercent(100 - pct);
 }
 
-/** True when stored Claude points look like percent-remaining (decreases as quota is consumed). */
-export function claudeUtilizationSeriesUsesRemainingSemantics(
-  points: ClaudeUtilizationHistoryPoint[]
+/** True when a drop in stored values is a quota-window reset rather than wrong semantics. */
+export function isLikelyClaudeQuotaCycleReset(
+  prev: ClaudeUtilizationHistoryPoint,
+  next: ClaudeUtilizationHistoryPoint,
+  windowSeconds: number
+): boolean {
+  const drop = prev.utilization - next.utilization;
+  if (drop < 12) return false;
+  if (next.utilization <= 15 && prev.utilization >= drop + next.utilization - 8) return true;
+  const gapMs = next.at_ms - prev.at_ms;
+  if (windowSeconds > 0 && gapMs > windowSeconds * 1000 * 0.55 && drop >= 8) return true;
+  return false;
+}
+
+/** Lower score = better fit for percent-used semantics (should climb within a quota window). */
+export function scoreClaudeUsedPercentSeries(
+  points: ClaudeUtilizationHistoryPoint[],
+  windowSeconds: number
+): number {
+  if (!points.length) return 0;
+  if (points.length === 1) {
+    const value = normalizeUtilizationPercent(points[0].utilization);
+    return value >= 55 ? 6 : 0;
+  }
+
+  let violations = 0;
+  for (let i = 1; i < points.length; i += 1) {
+    const prev = points[i - 1]!;
+    const next = points[i]!;
+    const delta = next.utilization - prev.utilization;
+    if (delta < -2 && !isLikelyClaudeQuotaCycleReset(prev, next, windowSeconds)) {
+      violations += 1 + Math.min(6, Math.floor(Math.abs(delta) / 12));
+    }
+  }
+  return violations;
+}
+
+export function splitClaudeUtilizationHistorySegments(
+  points: ClaudeUtilizationHistoryPoint[],
+  windowSeconds: number | null | undefined
+): ClaudeUtilizationHistoryPoint[][] {
+  if (!points.length) return [];
+  const windowSec = windowSeconds ?? 5 * 3600;
+  const windowMs = windowSec * 1000;
+  const sorted = [...points].sort((a, b) => a.at_ms - b.at_ms);
+  const segments: ClaudeUtilizationHistoryPoint[][] = [];
+  let current: ClaudeUtilizationHistoryPoint[] = [];
+  for (const point of sorted) {
+    const prev = current[current.length - 1];
+    if (
+      prev &&
+      (point.at_ms - prev.at_ms > windowMs * 0.6 ||
+        isLikelyClaudeQuotaCycleReset(prev, point, windowSec))
+    ) {
+      segments.push(current);
+      current = [];
+    }
+    current.push(point);
+  }
+  if (current.length) segments.push(current);
+  return segments;
+}
+
+/** Pick whether stored raw values are percent-remaining vs percent-used from trend shape. */
+export function inferClaudeStoredSeriesSemantics(
+  points: ClaudeUtilizationHistoryPoint[],
+  windowSeconds: number | null | undefined
 ): boolean {
   if (!points.length) return true;
+  const windowSec = windowSeconds ?? 5 * 3600;
+  const asUsed = points.map((point) => ({
+    at_ms: point.at_ms,
+    utilization: normalizeUtilizationPercent(point.utilization)
+  }));
+  const asUsedFromRemaining = points.map((point) => ({
+    at_ms: point.at_ms,
+    utilization: normalizeClaudeStoredUtilizationToUsed(point.utilization, true)
+  }));
+  const usedScore = scoreClaudeUsedPercentSeries(asUsed, windowSec);
+  const remainingScore = scoreClaudeUsedPercentSeries(asUsedFromRemaining, windowSec);
+  if (remainingScore < usedScore) return true;
+  if (usedScore < remainingScore) return false;
   if (points.length === 1) {
     return normalizeUtilizationPercent(points[0].utilization) >= 45;
   }
+  return claudeUtilizationSeriesUsesRemainingByTrend(points);
+}
+
+function claudeUtilizationSeriesUsesRemainingByTrend(points: ClaudeUtilizationHistoryPoint[]): boolean {
   let decreasing = 0;
   let increasing = 0;
   for (let i = 1; i < points.length; i += 1) {
-    const delta = points[i].utilization - points[i - 1].utilization;
+    const delta = points[i]!.utilization - points[i - 1]!.utilization;
     if (delta < -0.5) decreasing += 1;
     if (delta > 0.5) increasing += 1;
   }
   if (decreasing === 0 && increasing === 0) {
-    return normalizeUtilizationPercent(points[0].utilization) >= 45;
+    return normalizeUtilizationPercent(points[0]!.utilization) >= 45;
   }
   return decreasing >= increasing;
+}
+
+function enforceMonotonicClaudeUsedSeries(
+  points: ClaudeUtilizationHistoryPoint[]
+): ClaudeUtilizationHistoryPoint[] {
+  let floor = 0;
+  return points.map((point) => {
+    const utilization = Math.max(floor, normalizeUtilizationPercent(point.utilization));
+    floor = utilization;
+    return { at_ms: point.at_ms, utilization };
+  });
+}
+
+/** Reconcile one quota segment; live refresh trusts the newest reading as percent-used. */
+export function normalizeClaudeHistorySegment(
+  segment: ClaudeUtilizationHistoryPoint[],
+  windowSeconds: number | null | undefined,
+  opts: { trustLatestUsed?: boolean } = {}
+): ClaudeUtilizationHistoryPoint[] {
+  if (!segment.length) return [];
+  const windowSec = windowSeconds ?? 5 * 3600;
+
+  if (opts.trustLatestUsed && segment.length >= 2) {
+    const latest = segment[segment.length - 1]!;
+    const priors = segment.slice(0, -1);
+    const latestUsed = normalizeUtilizationPercent(latest.utilization);
+    let ceiling = latestUsed;
+    const converted: ClaudeUtilizationHistoryPoint[] = [{ at_ms: latest.at_ms, utilization: latestUsed }];
+
+    for (let i = priors.length - 1; i >= 0; i -= 1) {
+      const raw = normalizeUtilizationPercent(priors[i]!.utilization);
+      const candidates = [raw, normalizeUtilizationPercent(100 - raw)].filter((value) => value <= ceiling + 3);
+      const pick =
+        candidates.length === 0
+          ? raw <= ceiling + 3
+            ? raw
+            : normalizeUtilizationPercent(100 - raw)
+          : candidates.reduce((best, value) =>
+              Math.abs(value - ceiling) < Math.abs(best - ceiling) ? value : best
+            );
+      ceiling = Math.min(ceiling, pick);
+      converted.unshift({ at_ms: priors[i]!.at_ms, utilization: pick });
+    }
+
+    const trusted = enforceMonotonicClaudeUsedSeries(converted);
+    const uniformUsed = segment.map((point) => ({
+      at_ms: point.at_ms,
+      utilization: normalizeUtilizationPercent(point.utilization)
+    }));
+    const uniformRemaining = segment.map((point) => ({
+      at_ms: point.at_ms,
+      utilization: normalizeClaudeStoredUtilizationToUsed(point.utilization, true)
+    }));
+    const trustedScore = scoreClaudeUsedPercentSeries(trusted, windowSec);
+    const usedScore = scoreClaudeUsedPercentSeries(uniformUsed, windowSec);
+    const remainingScore = scoreClaudeUsedPercentSeries(uniformRemaining, windowSec);
+    const bestScore = Math.min(trustedScore, usedScore, remainingScore);
+    if (bestScore === trustedScore) return trusted;
+    if (bestScore === remainingScore) return enforceMonotonicClaudeUsedSeries(uniformRemaining);
+    return enforceMonotonicClaudeUsedSeries(uniformUsed);
+  }
+
+  const usesRemaining = inferClaudeStoredSeriesSemantics(segment, windowSec);
+  return enforceMonotonicClaudeUsedSeries(
+    segment.map((point) => ({
+      at_ms: point.at_ms,
+      utilization: normalizeClaudeStoredUtilizationToUsed(point.utilization, usesRemaining)
+    }))
+  );
+}
+
+/** True when stored Claude points look like percent-remaining (decreases as quota is consumed). */
+export function claudeUtilizationSeriesUsesRemainingSemantics(
+  points: ClaudeUtilizationHistoryPoint[]
+): boolean {
+  return inferClaudeStoredSeriesSemantics(points, null);
 }
 
 export function normalizeClaudeStoredUtilizationToUsed(
@@ -205,32 +362,19 @@ export function normalizeClaudeStoredUtilizationToUsed(
 /** Coerce mixed legacy Claude history (remaining vs used) into percent-used series. */
 export function migrateClaudeUtilizationHistoryToUsed(
   points: ClaudeUtilizationHistoryPoint[],
-  windowSeconds: number | null | undefined
+  windowSeconds: number | null | undefined,
+  opts: { trustLatestAtMs?: number } = {}
 ): ClaudeUtilizationHistoryPoint[] {
   if (!points.length) return [];
-  const windowMs = (windowSeconds ?? 5 * 3600) * 1000;
-  const sorted = [...points].sort((a, b) => a.at_ms - b.at_ms);
-  const segments: ClaudeUtilizationHistoryPoint[][] = [];
-  let current: ClaudeUtilizationHistoryPoint[] = [];
-  for (const point of sorted) {
-    const prev = current[current.length - 1];
-    if (prev && point.at_ms - prev.at_ms > windowMs * 0.6) {
-      segments.push(current);
-      current = [];
-    }
-    current.push(point);
-  }
-  if (current.length) segments.push(current);
-
+  const segments = splitClaudeUtilizationHistorySegments(points, windowSeconds);
   const out: ClaudeUtilizationHistoryPoint[] = [];
   for (const segment of segments) {
-    const remainingSemantics = claudeUtilizationSeriesUsesRemainingSemantics(segment);
-    for (const point of segment) {
-      out.push({
-        at_ms: point.at_ms,
-        utilization: normalizeClaudeStoredUtilizationToUsed(point.utilization, remainingSemantics)
-      });
-    }
+    const latestAtMs = segment[segment.length - 1]?.at_ms;
+    out.push(
+      ...normalizeClaudeHistorySegment(segment, windowSeconds, {
+        trustLatestUsed: opts.trustLatestAtMs != null && latestAtMs === opts.trustLatestAtMs
+      })
+    );
   }
   return out.sort((a, b) => a.at_ms - b.at_ms);
 }
