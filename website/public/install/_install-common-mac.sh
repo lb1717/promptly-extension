@@ -33,10 +33,10 @@ promptly_spinner_start() {
   promptly_spinner_stop
   (
     local frames
-    frames[0]='. '
-    frames[1]='.. '
-    frames[2]='... '
-    frames[3]='. '
+    frames[0]='.'
+    frames[1]='..'
+    frames[2]='...'
+    frames[3]=''
     local i=0
     while true; do
       if [[ -n "${label}" ]]; then
@@ -128,10 +128,10 @@ promptly_download_url_to_file() {
   curl -fsSL -o "${dest}" "${url}" &
   pid=$!
   local frames
-  frames[0]='. '
-  frames[1]='.. '
-  frames[2]='... '
-  frames[3]='. '
+  frames[0]='.'
+  frames[1]='..'
+  frames[2]='...'
+  frames[3]=''
   local dot_i=0
   while kill -0 "${pid}" 2>/dev/null; do
     local frame="${frames[$dot_i]}"

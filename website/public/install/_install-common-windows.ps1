@@ -33,7 +33,7 @@ function Promptly-InvokeWithSpinner {
     [string]$Label = "",
     [Parameter(Mandatory)][ScriptBlock]$Action
   )
-  $frames = @('. ', '.. ', '... ', '. ')
+  $frames = @('.', '..', '...', '')
   $i = 0
   $job = Start-Job -ScriptBlock $Action
   while ($job.State -eq 'Running') {
@@ -66,7 +66,7 @@ function Promptly-RunNodeWithSpinner {
     & $Node @NodeArgs 2>&1 | Out-Null
     return $LASTEXITCODE
   }
-  $frames = @('. ', '.. ', '... ', '. ')
+  $frames = @('.', '..', '...', '')
   $i = 0
   while ($job.State -eq 'Running') {
     Write-Host ("`r{0}" -f $frames[$i % 4]) -NoNewline
@@ -818,7 +818,7 @@ function Promptly-DownloadFileWithProgress {
         $buffer = New-Object byte[] 81920
         $read = 0
         $done = 0
-        $frames = @('. ', '.. ', '... ', '. ')
+        $frames = @('.', '..', '...', '')
         $dotI = 0
         while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
           $fileStream.Write($buffer, 0, $read)
@@ -900,7 +900,7 @@ function Promptly-InstallCompanionWindows {
     (Join-Path $env:ProgramFiles "Promptly Companion\Promptly Companion.exe"),
     (Join-Path ${env:ProgramFiles(x86)} "Promptly Companion\Promptly Companion.exe")
   )
-  for ($attempt = 1; $attempt -le 6; $attempt++) {
+  for ($attempt = 1; $attempt -le 4; $attempt++) {
     foreach ($launchPath in $launchCandidates) {
       if (Test-Path $launchPath) {
         Unblock-File -LiteralPath $launchPath -ErrorAction SilentlyContinue
@@ -917,8 +917,8 @@ function Promptly-InstallCompanionWindows {
       return
     }
 
-    if ($attempt -lt 6) {
-      Start-Sleep -Seconds 1
+    if ($attempt -lt 4) {
+      Start-Sleep -Milliseconds 500
     }
   }
 }

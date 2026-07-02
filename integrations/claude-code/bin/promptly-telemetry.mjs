@@ -2846,24 +2846,27 @@ function stampAllCredentialsForTarget(targetUid, targetEmail, apiUrl) {
 
 async function verifyLiveTrackingForAllTools() {
   console.log("Step 4/4: Verifying live tracking (test upload per agent)…");
-  const results = [];
-  for (const tool of ALL_TOOLS) {
-    const creds = getCredentials(tool);
-    if (!creds?.device_token) {
-      results.push({ tool, ok: true, skipped: true, reason: "not_paired" });
-      continue;
-    }
-    try {
-      const upload = await testSendForTool(tool);
-      if (!upload.ok) {
-        throw new Error(upload.error || "upload failed");
+  const results = await Promise.all(
+    ALL_TOOLS.map(async (tool) => {
+      const creds = getCredentials(tool);
+      if (!creds?.device_token) {
+        return { tool, ok: true, skipped: true, reason: "not_paired" };
       }
-      results.push({ tool, ok: true, written: upload.written ?? 1 });
-      console.log(`  OK ${tool}: live tracking OK`);
-    } catch (err) {
-      results.push({ tool, ok: false, error: String(err?.message || err) });
-      console.error(`  ✗ ${tool}: ${String(err?.message || err)}`);
-    }
+      try {
+        const upload = await testSendForTool(tool);
+        if (!upload.ok) {
+          throw new Error(upload.error || "upload failed");
+        }
+        return { tool, ok: true, written: upload.written ?? 1 };
+      } catch (err) {
+        return { tool, ok: false, error: String(err?.message || err) };
+      }
+    })
+  );
+  for (const row of results) {
+    if (row.skipped) continue;
+    if (row.ok) console.log(`  OK ${row.tool}: live tracking OK`);
+    else console.error(`  ✗ ${row.tool}: ${String(row.error)}`);
   }
   return results;
 }
@@ -2920,19 +2923,25 @@ async function cmdFixAccount(flags) {
 
   detail("Step 2/4: Re-pairing Claude Code, Cursor, and Codex to that account…");
   const aligned = [];
-  for (const tool of ALL_TOOLS) {
-    if (tool === anchorTool) {
-      aligned.push(tool);
-      if (quiet) ok(`${toolLabels[tool] || tool} connected`);
-      continue;
-    }
-    try {
-      const sibling = await exchangeSiblingTool(apiUrl, anchorTool, tool);
-      saveCredentialsFromExchange(tool, sibling, apiUrl);
-      aligned.push(tool);
-      if (quiet) ok(`${toolLabels[tool] || tool} connected`);
-    } catch (err) {
-      console.error(`[promptly] Could not pair ${tool}: ${String(err?.message || err)}`);
+  aligned.push(anchorTool);
+  const siblingOutcomes = await Promise.all(
+    ALL_TOOLS.filter((tool) => tool !== anchorTool).map(async (tool) => {
+      try {
+        const sibling = await exchangeSiblingTool(apiUrl, anchorTool, tool);
+        saveCredentialsFromExchange(tool, sibling, apiUrl);
+        return { tool, ok: true };
+      } catch (err) {
+        console.error(`[promptly] Could not pair ${tool}: ${String(err?.message || err)}`);
+        return { tool, ok: false };
+      }
+    })
+  );
+  for (const row of siblingOutcomes) {
+    if (row.ok) aligned.push(row.tool);
+  }
+  if (quiet) {
+    for (const tool of ALL_TOOLS) {
+      if (aligned.includes(tool)) ok(`${toolLabels[tool] || tool} connected`);
     }
   }
   setDevicePrimary(getCredentials(anchorTool), anchorTool);

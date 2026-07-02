@@ -4,7 +4,7 @@
 set -euo pipefail
 
 export PROMPTLY_QUIET="${PROMPTLY_QUIET:-1}"
-PLUGIN_PACK_URL="${PROMPTLY_PLUGIN_PACK_URL:-https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.16}"
+PLUGIN_PACK_URL="${PROMPTLY_PLUGIN_PACK_URL:-https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.17}"
 INTEGRATIONS="${HOME}/integrations"
 PROMPTLY_INSTALL_BASE="${PROMPTLY_INSTALL_BASE:-https://promptly-labs.com/install}"
 CODE="${1:-${PROMPTLY_PAIR_CODE:-}}"
@@ -41,7 +41,7 @@ fi
 
 promptly_unzip_plugin_pack "${HOME}/promptly.zip" "${HOME}"
 promptly_verify_plugin_pack "${INTEGRATIONS}" || exit 1
-promptly_pull_latest_telemetry_cli "${INTEGRATIONS}" || promptly_refresh_telemetry_cli "${INTEGRATIONS}" || true
+promptly_refresh_telemetry_cli "${INTEGRATIONS}" || true
 
 promptly_install_all_agents "${INTEGRATIONS}" || exit 1
 promptly_finalize_with_pair_code "${CODE}" "${INTEGRATIONS}" || exit 1
