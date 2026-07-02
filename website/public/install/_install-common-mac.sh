@@ -17,6 +17,75 @@ promptly_fail() {
   echo "✗ $1" >&2
 }
 
+PROMPTLY_SPINNER_PID=""
+
+promptly_spinner_stop() {
+  if [[ -n "${PROMPTLY_SPINNER_PID:-}" ]]; then
+    kill "${PROMPTLY_SPINNER_PID}" 2>/dev/null || true
+    wait "${PROMPTLY_SPINNER_PID}" 2>/dev/null || true
+    PROMPTLY_SPINNER_PID=""
+    printf "\r%*s\r" 72 ""
+  fi
+}
+
+promptly_spinner_start() {
+  local label="${1:-}"
+  promptly_spinner_stop
+  (
+    local frames
+    frames[0]='. '
+    frames[1]='.. '
+    frames[2]='... '
+    frames[3]='. '
+    local i=0
+    while true; do
+      if [[ -n "${label}" ]]; then
+        printf "\r%s%s" "${label}" "${frames[$i]}"
+      else
+        printf "\r%s" "${frames[$i]}"
+      fi
+      i=$(( (i + 1) % 4 ))
+      sleep 0.35
+    done
+  ) &
+  PROMPTLY_SPINNER_PID=$!
+}
+
+promptly_run_with_spinner() {
+  local label="$1"
+  shift
+  promptly_spinner_start "${label}"
+  set +e
+  "$@"
+  local code=$?
+  set -e
+  promptly_spinner_stop
+  return $code
+}
+
+promptly_download_plugin_pack() {
+  local url="$1"
+  local dest="$2"
+  local attempt
+  if promptly_is_quiet; then
+    for attempt in 1 2; do
+      if promptly_run_with_spinner "" curl -fsSL -o "${dest}" "${url}"; then
+        return 0
+      fi
+      sleep 1
+    done
+    return 1
+  fi
+  promptly_detail "→ Downloading Promptly plugin pack (Claude Code, Cursor, Codex)…"
+  for attempt in 1 2; do
+    if curl -fsSL -o "${dest}" "${url}"; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 promptly_print_install_success() {
   echo "Promptly Successfully Installed"
 }
@@ -52,24 +121,33 @@ promptly_download_url_to_file() {
 
   total="$(curl -fsI "${url}" 2>/dev/null | awk 'tolower($1)=="content-length:" {print $2}' | tr -d '\r' | tail -1)"
   if [[ -z "${total}" || ! "${total}" =~ ^[0-9]+$ || "${total}" -lt 1 ]]; then
-    echo "→ ${label}…"
-    curl -fsSL -o "${dest}" "${url}" || return 1
+    promptly_run_with_spinner "${label}" curl -fsSL -o "${dest}" "${url}" || return 1
     return 0
   fi
 
   curl -fsSL -o "${dest}" "${url}" &
   pid=$!
+  local frames
+  frames[0]='. '
+  frames[1]='.. '
+  frames[2]='... '
+  frames[3]='. '
+  local dot_i=0
   while kill -0 "${pid}" 2>/dev/null; do
+    local frame="${frames[$dot_i]}"
+    dot_i=$(( (dot_i + 1) % 4 ))
     if [[ -f "${dest}" ]]; then
       size="$(stat -f%z "${dest}" 2>/dev/null || echo 0)"
       pct=$(( size * 100 / total ))
       if (( pct > 100 )); then pct=100; fi
-      printf "\r→ ${label}… %d%%  " "${pct}"
+      printf "\r%s… %d%% %s  " "${label}" "${pct}" "${frame}"
+    else
+      printf "\r%s %s  " "${label}" "${frame}"
     fi
-    sleep 0.25
+    sleep 0.35
   done
   wait "${pid}" || return 1
-  printf "\r→ ${label}… 100%%  \n"
+  printf "\r%s… 100%%    \n" "${label}"
 }
 
 promptly_run_fix_account() {
@@ -734,17 +812,18 @@ promptly_sync_subscription_usage() {
   local integrations="${1:-${HOME}/integrations}"
   local cli="${integrations}/packages/telemetry-cli/bin/promptly-telemetry.mjs"
   if [[ ! -f "${cli}" ]]; then
-    promptly_detail "⚠ Subscription sync skipped — telemetry CLI missing."
     return 0
   fi
-  echo "→ Syncing AI subscription usage (Claude, Codex, Cursor)…"
-  echo "  Complete Claude sign-in in your browser — setup continues automatically when done."
   set +e
-  node "${cli}" usage-sync --login-claude
+  if promptly_is_quiet; then
+    promptly_run_with_spinner "" node "${cli}" usage-sync --login-claude >/dev/null 2>&1
+  else
+    node "${cli}" usage-sync --login-claude
+  fi
   local code=$?
   set -e
   if [[ $code -ne 0 ]]; then
-    echo "⚠ Subscription sync incomplete — resync anytime at https://promptly-labs.com/integrations#resync-subscriptions"
+    promptly_is_quiet || echo "⚠ Subscription sync incomplete — resync anytime at https://promptly-labs.com/integrations#resync-subscriptions"
     return 0
   fi
   promptly_ok "Subscription usage synced"
@@ -824,7 +903,7 @@ promptly_install_companion_mac() {
   local app_path
   app_path="$(promptly_pick_companion_app_dir)"
   local api_url="https://promptly-labs.com/api/companion/download"
-  local fallback="https://github.com/lb1717/promptly-extension/releases/download/companion-v0.2.4/Promptly-Companion-0.2.4-mac.dmg"
+  local fallback="https://github.com/lb1717/promptly-extension/releases/download/companion-v0.2.5/Promptly-Companion-0.2.5-mac.dmg"
   local dmg_url="${PROMPTLY_COMPANION_DMG_URL:-}"
   local tmp_dmg mount_point src_app attempt
 
@@ -878,7 +957,15 @@ promptly_install_companion_mac() {
   fi
 
   rm -rf "${app_path}"
-  if ! cp -R "${src_app}" "$(dirname "${app_path}")/"; then
+  if promptly_is_quiet; then
+    if ! promptly_run_with_spinner "Installing Promptly Desktop" cp -R "${src_app}" "$(dirname "${app_path}")/"; then
+      hdiutil detach "${mount_point}" -quiet 2>/dev/null || true
+      rm -f "${tmp_dmg}"
+      rm -rf "${mount_point}"
+      promptly_fail "Could not copy Promptly to $(dirname "${app_path}"). Check disk space and permissions."
+      return 1
+    fi
+  elif ! cp -R "${src_app}" "$(dirname "${app_path}")/"; then
     hdiutil detach "${mount_point}" -quiet 2>/dev/null || true
     rm -f "${tmp_dmg}"
     rm -rf "${mount_point}"
@@ -890,7 +977,9 @@ promptly_install_companion_mac() {
   rm -f "${tmp_dmg}"
   rm -rf "${mount_point}"
   xattr -cr "${app_path}" 2>/dev/null || true
-  if [[ "${app_path}" == "${HOME}/Applications/"* ]]; then
+  if promptly_is_quiet; then
+    promptly_ok "Desktop app installed"
+  elif [[ "${app_path}" == "${HOME}/Applications/"* ]]; then
     promptly_ok "Desktop app installed (~/Applications — no admin password needed)"
   else
     promptly_ok "Desktop app installed"

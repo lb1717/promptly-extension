@@ -28,6 +28,66 @@ function Promptly-Fail {
   Write-Host "✗ $Message" -ForegroundColor Red
 }
 
+function Promptly-InvokeWithSpinner {
+  param(
+    [string]$Label = "",
+    [Parameter(Mandatory)][ScriptBlock]$Action
+  )
+  $frames = @('. ', '.. ', '... ', '. ')
+  $i = 0
+  $job = Start-Job -ScriptBlock $Action
+  while ($job.State -eq 'Running') {
+    $frame = $frames[$i % $frames.Count]
+    if ($Label) {
+      Write-Host ("`r{0}{1}" -f $Label, $frame) -NoNewline
+    } else {
+      Write-Host ("`r{0}" -f $frame) -NoNewline
+    }
+    $i++
+    Start-Sleep -Milliseconds 350
+  }
+  Write-Host ("`r{0}" -f (' ' * 72))
+  $output = Receive-Job $job
+  Remove-Job $job -Force -ErrorAction SilentlyContinue
+  if ($job.State -eq 'Failed') {
+    throw ($output | Out-String)
+  }
+  return $output
+}
+
+function Promptly-RunNodeWithSpinner {
+  param(
+    [Parameter(Mandatory)][string[]]$Args,
+    [switch]$AllowFailure
+  )
+  $nodeExe = Promptly-GetNodeExe
+  $job = Start-Job -ArgumentList $nodeExe, $Args -ScriptBlock {
+    param($Node, $NodeArgs)
+    & $Node @NodeArgs 2>&1 | Out-Null
+    return $LASTEXITCODE
+  }
+  $frames = @('. ', '.. ', '... ', '. ')
+  $i = 0
+  while ($job.State -eq 'Running') {
+    Write-Host ("`r{0}" -f $frames[$i % 4]) -NoNewline
+    $i++
+    Start-Sleep -Milliseconds 350
+  }
+  Write-Host ("`r{0}" -f (' ' * 72))
+  $code = 1
+  $received = Receive-Job $job
+  if ($null -ne $received) {
+    foreach ($item in @($received)) {
+      if ($item -is [int]) { $code = $item; break }
+    }
+  }
+  Remove-Job $job -Force -ErrorAction SilentlyContinue
+  if (-not $AllowFailure -and $code -ne 0) {
+    exit $code
+  }
+  return $code
+}
+
 function Promptly-PrintInstallSuccess {
   Write-Host "Promptly Successfully Installed"
 }
@@ -472,14 +532,23 @@ function Promptly-SyncSubscriptionUsage {
   param([string]$Integrations = (Join-Path $env:USERPROFILE "integrations"))
   $cli = Join-Path $Integrations "packages\telemetry-cli\bin\promptly-telemetry.mjs"
   if (-not (Test-Path $cli)) {
-    Write-Host "WARN Subscription sync skipped - telemetry CLI missing."
+    if (-not (Promptly-IsQuiet)) {
+      Write-Host "WARN Subscription sync skipped - telemetry CLI missing."
+    }
     return
   }
-  Write-Host "-> Syncing AI subscription usage (Claude, Codex, Cursor)..."
-  Write-Host "  Complete Claude sign-in in your browser - setup continues automatically when done."
-  Promptly-RunNode -Args @($cli, "usage-sync", "--login-claude") -AllowFailure
-  if ($LASTEXITCODE -ne 0) {
-    Write-Host "WARN Subscription sync incomplete - resync anytime at https://promptly-labs.com/integrations#resync-subscriptions"
+  if (Promptly-IsQuiet) {
+    $syncCode = Promptly-RunNodeWithSpinner -Args @($cli, "usage-sync", "--login-claude") -AllowFailure
+  } else {
+    Write-Host "-> Syncing AI subscription usage (Claude, Codex, Cursor)..."
+    Write-Host "  Complete Claude sign-in in your browser - setup continues automatically when done."
+    Promptly-RunNode -Args @($cli, "usage-sync", "--login-claude") -AllowFailure
+    $syncCode = $LASTEXITCODE
+  }
+  if ($syncCode -ne 0) {
+    if (-not (Promptly-IsQuiet)) {
+      Write-Host "WARN Subscription sync incomplete - resync anytime at https://promptly-labs.com/integrations#resync-subscriptions"
+    }
   } else {
     Promptly-Ok "Subscription usage synced"
   }
@@ -634,7 +703,7 @@ function Promptly-InstallAllAgentsWithSummary {
 function Promptly-SetupAgents {
   param(
     [Parameter(Mandatory)][string]$PairCode,
-    [string]$PluginPackUrl = $(if ($env:PROMPTLY_PLUGIN_PACK_URL) { $env:PROMPTLY_PLUGIN_PACK_URL } else { "https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.15" }),
+    [string]$PluginPackUrl = $(if ($env:PROMPTLY_PLUGIN_PACK_URL) { $env:PROMPTLY_PLUGIN_PACK_URL } else { "https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.16" }),
     [string]$Integrations = (Join-Path $env:USERPROFILE "integrations"),
     [switch]$SuppressSuccessLine
   )
@@ -653,8 +722,14 @@ function Promptly-SetupAgents {
   Ensure-NodeJs
 
   $zipPath = Join-Path $env:USERPROFILE "promptly.zip"
-  Promptly-Detail "-> Downloading Promptly plugin pack (Claude Code, Cursor, Codex)..."
-  Invoke-WebRequest -Uri $PluginPackUrl -OutFile $zipPath -UseBasicParsing
+  if (Promptly-IsQuiet) {
+    Promptly-InvokeWithSpinner -Action {
+      Invoke-WebRequest -Uri $using:PluginPackUrl -OutFile $using:zipPath -UseBasicParsing | Out-Null
+    } | Out-Null
+  } else {
+    Promptly-Detail "-> Downloading Promptly plugin pack (Claude Code, Cursor, Codex)..."
+    Invoke-WebRequest -Uri $PluginPackUrl -OutFile $zipPath -UseBasicParsing
+  }
   Promptly-UnzipPluginPack -ZipPath $zipPath -Dest $env:USERPROFILE
   if (-not (Promptly-VerifyPluginPack -Integrations $Integrations)) {
     if ($env:PROMPTLY_INSTALL_DEBUG -eq "1") {
@@ -743,20 +818,24 @@ function Promptly-DownloadFileWithProgress {
         $buffer = New-Object byte[] 81920
         $read = 0
         $done = 0
+        $frames = @('. ', '.. ', '... ', '. ')
+        $dotI = 0
         while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
           $fileStream.Write($buffer, 0, $read)
           $done += $read
+          $frame = $frames[$dotI % $frames.Count]
+          $dotI++
           if ($total -gt 0) {
             $pct = [Math]::Min(100, [Math]::Floor(($done * 100) / $total))
-            Write-Host ("`r-> {0}... {1}%  " -f $Label, $pct) -NoNewline
+            Write-Host ("`r{0}… {1}% {2}  " -f $Label, $pct, $frame) -NoNewline
           } else {
-            Write-Host ("`r-> {0}...  " -f $Label) -NoNewline
+            Write-Host ("`r{0} {1}  " -f $Label, $frame) -NoNewline
           }
         }
         if ($total -gt 0) {
-          Write-Host ("`r-> {0}... 100%  " -f $Label)
+          Write-Host ("`r{0}… 100%    " -f $Label)
         } else {
-          Write-Host ("`r-> {0}... done  " -f $Label)
+          Write-Host ("`r{0}… done    " -f $Label)
         }
       } finally {
         $fileStream.Close()
@@ -778,7 +857,7 @@ function Promptly-InstallCompanionWindows {
   Write-Host "Installing Promptly Desktop..."
 
   $apiUrl = "https://promptly-labs.com/api/companion/download"
-  $fallback = "https://github.com/lb1717/promptly-extension/releases/download/companion-v0.2.4/Promptly-Companion-0.2.4-win.exe"
+  $fallback = "https://github.com/lb1717/promptly-extension/releases/download/companion-v0.2.5/Promptly-Companion-0.2.5-win.exe"
   $exeUrl = $null
   if ($env:PROMPTLY_COMPANION_WIN_URL) {
     $exeUrl = $env:PROMPTLY_COMPANION_WIN_URL
@@ -796,7 +875,13 @@ function Promptly-InstallCompanionWindows {
     exit 1
   }
   Unblock-File -LiteralPath $exePath -ErrorAction SilentlyContinue
-  Start-Process -FilePath $exePath -ArgumentList "/S" -Wait
+  if (Promptly-IsQuiet) {
+    Promptly-InvokeWithSpinner -Label "Installing Promptly Desktop" -Action {
+      Start-Process -FilePath $using:exePath -ArgumentList "/S" -Wait
+    } | Out-Null
+  } else {
+    Start-Process -FilePath $exePath -ArgumentList "/S" -Wait
+  }
   Remove-Item $exePath -Force -ErrorAction SilentlyContinue
   Promptly-Ok "Desktop app installed"
 

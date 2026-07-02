@@ -3,8 +3,8 @@
 # Usage: curl -fsSL https://promptly-labs.com/install/full-setup-mac.sh | bash -s -- YOUR_CODE
 set -euo pipefail
 
-export PROMPTLY_QUIET="${PROMPTLY_QUIET:-0}"
-PLUGIN_PACK_URL="${PROMPTLY_PLUGIN_PACK_URL:-https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.15}"
+export PROMPTLY_QUIET="${PROMPTLY_QUIET:-1}"
+PLUGIN_PACK_URL="${PROMPTLY_PLUGIN_PACK_URL:-https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.16}"
 INTEGRATIONS="${HOME}/integrations"
 PROMPTLY_INSTALL_BASE="${PROMPTLY_INSTALL_BASE:-https://promptly-labs.com/install}"
 CODE="${1:-${PROMPTLY_PAIR_CODE:-}}"
@@ -34,16 +34,7 @@ ensure_unzip_mac
 ensure_node_mac
 promptly_require_cmd node || exit 1
 
-promptly_detail "→ Downloading Promptly plugin pack (Claude Code, Cursor, Codex)…"
-pack_ok=0
-for attempt in 1 2; do
-  if curl -fsSL -o "${HOME}/promptly.zip" "${PLUGIN_PACK_URL}"; then
-    pack_ok=1
-    break
-  fi
-  sleep 1
-done
-if [[ $pack_ok -ne 1 ]]; then
+if ! promptly_download_plugin_pack "${PLUGIN_PACK_URL}" "${HOME}/promptly.zip"; then
   echo "✗ Could not download plugin pack — check your network and retry."
   exit 1
 fi

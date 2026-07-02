@@ -2,7 +2,7 @@
 # Install Promptly Companion desktop app to /Applications and clear quarantine.
 set -euo pipefail
 
-export PROMPTLY_QUIET="${PROMPTLY_QUIET:-0}"
+export PROMPTLY_QUIET="${PROMPTLY_QUIET:-1}"
 PROMPTLY_INSTALL_BASE="${PROMPTLY_INSTALL_BASE:-https://promptly-labs.com/install}"
 
 if ! command -v curl >/dev/null 2>&1; then

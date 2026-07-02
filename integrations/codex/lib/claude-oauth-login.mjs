@@ -21,6 +21,14 @@ const OAUTH_SCOPE =
   "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload";
 const CLAUDE_CLI_UA = "claude-cli/2.1.9 (external, cli)";
 
+function isQuiet() {
+  return process.env.PROMPTLY_QUIET === "1";
+}
+
+function logInfo(...args) {
+  if (!isQuiet()) console.log(...args);
+}
+
 export function claudeAuthJsonPath() {
   return join(homedir(), ".promptly", "claude-auth.json");
 }
@@ -331,7 +339,7 @@ export async function ensureClaudeOAuthLogin({
       if (saved.expiresAt && saved.expiresAt - Date.now() < 60_000) return;
       try {
         if (await probeClaudeUsageToken(saved.accessToken)) {
-          console.log("✓ Claude sign-in complete — continuing setup…");
+          logInfo("✓ Claude sign-in complete — continuing setup…");
           finish(resolve, saved);
         }
       } catch {
@@ -371,7 +379,7 @@ export async function ensureClaudeOAuthLogin({
         savePromptlyClaudeAuth(exchanged);
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
         res.end(htmlSuccess());
-        console.log("✓ Claude sign-in complete — continuing setup…");
+        logInfo("✓ Claude sign-in complete — continuing setup…");
         finish(resolve, exchanged);
       } catch (err) {
         const message = String(err?.message || err);
@@ -392,10 +400,10 @@ export async function ensureClaudeOAuthLogin({
       redirectUri = `http://localhost:${address.port}/callback`;
       savePendingOAuth({ state, verifier, redirect_uri: redirectUri });
       const authUrl = buildAuthUrl(state, challenge, redirectUri);
-      console.log("Opening browser for Claude subscription sign-in…");
-      console.log("Setup continues automatically when sign-in finishes — you do not need to close the browser.");
+      logInfo("Opening browser for Claude subscription sign-in…");
+      logInfo("Setup continues automatically when sign-in finishes — you do not need to close the browser.");
       if (!openBrowser(authUrl)) {
-        console.log(`Open this URL to sign in:\n${authUrl}`);
+        logInfo(`Open this URL to sign in:\n${authUrl}`);
       }
     });
 
