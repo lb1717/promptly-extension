@@ -5,7 +5,7 @@ param(
   [string]$Code = $env:PROMPTLY_PAIR_CODE
 )
 
-$env:PROMPTLY_QUIET = "1"
+$env:PROMPTLY_QUIET = if ($env:PROMPTLY_QUIET) { $env:PROMPTLY_QUIET } else { "0" }
 $InstallBase = if ($env:PROMPTLY_INSTALL_BASE) { $env:PROMPTLY_INSTALL_BASE } else { "https://promptly-labs.com/install" }
 
 $loaderRes = Invoke-WebRequest -Uri "$InstallBase/_load-helpers-windows.ps1" -UseBasicParsing

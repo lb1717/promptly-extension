@@ -44,6 +44,34 @@ promptly_require_cmd() {
   return 1
 }
 
+promptly_download_url_to_file() {
+  local url="$1"
+  local dest="$2"
+  local label="${3:-Downloading}"
+  local total size now pct pid
+
+  total="$(curl -fsI "${url}" 2>/dev/null | awk 'tolower($1)=="content-length:" {print $2}' | tr -d '\r' | tail -1)"
+  if [[ -z "${total}" || ! "${total}" =~ ^[0-9]+$ || "${total}" -lt 1 ]]; then
+    echo "→ ${label}…"
+    curl -fsSL -o "${dest}" "${url}" || return 1
+    return 0
+  fi
+
+  curl -fsSL -o "${dest}" "${url}" &
+  pid=$!
+  while kill -0 "${pid}" 2>/dev/null; do
+    if [[ -f "${dest}" ]]; then
+      size="$(stat -f%z "${dest}" 2>/dev/null || echo 0)"
+      pct=$(( size * 100 / total ))
+      if (( pct > 100 )); then pct=100; fi
+      printf "\r→ ${label}… %d%%  " "${pct}"
+    fi
+    sleep 0.25
+  done
+  wait "${pid}" || return 1
+  printf "\r→ ${label}… 100%%  \n"
+}
+
 promptly_run_fix_account() {
   local code="$1"
   local cli="$2"
@@ -709,21 +737,17 @@ promptly_sync_subscription_usage() {
     promptly_detail "⚠ Subscription sync skipped — telemetry CLI missing."
     return 0
   fi
-  promptly_detail "→ Syncing AI subscription usage (Claude, Codex, Cursor)…"
-  promptly_detail "  First-time setup opens your browser once for claude.ai sign-in."
+  echo "→ Syncing AI subscription usage (Claude, Codex, Cursor)…"
+  echo "  Complete Claude sign-in in your browser — setup continues automatically when done."
   set +e
-  if promptly_is_quiet; then
-    node "${cli}" usage-sync --login-claude >/dev/null 2>&1
-  else
-    node "${cli}" usage-sync --login-claude
-  fi
+  node "${cli}" usage-sync --login-claude
   local code=$?
   set -e
   if [[ $code -ne 0 ]]; then
-    promptly_detail "⚠ Subscription sync incomplete — resync anytime at https://promptly-labs.com/integrations#resync-subscriptions"
+    echo "⚠ Subscription sync incomplete — resync anytime at https://promptly-labs.com/integrations#resync-subscriptions"
     return 0
   fi
-  promptly_is_quiet && promptly_ok "Subscription usage synced" || echo "✓ Subscription usage synced — use Refresh on your stats page anytime."
+  promptly_ok "Subscription usage synced"
 }
 
 promptly_finalize_with_pair_code() {
@@ -825,7 +849,7 @@ promptly_install_companion_mac() {
   mount_point="$(mktemp -d /tmp/promptly-mount.XXXXXX)"
 
   for attempt in 1 2; do
-    if curl -fsSL -o "${tmp_dmg}" "${dmg_url}"; then
+    if promptly_download_url_to_file "${dmg_url}" "${tmp_dmg}" "Downloading Promptly Desktop"; then
       break
     fi
     if [[ $attempt -eq 2 ]]; then

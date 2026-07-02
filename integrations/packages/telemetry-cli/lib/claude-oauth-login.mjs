@@ -227,6 +227,26 @@ function htmlError(message) {
   return `<html><body style="font-family:system-ui;padding:2rem"><h2>Login failed</h2><p>${safe}</p><p style="color:#666">Close this tab and run sync again from Promptly.</p></body></html>`;
 }
 
+function htmlSuccess() {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Signed in</title></head><body style="font-family:system-ui;padding:2rem;text-align:center"><h2>Signed in to Claude</h2><p>You can close this tab — setup continues in Terminal automatically.</p><script>setTimeout(function(){try{window.close()}catch(e){}},600);</script></body></html>`;
+}
+
+async function probeClaudeUsageToken(accessToken) {
+  if (!accessToken) return false;
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    "anthropic-beta": "oauth-2025-04-20",
+    Accept: "application/json",
+    "User-Agent": CLAUDE_CLI_UA
+  };
+  try {
+    const res = await fetch("https://api.anthropic.com/api/oauth/usage", { headers });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 async function completeFromCallbackUrl(callbackUrl) {
   const pending = readPendingOAuth();
   if (!pending?.verifier || !pending?.redirect_uri) {
@@ -289,10 +309,13 @@ export async function ensureClaudeOAuthLogin({
   const tokens = await new Promise((resolve, reject) => {
     let settled = false;
     let redirectUri = "";
+    let pollAuth = null;
+    let timer = null;
     const finish = (fn, value) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
+      if (pollAuth) clearInterval(pollAuth);
       try {
         server.close();
       } catch {
@@ -300,6 +323,21 @@ export async function ensureClaudeOAuthLogin({
       }
       fn(value);
     };
+
+    pollAuth = setInterval(async () => {
+      if (settled) return;
+      const saved = readPromptlyClaudeAuth();
+      if (!saved?.accessToken) return;
+      if (saved.expiresAt && saved.expiresAt - Date.now() < 60_000) return;
+      try {
+        if (await probeClaudeUsageToken(saved.accessToken)) {
+          console.log("✓ Claude sign-in complete — continuing setup…");
+          finish(resolve, saved);
+        }
+      } catch {
+        /* ignore */
+      }
+    }, 500);
 
     const server = createServer(async (req, res) => {
       try {
@@ -331,8 +369,9 @@ export async function ensureClaudeOAuthLogin({
           redirectUri
         });
         savePromptlyClaudeAuth(exchanged);
-        res.writeHead(302, { Location: SUCCESS_URL });
-        res.end();
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(htmlSuccess());
+        console.log("✓ Claude sign-in complete — continuing setup…");
         finish(resolve, exchanged);
       } catch (err) {
         const message = String(err?.message || err);
@@ -353,13 +392,14 @@ export async function ensureClaudeOAuthLogin({
       redirectUri = `http://localhost:${address.port}/callback`;
       savePendingOAuth({ state, verifier, redirect_uri: redirectUri });
       const authUrl = buildAuthUrl(state, challenge, redirectUri);
-      console.error("Opening browser for Claude subscription sign-in…");
+      console.log("Opening browser for Claude subscription sign-in…");
+      console.log("Setup continues automatically when sign-in finishes — you do not need to close the browser.");
       if (!openBrowser(authUrl)) {
-        console.error(`Open this URL to sign in:\n${authUrl}`);
+        console.log(`Open this URL to sign in:\n${authUrl}`);
       }
     });
 
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       finish(reject, new Error("OAuth login timed out — complete sign-in in the browser within 2 minutes"));
     }, timeoutMs);
   });

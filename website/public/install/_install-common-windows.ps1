@@ -472,25 +472,16 @@ function Promptly-SyncSubscriptionUsage {
   param([string]$Integrations = (Join-Path $env:USERPROFILE "integrations"))
   $cli = Join-Path $Integrations "packages\telemetry-cli\bin\promptly-telemetry.mjs"
   if (-not (Test-Path $cli)) {
-    if ($env:PROMPTLY_QUIET -ne "1") {
-      Write-Host "WARN Subscription sync skipped - telemetry CLI missing."
-    }
-    return
-  }
-  if ($env:PROMPTLY_QUIET -eq "1") {
-    Promptly-RunNode -Args @($cli, "usage-sync", "--login-claude") -AllowFailure | Out-Null
-    if ($LASTEXITCODE -eq 0) {
-      Promptly-Ok "Subscription usage synced"
-    }
+    Write-Host "WARN Subscription sync skipped - telemetry CLI missing."
     return
   }
   Write-Host "-> Syncing AI subscription usage (Claude, Codex, Cursor)..."
-  Write-Host "  First-time setup opens your browser once for claude.ai sign-in."
+  Write-Host "  Complete Claude sign-in in your browser - setup continues automatically when done."
   Promptly-RunNode -Args @($cli, "usage-sync", "--login-claude") -AllowFailure
   if ($LASTEXITCODE -ne 0) {
     Write-Host "WARN Subscription sync incomplete - resync anytime at https://promptly-labs.com/integrations#resync-subscriptions"
   } else {
-    Write-Host "OK Subscription usage synced - use Refresh on your stats page anytime."
+    Promptly-Ok "Subscription usage synced"
   }
 }
 
@@ -733,6 +724,52 @@ function Promptly-CompanionIsRunning {
   return [bool](Get-Process -Name "Promptly Companion" -ErrorAction SilentlyContinue)
 }
 
+function Promptly-DownloadFileWithProgress {
+  param(
+    [Parameter(Mandatory)][string]$Url,
+    [Parameter(Mandatory)][string]$OutPath,
+    [string]$Label = "Downloading Promptly Desktop"
+  )
+
+  try {
+    $request = [System.Net.HttpWebRequest]::Create($Url)
+    $request.Method = "GET"
+    $response = $request.GetResponse()
+    try {
+      $total = [int64]$response.ContentLength
+      $stream = $response.GetResponseStream()
+      $fileStream = [System.IO.File]::Create($OutPath)
+      try {
+        $buffer = New-Object byte[] 81920
+        $read = 0
+        $done = 0
+        while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+          $fileStream.Write($buffer, 0, $read)
+          $done += $read
+          if ($total -gt 0) {
+            $pct = [Math]::Min(100, [Math]::Floor(($done * 100) / $total))
+            Write-Host ("`r-> {0}... {1}%  " -f $Label, $pct) -NoNewline
+          } else {
+            Write-Host ("`r-> {0}...  " -f $Label) -NoNewline
+          }
+        }
+        if ($total -gt 0) {
+          Write-Host ("`r-> {0}... 100%  " -f $Label)
+        } else {
+          Write-Host ("`r-> {0}... done  " -f $Label)
+        }
+      } finally {
+        $fileStream.Close()
+      }
+    } finally {
+      $response.Close()
+    }
+    return $true
+  } catch {
+    return $false
+  }
+}
+
 function Promptly-InstallCompanionWindows {
   param(
     [switch]$SkipLaunch
@@ -754,17 +791,17 @@ function Promptly-InstallCompanionWindows {
   if (-not $exeUrl) { $exeUrl = $fallback }
 
   $exePath = Join-Path $env:TEMP "Promptly-Companion-setup.exe"
-  Invoke-WebRequest -Uri $exeUrl -OutFile $exePath -UseBasicParsing
+  if (-not (Promptly-DownloadFileWithProgress -Url $exeUrl -OutPath $exePath -Label "Downloading Promptly Desktop")) {
+    Write-Host "Could not download Promptly desktop app."
+    exit 1
+  }
   Unblock-File -LiteralPath $exePath -ErrorAction SilentlyContinue
   Start-Process -FilePath $exePath -ArgumentList "/S" -Wait
   Remove-Item $exePath -Force -ErrorAction SilentlyContinue
   Promptly-Ok "Desktop app installed"
 
-  $shouldLaunch = -not $SkipLaunch -and $env:PROMPTLY_QUIET -ne "1" -and $env:PROMPTLY_SKIP_COMPANION_LAUNCH -ne "1"
+  $shouldLaunch = -not $SkipLaunch -and $env:PROMPTLY_SKIP_COMPANION_LAUNCH -ne "1"
   if (-not $shouldLaunch) {
-    if ($env:PROMPTLY_QUIET -eq "1") {
-      Promptly-Ok "Open Promptly Companion from the Start menu when you are ready"
-    }
     return
   }
 
@@ -778,19 +815,26 @@ function Promptly-InstallCompanionWindows {
     (Join-Path $env:ProgramFiles "Promptly Companion\Promptly Companion.exe"),
     (Join-Path ${env:ProgramFiles(x86)} "Promptly Companion\Promptly Companion.exe")
   )
-  foreach ($launchPath in $launchCandidates) {
-    if (Test-Path $launchPath) {
-      Unblock-File -LiteralPath $launchPath -ErrorAction SilentlyContinue
-      Start-Process -FilePath $launchPath | Out-Null
+  for ($attempt = 1; $attempt -le 6; $attempt++) {
+    foreach ($launchPath in $launchCandidates) {
+      if (Test-Path $launchPath) {
+        Unblock-File -LiteralPath $launchPath -ErrorAction SilentlyContinue
+        Start-Process -FilePath $launchPath | Out-Null
+        Promptly-Ok "Desktop app opened"
+        return
+      }
+    }
+
+    $startMenuShortcut = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Promptly Companion.lnk"
+    if (Test-Path $startMenuShortcut) {
+      Start-Process -FilePath $startMenuShortcut | Out-Null
       Promptly-Ok "Desktop app opened"
       return
     }
-  }
 
-  $startMenuShortcut = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Promptly Companion.lnk"
-  if (Test-Path $startMenuShortcut) {
-    Start-Process -FilePath $startMenuShortcut | Out-Null
-    Promptly-Ok "Desktop app opened"
+    if ($attempt -lt 6) {
+      Start-Sleep -Seconds 1
+    }
   }
 }
 

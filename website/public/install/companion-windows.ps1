@@ -2,7 +2,7 @@
 param()
 
 $ErrorActionPreference = "Stop"
-$env:PROMPTLY_QUIET = "1"
+$env:PROMPTLY_QUIET = if ($env:PROMPTLY_QUIET) { $env:PROMPTLY_QUIET } else { "0" }
 $InstallBase = if ($env:PROMPTLY_INSTALL_BASE) { $env:PROMPTLY_INSTALL_BASE } else { "https://promptly-labs.com/install" }
 $ApiUrl = "https://promptly-labs.com/api/companion/download"
 $Fallback = "https://github.com/lb1717/promptly-extension/releases/download/companion-v0.2.2/Promptly-Companion-0.2.2-win.exe"
