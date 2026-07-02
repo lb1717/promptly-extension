@@ -634,7 +634,7 @@ function Promptly-InstallAllAgentsWithSummary {
 function Promptly-SetupAgents {
   param(
     [Parameter(Mandatory)][string]$PairCode,
-    [string]$PluginPackUrl = $(if ($env:PROMPTLY_PLUGIN_PACK_URL) { $env:PROMPTLY_PLUGIN_PACK_URL } else { "https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.14" }),
+    [string]$PluginPackUrl = $(if ($env:PROMPTLY_PLUGIN_PACK_URL) { $env:PROMPTLY_PLUGIN_PACK_URL } else { "https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.15" }),
     [string]$Integrations = (Join-Path $env:USERPROFILE "integrations"),
     [switch]$SuppressSuccessLine
   )
@@ -778,7 +778,7 @@ function Promptly-InstallCompanionWindows {
   Write-Host "Installing Promptly Desktop..."
 
   $apiUrl = "https://promptly-labs.com/api/companion/download"
-  $fallback = "https://github.com/lb1717/promptly-extension/releases/download/companion-v0.2.2/Promptly-Companion-0.2.2-win.exe"
+  $fallback = "https://github.com/lb1717/promptly-extension/releases/download/companion-v0.2.4/Promptly-Companion-0.2.4-win.exe"
   $exeUrl = $null
   if ($env:PROMPTLY_COMPANION_WIN_URL) {
     $exeUrl = $env:PROMPTLY_COMPANION_WIN_URL

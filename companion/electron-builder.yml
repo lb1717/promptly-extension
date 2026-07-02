@@ -42,7 +42,9 @@ dmg:
       path: /Applications
 win:
   target:
-    - nsis
+    - target: nsis
+      arch:
+        - x64
   icon: build/icon.png
 nsis:
   oneClick: false
