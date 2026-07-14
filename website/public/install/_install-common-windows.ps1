@@ -785,15 +785,29 @@ function Promptly-FinalizeWithPairCode {
         return 1
       }
     }
-    Promptly-SyncSubscriptionUsage -Integrations $Integrations | Out-Null
+    $usageJob = Start-Job -ScriptBlock {
+      param($Integrations)
+      $cli = Join-Path $Integrations "packages\telemetry-cli\bin\promptly-telemetry.mjs"
+      $nodeExe = (Get-Command node.exe -ErrorAction SilentlyContinue).Source
+      if (-not $nodeExe) { $nodeExe = (Get-Command node -ErrorAction SilentlyContinue).Source }
+      if (-not $nodeExe -or -not (Test-Path $cli)) { return 0 }
+      & $nodeExe $cli usage-sync --login-claude 2>&1 | Out-Null
+      return $LASTEXITCODE
+    } -ArgumentList $Integrations
     Wait-Job $downloadJob | Out-Null
     $downloadCode = Promptly-CoerceExitCode (Receive-Job $downloadJob)
     Remove-Job $downloadJob -Force -ErrorAction SilentlyContinue
     if ($downloadCode -ne 0) {
+      Stop-Job $usageJob -ErrorAction SilentlyContinue
+      Remove-Job $usageJob -Force -ErrorAction SilentlyContinue
       Write-Host "Could not download Promptly desktop app."
       exit 1
     }
     Promptly-InstallCompanionFromExe -ExePath $exePath
+    Wait-Job $usageJob -ErrorAction SilentlyContinue | Out-Null
+    Receive-Job $usageJob -ErrorAction SilentlyContinue | Out-Null
+    Remove-Job $usageJob -Force -ErrorAction SilentlyContinue
+    Promptly-Ok "Subscription usage synced"
     return
   }
 
@@ -875,7 +889,7 @@ function Promptly-DownloadFileWithProgress {
 
 function Promptly-GetCompanionExeUrl {
   $apiUrl = "https://promptly-labs.com/api/companion/download"
-  $fallback = "https://github.com/lb1717/promptly-extension/releases/download/companion-v0.2.6/Promptly-Companion-0.2.6-win.exe"
+  $fallback = "https://github.com/lb1717/promptly-extension/releases/download/companion-v0.2.7/Promptly-Companion-0.2.7-win.exe"
   if ($env:PROMPTLY_COMPANION_WIN_URL) {
     return [string]$env:PROMPTLY_COMPANION_WIN_URL
   }
@@ -908,6 +922,8 @@ function Promptly-InstallCompanionFromExe {
     return
   }
 
+  Start-Sleep -Seconds 2
+
   if (Promptly-CompanionIsRunning) {
     Promptly-Ok "Desktop app already running"
     return
@@ -918,25 +934,31 @@ function Promptly-InstallCompanionFromExe {
     (Join-Path $env:ProgramFiles "Promptly Companion\Promptly Companion.exe"),
     (Join-Path ${env:ProgramFiles(x86)} "Promptly Companion\Promptly Companion.exe")
   )
-  for ($attempt = 1; $attempt -le 4; $attempt++) {
+  for ($attempt = 1; $attempt -le 10; $attempt++) {
     foreach ($launchPath in $launchCandidates) {
       if (Test-Path $launchPath) {
         Unblock-File -LiteralPath $launchPath -ErrorAction SilentlyContinue
         Start-Process -FilePath $launchPath | Out-Null
-        Promptly-Ok "Desktop app opened"
-        return
+        Start-Sleep -Seconds 1
+        if (Promptly-CompanionIsRunning) {
+          Promptly-Ok "Desktop app opened"
+          return
+        }
       }
     }
 
     $startMenuShortcut = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Promptly Companion.lnk"
     if (Test-Path $startMenuShortcut) {
       Start-Process -FilePath $startMenuShortcut | Out-Null
-      Promptly-Ok "Desktop app opened"
-      return
+      Start-Sleep -Seconds 1
+      if (Promptly-CompanionIsRunning) {
+        Promptly-Ok "Desktop app opened"
+        return
+      }
     }
 
-    if ($attempt -lt 4) {
-      Start-Sleep -Milliseconds 500
+    if ($attempt -lt 10) {
+      Start-Sleep -Seconds 1
     }
   }
 }

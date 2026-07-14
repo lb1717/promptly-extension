@@ -622,6 +622,14 @@ function registerCompanionWindow(win, options = {}) {
     return { action: "deny" };
   });
 
+  win.webContents.on("did-fail-load", (_event, errorCode, _description, validatedURL) => {
+    if (errorCode === -3 || win.isDestroyed()) return;
+    const target = String(validatedURL || "");
+    if (target.includes("index.html") || target.includes("app.bundle.js")) {
+      win.loadFile(join(__dirname, "renderer", "index.html"));
+    }
+  });
+
   win.loadFile(join(__dirname, "renderer", "index.html"));
 }
 
@@ -645,7 +653,7 @@ function createCompanionWindow(options = {}) {
       preload: join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: false
     }
   });
 
@@ -820,7 +828,7 @@ app.whenReady().then(() => {
   restartHostWatcher();
   startHostFocusTracking();
 
-  if (process.platform !== "darwin") {
+  if (companionSettings.openOnCompanionLaunch !== false && BrowserWindow.getAllWindows().length === 0) {
     openNewCompanionWindow();
   }
 });

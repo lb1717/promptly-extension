@@ -3,10 +3,6 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta
-      http-equiv="Content-Security-Policy"
-      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' http://localhost:* http://127.0.0.1:* https://promptly-labs.com https://www.promptly-labs.com https://*.vercel.app https://*"
-    />
     <title>Promptly Companion</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
@@ -288,6 +284,6 @@
       </div>
     </dialog>
 
-    <script type="module" src="app.js"></script>
+    <script defer src="app.bundle.js"></script>
   </body>
 </html>

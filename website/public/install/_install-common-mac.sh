@@ -881,13 +881,13 @@ promptly_finalize_with_pair_code() {
   fi
   promptly_run_fix_account "${code}" "${cli}" || return 1
   if promptly_is_quiet; then
-    local comp_pid=0
-    promptly_install_companion_mac &
-    comp_pid=$!
-    promptly_sync_subscription_usage "${integrations}" || true
-    if ! wait "${comp_pid}"; then
+    promptly_sync_subscription_usage "${integrations}" &
+    local sub_pid=$!
+    if ! promptly_install_companion_mac; then
+      wait "${sub_pid}" 2>/dev/null || true
       return 1
     fi
+    wait "${sub_pid}" 2>/dev/null || true
     return 0
   fi
   promptly_detail "→ Syncing hooks + telemetry into Claude Code, Cursor, and Codex runtimes…"
@@ -915,7 +915,7 @@ promptly_pick_companion_app_dir() {
 }
 
 promptly_companion_is_running_mac() {
-  if pgrep -f "Promptly Companion.app/Contents/MacOS" >/dev/null 2>&1; then
+  if pgrep -f "Promptly Companion.app/Contents/MacOS/Promptly Companion" >/dev/null 2>&1; then
     return 0
   fi
   if pgrep -x "Promptly Companion" >/dev/null 2>&1; then
@@ -926,21 +926,26 @@ promptly_companion_is_running_mac() {
 
 promptly_open_companion_mac() {
   local app_path="$1"
+  local attempt
   if [[ ! -d "${app_path}" ]]; then
     return 1
-  fi
-  if promptly_companion_is_running_mac; then
-    promptly_ok "Desktop app already running"
-    return 0
   fi
   if ! command -v open >/dev/null 2>&1; then
     promptly_detail "→ Open ${app_path} manually to finish setup."
     return 0
   fi
-  if open "${app_path}" >/dev/null 2>&1; then
-    promptly_ok "Desktop app opened"
-    return 0
-  fi
+  for attempt in 1 2 3 4 5 6; do
+    if promptly_companion_is_running_mac; then
+      promptly_ok "Desktop app already running"
+      return 0
+    fi
+    open "${app_path}" >/dev/null 2>&1 || true
+    sleep 1
+    if promptly_companion_is_running_mac; then
+      promptly_ok "Desktop app opened"
+      return 0
+    fi
+  done
   promptly_detail "→ Desktop app installed — open it from Applications if it did not launch automatically."
   return 0
 }
@@ -949,7 +954,7 @@ promptly_install_companion_mac() {
   local app_path
   app_path="$(promptly_pick_companion_app_dir)"
   local api_url="https://promptly-labs.com/api/companion/download"
-  local fallback="https://github.com/lb1717/promptly-extension/releases/download/companion-v0.2.6/Promptly-Companion-0.2.6-mac.dmg"
+  local fallback="https://github.com/lb1717/promptly-extension/releases/download/companion-v0.2.7/Promptly-Companion-0.2.7-mac.dmg"
   local dmg_url="${PROMPTLY_COMPANION_DMG_URL:-}"
   local tmp_dmg mount_point src_app attempt
 
