@@ -44,7 +44,7 @@ function Promptly-InvokeWithSpinner {
       Write-Host ("`r{0}" -f $frame) -NoNewline
     }
     $i++
-    Start-Sleep -Milliseconds 350
+    Start-Sleep -Milliseconds 120
   }
   Write-Host ("`r{0}" -f (' ' * 72))
   $output = Receive-Job $job
@@ -71,7 +71,7 @@ function Promptly-RunNodeWithSpinner {
   while ($job.State -eq 'Running') {
     Write-Host ("`r{0}" -f $frames[$i % 4]) -NoNewline
     $i++
-    Start-Sleep -Milliseconds 350
+    Start-Sleep -Milliseconds 120
   }
   Write-Host ("`r{0}" -f (' ' * 72))
   $code = 1
@@ -273,8 +273,13 @@ function Promptly-ApplyWindowsHookPaths {
   Promptly-PatchHookNodeInFiles -Paths (Promptly-CollectHookJsonPaths -Integrations $Integrations)
 }
 
+$script:PromptlyPackPrepared = $false
+
 function Promptly-PreparePluginPack {
   param([string]$Integrations)
+  if ($script:PromptlyPackPrepared) {
+    return
+  }
   $syncScript = Join-Path $Integrations "scripts\sync-plugin-pack.mjs"
   $nodeExe = Promptly-GetNodeExe
   if ($syncScript -and (Test-Path $syncScript)) {
@@ -398,7 +403,7 @@ function Promptly-StartCodexWatchDaemon {
   if (-not $nodeExe) { return $false }
   $env:PROMPTLY_NODE_EXE = $nodeExe
   Start-Process -FilePath $nodeExe -ArgumentList @($cli, "codex-watch-daemon") -WindowStyle Hidden | Out-Null
-  Start-Sleep -Seconds 2
+  Start-Sleep -Milliseconds 750
   if (Test-Path -LiteralPath $daemonFlag) {
     try {
       $state = Get-Content -LiteralPath $daemonFlag -Raw | ConvertFrom-Json
@@ -703,7 +708,7 @@ function Promptly-InstallAllAgentsWithSummary {
 function Promptly-SetupAgents {
   param(
     [Parameter(Mandatory)][string]$PairCode,
-    [string]$PluginPackUrl = $(if ($env:PROMPTLY_PLUGIN_PACK_URL) { $env:PROMPTLY_PLUGIN_PACK_URL } else { "https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.16" }),
+    [string]$PluginPackUrl = $(if ($env:PROMPTLY_PLUGIN_PACK_URL) { $env:PROMPTLY_PLUGIN_PACK_URL } else { "https://promptly-labs.com/downloads/promptly-coding-agents.zip?v=1.4.18" }),
     [string]$Integrations = (Join-Path $env:USERPROFILE "integrations"),
     [switch]$SuppressSuccessLine
   )
@@ -768,8 +773,27 @@ function Promptly-FinalizeWithPairCode {
     exit 1
   }
   if ($quiet) {
-    Promptly-SyncAllAgentRuntimes -Integrations $Integrations | Out-Null
+    Write-Host "Installing Promptly Desktop..."
+    $exeUrl = Promptly-GetCompanionExeUrl
+    $exePath = Join-Path $env:TEMP "Promptly-Companion-setup.exe"
+    $downloadJob = Start-Job -ArgumentList $exeUrl, $exePath -ScriptBlock {
+      param($Url, $OutPath)
+      try {
+        Invoke-WebRequest -Uri $Url -OutFile $OutPath -UseBasicParsing | Out-Null
+        return 0
+      } catch {
+        return 1
+      }
+    }
     Promptly-SyncSubscriptionUsage -Integrations $Integrations | Out-Null
+    Wait-Job $downloadJob | Out-Null
+    $downloadCode = Promptly-CoerceExitCode (Receive-Job $downloadJob)
+    Remove-Job $downloadJob -Force -ErrorAction SilentlyContinue
+    if ($downloadCode -ne 0) {
+      Write-Host "Could not download Promptly desktop app."
+      exit 1
+    }
+    Promptly-InstallCompanionFromExe -ExePath $exePath
     return
   }
 
@@ -849,40 +873,34 @@ function Promptly-DownloadFileWithProgress {
   }
 }
 
-function Promptly-InstallCompanionWindows {
+function Promptly-GetCompanionExeUrl {
+  $apiUrl = "https://promptly-labs.com/api/companion/download"
+  $fallback = "https://github.com/lb1717/promptly-extension/releases/download/companion-v0.2.6/Promptly-Companion-0.2.6-win.exe"
+  if ($env:PROMPTLY_COMPANION_WIN_URL) {
+    return [string]$env:PROMPTLY_COMPANION_WIN_URL
+  }
+  try {
+    $json = Invoke-RestMethod -Uri $apiUrl -Method Get
+    if ($json.winUrl) { return [string]$json.winUrl }
+  } catch {}
+  return $fallback
+}
+
+function Promptly-InstallCompanionFromExe {
   param(
+    [Parameter(Mandatory)][string]$ExePath,
     [switch]$SkipLaunch
   )
 
-  Write-Host "Installing Promptly Desktop..."
-
-  $apiUrl = "https://promptly-labs.com/api/companion/download"
-  $fallback = "https://github.com/lb1717/promptly-extension/releases/download/companion-v0.2.6/Promptly-Companion-0.2.6-win.exe"
-  $exeUrl = $null
-  if ($env:PROMPTLY_COMPANION_WIN_URL) {
-    $exeUrl = $env:PROMPTLY_COMPANION_WIN_URL
-  } else {
-    try {
-      $json = Invoke-RestMethod -Uri $apiUrl -Method Get
-      if ($json.winUrl) { $exeUrl = [string]$json.winUrl }
-    } catch {}
-  }
-  if (-not $exeUrl) { $exeUrl = $fallback }
-
-  $exePath = Join-Path $env:TEMP "Promptly-Companion-setup.exe"
-  if (-not (Promptly-DownloadFileWithProgress -Url $exeUrl -OutPath $exePath -Label "Downloading Promptly Desktop")) {
-    Write-Host "Could not download Promptly desktop app."
-    exit 1
-  }
-  Unblock-File -LiteralPath $exePath -ErrorAction SilentlyContinue
+  Unblock-File -LiteralPath $ExePath -ErrorAction SilentlyContinue
   if (Promptly-IsQuiet) {
     Promptly-InvokeWithSpinner -Label "Installing Promptly Desktop" -Action {
-      Start-Process -FilePath $using:exePath -ArgumentList "/S" -Wait
+      Start-Process -FilePath $using:ExePath -ArgumentList "/S" -Wait
     } | Out-Null
   } else {
-    Start-Process -FilePath $exePath -ArgumentList "/S" -Wait
+    Start-Process -FilePath $ExePath -ArgumentList "/S" -Wait
   }
-  Remove-Item $exePath -Force -ErrorAction SilentlyContinue
+  Remove-Item $ExePath -Force -ErrorAction SilentlyContinue
   Promptly-Ok "Desktop app installed"
 
   $shouldLaunch = -not $SkipLaunch -and $env:PROMPTLY_SKIP_COMPANION_LAUNCH -ne "1"
@@ -921,6 +939,22 @@ function Promptly-InstallCompanionWindows {
       Start-Sleep -Milliseconds 500
     }
   }
+}
+
+function Promptly-InstallCompanionWindows {
+  param(
+    [switch]$SkipLaunch
+  )
+
+  Write-Host "Installing Promptly Desktop..."
+
+  $exeUrl = Promptly-GetCompanionExeUrl
+  $exePath = Join-Path $env:TEMP "Promptly-Companion-setup.exe"
+  if (-not (Promptly-DownloadFileWithProgress -Url $exeUrl -OutPath $exePath -Label "Downloading Promptly Desktop")) {
+    Write-Host "Could not download Promptly desktop app."
+    exit 1
+  }
+  Promptly-InstallCompanionFromExe -ExePath $exePath -SkipLaunch:$SkipLaunch
 }
 
 function Promptly-ClaudeMarketplaceRefresh {
@@ -1087,6 +1121,7 @@ function Promptly-VerifyPluginPack {
     return $false
   }
   Promptly-PreparePluginPack -Integrations $Integrations
+  $script:PromptlyPackPrepared = $true
   if (Promptly-IsQuiet) {
     Promptly-Ok "Plugin pack ready"
   } else {
@@ -1101,7 +1136,9 @@ function Promptly-InstallForCursor {
   Promptly-Detail "=== Cursor ==="
   $source = Join-Path $Integrations "cursor"
   if (-not (Test-Path $source)) { Write-Host "✗ Cursor plugin files missing"; return 1 }
-  Promptly-PreparePluginPack -Integrations $Integrations
+  if (-not (Promptly-IsQuiet)) {
+    Promptly-PreparePluginPack -Integrations $Integrations
+  }
   Promptly-SyncTelemetryCli -PluginDir $source
   try { Promptly-SyncImproveCli -PluginDir $source } catch { }
   Promptly-CursorPluginReinstall -Integrations $Integrations
@@ -1139,7 +1176,9 @@ function Promptly-InstallForClaudeCode {
   if (-not (Promptly-EnsureClaudeCli)) { return 2 }
   $plugin = Join-Path $Integrations "claude-code"
   if (-not (Test-Path $plugin)) { Write-Host "Claude Code plugin files missing"; return 1 }
-  Promptly-PreparePluginPack -Integrations $Integrations
+  if (-not (Promptly-IsQuiet)) {
+    Promptly-PreparePluginPack -Integrations $Integrations
+  }
   Promptly-SyncTelemetryCli -PluginDir $plugin
   try { Promptly-SyncImproveCli -PluginDir $plugin } catch { }
   Promptly-SyncClaudeCodeCommandFiles -PluginDir $plugin
@@ -1177,7 +1216,9 @@ function Promptly-InstallForCodex {
   if (-not (Promptly-EnsureCodexCli)) { return 2 }
   $plugin = Join-Path $Integrations "codex"
   if (-not (Test-Path $plugin)) { Write-Host "Codex plugin files missing"; return 1 }
-  Promptly-PreparePluginPack -Integrations $Integrations
+  if (-not (Promptly-IsQuiet)) {
+    Promptly-PreparePluginPack -Integrations $Integrations
+  }
   Promptly-SyncTelemetryCli -PluginDir $plugin
   try { Promptly-SyncImproveCli -PluginDir $plugin } catch { }
   Promptly-InstallCodexSkill -PluginDir $plugin

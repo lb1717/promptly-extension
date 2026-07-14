@@ -45,7 +45,7 @@ promptly_spinner_start() {
         printf "\r%s" "${frames[$i]}"
       fi
       i=$(( (i + 1) % 4 ))
-      sleep 0.35
+      sleep 0.12
     done
   ) &
   PROMPTLY_SPINNER_PID=$!
@@ -117,9 +117,14 @@ promptly_download_url_to_file() {
   local url="$1"
   local dest="$2"
   local label="${3:-Downloading}"
-  local total size now pct pid
+  local total size pct pid
 
-  total="$(curl -fsI "${url}" 2>/dev/null | awk 'tolower($1)=="content-length:" {print $2}' | tr -d '\r' | tail -1)"
+  if [[ "${url}" == *promptly-coding-agents.zip* ]]; then
+    promptly_run_with_spinner "${label}" curl -fsSL -o "${dest}" "${url}" || return 1
+    return 0
+  fi
+
+  total="$(curl -fsI --connect-timeout 3 --max-time 10 "${url}" 2>/dev/null | awk 'tolower($1)=="content-length:" {print $2}' | tr -d '\r' | tail -1)"
   if [[ -z "${total}" || ! "${total}" =~ ^[0-9]+$ || "${total}" -lt 1 ]]; then
     promptly_run_with_spinner "${label}" curl -fsSL -o "${dest}" "${url}" || return 1
     return 0
@@ -144,7 +149,7 @@ promptly_download_url_to_file() {
     else
       printf "\r%s %s  " "${label}" "${frame}"
     fi
-    sleep 0.35
+    sleep 0.12
   done
   wait "${pid}" || return 1
   printf "\r%s… 100%%    \n" "${label}"
@@ -585,6 +590,9 @@ promptly_pull_latest_telemetry_cli() {
 
 promptly_prepare_plugin_pack() {
   local integrations="${1:-${HOME}/integrations}"
+  if [[ "${PROMPTLY_PACK_PREPARED:-}" == "1" ]]; then
+    return 0
+  fi
   promptly_refresh_telemetry_cli "${integrations}"
   local sync_script="${integrations}/scripts/sync-plugin-pack.mjs"
   if [[ -f "${sync_script}" ]] && command -v node >/dev/null 2>&1; then
@@ -618,6 +626,7 @@ promptly_verify_plugin_pack() {
     return 1
   fi
   promptly_prepare_plugin_pack "${integrations}"
+  export PROMPTLY_PACK_PREPARED=1
   promptly_is_quiet && promptly_ok "Plugin pack ready" || echo "✓ Plugin pack OK"
   return 0
 }
@@ -632,7 +641,9 @@ promptly_install_for_cursor() {
     echo "✗ Cursor plugin files missing from ${integrations}/cursor"
     return 1
   fi
-  promptly_prepare_plugin_pack "${integrations}"
+  if ! promptly_is_quiet; then
+    promptly_prepare_plugin_pack "${integrations}"
+  fi
   promptly_sync_telemetry_cli "${source_cursor}" || return 1
   set +e
   promptly_sync_improve_cli "${source_cursor}"
@@ -715,7 +726,9 @@ promptly_install_for_codex() {
     echo "✗ Codex plugin files missing from ${integrations}/codex"
     return 1
   fi
-  promptly_prepare_plugin_pack "${integrations}"
+  if ! promptly_is_quiet; then
+    promptly_prepare_plugin_pack "${integrations}"
+  fi
   promptly_sync_telemetry_cli "${codex_plugin}" || return 1
   set +e
   promptly_sync_improve_cli "${codex_plugin}"
@@ -772,9 +785,38 @@ promptly_install_all_agents() {
     fi
   }
 
-  _run_agent_install "Cursor" promptly_install_for_cursor "${integrations}"
-  _run_agent_install "Claude Code" promptly_install_for_claude_code "${integrations}"
-  _run_agent_install "Codex" promptly_install_for_codex "${integrations}"
+  if promptly_is_quiet; then
+    local cursor_code=0 codex_code=0
+    set +e
+    promptly_install_for_cursor "${integrations}" &
+    local pid_cursor=$!
+    promptly_install_for_codex "${integrations}" &
+    local pid_codex=$!
+    wait "${pid_cursor}"
+    cursor_code=$?
+    wait "${pid_codex}"
+    codex_code=$?
+    set -e
+    if [[ $cursor_code -eq 0 ]]; then
+      _installed+=("Cursor")
+    elif [[ $cursor_code -eq 2 ]]; then
+      _skipped+=("Cursor")
+    else
+      _failed+=("Cursor")
+    fi
+    if [[ $codex_code -eq 0 ]]; then
+      _installed+=("Codex")
+    elif [[ $codex_code -eq 2 ]]; then
+      _skipped+=("Codex")
+    else
+      _failed+=("Codex")
+    fi
+    _run_agent_install "Claude Code" promptly_install_for_claude_code "${integrations}"
+  else
+    _run_agent_install "Cursor" promptly_install_for_cursor "${integrations}"
+    _run_agent_install "Claude Code" promptly_install_for_claude_code "${integrations}"
+    _run_agent_install "Codex" promptly_install_for_codex "${integrations}"
+  fi
 
   if ! promptly_is_quiet; then
     echo ""
@@ -839,9 +881,13 @@ promptly_finalize_with_pair_code() {
   fi
   promptly_run_fix_account "${code}" "${cli}" || return 1
   if promptly_is_quiet; then
-    promptly_sync_all_agent_runtimes "${integrations}" >/dev/null 2>&1 \
-      || promptly_sync_all_agent_runtimes "${integrations}" || return 1
+    local comp_pid=0
+    promptly_install_companion_mac &
+    comp_pid=$!
     promptly_sync_subscription_usage "${integrations}" || true
+    if ! wait "${comp_pid}"; then
+      return 1
+    fi
     return 0
   fi
   promptly_detail "→ Syncing hooks + telemetry into Claude Code, Cursor, and Codex runtimes…"

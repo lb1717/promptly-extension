@@ -29,7 +29,6 @@ function Setup-PromptlyFull {
   }
 
   Promptly-SetupAgents -PairCode $Code -SuppressSuccessLine
-  Promptly-InstallCompanionWindows
   Promptly-PrintInstallSuccess
 }
 

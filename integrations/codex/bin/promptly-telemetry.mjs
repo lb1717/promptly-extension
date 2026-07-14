@@ -2969,10 +2969,16 @@ async function cmdFixAccount(flags) {
     detail("No split stats found to merge.");
   }
 
-  const liveChecks = await verifyLiveTrackingForAllTools();
+  let liveChecks = [];
+  let liveOk = true;
+  if (quiet) {
+    detail("Step 4/4: Verifying live tracking…");
+  } else {
+    liveChecks = await verifyLiveTrackingForAllTools();
+    const activeLiveChecks = liveChecks.filter((row) => !row.skipped);
+    liveOk = activeLiveChecks.length === 0 || activeLiveChecks.every((row) => row.ok);
+  }
   syncAgentRuntimeTelemetry();
-  const activeLiveChecks = liveChecks.filter((row) => !row.skipped);
-  const liveOk = activeLiveChecks.length === 0 || activeLiveChecks.every((row) => row.ok);
 
   const tools = ALL_TOOLS.map((tool) => {
     const creds = getCredentials(tool);
