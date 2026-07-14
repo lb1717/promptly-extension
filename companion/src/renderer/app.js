@@ -1,4 +1,4 @@
-import { improveInitialDraft, refineWithFeedback, fetchSuggestions, fetchAccount, CREDITS_POLL_MS } from "./api.js";
+import { improveInitialDraft, refineWithFeedback, fetchAccount, CREDITS_POLL_MS } from "./api.js";
 import { countWords } from "./further-improve.js";
 import { updateStrengthUi } from "./strength.js";
 import { createDictationController, stopAllDictation } from "./dictation.js";
@@ -47,7 +47,6 @@ const refineView = document.getElementById("refine-view");
 const draftInput = document.getElementById("draft-input");
 const draftMicBtn = document.getElementById("draft-mic-btn");
 const improveBtn = document.getElementById("improve-btn");
-const chipGrid = document.getElementById("chip-grid");
 const promptInput = document.getElementById("prompt-input");
 const copyBtn = document.getElementById("copy-btn");
 const pasteBtn = document.getElementById("paste-btn");
@@ -66,7 +65,6 @@ const settingsBtn = document.getElementById("settings-btn");
 const settingsDialog = document.getElementById("settings-dialog");
 const signInGate = document.getElementById("sign-in-gate");
 const signInBtn = document.getElementById("sign-in-btn");
-const refreshAuthBtn = document.getElementById("refresh-auth-btn");
 const permissionsDialog = document.getElementById("permissions-dialog");
 const permissionsAllowBtn = document.getElementById("permissions-allow-btn");
 const permissionsSkipBtn = document.getElementById("permissions-skip-btn");
@@ -99,14 +97,13 @@ const promptWordCount = document.getElementById("prompt-word-count");
 const draftBusyOverlay = document.getElementById("draft-busy-overlay");
 const promptBusyOverlay = document.getElementById("prompt-busy-overlay");
 
-const appliedChipIds = new Set();
 let promptAiEnhanced = false;
-/** @type {Array<{ id: string; label: string; snippet: string }>} */
-let suggestionOptions = [];
 
 let statusFadeTimer = null;
 let authBootstrapPending = true;
 let signInPollTimer = null;
+let hasEstablishedSession = false;
+let userSignedOutExplicitly = false;
 
 function scheduleStatusFade(ms = 4200) {
   if (statusFadeTimer) {
@@ -218,9 +215,18 @@ function updateCreditsUi() {
     resetLabel || (resetDays > 0 ? `Resets in ${resetDays} day${resetDays === 1 ? "" : "s"}` : resetHours > 0 ? `Resets in ${resetHours} hour${resetHours === 1 ? "" : "s"}` : "");
 }
 
+function markSessionEstablished() {
+  hasEstablishedSession = true;
+  userSignedOutExplicitly = false;
+}
+
+function shouldKeepWorkspaceVisible() {
+  return hasEstablishedSession && !userSignedOutExplicitly;
+}
+
 function updateAccountUi() {
   if (accountIndicator) {
-    if (!isSignedIn) {
+    if (!isSignedIn && !shouldKeepWorkspaceVisible()) {
       accountIndicator.textContent = "Sign in required";
       accountIndicator.className = "brand-account";
       accountIndicator.title = "Sign in to Promptly";
@@ -245,12 +251,17 @@ function updateAccountUi() {
 }
 
 function setSignedInUi(signedIn) {
-  isSignedIn = Boolean(signedIn);
+  if (signedIn) {
+    isSignedIn = true;
+    markSessionEstablished();
+  } else if (!shouldKeepWorkspaceVisible()) {
+    isSignedIn = false;
+  }
   if (signInGate) {
-    const hideGate = isSignedIn || authBootstrapPending;
+    const hideGate = shouldKeepWorkspaceVisible() || isSignedIn || authBootstrapPending;
     signInGate.classList.toggle("hidden", hideGate);
   }
-  if (!isSignedIn) {
+  if (!isSignedIn && !shouldKeepWorkspaceVisible()) {
     draftView?.classList.add("hidden");
     refineView?.classList.add("hidden");
   } else if (refineView && !refineView.classList.contains("hidden")) {
@@ -279,9 +290,11 @@ function startCreditsPolling() {
 async function refreshAccount(options = {}) {
   const { silent = false } = options;
   if (!config.token) {
-    account = null;
-    setSignedInUi(false);
-    stopCreditsPolling();
+    if (!shouldKeepWorkspaceVisible()) {
+      account = null;
+      setSignedInUi(false);
+      stopCreditsPolling();
+    }
     return null;
   }
   try {
@@ -290,9 +303,27 @@ async function refreshAccount(options = {}) {
     startCreditsPolling();
     return account;
   } catch (error) {
+    if (shouldKeepWorkspaceVisible()) {
+      if (silent) {
+        return account;
+      }
+      await reloadCredentialsFromDisk();
+      if (config.token) {
+        try {
+          account = await fetchAccount(config);
+          setSignedInUi(true);
+          startCreditsPolling();
+          return account;
+        } catch {
+          /* fall through */
+        }
+      }
+    }
     account = null;
-    setSignedInUi(false);
-    stopCreditsPolling();
+    if (!shouldKeepWorkspaceVisible()) {
+      setSignedInUi(false);
+      stopCreditsPolling();
+    }
     if (!silent) {
       showError(String(error?.message || error || "Could not verify your Promptly account."));
     }
@@ -324,32 +355,46 @@ function startSignInPoll() {
   stopSignInPoll();
   signInPollTimer = setInterval(() => {
     void attemptAutoConnectFromDisk({ silent: true }).then((connected) => {
-      if (connected) stopSignInPoll();
+      if (connected) {
+        stopSignInPoll();
+        clearStatus();
+        showSuccess("Connected to Promptly.");
+      }
     });
   }, 2000);
-  setTimeout(stopSignInPoll, 120000);
 }
 
 async function attemptAutoConnectFromDisk(options = {}) {
   const { silent = true, notifyOnSuccess = false, clearSignedOut = true } = options;
-  if (isSignedIn) return true;
+  if (isSignedIn && config.token) return true;
 
   if (clearSignedOut && window.promptlyCompanion?.saveSettings) {
     await window.promptlyCompanion.saveSettings({ signedOut: false });
+    userSignedOutExplicitly = false;
   }
   await reloadCredentialsFromDisk();
   if (!config.token) return false;
 
   await refreshAccount({ silent });
-  if (isSignedIn && notifyOnSuccess) {
-    clearStatus();
-    showSuccess("Connected to Promptly.");
+  if (isSignedIn || shouldKeepWorkspaceVisible()) {
+    if (notifyOnSuccess) {
+      clearStatus();
+      showSuccess("Connected to Promptly.");
+    }
+    return true;
   }
-  return isSignedIn;
+  return false;
 }
 
-async function refreshAuthFromDisk() {
-  await attemptAutoConnectFromDisk({ silent: false, notifyOnSuccess: true });
+async function ensureAuthForAction() {
+  await reloadCredentialsFromDisk();
+  if (config.token) {
+    await refreshAccount({ silent: true });
+    if (config.token) return true;
+  }
+  showError("Sign in to Promptly to continue.");
+  openSignInPage();
+  return false;
 }
 
 async function tryRestoreSession(options = {}) {
@@ -367,7 +412,7 @@ async function tryRestoreSession(options = {}) {
 
 function openSignInPage() {
   const url = getSignInUrl(config.apiUrl);
-  showStatus("Finish sign-in in your browser, then tap I've connected — refresh.", "loading", {
+  showStatus("Finish sign-in in your browser — this app connects automatically.", "loading", {
     autoFade: false
   });
   openExternalUrl(url);
@@ -388,6 +433,8 @@ function closeSettings() {
 
 async function signOut() {
   stopSignInPoll();
+  hasEstablishedSession = false;
+  userSignedOutExplicitly = true;
   if (window.promptlyCompanion?.saveSettings) {
     await window.promptlyCompanion.saveSettings({ signedOut: true });
   }
@@ -444,7 +491,11 @@ function handleApiError(error) {
   const message = mapPromptlyError(error);
   showError(message);
   if (error?.needsSignIn) {
-    setSignedInUi(false);
+    if (shouldKeepWorkspaceVisible()) {
+      void ensureAuthForAction();
+    } else {
+      setSignedInUi(false);
+    }
   }
 }
 
@@ -552,55 +603,6 @@ function syncPromptStrength() {
   updateWordCountLabel(promptWordCount, promptInput.value);
 }
 
-function renderChips() {
-  chipGrid.innerHTML = "";
-  appliedChipIds.clear();
-  for (const opt of suggestionOptions) {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "chip";
-    chip.dataset.id = opt.id;
-
-    const labelSpan = document.createElement("span");
-    labelSpan.textContent = opt.label;
-    chip.appendChild(labelSpan);
-
-    chip.addEventListener("click", () => {
-      if (appliedChipIds.has(opt.id)) return;
-      const current = String(promptInput.value || "").trim();
-      const snippet = String(opt.snippet || "").trim();
-      promptInput.value = current ? `${current}\n\n${snippet}` : snippet;
-      appliedChipIds.add(opt.id);
-      chip.classList.add("applied");
-      labelSpan.textContent = opt.label;
-      const check = document.createElement("span");
-      check.className = "chip-check";
-      check.textContent = "✓";
-      check.setAttribute("aria-hidden", "true");
-      chip.appendChild(check);
-      chip.setAttribute("aria-disabled", "true");
-      promptInput.focus();
-      syncPromptStrength();
-    });
-    chipGrid.appendChild(chip);
-  }
-}
-
-async function loadSuggestionsForPrompt(text) {
-  if (!config.token) {
-    suggestionOptions = [];
-    renderChips();
-    return;
-  }
-  chipGrid.innerHTML = '<span class="chip-loading">Loading suggestions…</span>';
-  try {
-    suggestionOptions = await fetchSuggestions(config, text);
-  } catch {
-    suggestionOptions = [];
-  }
-  renderChips();
-}
-
 function resetFeedbackUi() {
   summarySlot.value = "";
   summarySlot.classList.add("hidden");
@@ -643,10 +645,9 @@ async function handleImprove() {
     showError("Write at least 3 words before improving.");
     return;
   }
-  if (!isSignedIn || !config.token) {
-    showError("Sign in to Promptly to improve prompts.");
-    openSignInPage();
-    return;
+  if (!config.token) {
+    const ready = await ensureAuthForAction();
+    if (!ready || !config.token) return;
   }
   if (isCreditsHardExhausted(account?.credits)) {
     showError("Weekly token limit reached. Resets Sunday UTC.");
@@ -669,8 +670,7 @@ async function handleImprove() {
     syncPromptStrength();
 
     const pastePromise = autoPasteToHost(optimized);
-    const suggestionsPromise = loadSuggestionsForPrompt(optimized);
-    await Promise.all([pastePromise, suggestionsPromise]);
+    await pastePromise;
 
     followUpInput.focus();
   } catch (error) {
@@ -697,10 +697,9 @@ async function handleRefine() {
   if (followUpInput.readOnly) {
     return;
   }
-  if (!isSignedIn || !config.token) {
-    showError("Sign in to Promptly to continue.");
-    openSignInPage();
-    return;
+  if (!config.token) {
+    const ready = await ensureAuthForAction();
+    if (!ready || !config.token) return;
   }
   if (isCreditsHardExhausted(account?.credits)) {
     showError("Weekly token limit reached. Resets Sunday UTC.");
@@ -743,9 +742,6 @@ function startNewSession() {
   draftInput.value = "";
   promptInput.value = "";
   resetFeedbackUi();
-  chipGrid.innerHTML = "";
-  suggestionOptions = [];
-  appliedChipIds.clear();
   promptAiEnhanced = false;
   syncDraftStrength();
   syncPromptStrength();
@@ -1101,7 +1097,6 @@ pasteBtn?.addEventListener("click", async () => {
 });
 
 signInBtn?.addEventListener("click", () => openSignInPage());
-refreshAuthBtn?.addEventListener("click", () => void refreshAuthFromDisk());
 newBtn?.addEventListener("click", () => {
   if (window.promptlyCompanion?.openNewWindow) {
     void window.promptlyCompanion.openNewWindow();
@@ -1158,15 +1153,28 @@ void bootstrapConfig().then(async () => {
     await attemptAutoConnectFromDisk({ silent: true });
   }
   authBootstrapPending = false;
+  if (isSignedIn) {
+    markSessionEstablished();
+  }
   setSignedInUi(isSignedIn);
   await maybeShowPermissionsOnboarding();
 });
 
 window.promptlyCompanion?.onWindowFocus?.(() => {
-  if (isSignedIn) return;
-  void tryRestoreSession({ silent: true }).then((connected) => {
-    if (!connected) {
-      void attemptAutoConnectFromDisk({ silent: true });
+  if (userSignedOutExplicitly) return;
+  void (async () => {
+    await reloadCredentialsFromDisk();
+    if (config.token) {
+      await refreshAccount({ silent: true });
+      return;
     }
-  });
+    if (shouldKeepWorkspaceVisible()) {
+      await attemptAutoConnectFromDisk({ silent: true });
+      return;
+    }
+    const connected = await tryRestoreSession({ silent: true });
+    if (!connected) {
+      await attemptAutoConnectFromDisk({ silent: true });
+    }
+  })();
 });
