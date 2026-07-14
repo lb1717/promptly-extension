@@ -40,6 +40,10 @@ let account = null;
 let creditsPollTimer = null;
 let isSignedIn = false;
 let loadingSettingsForm = false;
+const PROMPT_IDLE_RESET_MS = 3 * 60 * 1000;
+let promptCopiedSinceImprove = false;
+/** @type {ReturnType<typeof setTimeout> | null} */
+let promptIdleResetTimer = null;
 
 const statusBanner = document.getElementById("status-banner");
 const draftView = document.getElementById("draft-view");
@@ -574,11 +578,51 @@ function setPromptBusy(busy) {
 function showDraftView() {
   draftView.classList.remove("hidden");
   refineView.classList.add("hidden");
+  clearPromptIdleReset();
 }
 
 function showRefineView() {
   draftView.classList.add("hidden");
   refineView.classList.remove("hidden");
+}
+
+function clearPromptIdleReset() {
+  promptCopiedSinceImprove = false;
+  if (promptIdleResetTimer) {
+    clearTimeout(promptIdleResetTimer);
+    promptIdleResetTimer = null;
+  }
+}
+
+function schedulePromptIdleReset() {
+  if (promptIdleResetTimer) {
+    clearTimeout(promptIdleResetTimer);
+    promptIdleResetTimer = null;
+  }
+  if (refineView.classList.contains("hidden")) {
+    return;
+  }
+  promptCopiedSinceImprove = false;
+  promptIdleResetTimer = setTimeout(() => {
+    promptIdleResetTimer = null;
+    if (!promptCopiedSinceImprove && !refineView.classList.contains("hidden")) {
+      startNewSession();
+    }
+  }, PROMPT_IDLE_RESET_MS);
+}
+
+function markPromptCopied() {
+  promptCopiedSinceImprove = true;
+  if (promptIdleResetTimer) {
+    clearTimeout(promptIdleResetTimer);
+    promptIdleResetTimer = null;
+  }
+}
+
+function handleWindowReopened() {
+  if (!refineView.classList.contains("hidden")) {
+    startNewSession();
+  }
 }
 
 function formatWordCount(text) {
@@ -668,6 +712,7 @@ async function handleImprove() {
     promptAiEnhanced = true;
     showRefineView();
     syncPromptStrength();
+    schedulePromptIdleReset();
 
     const pastePromise = autoPasteToHost(optimized);
     await pastePromise;
@@ -720,6 +765,7 @@ async function handleRefine() {
     showSummary(result.summary);
     promptAiEnhanced = true;
     syncPromptStrength();
+    schedulePromptIdleReset();
 
     await autoPasteToHost(result.prompt);
 
@@ -1068,6 +1114,7 @@ copyBtn?.addEventListener("click", async () => {
   const text = String(promptInput.value || "").trim();
   if (!text) return;
   await navigator.clipboard.writeText(text);
+  markPromptCopied();
   const prev = copyBtn.textContent;
   copyBtn.textContent = "Copied";
   setTimeout(() => {
@@ -1177,4 +1224,8 @@ window.promptlyCompanion?.onWindowFocus?.(() => {
       await attemptAutoConnectFromDisk({ silent: true });
     }
   })();
+});
+
+window.promptlyCompanion?.onWindowReopened?.(() => {
+  handleWindowReopened();
 });

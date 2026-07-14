@@ -889,7 +889,7 @@ function Promptly-DownloadFileWithProgress {
 
 function Promptly-GetCompanionExeUrl {
   $apiUrl = "https://promptly-labs.com/api/companion/download"
-  $fallback = "https://github.com/lb1717/promptly-extension/releases/download/companion-v0.2.7/Promptly-Companion-0.2.7-win.exe"
+  $fallback = "https://github.com/lb1717/promptly-extension/releases/download/companion-v0.2.8/Promptly-Companion-0.2.8-win.exe"
   if ($env:PROMPTLY_COMPANION_WIN_URL) {
     return [string]$env:PROMPTLY_COMPANION_WIN_URL
   }

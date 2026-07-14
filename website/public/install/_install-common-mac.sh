@@ -954,7 +954,7 @@ promptly_install_companion_mac() {
   local app_path
   app_path="$(promptly_pick_companion_app_dir)"
   local api_url="https://promptly-labs.com/api/companion/download"
-  local fallback="https://github.com/lb1717/promptly-extension/releases/download/companion-v0.2.7/Promptly-Companion-0.2.7-mac.dmg"
+  local fallback="https://github.com/lb1717/promptly-extension/releases/download/companion-v0.2.8/Promptly-Companion-0.2.8-mac.dmg"
   local dmg_url="${PROMPTLY_COMPANION_DMG_URL:-}"
   local tmp_dmg mount_point src_app attempt
 

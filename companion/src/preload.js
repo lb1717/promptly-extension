@@ -23,5 +23,11 @@ contextBridge.exposeInMainWorld("promptlyCompanion", {
     const handler = () => callback();
     ipcRenderer.on("promptly:window-focus", handler);
     return () => ipcRenderer.removeListener("promptly:window-focus", handler);
+  },
+  onWindowReopened: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    const handler = () => callback();
+    ipcRenderer.on("promptly:window-reopened", handler);
+    return () => ipcRenderer.removeListener("promptly:window-reopened", handler);
   }
 });

@@ -33,7 +33,7 @@ const APP_VERSION = (() => {
 const ANCHOR_POLL_MS = 900;
 const HOST_FOCUS_TRACK_MS = 1200;
 const PRODUCTION_API_URL = "https://promptly-labs.com";
-const EXPANDED_DEFAULT = { width: 380, height: 580, minWidth: 320, minHeight: 420 };
+const EXPANDED_DEFAULT = { width: 380, height: 580, minWidth: 280, minHeight: 340 };
 const COLLAPSED_HEIGHT = 35;
 const COLLAPSED_WIDTH_RATIO = 0.7;
 const COLLAPSED_WIDTH_INSET_RATIO = 0.15;
@@ -553,11 +553,19 @@ function syncExpandedBoundsSize(win) {
   state.expandedBounds = { ...win.getBounds() };
 }
 
+function notifyWindowReopened(win) {
+  if (!win || win.isDestroyed()) {
+    return;
+  }
+  win.webContents.send("promptly:window-reopened");
+}
+
 function registerCompanionWindow(win, options = {}) {
   companionWindows.add(win);
   applyWindowAnchor(win, options);
   win.__promptlySetAnchor = (anchorOptions) => applyWindowAnchor(win, anchorOptions);
   let readyResolve = null;
+  let wasHidden = false;
   win.__promptlyWaitUntilReady = () =>
     new Promise((resolve) => {
       if (win.isDestroyed()) {
@@ -594,6 +602,17 @@ function registerCompanionWindow(win, options = {}) {
     stopAnchorWatch(win);
     setCompanionOnTop(win, true);
     win.webContents.send("promptly:window-focus");
+  });
+
+  win.on("hide", () => {
+    wasHidden = true;
+  });
+
+  win.on("show", () => {
+    if (wasHidden) {
+      wasHidden = false;
+      notifyWindowReopened(win);
+    }
   });
 
   win.on("blur", () => {
@@ -646,6 +665,8 @@ function createCompanionWindow(options = {}) {
     backgroundColor: "#f4f5f7",
     autoHideMenuBar: false,
     frame: false,
+    resizable: true,
+    thickFrame: process.platform === "win32",
     transparent: false,
     visibleOnAllWorkspaces: false,
     visibleOnFullScreen: true,
@@ -744,18 +765,24 @@ ipcMain.handle("promptly:set-window-size", (event, size) => {
   }
   const bounds = win.getBounds();
   const height = Math.round(Number(size?.height));
-  if (!Number.isFinite(height)) {
-    return { ok: false, error: "Invalid height" };
+  const width = Math.round(Number(size?.width));
+  if (!Number.isFinite(height) && !Number.isFinite(width)) {
+    return { ok: false, error: "Invalid size" };
   }
-  const nextHeight = Math.max(EXPANDED_DEFAULT.minHeight, Math.min(10_000, height));
+  const nextHeight = Number.isFinite(height)
+    ? Math.max(EXPANDED_DEFAULT.minHeight, Math.min(10_000, height))
+    : bounds.height;
+  const nextWidth = Number.isFinite(width)
+    ? Math.max(EXPANDED_DEFAULT.minWidth, Math.min(10_000, width))
+    : bounds.width;
   win.setBounds({
     x: bounds.x,
     y: bounds.y,
-    width: bounds.width,
+    width: nextWidth,
     height: nextHeight
   });
   syncExpandedBoundsSize(win);
-  return { ok: true, height: nextHeight };
+  return { ok: true, width: nextWidth, height: nextHeight };
 });
 ipcMain.handle("promptly:paste-to-host", async (event, text) => {
   if (
@@ -834,7 +861,9 @@ app.whenReady().then(() => {
 });
 
 app.on("second-instance", () => {
-  if (focusMostRecentCompanionWindow()) {
+  const win = focusMostRecentCompanionWindow();
+  if (win) {
+    notifyWindowReopened(win);
     return;
   }
   openNewCompanionWindow();

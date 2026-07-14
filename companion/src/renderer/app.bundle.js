@@ -614,6 +614,9 @@
   var creditsPollTimer = null;
   var isSignedIn = false;
   var loadingSettingsForm = false;
+  var PROMPT_IDLE_RESET_MS = 3 * 60 * 1e3;
+  var promptCopiedSinceImprove = false;
+  var promptIdleResetTimer = null;
   var statusBanner = document.getElementById("status-banner");
   var draftView = document.getElementById("draft-view");
   var refineView = document.getElementById("refine-view");
@@ -1090,10 +1093,46 @@
   function showDraftView() {
     draftView.classList.remove("hidden");
     refineView.classList.add("hidden");
+    clearPromptIdleReset();
   }
   function showRefineView() {
     draftView.classList.add("hidden");
     refineView.classList.remove("hidden");
+  }
+  function clearPromptIdleReset() {
+    promptCopiedSinceImprove = false;
+    if (promptIdleResetTimer) {
+      clearTimeout(promptIdleResetTimer);
+      promptIdleResetTimer = null;
+    }
+  }
+  function schedulePromptIdleReset() {
+    if (promptIdleResetTimer) {
+      clearTimeout(promptIdleResetTimer);
+      promptIdleResetTimer = null;
+    }
+    if (refineView.classList.contains("hidden")) {
+      return;
+    }
+    promptCopiedSinceImprove = false;
+    promptIdleResetTimer = setTimeout(() => {
+      promptIdleResetTimer = null;
+      if (!promptCopiedSinceImprove && !refineView.classList.contains("hidden")) {
+        startNewSession();
+      }
+    }, PROMPT_IDLE_RESET_MS);
+  }
+  function markPromptCopied() {
+    promptCopiedSinceImprove = true;
+    if (promptIdleResetTimer) {
+      clearTimeout(promptIdleResetTimer);
+      promptIdleResetTimer = null;
+    }
+  }
+  function handleWindowReopened() {
+    if (!refineView.classList.contains("hidden")) {
+      startNewSession();
+    }
   }
   function formatWordCount(text) {
     const n = countWords(text);
@@ -1171,6 +1210,7 @@
       promptAiEnhanced = true;
       showRefineView();
       syncPromptStrength();
+      schedulePromptIdleReset();
       const pastePromise = autoPasteToHost(optimized);
       await pastePromise;
       followUpInput.focus();
@@ -1217,6 +1257,7 @@
       showSummary(result.summary);
       promptAiEnhanced = true;
       syncPromptStrength();
+      schedulePromptIdleReset();
       await autoPasteToHost(result.prompt);
       unlockFollowUp(true);
       followUpInput.focus();
@@ -1522,6 +1563,7 @@
     const text = String(promptInput.value || "").trim();
     if (!text) return;
     await navigator.clipboard.writeText(text);
+    markPromptCopied();
     const prev = copyBtn.textContent;
     copyBtn.textContent = "Copied";
     setTimeout(() => {
@@ -1623,5 +1665,8 @@
         await attemptAutoConnectFromDisk({ silent: true });
       }
     })();
+  });
+  window.promptlyCompanion?.onWindowReopened?.(() => {
+    handleWindowReopened();
   });
 })();
