@@ -95,7 +95,7 @@ function HostAppCarousel({
           {variant === "watermark" ? (
             <>
               <span
-                className={`min-w-0 text-base font-semibold leading-none tracking-tight ${DEMO_PROMPT_FONT_CLASS} sm:hidden`}
+                className={`min-w-0 text-sm font-semibold leading-tight tracking-tight ${DEMO_PROMPT_FONT_CLASS} sm:hidden`}
               >
                 {app.label}
               </span>
@@ -363,7 +363,7 @@ export function ResearchCompanionDemo({ compactTop = false }: { compactTop?: boo
     return () => media.removeEventListener("change", update);
   }, []);
 
-  const companionHeight = view === "pasted" ? (isNarrowViewport ? 118 : 144) : isNarrowViewport ? 156 : 196;
+  const companionHeight = view === "pasted" ? (isNarrowViewport ? 132 : 144) : isNarrowViewport ? 172 : 196;
 
   useEffect(() => {
     if (view !== "pasted") {
@@ -550,37 +550,37 @@ export function ResearchCompanionDemo({ compactTop = false }: { compactTop?: boo
             </div>
           </div>
 
-          <div className="relative min-h-0 flex-1">
-            <div className="pointer-events-none absolute bottom-3 left-3 right-[40%] top-[3.25rem] z-10 flex items-start sm:left-8 sm:right-auto sm:top-3 sm:items-center sm:max-w-[calc(100%-236px)]">
+          <div className="relative flex min-h-0 flex-1 items-start gap-2.5 px-3 pt-3 max-sm:pb-2 sm:block sm:p-0">
+            <div className="pointer-events-none z-10 flex w-[6.5rem] shrink-0 items-start sm:absolute sm:bottom-3 sm:left-8 sm:top-3 sm:w-auto sm:max-w-[calc(100%-236px)] sm:items-center">
               <HostAppCarousel
                 index={hostCarouselIndex}
                 variant="watermark"
                 compact={Boolean(hostPrompt)}
               />
             </div>
-          </div>
 
-          <div className="absolute right-2 top-11 z-30 w-[min(36%,8.75rem)] sm:right-3 sm:top-3 sm:w-[220px] sm:max-w-[calc(100%-1.5rem)]">
-            <motion.div
-              animate={{ height: companionHeight }}
-              initial={false}
-              transition={{ duration: 0.35, ease: [0.32, 0.72, 0, 1] }}
-              className="w-full overflow-hidden rounded-lg"
-            >
-              <CompanionChrome
-                view={view}
-                draftText={draftText}
-                recordingPhase={recordingPhase}
-                improving={improving}
-                micPulse={micPulse}
-                stopPulse={stopPulse}
-                improvePulse={improvePulse}
-                showPastedBanner={showPastedBanner}
-                micBtnRef={micBtnRef}
-                stopBtnRef={stopBtnRef}
-                improveBtnRef={improveBtnRef}
-              />
-            </motion.div>
+            <div className="relative z-30 min-w-0 flex-1 sm:absolute sm:right-3 sm:top-3 sm:w-[220px] sm:max-w-[calc(100%-1.5rem)] sm:flex-none">
+              <motion.div
+                animate={{ height: companionHeight }}
+                initial={false}
+                transition={{ duration: 0.35, ease: [0.32, 0.72, 0, 1] }}
+                className="w-full overflow-hidden rounded-lg"
+              >
+                <CompanionChrome
+                  view={view}
+                  draftText={draftText}
+                  recordingPhase={recordingPhase}
+                  improving={improving}
+                  micPulse={micPulse}
+                  stopPulse={stopPulse}
+                  improvePulse={improvePulse}
+                  showPastedBanner={showPastedBanner}
+                  micBtnRef={micBtnRef}
+                  stopBtnRef={stopBtnRef}
+                  improveBtnRef={improveBtnRef}
+                />
+              </motion.div>
+            </div>
           </div>
 
           <div className="shrink-0 border-t border-[#e5e7eb] bg-white px-4 py-3 sm:px-5">

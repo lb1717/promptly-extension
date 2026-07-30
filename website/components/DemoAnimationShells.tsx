@@ -16,8 +16,9 @@ export function ResearchCompanionDemoShell({ compactTop = false }: { compactTop?
             <div className="ml-2 h-3 w-24 rounded bg-[#e5e7eb]" />
           </div>
 
-          <div className="relative min-h-0 flex-1 bg-white">
-            <div className="absolute right-2 top-11 h-[156px] w-[min(36%,8.75rem)] rounded-lg border border-[#d8dce5] bg-[#f4f5f7] sm:right-3 sm:top-3 sm:h-[196px] sm:w-[220px] sm:max-w-[calc(100%-1.5rem)]" />
+          <div className="relative flex min-h-0 flex-1 items-start gap-2.5 px-3 pt-3 max-sm:pb-2 sm:block sm:p-0">
+            <div className="h-16 w-[6.5rem] shrink-0 rounded bg-[#f3f4f6] sm:hidden" />
+            <div className="min-h-[172px] min-w-0 flex-1 rounded-lg border border-[#d8dce5] bg-[#f4f5f7] sm:absolute sm:right-3 sm:top-3 sm:h-[196px] sm:w-[220px] sm:max-w-[calc(100%-1.5rem)] sm:flex-none" />
           </div>
 
           <div className="shrink-0 border-t border-[#e5e7eb] bg-white px-4 py-3 sm:px-5">
