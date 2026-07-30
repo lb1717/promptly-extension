@@ -33,7 +33,7 @@ export function LaunchCampaignWelcomeClient() {
             Set up your Pro account in a few minutes — no payment required during our public launch.
           </p>
         </div>
-        <p className="mt-5 text-center text-sm font-semibold text-ink">
+        <p className="mt-5 text-center text-sm font-semibold text-red-600">
           {remaining.toLocaleString()} free {remaining === 1 ? "account" : "accounts"} remaining
         </p>
         <Link
