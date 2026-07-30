@@ -100,8 +100,7 @@ export function rootMetadata(): Metadata {
   return {
     metadataBase: new URL(getSiteUrl()),
     title: {
-      default:
-        "Promptly — One-Click AI Prompt Improvement for ChatGPT, Claude & Gemini",
+      default: "Promptly Labs",
       template: "%s"
     },
     description: DEFAULT_DESCRIPTION,

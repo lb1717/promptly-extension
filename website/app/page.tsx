@@ -18,7 +18,7 @@ const ResearchCompanionDemoLazy = dynamic(
 );
 
 export const metadata = buildPageMetadata({
-  title: "Promptly | Improve and Track AI Use for ChatGPT, Claude & Gemini",
+  title: "Promptly Labs",
   description:
     "Improve AI prompts in one click inside ChatGPT, Claude, and Gemini. Promptly rewrites for clearer intent, structured outputs, and less wasted effort from Promptly Labs.",
   path: "/",
