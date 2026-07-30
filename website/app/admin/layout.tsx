@@ -1,7 +1,8 @@
 import { ReactNode } from "react";
+import { SITE_TAB_TITLE } from "@/lib/seo";
 
 export const metadata = {
-  title: "Promptly Labs",
+  title: { absolute: SITE_TAB_TITLE },
   robots: { index: false, follow: false }
 };
 

@@ -20,6 +20,9 @@ export const PRODUCT_KEYWORDS = [
 
 export const DEFAULT_KEYWORDS = PRODUCT_KEYWORDS;
 
+/** Browser tab title on every page. */
+export const SITE_TAB_TITLE = "Promptly Labs";
+
 type SitemapChangeFrequency = "always" | "hourly" | "daily" | "weekly" | "monthly" | "yearly" | "never";
 
 /** Public marketing pages included in the sitemap. */
@@ -63,7 +66,7 @@ export function buildPageMetadata({
   const ogImage = absoluteUrl("/icon-512.png");
 
   return {
-    title: { absolute: title },
+    title: { absolute: SITE_TAB_TITLE },
     description,
     keywords: keywords ?? DEFAULT_KEYWORDS,
     alternates: {
@@ -100,7 +103,7 @@ export function rootMetadata(): Metadata {
   return {
     metadataBase: new URL(getSiteUrl()),
     title: {
-      default: "Promptly Labs",
+      default: SITE_TAB_TITLE,
       template: "%s"
     },
     description: DEFAULT_DESCRIPTION,
