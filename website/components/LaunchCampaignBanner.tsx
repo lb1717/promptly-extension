@@ -11,7 +11,9 @@ function BannerMessage({ remaining, className = "" }: { remaining: number; class
       className={`text-base font-medium leading-snug [overflow-wrap:break-word] [word-break:normal] hyphens-none sm:text-lg ${className}`}
     >
       First 1,000 Accounts Are Free. Only{" "}
-      <span className="whitespace-nowrap font-black tracking-tight">{remaining.toLocaleString()} Remaining</span>
+      <span className="whitespace-nowrap">
+        <span className="font-black tracking-tight">{remaining.toLocaleString()}</span> Remaining
+      </span>
     </p>
   );
 }

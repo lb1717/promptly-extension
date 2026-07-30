@@ -558,7 +558,7 @@ export function GeneralOnboardingClient() {
                   </p>
                 </div>
                 {!campaignLoading ? (
-                  <p className="text-center text-sm font-semibold text-ink">
+                  <p className="text-center text-sm font-semibold text-red-600">
                     {remaining.toLocaleString()} free {remaining === 1 ? "account" : "accounts"} remaining
                   </p>
                 ) : null}

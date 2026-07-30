@@ -1,6 +1,10 @@
 appId: com.promptlylabs.companion
 productName: Promptly Companion
 copyright: Copyright © Promptly Labs
+protocols:
+  name: Promptly Companion
+  schemes:
+    - promptly-companion
 directories:
   output: dist
   buildResources: build

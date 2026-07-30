@@ -8,6 +8,7 @@ import {
   type OnboardingTourSetup,
   type OnboardingTourStep
 } from "@/lib/onboardingTour";
+import { openPromptlyCompanion } from "@/lib/openPromptlyCompanion";
 import { useRouter } from "next/navigation";
 import {
   useCallback,
@@ -256,16 +257,25 @@ export function OnboardingTourOverlay({
         ) : null}
         {targetRect ? <Spotlight rect={targetRect} /> : null}
         <TourCard
-          body={`You're all set. This is your statistics home — filter by range and service anytime. Now try Promptly on ${promptTarget}.`}
+          body={`You're all set. This is your statistics home — filter by range and service anytime. Now try Promptly on ${promptTarget}. Promptly Companion is your desktop prompt workshop — open it below to find it in Applications or the Start menu.`}
           style={cardStyle}
         >
-          <button
-            type="button"
-            onClick={finishTour}
-            className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800"
-          >
-            Done
-          </button>
+          <div className="flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={openPromptlyCompanion}
+              className="inline-flex w-full items-center justify-center rounded-xl border border-line bg-cream px-4 py-2.5 text-sm font-semibold text-ink hover:bg-cream-dark"
+            >
+              Open Promptly Companion
+            </button>
+            <button
+              type="button"
+              onClick={finishTour}
+              className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800"
+            >
+              Done
+            </button>
+          </div>
         </TourCard>
       </>
     );

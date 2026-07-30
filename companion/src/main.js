@@ -432,6 +432,40 @@ function openNewCompanionWindow() {
   return win;
 }
 
+const COMPANION_PROTOCOL = "promptly-companion";
+/** @type {string | null} */
+let pendingProtocolUrl = null;
+
+function registerCompanionProtocol() {
+  if (process.defaultApp) {
+    if (process.argv.length >= 2) {
+      app.setAsDefaultProtocolClient(COMPANION_PROTOCOL, process.execPath, [join(process.argv[1])]);
+    }
+  } else {
+    app.setAsDefaultProtocolClient(COMPANION_PROTOCOL);
+  }
+}
+
+function focusOrOpenCompanionFromDeepLink() {
+  const win = focusMostRecentCompanionWindow();
+  if (win) {
+    notifyWindowReopened(win);
+    return;
+  }
+  openNewCompanionWindow();
+}
+
+function handleCompanionProtocolUrl(url) {
+  if (!url || !String(url).startsWith(`${COMPANION_PROTOCOL}://`)) {
+    return;
+  }
+  focusOrOpenCompanionFromDeepLink();
+}
+
+function readCompanionProtocolArg(argv = process.argv) {
+  return argv.find((arg) => arg.startsWith(`${COMPANION_PROTOCOL}://`)) || null;
+}
+
 async function resolvePasteHost(win) {
   const anchorProcessNames =
     win && !win.isDestroyed() ? getLayerState(win).anchorProcessNames || [] : [];
@@ -832,7 +866,27 @@ ipcMain.handle("promptly:save-settings", (_event, patch) => {
   return companionSettings;
 });
 
+if (process.platform === "darwin") {
+  app.on("open-url", (event, url) => {
+    event.preventDefault();
+    if (app.isReady()) {
+      handleCompanionProtocolUrl(url);
+    } else {
+      pendingProtocolUrl = url;
+    }
+  });
+}
+
 app.whenReady().then(() => {
+  registerCompanionProtocol();
+
+  const startupProtocolUrl = readCompanionProtocolArg();
+  if (startupProtocolUrl) {
+    handleCompanionProtocolUrl(startupProtocolUrl);
+  } else if (pendingProtocolUrl) {
+    handleCompanionProtocolUrl(pendingProtocolUrl);
+    pendingProtocolUrl = null;
+  }
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
     callback(permission === "media");
   });
@@ -860,7 +914,12 @@ app.whenReady().then(() => {
   }
 });
 
-app.on("second-instance", () => {
+app.on("second-instance", (_event, argv) => {
+  const protocolUrl = readCompanionProtocolArg(argv);
+  if (protocolUrl) {
+    handleCompanionProtocolUrl(protocolUrl);
+    return;
+  }
   const win = focusMostRecentCompanionWindow();
   if (win) {
     notifyWindowReopened(win);
