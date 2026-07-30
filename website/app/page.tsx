@@ -1,5 +1,6 @@
 import dynamic from "next/dynamic";
 import { AmbientBackground } from "@/components/AmbientBackground";
+import { LaunchCampaignBanner } from "@/components/LaunchCampaignBanner";
 import { ResearchCompanionDemoShell } from "@/components/DemoAnimationShells";
 import { HomeAnalyticsSection } from "@/components/HomeAnalyticsSection";
 import { DemoSection } from "@/components/DemoSection";
@@ -31,6 +32,7 @@ export default function HomePage() {
       <ProductPageJsonLd />
       <AmbientBackground />
       <div className="relative z-10">
+        <LaunchCampaignBanner />
         <Navbar />
         <Hero />
         <ResearchCompanionDemoLazy compactTop />

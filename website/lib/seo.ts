@@ -29,6 +29,7 @@ type SitemapChangeFrequency = "always" | "hourly" | "daily" | "weekly" | "monthl
 export const PUBLIC_SITEMAP_ROUTES: Array<{ path: string; changeFrequency: SitemapChangeFrequency; priority: number }> =
   [
     { path: "/", changeFrequency: "weekly", priority: 1 },
+    { path: "/launch", changeFrequency: "weekly", priority: 0.85 },
     { path: "/get-started", changeFrequency: "weekly", priority: 0.9 },
     { path: "/companion", changeFrequency: "weekly", priority: 0.75 },
     { path: "/research", changeFrequency: "monthly", priority: 0.7 },

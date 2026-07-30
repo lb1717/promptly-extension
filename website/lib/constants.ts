@@ -48,6 +48,8 @@ export const SITE = {
   navBrand: "Promptly Labs",
   /** Public general onboarding funnel (not sales invite links). */
   getStartedPath: "/get-started",
+  /** Launch campaign welcome page before free Pro onboarding. */
+  launchPath: "/launch",
   /** Shareable desktop app download — always resolves the latest release. */
   companionPath: "/companion",
   /** Install-only desktop setup (get-started install step). */

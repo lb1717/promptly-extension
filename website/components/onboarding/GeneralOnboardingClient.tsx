@@ -22,6 +22,7 @@ import {
   resolveGoogleSignInError
 } from "@/lib/firebaseAuthAccountHints";
 import { listenForGoogleSignInReturn, signInWithGoogleInteractive } from "@/lib/firebaseGoogleAuth";
+import { useLaunchCampaign } from "@/lib/useLaunchCampaign";
 import { EmailVerificationNotice } from "@/components/auth/EmailVerificationNotice";
 import { GetStartedAiSelection } from "@/components/onboarding/GetStartedAiSelection";
 import { GetStartedPromptlyInstall } from "@/components/onboarding/GetStartedPromptlyInstall";
@@ -101,6 +102,9 @@ function upgradeOptionsForTier(tier: Exclude<PlanKey, "free" | "enterprise">): P
 export function GeneralOnboardingClient() {
   const searchParams = useSearchParams();
   const checkoutResult = searchParams.get("checkout");
+  const campaignRequested = searchParams.get("campaign") === "launch";
+  const { promoActive, remaining, loading: campaignLoading } = useLaunchCampaign();
+  const campaignMode = campaignRequested || promoActive;
 
   const [step, setStep] = useState(1);
   const [user, setUser] = useState<User | null>(null);
@@ -117,6 +121,7 @@ export function GeneralOnboardingClient() {
     stripeConfigured: false
   });
   const [checkoutBusy, setCheckoutBusy] = useState(false);
+  const [campaignClaimBusy, setCampaignClaimBusy] = useState(false);
   const [extensionDetected, setExtensionDetected] = useState(false);
   const [browserStoreClicked, setBrowserStoreClicked] = useState(false);
   const [productSelection, setProductSelection] = useState<OnboardingProductSelection>(
@@ -184,6 +189,47 @@ export function GeneralOnboardingClient() {
   const goToStep = useCallback((next: number) => {
     setStep(next);
   }, []);
+
+  const onboardingReturnPath = useMemo(
+    () => (campaignMode ? "/get-started?campaign=launch" : "/get-started"),
+    [campaignMode]
+  );
+
+  async function claimLaunchProAndFinish() {
+    if (!user) return;
+    setCampaignClaimBusy(true);
+    setError("");
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch("/api/campaign/claim", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(String(data?.error || "Could not claim your free Pro account."));
+      }
+      await loadBilling(user);
+      setSelectedPlan("pro");
+      setNotice("Your free Pro account is ready.");
+      goToStep(DONE_STEP);
+    } catch (e) {
+      setError(String(e instanceof Error ? e.message : e));
+      if (!promoActive) {
+        goToStep(PLAN_STEP);
+      }
+    } finally {
+      setCampaignClaimBusy(false);
+    }
+  }
+
+  async function continueAfterInstall() {
+    if (campaignMode && promoActive) {
+      await claimLaunchProAndFinish();
+      return;
+    }
+    goToStep(PLAN_STEP);
+  }
 
   useEffect(() => {
     return listenForGoogleSignInReturn({
@@ -317,7 +363,7 @@ export function GeneralOnboardingClient() {
     setBusy(true);
     let openedTab = false;
     try {
-      const flow = await signInWithGoogleInteractive("/get-started");
+      const flow = await signInWithGoogleInteractive(onboardingReturnPath);
       if (flow.status === "success") {
         resetVerificationStatus();
         await syncPromptlyUserDoc(flow.user);
@@ -446,13 +492,15 @@ export function GeneralOnboardingClient() {
   }
 
   const stepTitle = useMemo(() => {
-    if (step === 1) return "Welcome to Promptly, set up in 2 minutes";
+    if (step === 1) {
+      return campaignMode ? "Welcome to Promptly Labs" : "Welcome to Promptly, set up in 2 minutes";
+    }
     if (step === 2) return "Create your account";
     if (step === 3) return "What AI platforms do you use?";
     if (step === 4) return "Install Promptly";
     if (step === 5) return billingLoading || activePaidTier ? "Your plan" : "Choose your plan";
     return "Setup complete";
-  }, [step, activePaidTier, billingLoading]);
+  }, [step, activePaidTier, billingLoading, campaignMode]);
 
   return (
     <div className="mx-auto w-full max-w-xl px-4 py-10 pb-24">
@@ -500,13 +548,28 @@ export function GeneralOnboardingClient() {
         ) : null}
 
         {step === 1 ? (
-          <div className="mt-6">
+          <div className="mt-6 space-y-4">
+            {campaignMode ? (
+              <>
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/80 p-4">
+                  <p className="text-sm font-semibold text-emerald-900">First 1,000 customer accounts are free</p>
+                  <p className="mt-1 text-sm leading-relaxed text-emerald-800">
+                    Create your account, install Promptly, and activate Pro with no payment step.
+                  </p>
+                </div>
+                {!campaignLoading ? (
+                  <p className="text-center text-sm font-semibold text-ink">
+                    {remaining.toLocaleString()} free {remaining === 1 ? "account" : "accounts"} remaining
+                  </p>
+                ) : null}
+              </>
+            ) : null}
             <button
               type="button"
               onClick={() => goToStep(welcomeContinueStep(user, ACCOUNT_STEP, CHOOSE_AI_STEP))}
               className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-cream hover:bg-neutral-800"
             >
-              Get Started
+              {campaignMode ? "Set Up Free Account" : "Get Started"}
             </button>
           </div>
         ) : null}
@@ -649,11 +712,15 @@ export function GeneralOnboardingClient() {
             ) : null}
             <button
               type="button"
-              onClick={() => goToStep(PLAN_STEP)}
-              disabled={!canFinishInstall}
+              onClick={() => void continueAfterInstall()}
+              disabled={!canFinishInstall || campaignClaimBusy}
               className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-cream hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              Continue to plan
+              {campaignClaimBusy
+                ? "Activating free Pro…"
+                : campaignMode && promoActive
+                  ? "Finish free setup"
+                  : "Continue to plan"}
             </button>
             <button type="button" onClick={() => goToStep(CHOOSE_AI_STEP)} className="text-xs text-faint hover:text-ink">
               ← Back

@@ -1,10 +1,11 @@
 "use client";
 
 import { Button } from "@/components/ui/Button";
-import { SITE } from "@/lib/constants";
+import { useLaunchCampaign } from "@/lib/useLaunchCampaign";
 import { useEffect, useRef, useState } from "react";
 
 export function Hero() {
+  const { getStartedPath } = useLaunchCampaign();
   const [ctaShouldShine, setCtaShouldShine] = useState(false);
   const shineResetTimerRef = useRef<number | null>(null);
 
@@ -56,7 +57,7 @@ export function Hero() {
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3">
             <Button
-              href={SITE.getStartedPath}
+              href={getStartedPath}
               className={ctaShouldShine ? `promptly-cta-shine ${heroCtaClass}` : heroCtaClass}
             >
               GET STARTED
