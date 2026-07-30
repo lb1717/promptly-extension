@@ -1,5 +1,6 @@
 "use client";
 
+import { OnboardingCompanionStep } from "@/components/onboarding/OnboardingCompanionStep";
 import {
   advanceOnboardingTour,
   endOnboardingTour,
@@ -8,7 +9,6 @@ import {
   type OnboardingTourSetup,
   type OnboardingTourStep
 } from "@/lib/onboardingTour";
-import { openPromptlyCompanion } from "@/lib/openPromptlyCompanion";
 import { useRouter } from "next/navigation";
 import {
   useCallback,
@@ -24,7 +24,7 @@ type Rect = { top: number; left: number; width: number; height: number };
 const SPOTLIGHT_TARGET_CLASS = "onboarding-tour-spotlight-target";
 
 function measureTarget(step: OnboardingTourStep): Rect | null {
-  if (step === "complete") return null;
+  if (step === "complete" || step === "open-companion") return null;
   const el = document.querySelector(ONBOARDING_TOUR_TARGETS[step]);
   if (!el) return null;
   const rect = el.getBoundingClientRect();
@@ -150,6 +150,7 @@ export function OnboardingTourOverlay({
   }, [router]);
 
   useLayoutEffect(() => {
+    if (step === "open-companion") return;
     updateRect();
     const targetSelector =
       step === "complete" ? ONBOARDING_TOUR_TARGETS["statistics-filters"] : ONBOARDING_TOUR_TARGETS[step];
@@ -160,6 +161,7 @@ export function OnboardingTourOverlay({
   }, [step, updateRect, pathname]);
 
   useEffect(() => {
+    if (step === "open-companion") return;
     updateRect();
     window.addEventListener("resize", updateRect);
     window.addEventListener("scroll", updateRect, true);
@@ -167,9 +169,10 @@ export function OnboardingTourOverlay({
       window.removeEventListener("resize", updateRect);
       window.removeEventListener("scroll", updateRect, true);
     };
-  }, [updateRect]);
+  }, [step, updateRect]);
 
   useEffect(() => {
+    if (step === "open-companion") return;
     let attempts = 0;
     const id = window.setInterval(() => {
       attempts += 1;
@@ -181,6 +184,7 @@ export function OnboardingTourOverlay({
   }, [step, updateRect, pathname]);
 
   useEffect(() => {
+    if (step === "open-companion") return;
     const selector =
       step === "complete" ? ONBOARDING_TOUR_TARGETS["statistics-filters"] : ONBOARDING_TOUR_TARGETS[step];
     const el = document.querySelector(selector);
@@ -249,6 +253,10 @@ export function OnboardingTourOverlay({
 
   const waitingForTarget = !targetRect;
 
+  if (step === "open-companion") {
+    return <OnboardingCompanionStep onFinish={finishTour} />;
+  }
+
   if (step === "complete") {
     return (
       <>
@@ -257,25 +265,16 @@ export function OnboardingTourOverlay({
         ) : null}
         {targetRect ? <Spotlight rect={targetRect} /> : null}
         <TourCard
-          body={`You're all set. This is your statistics home — filter by range and service anytime. Now try Promptly on ${promptTarget}. Promptly Companion is your desktop prompt workshop — open it below to find it in Applications or the Start menu.`}
+          body={`You're all set. This is your statistics home — filter by range and service anytime. Now try Promptly on ${promptTarget}.`}
           style={cardStyle}
         >
-          <div className="flex flex-col gap-2">
-            <button
-              type="button"
-              onClick={openPromptlyCompanion}
-              className="inline-flex w-full items-center justify-center rounded-xl border border-line bg-cream px-4 py-2.5 text-sm font-semibold text-ink hover:bg-cream-dark"
-            >
-              Open Promptly Companion
-            </button>
-            <button
-              type="button"
-              onClick={finishTour}
-              className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800"
-            >
-              Done
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => advanceOnboardingTour("open-companion")}
+            className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800"
+          >
+            Next
+          </button>
         </TourCard>
       </>
     );

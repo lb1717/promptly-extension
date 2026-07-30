@@ -23,7 +23,7 @@ function parseTab(raw: string | null): AccountHubTab {
 }
 
 function tabForTourStep(step: OnboardingTourStep): AccountHubTab | null {
-  if (step === "statistics-filters" || step === "account-settings-tab" || step === "complete") {
+  if (step === "statistics-filters" || step === "account-settings-tab" || step === "complete" || step === "open-companion") {
     return "statistics";
   }
   if (step === "account-section" || step === "account-token-usage" || step === "statistics-tab") {

@@ -8,7 +8,8 @@ export type OnboardingTourStep =
   | "account-section"
   | "account-token-usage"
   | "statistics-tab"
-  | "complete";
+  | "complete"
+  | "open-companion";
 
 export type OnboardingTourSetup = {
   web: boolean;
@@ -26,7 +27,10 @@ export const ONBOARDING_TOUR_STORAGE_KEY = "promptly_onboarding_tour";
 export const ONBOARDING_AWAITING_TUTORIAL_KEY = "promptly_onboarding_awaiting_tutorial";
 export const ONBOARDING_TOUR_EVENT = "promptly-onboarding-tour";
 
-export const ONBOARDING_TOUR_TARGETS: Record<Exclude<OnboardingTourStep, "complete">, string> = {
+export const ONBOARDING_TOUR_TARGETS: Record<
+  Exclude<OnboardingTourStep, "complete" | "open-companion">,
+  string
+> = {
   "account-nav": '[data-onboarding-tour="account-nav"]',
   "statistics-filters": '[data-onboarding-tour="statistics-filters"]',
   "account-settings-tab": '[data-onboarding-tour="account-settings-tab"]',
@@ -44,7 +48,11 @@ export const ONBOARDING_TOUR_ACCOUNT_STEPS: OnboardingTourStep[] = [
 ];
 
 /** Steps while the Statistics tab should be visible. */
-export const ONBOARDING_TOUR_STATISTICS_STEPS: OnboardingTourStep[] = ["statistics-filters", "complete"];
+export const ONBOARDING_TOUR_STATISTICS_STEPS: OnboardingTourStep[] = [
+  "statistics-filters",
+  "complete",
+  "open-companion"
+];
 
 export function isOnboardingTourAccountPage(pathname: string): boolean {
   return pathname === "/account" || pathname === "/account/";
