@@ -8,8 +8,8 @@ import { useLaunchCampaign } from "@/lib/useLaunchCampaign";
 function BannerMessage({ remaining, className = "" }: { remaining: number; className?: string }) {
   return (
     <span className={className}>
-      First 1,000 Customer Accounts Are Free. Get Yours Now. Only{" "}
-      <strong className="font-bold">{remaining.toLocaleString()}</strong> Remaining
+      First 1,000 Accounts Are Free. Only{" "}
+      <span className="font-black tracking-tight">{remaining.toLocaleString()}</span> Remaining
     </span>
   );
 }
@@ -45,7 +45,7 @@ export function LaunchCampaignBanner() {
           <div className="launch-banner-marquee-track flex w-max">
             {[0, 1].map((copy) => (
               <span key={copy} className="shrink-0 px-6" aria-hidden={copy === 1}>
-                <BannerMessage remaining={remaining} className="text-base font-semibold" />
+                <BannerMessage remaining={remaining} className="text-base font-medium" />
               </span>
             ))}
           </div>
@@ -61,7 +61,7 @@ export function LaunchCampaignBanner() {
       </div>
 
       <div className="relative z-20 mx-auto hidden max-w-6xl flex-col items-center justify-center gap-2.5 px-4 py-2.5 text-center sm:flex sm:flex-row sm:gap-3">
-        <BannerMessage remaining={remaining} className="text-base font-semibold sm:text-lg" />
+        <BannerMessage remaining={remaining} className="text-base font-medium sm:text-lg" />
         <Link
           href={SITE.launchPath}
           className="inline-flex shrink-0 items-center justify-center rounded-lg bg-white px-4 py-1.5 text-sm font-semibold text-ink hover:bg-neutral-100"
