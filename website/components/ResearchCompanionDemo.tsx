@@ -75,8 +75,8 @@ function HostAppCarousel({
         variant === "title"
           ? "relative flex h-full min-w-0 flex-1 items-center overflow-hidden sm:min-w-[8.5rem] sm:flex-none"
           : compact
-            ? "relative h-12 min-w-0 w-full max-w-full overflow-hidden sm:h-14 sm:min-w-[9.5rem] sm:max-w-[16rem]"
-            : "relative h-[3.75rem] min-w-0 w-full max-w-full overflow-hidden sm:h-[4.75rem] sm:min-w-[9.5rem] sm:max-w-[17rem]"
+            ? "relative h-14 min-w-0 w-full max-w-full overflow-hidden sm:h-14 sm:min-w-[9.5rem] sm:max-w-[16rem]"
+            : "relative h-16 min-w-0 w-full max-w-full overflow-hidden sm:h-[4.75rem] sm:min-w-[9.5rem] sm:max-w-[17rem]"
       }
     >
       <AnimatePresence initial={false}>
@@ -89,24 +89,35 @@ function HostAppCarousel({
           className={
             variant === "title"
               ? "absolute inset-0 flex items-center"
-              : "absolute inset-0 flex max-w-full items-center gap-1.5 sm:gap-2"
+              : "absolute inset-0 flex max-w-full flex-col items-start justify-center gap-1 sm:flex-row sm:items-center sm:gap-2"
           }
         >
-          <span
-            className={
-              variant === "title"
-                ? `truncate text-[11px] font-medium leading-none sm:text-xs ${DEMO_PROMPT_PLACEHOLDER_CLASS}`
-                : compact
-                  ? `min-w-0 whitespace-pre-line text-base font-semibold leading-[1.08] tracking-tight ${DEMO_PROMPT_FONT_CLASS} sm:text-2xl`
-                  : `min-w-0 whitespace-pre-line text-xl font-semibold leading-[1.08] tracking-tight ${DEMO_PROMPT_FONT_CLASS} sm:text-3xl`
-            }
-          >
-            {displayLabel}
-          </span>
+          {variant === "watermark" ? (
+            <>
+              <span
+                className={`min-w-0 text-base font-semibold leading-none tracking-tight ${DEMO_PROMPT_FONT_CLASS} sm:hidden`}
+              >
+                {app.label}
+              </span>
+              <span
+                className={`hidden min-w-0 whitespace-pre-line text-xl font-semibold leading-[1.08] tracking-tight sm:inline ${
+                  compact ? `${DEMO_PROMPT_FONT_CLASS} sm:text-2xl` : `${DEMO_PROMPT_FONT_CLASS} sm:text-3xl`
+                }`}
+              >
+                {displayLabel}
+              </span>
+            </>
+          ) : (
+            <span
+              className={`truncate text-[11px] font-medium leading-none sm:text-xs ${DEMO_PROMPT_PLACEHOLDER_CLASS}`}
+            >
+              {displayLabel}
+            </span>
+          )}
           {variant === "watermark" ? (
             <Logo
               className={
-                compact ? "h-6 w-6 shrink-0 sm:h-7 sm:w-7" : "h-7 w-7 shrink-0 sm:h-8 sm:w-8"
+                compact ? "h-6 w-6 shrink-0 sm:h-7 sm:w-7" : "h-6 w-6 shrink-0 sm:h-8 sm:w-8"
               }
             />
           ) : null}
@@ -161,7 +172,7 @@ function PromptImproverHeader({ wordCount }: { wordCount: number }) {
       <img
         src="/images/promptly-logo.png"
         alt=""
-        className="absolute left-2 h-3.5 w-3.5 shrink-0"
+        className="absolute left-2 hidden h-3.5 w-3.5 shrink-0 sm:block"
         draggable={false}
       />
       <div className="flex flex-1 items-center justify-center gap-1.5">
@@ -352,7 +363,7 @@ export function ResearchCompanionDemo({ compactTop = false }: { compactTop?: boo
     return () => media.removeEventListener("change", update);
   }, []);
 
-  const companionHeight = view === "pasted" ? (isNarrowViewport ? 128 : 144) : isNarrowViewport ? 168 : 196;
+  const companionHeight = view === "pasted" ? (isNarrowViewport ? 118 : 144) : isNarrowViewport ? 156 : 196;
 
   useEffect(() => {
     if (view !== "pasted") {
@@ -540,7 +551,7 @@ export function ResearchCompanionDemo({ compactTop = false }: { compactTop?: boo
           </div>
 
           <div className="relative min-h-0 flex-1">
-            <div className="pointer-events-none absolute bottom-3 left-3 right-[47%] top-[3.25rem] z-10 flex items-start sm:left-8 sm:right-auto sm:top-3 sm:items-center sm:max-w-[calc(100%-236px)]">
+            <div className="pointer-events-none absolute bottom-3 left-3 right-[40%] top-[3.25rem] z-10 flex items-start sm:left-8 sm:right-auto sm:top-3 sm:items-center sm:max-w-[calc(100%-236px)]">
               <HostAppCarousel
                 index={hostCarouselIndex}
                 variant="watermark"
@@ -549,7 +560,7 @@ export function ResearchCompanionDemo({ compactTop = false }: { compactTop?: boo
             </div>
           </div>
 
-          <div className="absolute right-2 top-11 z-30 w-[min(46%,10.75rem)] sm:right-3 sm:top-3 sm:w-[220px] sm:max-w-[calc(100%-1.5rem)]">
+          <div className="absolute right-2 top-11 z-30 w-[min(36%,8.75rem)] sm:right-3 sm:top-3 sm:w-[220px] sm:max-w-[calc(100%-1.5rem)]">
             <motion.div
               animate={{ height: companionHeight }}
               initial={false}
