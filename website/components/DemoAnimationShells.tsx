@@ -4,20 +4,20 @@ export function ResearchCompanionDemoShell({ compactTop = false }: { compactTop?
   return (
     <section
       id="companion-demo"
-      className={`scroll-mt-24 px-4 pb-8 sm:pb-10 ${compactTop ? "pt-2 sm:pt-3" : "py-8 sm:py-10"}`}
+      className={`scroll-mt-24 px-4 pb-8 sm:pb-10 ${compactTop ? "pt-4 sm:pt-3" : "py-8 sm:py-10"}`}
       aria-hidden
     >
       <div className="mx-auto max-w-6xl">
-        <div className="research-companion-scene relative mx-auto flex h-[380px] w-full max-w-[min(100%,570px)] flex-col overflow-hidden rounded-lg border border-[#d8dce5] bg-white shadow-[0_20px_50px_rgba(15,23,42,0.12)] sm:h-[420px] sm:max-w-[min(100%,630px)]">
-          <div className="flex h-10 shrink-0 items-center gap-2 border-b border-[#e5e7eb] bg-[#fafafa] px-4">
-            <span className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]" />
-            <span className="h-2.5 w-2.5 rounded-full bg-[#febc2e]" />
-            <span className="h-2.5 w-2.5 rounded-full bg-[#28c840]" />
+        <div className="research-companion-scene relative mx-auto flex h-[400px] w-full max-w-[min(100%,570px)] flex-col overflow-hidden rounded-lg border border-[#d8dce5] bg-white shadow-[0_20px_50px_rgba(15,23,42,0.12)] sm:h-[420px] sm:max-w-[min(100%,630px)]">
+          <div className="flex h-10 shrink-0 items-center gap-1.5 border-b border-[#e5e7eb] bg-[#fafafa] px-3 sm:gap-2 sm:px-4">
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#ff5f57]" />
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#febc2e]" />
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#28c840]" />
             <div className="ml-2 h-3 w-24 rounded bg-[#e5e7eb]" />
           </div>
 
           <div className="relative min-h-0 flex-1 bg-white">
-            <div className="absolute right-3 top-3 h-[196px] w-[220px] max-w-[calc(100%-1.5rem)] rounded-lg border border-[#d8dce5] bg-[#f4f5f7]" />
+            <div className="absolute right-2 top-11 h-[168px] w-[min(46%,10.75rem)] rounded-lg border border-[#d8dce5] bg-[#f4f5f7] sm:right-3 sm:top-3 sm:h-[196px] sm:w-[220px] sm:max-w-[calc(100%-1.5rem)]" />
           </div>
 
           <div className="shrink-0 border-t border-[#e5e7eb] bg-white px-4 py-3 sm:px-5">

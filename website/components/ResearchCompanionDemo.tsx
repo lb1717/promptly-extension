@@ -73,10 +73,10 @@ function HostAppCarousel({
     <div
       className={
         variant === "title"
-          ? "relative flex h-full min-w-[8.5rem] items-center overflow-hidden"
+          ? "relative flex h-full min-w-0 flex-1 items-center overflow-hidden sm:min-w-[8.5rem] sm:flex-none"
           : compact
-            ? "relative h-12 min-w-[9.5rem] w-full max-w-[14rem] overflow-hidden sm:h-14 sm:max-w-[16rem]"
-            : "relative h-[3.75rem] min-w-[9.5rem] w-full max-w-[15rem] overflow-hidden sm:h-[4.75rem] sm:max-w-[17rem]"
+            ? "relative h-12 min-w-0 w-full max-w-full overflow-hidden sm:h-14 sm:min-w-[9.5rem] sm:max-w-[16rem]"
+            : "relative h-[3.75rem] min-w-0 w-full max-w-full overflow-hidden sm:h-[4.75rem] sm:min-w-[9.5rem] sm:max-w-[17rem]"
       }
     >
       <AnimatePresence initial={false}>
@@ -95,9 +95,9 @@ function HostAppCarousel({
           <span
             className={
               variant === "title"
-                ? `text-xs font-medium leading-none ${DEMO_PROMPT_PLACEHOLDER_CLASS}`
+                ? `truncate text-[11px] font-medium leading-none sm:text-xs ${DEMO_PROMPT_PLACEHOLDER_CLASS}`
                 : compact
-                  ? `min-w-0 whitespace-pre-line text-lg font-semibold leading-[1.08] tracking-tight ${DEMO_PROMPT_FONT_CLASS} sm:text-2xl`
+                  ? `min-w-0 whitespace-pre-line text-base font-semibold leading-[1.08] tracking-tight ${DEMO_PROMPT_FONT_CLASS} sm:text-2xl`
                   : `min-w-0 whitespace-pre-line text-xl font-semibold leading-[1.08] tracking-tight ${DEMO_PROMPT_FONT_CLASS} sm:text-3xl`
             }
           >
@@ -342,6 +342,17 @@ export function ResearchCompanionDemo({ compactTop = false }: { compactTop?: boo
   const [improvePulse, setImprovePulse] = useState(false);
   const [showPastedBanner, setShowPastedBanner] = useState(false);
   const [hostCarouselIndex, setHostCarouselIndex] = useState(0);
+  const [isNarrowViewport, setIsNarrowViewport] = useState(false);
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 639px)");
+    const update = () => setIsNarrowViewport(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  const companionHeight = view === "pasted" ? (isNarrowViewport ? 128 : 144) : isNarrowViewport ? 168 : 196;
 
   useEffect(() => {
     if (view !== "pasted") {
@@ -512,24 +523,24 @@ export function ResearchCompanionDemo({ compactTop = false }: { compactTop?: boo
   return (
     <section
       id="companion-demo"
-      className={`scroll-mt-24 px-4 pb-8 sm:pb-10 ${compactTop ? "pt-2 sm:pt-3" : "py-8 sm:py-10"}`}
+      className={`scroll-mt-24 px-4 pb-8 sm:pb-10 ${compactTop ? "pt-4 sm:pt-3" : "py-8 sm:py-10"}`}
     >
       <div className="mx-auto max-w-6xl">
         <div
           ref={sceneRef}
-          className="research-companion-scene relative mx-auto flex h-[380px] w-full max-w-[min(100%,570px)] flex-col overflow-hidden rounded-lg border border-[#d8dce5] bg-white shadow-[0_20px_50px_rgba(15,23,42,0.12)] sm:h-[420px] sm:max-w-[min(100%,630px)]"
+          className="research-companion-scene relative mx-auto flex h-[400px] w-full max-w-[min(100%,570px)] flex-col overflow-hidden rounded-lg border border-[#d8dce5] bg-white shadow-[0_20px_50px_rgba(15,23,42,0.12)] sm:h-[420px] sm:max-w-[min(100%,630px)]"
         >
-          <div className="flex h-10 shrink-0 items-center gap-2 border-b border-[#e5e7eb] bg-[#fafafa] px-4">
-            <span className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]" />
-            <span className="h-2.5 w-2.5 rounded-full bg-[#febc2e]" />
-            <span className="h-2.5 w-2.5 rounded-full bg-[#28c840]" />
-            <div className="flex h-full min-w-0 flex-1 items-center">
+          <div className="flex h-10 shrink-0 items-center gap-1.5 border-b border-[#e5e7eb] bg-[#fafafa] px-3 sm:gap-2 sm:px-4">
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#ff5f57]" />
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#febc2e]" />
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#28c840]" />
+            <div className="flex h-full min-w-0 flex-1 items-center overflow-hidden pl-0.5 sm:pl-0">
               <HostAppCarousel index={hostCarouselIndex} variant="title" />
             </div>
           </div>
 
           <div className="relative min-h-0 flex-1">
-            <div className="pointer-events-none absolute bottom-3 left-5 top-3 z-10 flex max-w-[calc(100%-236px)] items-center sm:left-8">
+            <div className="pointer-events-none absolute bottom-3 left-3 right-[47%] top-[3.25rem] z-10 flex items-start sm:left-8 sm:right-auto sm:top-3 sm:items-center sm:max-w-[calc(100%-236px)]">
               <HostAppCarousel
                 index={hostCarouselIndex}
                 variant="watermark"
@@ -538,9 +549,9 @@ export function ResearchCompanionDemo({ compactTop = false }: { compactTop?: boo
             </div>
           </div>
 
-          <div className="absolute right-3 top-3 z-30 w-[220px] max-w-[calc(100%-1.5rem)]">
+          <div className="absolute right-2 top-11 z-30 w-[min(46%,10.75rem)] sm:right-3 sm:top-3 sm:w-[220px] sm:max-w-[calc(100%-1.5rem)]">
             <motion.div
-              animate={{ height: view === "pasted" ? 144 : 196 }}
+              animate={{ height: companionHeight }}
               initial={false}
               transition={{ duration: 0.35, ease: [0.32, 0.72, 0, 1] }}
               className="w-full overflow-hidden rounded-lg"
