@@ -93,6 +93,28 @@ body {
   animation: launch-banner-marquee 24s linear infinite;
 }
 
+.launch-banner-shine-sweep::after {
+  content: "";
+  position: absolute;
+  top: -35%;
+  left: -140%;
+  width: 46%;
+  height: 170%;
+  background: linear-gradient(100deg, transparent 0%, rgba(255, 255, 255, 0.55) 52%, transparent 100%);
+  transform: skewX(-18deg);
+  animation: launch-banner-shine-sweep 1.9s ease-in-out 1;
+  pointer-events: none;
+}
+
+@keyframes launch-banner-shine-sweep {
+  from {
+    left: -140%;
+  }
+  to {
+    left: 170%;
+  }
+}
+
 @keyframes launch-banner-marquee {
   from {
     transform: translateX(0);
@@ -106,6 +128,10 @@ body {
   .launch-banner-marquee-track {
     animation: none;
     transform: translateX(0);
+  }
+
+  .launch-banner-shine-sweep::after {
+    animation: none;
   }
 }
 
