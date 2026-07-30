@@ -49,6 +49,8 @@ function SpotlightCard({
       <p className="mt-4 flex-1 text-sm leading-relaxed text-muted">{body}</p>
       <a
         href={href}
+        target="_blank"
+        rel="noopener noreferrer"
         className="mt-6 inline-flex w-fit items-center justify-center rounded-xl border border-line bg-cream-dark px-4 py-2.5 text-sm font-semibold text-muted transition hover:bg-cream-dark hover:text-ink"
       >
         Read on arXiv
