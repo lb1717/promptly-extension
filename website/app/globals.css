@@ -89,6 +89,26 @@ body {
   }
 }
 
+.launch-banner-marquee-track {
+  animation: launch-banner-marquee 24s linear infinite;
+}
+
+@keyframes launch-banner-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .launch-banner-marquee-track {
+    animation: none;
+    transform: translateX(0);
+  }
+}
+
 .onboarding-tour-spotlight-target {
   position: relative;
   z-index: 203 !important;
