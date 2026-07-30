@@ -24,7 +24,12 @@ function SourcesBlock({
         {items.map((item, index) => (
           <li key={item.url}>
             <span className="mr-2 text-faint">[{index + 1}]</span>
-            <a href={item.url} className="underline-offset-2 hover:text-ink hover:underline">
+            <a
+              href={item.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline-offset-2 hover:text-ink hover:underline"
+            >
               {item.label}
             </a>
           </li>

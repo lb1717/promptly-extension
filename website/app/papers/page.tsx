@@ -56,6 +56,8 @@ export default function PapersPage() {
                   </div>
                   <a
                     href={entry.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     className="inline-flex w-fit items-center justify-center rounded-xl border border-line bg-cream-dark px-4 py-2.5 text-sm font-semibold text-muted transition hover:bg-cream-deep hover:text-ink"
                   >
                     Open source
