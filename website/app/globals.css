@@ -91,6 +91,11 @@ body {
 
 .launch-banner-marquee-track {
   animation: launch-banner-marquee 24s linear infinite;
+  width: max-content;
+}
+
+.launch-banner-marquee-track > span {
+  white-space: nowrap;
 }
 
 .launch-banner-shine-sweep::after {
