@@ -550,8 +550,8 @@ export function ResearchCompanionDemo({ compactTop = false }: { compactTop?: boo
             </div>
           </div>
 
-          <div className="relative flex min-h-0 flex-1 items-start gap-2.5 px-3 pt-3 max-sm:pb-2 sm:block sm:p-0">
-            <div className="pointer-events-none z-10 flex w-[6.5rem] shrink-0 items-start sm:absolute sm:bottom-3 sm:left-8 sm:top-3 sm:w-auto sm:max-w-[calc(100%-236px)] sm:items-center">
+          <div className="relative flex min-h-0 flex-1 items-center gap-2.5 px-3 pt-3 max-sm:pb-2 sm:block sm:p-0">
+            <div className="pointer-events-none z-10 flex w-[6.5rem] shrink-0 items-center justify-center max-sm:translate-y-1 sm:absolute sm:bottom-3 sm:left-8 sm:top-3 sm:w-auto sm:translate-y-0 sm:max-w-[calc(100%-236px)] sm:items-center sm:justify-start">
               <HostAppCarousel
                 index={hostCarouselIndex}
                 variant="watermark"
