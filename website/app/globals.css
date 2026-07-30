@@ -89,15 +89,6 @@ body {
   }
 }
 
-.launch-banner-marquee-track {
-  animation: launch-banner-marquee 24s linear infinite;
-  width: max-content;
-}
-
-.launch-banner-marquee-track > span {
-  white-space: nowrap;
-}
-
 .launch-banner-shine-sweep::after {
   content: "";
   position: absolute;
@@ -120,21 +111,7 @@ body {
   }
 }
 
-@keyframes launch-banner-marquee {
-  from {
-    transform: translateX(0);
-  }
-  to {
-    transform: translateX(-50%);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .launch-banner-marquee-track {
-    animation: none;
-    transform: translateX(0);
-  }
-
   .launch-banner-shine-sweep::after {
     animation: none;
   }
