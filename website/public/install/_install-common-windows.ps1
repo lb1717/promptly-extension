@@ -92,6 +92,11 @@ function Promptly-PrintInstallSuccess {
   Write-Host "Promptly Successfully Installed"
 }
 
+function Promptly-PrintDesktopInstallSuccess {
+  Write-Host "Promptly Successfully Installed"
+  Write-Host "Return to website to finish setup"
+}
+
 function Promptly-ShouldShowCommandOutput {
   param([switch]$ForceShow)
   if ($ForceShow) { return $true }

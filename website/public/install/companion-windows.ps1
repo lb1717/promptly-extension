@@ -5,7 +5,7 @@ $ErrorActionPreference = "Stop"
 $env:PROMPTLY_QUIET = if ($env:PROMPTLY_QUIET) { $env:PROMPTLY_QUIET } else { "1" }
 $InstallBase = if ($env:PROMPTLY_INSTALL_BASE) { $env:PROMPTLY_INSTALL_BASE } else { "https://promptly-labs.com/install" }
 $ApiUrl = "https://promptly-labs.com/api/companion/download"
-$Fallback = "https://github.com/lb1717/promptly-extension/releases/download/companion-v0.2.8/Promptly-Companion-0.2.8-win.exe"
+$Fallback = "https://github.com/lb1717/promptly-extension/releases/download/companion-v0.2.9/Promptly-Labs-0.2.9-win.exe"
 
 $loaderRes = Invoke-WebRequest -Uri "$InstallBase/_load-helpers-windows.ps1" -UseBasicParsing
 $loaderText = $loaderRes.Content
@@ -15,4 +15,4 @@ if ($loaderText -is [byte[]]) {
 Invoke-Expression ([string]$loaderText.TrimStart([char]0xFEFF))
 
 Promptly-InstallCompanionWindows
-Write-Host "Promptly Successfully Installed"
+Promptly-PrintDesktopInstallSuccess

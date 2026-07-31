@@ -73,10 +73,14 @@ export function companionInstallCommands(os: OsId): string[] {
 }
 
 export const PROMPTLY_INSTALL_SUCCESS_LINE = "Promptly Successfully Installed";
+export const PROMPTLY_DESKTOP_INSTALL_FINISH_LINE = "Return to website to finish setup";
 
 export type OnboardingInstallMode = "combined" | "agents" | "desktop";
 
-export function onboardingSetupValidationItems(_mode: OnboardingInstallMode): string[] {
+export function onboardingSetupValidationItems(mode: OnboardingInstallMode): string[] {
+  if (mode === "desktop") {
+    return [PROMPTLY_INSTALL_SUCCESS_LINE, PROMPTLY_DESKTOP_INSTALL_FINISH_LINE];
+  }
   return [PROMPTLY_INSTALL_SUCCESS_LINE];
 }
 

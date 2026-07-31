@@ -1906,6 +1906,7 @@ export function StatisticsClient({
   const companyMultiMember = Boolean(companyStatistics?.multiMemberView);
   const chartGroupMode: StatsGroupMode = companyMultiMember ? "member" : statsGroupMode;
   const companyMemberIdsKey = (companyStatistics?.memberIds ?? []).join(",");
+  const statsMemberIds = companyStatistics?.memberIds;
   const [selectedModelService, setSelectedModelService] = useState<PromptVolumeAiKey>("chatgpt");
   const [selectedModelBuckets, setSelectedModelBuckets] = useState<Set<string>>(new Set());
   const [modelCatalogWeb, setModelCatalogWeb] = useState<
@@ -1951,9 +1952,7 @@ export function StatisticsClient({
   const placeholderIdeStats = useMemo(() => emptyIdeStats(days, granularity), [days, granularity]);
 
   const displayStats = user ? stats ?? placeholderStats : null;
-  const displayIdeStats = user
-    ? ideStats ?? (ideStatsLoading ? null : placeholderIdeStats)
-    : null;
+  const displayIdeStats = user ? ideStats ?? placeholderIdeStats : null;
 
   useEffect(() => {
     if (typeof window === "undefined" || !pendingScrollRestoreRef.current) return;
@@ -2166,11 +2165,12 @@ export function StatisticsClient({
           availableByTool,
           scopeParams,
           refresh,
-          statsGroupMode !== "model"
+          statsGroupMode !== "model",
+          statsMemberIds
         );
       }, 300);
     },
-    [user, days, granularity, loadIdeStats, statsGroupMode]
+    [user, days, granularity, loadIdeStats, statsGroupMode, statsMemberIds]
   );
 
   useEffect(() => {
@@ -2201,8 +2201,6 @@ export function StatisticsClient({
     () => (companyMultiMember ? new URLSearchParams() : buildStatsScopeSearchParams(statsGroupMode, selectedModelService)),
     [companyMultiMember, statsGroupMode, selectedModelService]
   );
-
-  const statsMemberIds = companyStatistics?.memberIds;
 
   const effectivePromptVolumeAiFilters = useMemo(
     () =>
@@ -2582,11 +2580,12 @@ export function StatisticsClient({
     days,
     granularity,
     statsScopeParams,
-    statsGroupMode,
+    chartGroupMode,
     selectedEmailsByTool,
     ideStats?.agent_emails_by_tool,
     loadExtended,
-    loadIdeStats
+    loadIdeStats,
+    statsMemberIds
   ]);
 
   const prevModelServiceRef = useRef(selectedModelService);
