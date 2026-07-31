@@ -11,22 +11,22 @@ const HELPER_FIXES = [
   {
     bundleTo: "Electron Helper.app",
     execTo: "Electron Helper",
-    matches: ["Promptly Companion Helper.app", "Electron Helper.app"]
+    matches: ["Promptly Labs Helper.app", "Promptly Companion Helper.app", "Electron Helper.app"]
   },
   {
     bundleTo: "Electron Helper (GPU).app",
     execTo: "Electron Helper (GPU)",
-    matches: ["Promptly Companion Helper (GPU).app", "Electron Helper (GPU).app"]
+    matches: ["Promptly Labs Helper (GPU).app", "Promptly Companion Helper (GPU).app", "Electron Helper (GPU).app"]
   },
   {
     bundleTo: "Electron Helper (Plugin).app",
     execTo: "Electron Helper (Plugin)",
-    matches: ["Promptly Companion Helper (Plugin).app", "Electron Helper (Plugin).app"]
+    matches: ["Promptly Labs Helper (Plugin).app", "Promptly Companion Helper (Plugin).app", "Electron Helper (Plugin).app"]
   },
   {
     bundleTo: "Electron Helper (Renderer).app",
     execTo: "Electron Helper (Renderer)",
-    matches: ["Promptly Companion Helper (Renderer).app", "Electron Helper (Renderer).app"]
+    matches: ["Promptly Labs Helper (Renderer).app", "Promptly Companion Helper (Renderer).app", "Electron Helper (Renderer).app"]
   }
 ];
 

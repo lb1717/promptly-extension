@@ -18,21 +18,21 @@ export type CompanionAssetUrls = {
 const GITHUB_REPO = "lb1717/promptly-extension";
 
 /** Stable fallback when GitHub API is unavailable at runtime. */
-const FALLBACK_RELEASE_TAG = "companion-v0.2.8";
+const FALLBACK_RELEASE_TAG = "companion-v0.2.9";
 const FALLBACK_BASE = `https://github.com/${GITHUB_REPO}/releases/download/${FALLBACK_RELEASE_TAG}`;
 
 const FALLBACK_ASSETS: CompanionAssetUrls = {
-  version: "0.2.8",
-  macDmg: `${FALLBACK_BASE}/Promptly-Companion-0.2.8-mac.dmg`,
-  macZip: `${FALLBACK_BASE}/Promptly-Companion-0.2.8-mac.zip`,
-  winExe: `${FALLBACK_BASE}/Promptly-Companion-0.2.8-win.exe`
+  version: "0.2.9",
+  macDmg: `${FALLBACK_BASE}/Promptly-Labs-0.2.9-mac.dmg`,
+  macZip: `${FALLBACK_BASE}/Promptly-Labs-0.2.9-mac.zip`,
+  winExe: `${FALLBACK_BASE}/Promptly-Labs-0.2.9-win.exe`
 };
 
 /** macOS bundle path after drag-to-Applications (matches electron-builder productName). */
-export const PROMPTLY_MAC_APP_PATH = "/Applications/Promptly Companion.app";
+export const PROMPTLY_MAC_APP_PATH = "/Applications/Promptly Labs.app";
 
 export const PROMPTLY_MAC_INSTALL_COMMAND =
-  'xattr -cr "/Applications/Promptly Companion.app" 2>/dev/null; xattr -cr "$HOME/Applications/Promptly Companion.app" 2>/dev/null';
+  'xattr -cr "/Applications/Promptly Labs.app" 2>/dev/null; xattr -cr "$HOME/Applications/Promptly Labs.app" 2>/dev/null; xattr -cr "/Applications/Promptly Companion.app" 2>/dev/null; xattr -cr "$HOME/Applications/Promptly Companion.app" 2>/dev/null';
 
 export const PROMPTLY_MAC_DMG_FALLBACK_URL = FALLBACK_ASSETS.macDmg!;
 
@@ -45,7 +45,7 @@ function pickCompanionAsset(
   const match = assets.find(
     (a) =>
       a.name.toLowerCase().endsWith(ext) &&
-      (/companion/i.test(a.name) || /promptly companion/i.test(a.name))
+      (/promptly[- ]labs/i.test(a.name) || /promptly[- ]companion/i.test(a.name) || /companion/i.test(a.name))
   );
   if (!match) return null;
   return { url: match.browser_download_url, label: match.name };

@@ -9,7 +9,7 @@ const MIC_SVG =
 async function ensureMicrophoneAccess(onError) {
   const appInfo = window.promptlyCompanion?.getAppInfo
     ? await window.promptlyCompanion.getAppInfo()
-    : { isPackaged: true, name: "Promptly Companion" };
+    : { isPackaged: true, name: "Promptly Labs" };
 
   if (window.promptlyCompanion?.requestMicrophoneAccess) {
     const access = await window.promptlyCompanion.requestMicrophoneAccess();
@@ -17,7 +17,7 @@ async function ensureMicrophoneAccess(onError) {
       if (access?.prompted) {
         onError?.("Microphone access was denied. Tap the mic again after allowing access.");
       } else if (access?.openedSettings) {
-        const label = appInfo.isPackaged ? appInfo.name || "Promptly Companion" : "Electron";
+        const label = appInfo.isPackaged ? appInfo.name || "Promptly Labs" : "Electron";
         onError?.(
           `Enable ${label} under Privacy & Security → Microphone in System Settings, then tap the mic again.`
         );

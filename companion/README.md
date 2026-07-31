@@ -1,4 +1,4 @@
-# Promptly Companion
+# Promptly Labs
 
 Desktop prompt workshop for Promptly — type a draft, improve it, refine with feedback, copy into any AI app.
 

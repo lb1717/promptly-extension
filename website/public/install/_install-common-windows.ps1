@@ -834,7 +834,10 @@ function Promptly-FinalizeWithPairCode {
 }
 
 function Promptly-CompanionIsRunning {
-  return [bool](Get-Process -Name "Promptly Companion" -ErrorAction SilentlyContinue)
+  return [bool](
+    (Get-Process -Name "Promptly Labs" -ErrorAction SilentlyContinue) -or
+    (Get-Process -Name "Promptly Companion" -ErrorAction SilentlyContinue)
+  )
 }
 
 function Promptly-DownloadFileWithProgress {
@@ -930,6 +933,9 @@ function Promptly-InstallCompanionFromExe {
   }
 
   $launchCandidates = @(
+    (Join-Path $env:LOCALAPPDATA "Programs\Promptly Labs\Promptly Labs.exe"),
+    (Join-Path $env:ProgramFiles "Promptly Labs\Promptly Labs.exe"),
+    (Join-Path ${env:ProgramFiles(x86)} "Promptly Labs\Promptly Labs.exe"),
     (Join-Path $env:LOCALAPPDATA "Programs\Promptly Companion\Promptly Companion.exe"),
     (Join-Path $env:ProgramFiles "Promptly Companion\Promptly Companion.exe"),
     (Join-Path ${env:ProgramFiles(x86)} "Promptly Companion\Promptly Companion.exe")
@@ -947,7 +953,10 @@ function Promptly-InstallCompanionFromExe {
       }
     }
 
-    $startMenuShortcut = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Promptly Companion.lnk"
+    $startMenuShortcut = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Promptly Labs.lnk"
+    if (-not (Test-Path $startMenuShortcut)) {
+      $startMenuShortcut = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Promptly Companion.lnk"
+    }
     if (Test-Path $startMenuShortcut) {
       Start-Process -FilePath $startMenuShortcut | Out-Null
       Start-Sleep -Seconds 1

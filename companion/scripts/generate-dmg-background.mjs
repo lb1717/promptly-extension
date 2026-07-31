@@ -6,7 +6,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const outDir = join(__dirname, "..", "build");
 const width = 660;
 const height = 320;
-const INSTALL_COMMAND = 'xattr -cr "/Applications/Promptly Companion.app"';
+const INSTALL_COMMAND = 'xattr -cr "/Applications/Promptly Labs.app"';
 
 function escapeSvgText(value) {
   return String(value)
@@ -40,10 +40,10 @@ function buildInstallBackgroundSvg(w, h) {
 <svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg">
   <rect width="${w}" height="${h}" fill="#f4f5f7"/>
 
-  <text x="${cx}" y="${titleY}" text-anchor="middle" fill="#141820" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="${titleSize}" font-weight="700">Install Promptly Companion</text>
+  <text x="${cx}" y="${titleY}" text-anchor="middle" fill="#141820" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="${titleSize}" font-weight="700">Install Promptly Labs</text>
   <text x="${cx}" y="${subtitleY}" text-anchor="middle" fill="#6b7280" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="${subtitleSize}">Two steps — first time only</text>
 
-  <text x="${cx}" y="${step1Y}" text-anchor="middle" fill="#141820" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="${stepSize}" font-weight="600">1. Drag Promptly Companion to Applications</text>
+  <text x="${cx}" y="${step1Y}" text-anchor="middle" fill="#141820" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="${stepSize}" font-weight="600">1. Drag Promptly Labs to Applications</text>
 
   <path d="M ${arrowStart} ${arrowY} L ${arrowEnd} ${arrowY}" stroke="#6d5ce8" stroke-width="${3 * scale}" fill="none" stroke-linecap="round"/>
   <path d="M ${arrowEnd - 15 * scale} ${arrowY - 7 * scale} L ${arrowEnd} ${arrowY} L ${arrowEnd - 15 * scale} ${arrowY + 7 * scale}" fill="#6d5ce8"/>

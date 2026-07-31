@@ -18,7 +18,7 @@ export function CompanionDesktopInstallClient() {
           <OnboardingInstallOsToggle os={installOs} onChange={setInstallOs} />
         </div>
         <p className="mt-3 text-sm text-muted">
-          Run the install command below, then open Promptly Companion from your applications folder or Start menu.
+          Run the install command below, then open Promptly Labs from your applications folder or Start menu.
         </p>
 
         <div className="mt-6">

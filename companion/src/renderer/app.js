@@ -993,10 +993,10 @@ async function maybeShowPermissionsOnboarding() {
 
   const appInfo = window.promptlyCompanion.getAppInfo
     ? await window.promptlyCompanion.getAppInfo()
-    : { name: "Promptly Companion", isPackaged: true };
+    : { name: "Promptly Labs", isPackaged: true };
 
   if (permissionsAppName) {
-    permissionsAppName.textContent = appInfo.name || "Promptly Companion";
+    permissionsAppName.textContent = appInfo.name || "Promptly Labs";
   }
   if (permissionsDevHint) {
     permissionsDevHint.classList.toggle("hidden", Boolean(appInfo.isPackaged));
@@ -1024,10 +1024,10 @@ async function handlePermissionsAllow() {
     if (needsSettings && permissionsFollowupHint) {
       permissionsFollowupHint.classList.remove("hidden");
       if (permissionsAppName) {
-        permissionsAppName.textContent = result?.appName || "Promptly Companion";
+        permissionsAppName.textContent = result?.appName || "Promptly Labs";
       }
       showError(
-        `Enable ${result?.appName || "Promptly Companion"} under Microphone and Accessibility in the System Settings window, then tap Allow access again or continue.`
+        `Enable ${result?.appName || "Promptly Labs"} under Microphone and Accessibility in the System Settings window, then tap Allow access again or continue.`
       );
       return;
     }

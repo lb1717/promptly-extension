@@ -222,14 +222,14 @@
   var activeController = null;
   var MIC_SVG = '<svg class="mic-icon" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V19H9v2h6v-2h-2v-1.08A7 7 0 0 0 19 11h-2Z"/></svg>';
   async function ensureMicrophoneAccess(onError) {
-    const appInfo = window.promptlyCompanion?.getAppInfo ? await window.promptlyCompanion.getAppInfo() : { isPackaged: true, name: "Promptly Companion" };
+    const appInfo = window.promptlyCompanion?.getAppInfo ? await window.promptlyCompanion.getAppInfo() : { isPackaged: true, name: "Promptly Labs" };
     if (window.promptlyCompanion?.requestMicrophoneAccess) {
       const access = await window.promptlyCompanion.requestMicrophoneAccess();
       if (!access?.granted) {
         if (access?.prompted) {
           onError?.("Microphone access was denied. Tap the mic again after allowing access.");
         } else if (access?.openedSettings) {
-          const label = appInfo.isPackaged ? appInfo.name || "Promptly Companion" : "Electron";
+          const label = appInfo.isPackaged ? appInfo.name || "Promptly Labs" : "Electron";
           onError?.(
             `Enable ${label} under Privacy & Security \u2192 Microphone in System Settings, then tap the mic again.`
           );
@@ -1455,9 +1455,9 @@
     if (settings.permissionsOnboardingComplete) {
       return;
     }
-    const appInfo = window.promptlyCompanion.getAppInfo ? await window.promptlyCompanion.getAppInfo() : { name: "Promptly Companion", isPackaged: true };
+    const appInfo = window.promptlyCompanion.getAppInfo ? await window.promptlyCompanion.getAppInfo() : { name: "Promptly Labs", isPackaged: true };
     if (permissionsAppName) {
-      permissionsAppName.textContent = appInfo.name || "Promptly Companion";
+      permissionsAppName.textContent = appInfo.name || "Promptly Labs";
     }
     if (permissionsDevHint) {
       permissionsDevHint.classList.toggle("hidden", Boolean(appInfo.isPackaged));
@@ -1482,10 +1482,10 @@
       if (needsSettings && permissionsFollowupHint) {
         permissionsFollowupHint.classList.remove("hidden");
         if (permissionsAppName) {
-          permissionsAppName.textContent = result?.appName || "Promptly Companion";
+          permissionsAppName.textContent = result?.appName || "Promptly Labs";
         }
         showError(
-          `Enable ${result?.appName || "Promptly Companion"} under Microphone and Accessibility in the System Settings window, then tap Allow access again or continue.`
+          `Enable ${result?.appName || "Promptly Labs"} under Microphone and Accessibility in the System Settings window, then tap Allow access again or continue.`
         );
         return;
       }

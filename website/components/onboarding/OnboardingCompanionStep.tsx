@@ -44,7 +44,7 @@ export function OnboardingCompanionStep({ onFinish }: { onFinish: () => void }) 
   function handleOpenCompanion() {
     openedRef.current = true;
     setOpened(true);
-    openPromptlyCompanion();
+    void openPromptlyCompanion();
   }
 
   return (
@@ -55,14 +55,14 @@ export function OnboardingCompanionStep({ onFinish }: { onFinish: () => void }) 
           <div className="mx-auto flex h-24 w-24 items-center justify-center overflow-hidden rounded-2xl bg-white shadow-sm">
             <Image
               src="/images/promptly-product-icon.png"
-              alt="Promptly Companion"
+              alt="Promptly Labs"
               width={96}
               height={96}
               className="h-full w-full object-cover"
               priority
             />
           </div>
-          <p className="mt-6 text-lg font-semibold text-ink">Open Promptly Desktop app</p>
+          <p className="mt-6 text-lg font-semibold text-ink">Open Promptly Labs</p>
           <p className="mt-2 text-sm leading-relaxed text-muted">
             Draft and improve prompts in the desktop app, then paste into any AI tool.
           </p>
@@ -81,12 +81,12 @@ export function OnboardingCompanionStep({ onFinish }: { onFinish: () => void }) 
                 onClick={handleOpenCompanion}
                 className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800"
               >
-                Open Promptly Desktop app
+                Open Promptly Labs
               </button>
             )}
           </div>
           {!showDone && opened ? (
-            <p className="mt-3 text-xs text-faint">Switch to Promptly Companion, then return here to finish.</p>
+            <p className="mt-3 text-xs text-faint">Switch to Promptly Labs, then return here to finish.</p>
           ) : null}
         </div>
       </div>

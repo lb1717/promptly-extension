@@ -899,13 +899,21 @@ promptly_finalize_with_pair_code() {
 }
 
 promptly_pick_companion_app_dir() {
+  local candidate
+  for candidate in \
+    "/Applications/Promptly Labs.app" \
+    "${HOME}/Applications/Promptly Labs.app" \
+    "/Applications/Promptly Companion.app" \
+    "${HOME}/Applications/Promptly Companion.app"
+  do
+    if [[ -d "${candidate}" ]]; then
+      printf '%s' "${candidate}"
+      return 0
+    fi
+  done
   local system_dir="/Applications"
-  local system_apps="${system_dir}/Promptly Companion.app"
-  local user_apps="${HOME}/Applications/Promptly Companion.app"
-  if [[ -d "${system_apps}" ]]; then
-    printf '%s' "${system_apps}"
-    return 0
-  fi
+  local system_apps="${system_dir}/Promptly Labs.app"
+  local user_apps="${HOME}/Applications/Promptly Labs.app"
   if [[ -w "${system_dir}" ]] 2>/dev/null; then
     printf '%s' "${system_apps}"
     return 0
@@ -915,6 +923,12 @@ promptly_pick_companion_app_dir() {
 }
 
 promptly_companion_is_running_mac() {
+  if pgrep -f "Promptly Labs.app/Contents/MacOS/Promptly Labs" >/dev/null 2>&1; then
+    return 0
+  fi
+  if pgrep -x "Promptly Labs" >/dev/null 2>&1; then
+    return 0
+  fi
   if pgrep -f "Promptly Companion.app/Contents/MacOS/Promptly Companion" >/dev/null 2>&1; then
     return 0
   fi
@@ -998,12 +1012,18 @@ promptly_install_companion_mac() {
     return 1
   fi
 
-  src_app="${mount_point}/Promptly Companion.app"
-  if [[ ! -d "${src_app}" ]]; then
+  src_app=""
+  for candidate in "Promptly Labs.app" "Promptly Companion.app"; do
+    if [[ -d "${mount_point}/${candidate}" ]]; then
+      src_app="${mount_point}/${candidate}"
+      break
+    fi
+  done
+  if [[ -z "${src_app}" ]]; then
     hdiutil detach "${mount_point}" -quiet 2>/dev/null || true
     rm -f "${tmp_dmg}"
     rm -rf "${mount_point}"
-    promptly_fail "Promptly Companion.app not found in the installer."
+    promptly_fail "Promptly Labs.app not found in the installer."
     return 1
   fi
 

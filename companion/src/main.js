@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, shell, systemPreferences, Menu, session } = require("electron");
 const { execFile } = require("child_process");
 const { readFileSync, existsSync } = require("fs");
+const http = require("http");
 const { homedir } = require("os");
 const { join } = require("path");
 const { promisify } = require("util");
@@ -39,6 +40,9 @@ const COLLAPSED_WIDTH_RATIO = 0.7;
 const COLLAPSED_WIDTH_INSET_RATIO = 0.15;
 const COLLAPSED_BG = "#6d5ce8";
 const EXPANDED_BG = "#f4f5f7";
+const DESKTOP_OPEN_PORT = 38472;
+const DESKTOP_APP_NAME = "Promptly Labs";
+const COMPANION_PROTOCOLS = ["promptly-labs", "promptly-companion"];
 
 /** @type {Set<BrowserWindow>} */
 const companionWindows = new Set();
@@ -58,10 +62,53 @@ if (!gotSingleInstanceLock) {
   app.quit();
 }
 
+app.setName(DESKTOP_APP_NAME);
 if (process.platform === "darwin") {
-  app.setName("Promptly");
   app.setActivationPolicy("regular");
 }
+
+/** @type {string | null} */
+let pendingProtocolUrl = null;
+
+function registerCompanionProtocols() {
+  for (const scheme of COMPANION_PROTOCOLS) {
+    if (process.defaultApp) {
+      if (process.argv.length >= 2) {
+        app.setAsDefaultProtocolClient(scheme, process.execPath, [join(process.argv[1])]);
+      }
+    } else {
+      app.setAsDefaultProtocolClient(scheme);
+    }
+  }
+}
+
+function readCompanionProtocolArg(argv = process.argv) {
+  return argv.find((arg) => COMPANION_PROTOCOLS.some((scheme) => arg.startsWith(`${scheme}://`))) || null;
+}
+
+function handleCompanionProtocolUrl(url) {
+  if (!url) {
+    return;
+  }
+  const value = String(url);
+  if (!COMPANION_PROTOCOLS.some((scheme) => value.startsWith(`${scheme}://`))) {
+    return;
+  }
+  focusOrOpenCompanionFromDeepLink();
+}
+
+if (process.platform === "darwin") {
+  app.on("open-url", (event, url) => {
+    event.preventDefault();
+    if (app.isReady()) {
+      handleCompanionProtocolUrl(url);
+    } else {
+      pendingProtocolUrl = url;
+    }
+  });
+}
+
+registerCompanionProtocols();
 
 function normalizeApiUrl(url) {
   return String(url || "").replace(/\/$/, "");
@@ -432,21 +479,13 @@ function openNewCompanionWindow() {
   return win;
 }
 
-const COMPANION_PROTOCOL = "promptly-companion";
-/** @type {string | null} */
-let pendingProtocolUrl = null;
-
-function registerCompanionProtocol() {
-  if (process.defaultApp) {
-    if (process.argv.length >= 2) {
-      app.setAsDefaultProtocolClient(COMPANION_PROTOCOL, process.execPath, [join(process.argv[1])]);
-    }
-  } else {
-    app.setAsDefaultProtocolClient(COMPANION_PROTOCOL);
-  }
-}
-
 function focusOrOpenCompanionFromDeepLink() {
+  if (process.platform === "darwin") {
+    if (app.dock) {
+      app.dock.show();
+    }
+    app.focus({ steal: true });
+  }
   const win = focusMostRecentCompanionWindow();
   if (win) {
     notifyWindowReopened(win);
@@ -455,15 +494,39 @@ function focusOrOpenCompanionFromDeepLink() {
   openNewCompanionWindow();
 }
 
-function handleCompanionProtocolUrl(url) {
-  if (!url || !String(url).startsWith(`${COMPANION_PROTOCOL}://`)) {
-    return;
-  }
-  focusOrOpenCompanionFromDeepLink();
-}
+function startDesktopOpenServer() {
+  const server = http.createServer((req, res) => {
+    const origin = req.headers.origin || "*";
+    const corsHeaders = {
+      "Access-Control-Allow-Origin": origin,
+      "Access-Control-Allow-Methods": "GET, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type"
+    };
 
-function readCompanionProtocolArg(argv = process.argv) {
-  return argv.find((arg) => arg.startsWith(`${COMPANION_PROTOCOL}://`)) || null;
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, corsHeaders);
+      res.end();
+      return;
+    }
+
+    if (req.method === "GET" && req.url === "/open") {
+      focusOrOpenCompanionFromDeepLink();
+      res.writeHead(200, { ...corsHeaders, "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+
+    res.writeHead(404, corsHeaders);
+    res.end();
+  });
+
+  server.on("error", (error) => {
+    if (error?.code !== "EADDRINUSE") {
+      console.warn("[promptly-desktop] open server error:", error);
+    }
+  });
+
+  server.listen(DESKTOP_OPEN_PORT, "127.0.0.1");
 }
 
 async function resolvePasteHost(win) {
@@ -511,19 +574,19 @@ function setupApplicationMenu() {
 
   if (process.platform === "darwin") {
     template.push({
-      label: "Promptly",
+      label: DESKTOP_APP_NAME,
       submenu: [
-        { label: "About Promptly", role: "about" },
+        { label: `About ${DESKTOP_APP_NAME}`, role: "about" },
         { type: "separator" },
         newWindowItem,
         { type: "separator" },
         { role: "services" },
         { type: "separator" },
-        { label: "Hide Promptly", role: "hide" },
+        { label: `Hide ${DESKTOP_APP_NAME}`, role: "hide" },
         { role: "hideOthers" },
         { role: "unhide" },
         { type: "separator" },
-        { label: "Quit Promptly", role: "quit" }
+        { label: `Quit ${DESKTOP_APP_NAME}`, role: "quit" }
       ]
     });
   } else {
@@ -694,7 +757,7 @@ function createCompanionWindow(options = {}) {
     minWidth: EXPANDED_DEFAULT.minWidth,
     minHeight: EXPANDED_DEFAULT.minHeight,
     show: false,
-    title: "Promptly Companion",
+    title: DESKTOP_APP_NAME,
     ...(iconPath ? { icon: iconPath } : {}),
     backgroundColor: "#f4f5f7",
     autoHideMenuBar: false,
@@ -840,7 +903,7 @@ ipcMain.handle("promptly:paste-to-host", async (event, text) => {
 });
 
 ipcMain.handle("promptly:get-app-info", () => ({
-  name: app.getName(),
+  name: app.getName() || DESKTOP_APP_NAME,
   version: APP_VERSION,
   isPackaged: app.isPackaged
 }));
@@ -866,19 +929,8 @@ ipcMain.handle("promptly:save-settings", (_event, patch) => {
   return companionSettings;
 });
 
-if (process.platform === "darwin") {
-  app.on("open-url", (event, url) => {
-    event.preventDefault();
-    if (app.isReady()) {
-      handleCompanionProtocolUrl(url);
-    } else {
-      pendingProtocolUrl = url;
-    }
-  });
-}
-
 app.whenReady().then(() => {
-  registerCompanionProtocol();
+  startDesktopOpenServer();
 
   const startupProtocolUrl = readCompanionProtocolArg();
   if (startupProtocolUrl) {

@@ -1,9 +1,10 @@
 appId: com.promptlylabs.companion
-productName: Promptly Companion
+productName: Promptly Labs
 copyright: Copyright © Promptly Labs
 protocols:
-  name: Promptly Companion
+  name: Promptly Labs
   schemes:
+    - promptly-labs
     - promptly-companion
 directories:
   output: dist
@@ -13,14 +14,14 @@ files:
   - package.json
 extraMetadata:
   main: src/main.js
-artifactName: Promptly-Companion-${version}-${os}.${ext}
+artifactName: Promptly-Labs-${version}-${os}.${ext}
 mac:
   category: public.app-category.productivity
   extendInfo:
-    CFBundleName: Promptly
-    CFBundleDisplayName: Promptly Companion
+    CFBundleName: Promptly Labs
+    CFBundleDisplayName: Promptly Labs
     LSUIElement: false
-    NSMicrophoneUsageDescription: Promptly Companion uses the microphone for dictation when writing prompts.
+    NSMicrophoneUsageDescription: Promptly Labs uses the microphone for dictation when writing prompts.
   target:
     - dmg
     - zip
@@ -31,7 +32,7 @@ mac:
   hardenedRuntime: false
 afterPack: ./scripts/after-pack.cjs
 dmg:
-  title: Promptly Companion
+  title: Promptly Labs
   iconSize: 96
   window:
     width: 660
@@ -54,7 +55,7 @@ nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
   runAfterFinish: false
-  shortcutName: Promptly Companion
+  shortcutName: Promptly Labs
 linux:
   target:
     - AppImage

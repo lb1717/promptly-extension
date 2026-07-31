@@ -113,7 +113,7 @@ return "ok"`;
 function mapPasteError(raw) {
   const text = String(raw || "").trim();
   if (text.includes("-25211") || text.toLowerCase().includes("assistive access")) {
-    return "Enable Accessibility for Promptly Companion in System Settings → Privacy & Security → Accessibility.";
+    return "Enable Accessibility for Promptly Labs in System Settings → Privacy & Security → Accessibility.";
   }
   if (text.includes("-2741")) {
     return "Paste automation failed (AppleScript error). Click into the host app prompt box and paste manually.";
