@@ -837,6 +837,7 @@ export function GeneralOnboardingClient() {
             tourSetup={{
               web: productSelection.web,
               codingAgents: hasAnyCodingAgent(productSelection),
+              desktopApps: productSelection.desktop_apps,
               setupAgents: selectedCodingAgentIds(productSelection)
             }}
             completionDetail={

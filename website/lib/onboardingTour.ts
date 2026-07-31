@@ -14,6 +14,7 @@ export type OnboardingTourStep =
 export type OnboardingTourSetup = {
   web: boolean;
   codingAgents: boolean;
+  desktopApps?: boolean;
   setupAgents?: IdeToolId[];
 };
 
@@ -70,7 +71,14 @@ export function readOnboardingTour(): OnboardingTourState | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as OnboardingTourState;
     if (!parsed?.active || !parsed.step || !parsed.setup) return null;
-    return parsed;
+    const setup: OnboardingTourSetup = {
+      ...parsed.setup,
+      desktopApps: Boolean(parsed.setup.desktopApps)
+    };
+    if (parsed.step === "open-companion" && !setup.desktopApps) {
+      return { ...parsed, setup, step: "account-nav" };
+    }
+    return { ...parsed, setup };
   } catch {
     return null;
   }
@@ -88,7 +96,8 @@ export function writeOnboardingTour(state: OnboardingTourState | null) {
 
 export function startOnboardingTour(setup: OnboardingTourSetup) {
   clearAwaitingTutorial();
-  writeOnboardingTour({ active: true, step: "open-companion", setup });
+  const step: OnboardingTourStep = setup.desktopApps ? "open-companion" : "account-nav";
+  writeOnboardingTour({ active: true, step, setup });
 }
 
 export function setAwaitingTutorial(setup: OnboardingTourSetup) {
