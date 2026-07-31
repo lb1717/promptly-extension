@@ -171,16 +171,34 @@ export function AccountPromptVolumeChart({
     setLoading(true);
     setError("");
     try {
-      const token = await user.getIdToken(false);
+      let token = await user.getIdToken(false);
       const params = new URLSearchParams({
         days: String(ACCOUNT_PROMPT_VOLUME_DAYS),
         granularity: "day"
       });
       const headers = { Authorization: `Bearer ${token}` };
-      const [extendedRes, ideRes] = await Promise.all([
-        fetch(`/api/account/stats/extended?${params.toString()}`, { headers }),
-        fetch(`/api/account/stats/ide?${params.toString()}`, { headers })
-      ]);
+      let extendedRes = await fetch(`/api/account/stats/extended?${params.toString()}`, {
+        headers,
+        cache: "no-store"
+      });
+      if (extendedRes.status === 401) {
+        token = await user.getIdToken(true);
+        extendedRes = await fetch(`/api/account/stats/extended?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store"
+        });
+      }
+      let ideRes = await fetch(`/api/account/stats/ide?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store"
+      });
+      if (ideRes.status === 401) {
+        token = await user.getIdToken(true);
+        ideRes = await fetch(`/api/account/stats/ide?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store"
+        });
+      }
       const extendedData = await extendedRes.json().catch(() => ({}));
       const ideData = await ideRes.json().catch(() => ({}));
       if (!extendedRes.ok) {

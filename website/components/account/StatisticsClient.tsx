@@ -1866,13 +1866,15 @@ function ModeMiniChart({
 
 export function StatisticsClient({
   embedded = false,
-  companyStatistics
+  companyStatistics,
+  user: userProp
 }: {
   embedded?: boolean;
   companyStatistics?: CompanyStatisticsConfig;
+  user?: User | null;
 }) {
-  const [user, setUser] = useState<User | null>(companyStatistics?.user ?? null);
-  const [loading, setLoading] = useState(!companyStatistics);
+  const [user, setUser] = useState<User | null>(companyStatistics?.user ?? userProp ?? null);
+  const [loading, setLoading] = useState(!companyStatistics && !userProp);
   const [days, setDaysInternal] = useState(companyStatistics?.days ?? 30);
   useEffect(() => {
     if (companyStatistics?.days != null) {
@@ -1951,8 +1953,13 @@ export function StatisticsClient({
 
   const placeholderIdeStats = useMemo(() => emptyIdeStats(days, granularity), [days, granularity]);
 
-  const displayStats = user ? stats ?? placeholderStats : null;
-  const displayIdeStats = user ? ideStats ?? placeholderIdeStats : null;
+  const displayStats = user
+    ? stats ?? (statsLoading && !statsError ? placeholderStats : null)
+    : null;
+  const displayIdeStats = user
+    ? ideStats ?? (ideStatsLoading && !ideStatsError ? placeholderIdeStats : null)
+    : null;
+  const statsPanelsReady = Boolean(displayStats || displayIdeStats || statsError || ideStatsError);
 
   useEffect(() => {
     if (typeof window === "undefined" || !pendingScrollRestoreRef.current) return;
@@ -2006,19 +2013,25 @@ export function StatisticsClient({
   }, [companyStatistics?.days, days]);
 
   useEffect(() => {
-    if (!companyStatistics) return;
-    setUser(companyStatistics.user);
-    setLoading(false);
-  }, [companyStatistics]);
+    if (companyStatistics?.user) {
+      setUser(companyStatistics.user);
+      setLoading(false);
+      return;
+    }
+    if (userProp !== undefined) {
+      setUser(userProp);
+      setLoading(false);
+    }
+  }, [companyStatistics?.user, userProp]);
 
   useEffect(() => {
-    if (companyStatistics) return;
+    if (companyStatistics || userProp !== undefined) return;
     const auth = getFirebaseAuth();
     return onAuthStateChanged(auth, (next) => {
       setUser(next);
       setLoading(false);
     });
-  }, [companyStatistics]);
+  }, [companyStatistics, userProp]);
 
   const loadExtended = useCallback(
     async (
@@ -2037,7 +2050,7 @@ export function StatisticsClient({
     setStatsLoading(true);
     setStatsError("");
     try {
-      const token = await current.getIdToken(false);
+      let token = await current.getIdToken(false);
       const params = new URLSearchParams({
         days: String(d),
         granularity: g
@@ -2052,10 +2065,17 @@ export function StatisticsClient({
       const endpoint = memberIds?.length
         ? `/api/account/company/stats/extended?${params.toString()}`
         : `/api/account/stats/extended?${params.toString()}`;
-      const res = await fetch(endpoint, {
+      let res = await fetch(endpoint, {
         headers: { Authorization: `Bearer ${token}` },
-        cache: refresh ? "no-store" : "default"
+        cache: "no-store"
       });
+      if (res.status === 401) {
+        token = await current.getIdToken(true);
+        res = await fetch(endpoint, {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store"
+        });
+      }
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(data?.error || `Request failed (${res.status})`);
@@ -2097,7 +2117,7 @@ export function StatisticsClient({
     setIdeStatsLoading(true);
     setIdeStatsError("");
     try {
-      const token = await current.getIdToken(false);
+      let token = await current.getIdToken(false);
       const params = new URLSearchParams({
         days: String(d),
         granularity: g
@@ -2113,10 +2133,17 @@ export function StatisticsClient({
       const endpoint = memberIds?.length
         ? `/api/account/company/stats/ide?${params.toString()}`
         : `/api/account/stats/ide?${params.toString()}`;
-      const res = await fetch(endpoint, {
+      let res = await fetch(endpoint, {
         headers: { Authorization: `Bearer ${token}` },
-        cache: refresh ? "no-store" : "default"
+        cache: "no-store"
       });
+      if (res.status === 401) {
+        token = await current.getIdToken(true);
+        res = await fetch(endpoint, {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store"
+        });
+      }
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(data?.error || `Request failed (${res.status})`);
@@ -2765,6 +2792,13 @@ export function StatisticsClient({
     ),
     [stackedTimeline, days, displayStats?.granularity, granularity, effectivePromptVolumeAiFilters]
   );
+
+  const promptVolumeHasData = useMemo(
+    () => stackedTimeline.some((row) => promptVolumeBucketTotal(row, effectivePromptVolumeAiFilters) > 0),
+    [stackedTimeline, effectivePromptVolumeAiFilters]
+  );
+
+  const statsFetchSettled = !statsLoading && !ideStatsLoading;
 
   const promptVolumeAiEnabledCount = useMemo(
     () => PROMPT_VOLUME_AI_FILTERS.filter((f) => effectivePromptVolumeAiFilters[f.key]).length,
@@ -3628,7 +3662,15 @@ export function StatisticsClient({
         </div>
       ) : null}
 
-      {user && displayStats ? (
+      {user && loading ? (
+        <p className="rounded-2xl border border-line bg-cream p-8 text-center text-sm text-muted">Loading statistics…</p>
+      ) : null}
+
+      {user && !loading && !statsPanelsReady && (statsLoading || ideStatsLoading) ? (
+        <p className="rounded-2xl border border-line bg-cream p-8 text-center text-sm text-muted">Loading statistics…</p>
+      ) : null}
+
+      {user && statsPanelsReady ? (
         <>
           <div ref={filterSentinelRef} className="pointer-events-none h-0 w-full" aria-hidden />
           <div
@@ -3761,7 +3803,15 @@ export function StatisticsClient({
           </div>
 
           {statsError ? (
-            <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">{statsError}</div>
+            <div className="mb-4 rounded-xl border border-amber-300/60 bg-amber-50/90 px-4 py-3 text-sm text-amber-950">
+              Could not load web statistics: {statsError}
+            </div>
+          ) : null}
+
+          {ideStatsError ? (
+            <div className="mb-4 rounded-xl border border-amber-300/60 bg-amber-50/90 px-4 py-3 text-sm text-amber-950">
+              Could not load coding-agent statistics: {ideStatsError}
+            </div>
           ) : null}
 
           {displayStats?.quota_exceeded || displayIdeStats?.quota_exceeded ? (
@@ -3778,7 +3828,7 @@ export function StatisticsClient({
             <AutoDismissNoticeBar
               key={`${days}-${granularity}-${statsInfoNotices.length}`}
               className="!mb-4"
-              innerClassName="rounded-xl border border-sky-500/35 bg-sky-500/[0.12] px-4 py-3 text-xs leading-relaxed text-sky-50/95"
+              innerClassName="rounded-xl border border-sky-300/60 bg-sky-50/90 px-4 py-3 text-xs leading-relaxed text-sky-950"
             >
               <div className="space-y-3">{statsInfoNotices}</div>
             </AutoDismissNoticeBar>
@@ -3919,6 +3969,12 @@ export function StatisticsClient({
                 )}
               </ResponsiveContainer>
             </div>
+            {statsFetchSettled && !promptVolumeHasData ? (
+              <p className="mt-3 text-sm text-muted">
+                No prompt volume in this range yet. Stats come from the browser extension (ChatGPT, Claude, Gemini) and
+                coding agents (Claude Code, Cursor, Codex) after you send prompts while signed in.
+              </p>
+            ) : null}
             {statsGroupMode === "model" && activeModelChartSeries.length ? (
               <div className="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 border-t border-line pt-3">
                 {activeModelChartSeries.map((series) => (
@@ -4762,6 +4818,7 @@ export function StatisticsClient({
           ) : null}
 
           {/* Supporting technical */}
+          {displayStats ? (
           <section className="mb-12 grid gap-10 lg:grid-cols-2">
             <div className="rounded-2xl border border-line bg-white p-6">
               <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-faint">Improve mode mixes</h3>
@@ -4788,6 +4845,7 @@ export function StatisticsClient({
               </div>
             </div>
           </section>
+          ) : null}
 
         </>
       ) : null}

@@ -157,7 +157,7 @@ export function AccountHubClient() {
         }
       >
         {tab === "statistics" ? (
-          <StatisticsClient embedded />
+          <StatisticsClient embedded user={user} />
         ) : tab === "company-statistics" ? (
           <CompanyStatisticsClient user={user} />
         ) : (
