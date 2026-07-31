@@ -5,7 +5,7 @@ import { SITE } from "@/lib/constants";
 import { useLaunchCampaign } from "@/lib/useLaunchCampaign";
 
 export function LaunchCampaignWelcomeClient() {
-  const { loading, promoActive, remaining } = useLaunchCampaign();
+  const { loading, promoActive, maxFreeAccounts, remaining } = useLaunchCampaign();
 
   if (loading) {
     return <p className="py-20 text-center text-sm text-muted">Loading launch offer…</p>;
@@ -28,7 +28,9 @@ export function LaunchCampaignWelcomeClient() {
       <div className="rounded-2xl border border-line bg-cream p-6 shadow-card sm:p-8">
         <h1 className="text-2xl font-semibold text-ink">Welcome to Promptly Labs</h1>
         <div className="mt-6 rounded-xl border border-emerald-200 bg-emerald-50/80 p-4">
-          <p className="text-sm font-semibold text-emerald-900">First 1,000 customer accounts are free</p>
+          <p className="text-sm font-semibold text-emerald-900">
+            First {maxFreeAccounts.toLocaleString()} customer accounts are free
+          </p>
           <p className="mt-1 text-sm leading-relaxed text-emerald-800">
             Set up your Pro account in a few minutes — no payment required during our public launch.
           </p>

@@ -5,12 +5,20 @@ import { useEffect, useState } from "react";
 import { SITE } from "@/lib/constants";
 import { useLaunchCampaign } from "@/lib/useLaunchCampaign";
 
-function BannerMessage({ remaining, className = "" }: { remaining: number; className?: string }) {
+function BannerMessage({
+  maxFreeAccounts,
+  remaining,
+  className = ""
+}: {
+  maxFreeAccounts: number;
+  remaining: number;
+  className?: string;
+}) {
   return (
     <p
       className={`text-base font-medium leading-snug [overflow-wrap:break-word] [word-break:normal] hyphens-none sm:text-lg ${className}`}
     >
-      First 1,000 Accounts Are Free. Only{" "}
+      First {maxFreeAccounts.toLocaleString()} Accounts Are Free. Only{" "}
       <span className="whitespace-nowrap">
         <span className="font-black tracking-tight">{remaining.toLocaleString()}</span> Remaining
       </span>
@@ -19,7 +27,7 @@ function BannerMessage({ remaining, className = "" }: { remaining: number; class
 }
 
 export function LaunchCampaignBanner() {
-  const { loading, promoActive, remaining } = useLaunchCampaign();
+  const { loading, promoActive, maxFreeAccounts, remaining } = useLaunchCampaign();
   const [shineKey, setShineKey] = useState(0);
 
   useEffect(() => {
@@ -45,7 +53,7 @@ export function LaunchCampaignBanner() {
       ) : null}
 
       <div className="relative z-20 mx-auto flex max-w-6xl flex-col items-center justify-center gap-2.5 px-4 py-2.5 text-center sm:flex-row sm:gap-3">
-        <BannerMessage remaining={remaining} className="max-w-3xl" />
+        <BannerMessage maxFreeAccounts={maxFreeAccounts} remaining={remaining} className="max-w-3xl" />
         <Link
           href={SITE.launchPath}
           className="inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-lg bg-white px-4 py-1.5 text-sm font-semibold text-ink hover:bg-neutral-100"

@@ -3,6 +3,8 @@
 import { SITE } from "@/lib/constants";
 import { useCallback, useEffect, useState } from "react";
 
+const DEFAULT_MAX_FREE_ACCOUNTS = 1000;
+
 export type LaunchCampaignStatus = {
   promoActive: boolean;
   maxFreeAccounts: number;
@@ -11,7 +13,7 @@ export type LaunchCampaignStatus = {
 };
 
 export function useLaunchCampaign(options: { pollMs?: number } = {}) {
-  const pollMs = options.pollMs ?? 30_000;
+  const pollMs = options.pollMs ?? 10_000;
   const [status, setStatus] = useState<LaunchCampaignStatus | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -39,7 +41,16 @@ export function useLaunchCampaign(options: { pollMs?: number } = {}) {
   useEffect(() => {
     void refresh();
     const id = window.setInterval(() => void refresh(), pollMs);
-    return () => window.clearInterval(id);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        void refresh();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [pollMs, refresh]);
 
   const promoActive = Boolean(status?.promoActive);
@@ -48,6 +59,7 @@ export function useLaunchCampaign(options: { pollMs?: number } = {}) {
     loading,
     status,
     promoActive,
+    maxFreeAccounts: status?.maxFreeAccounts ?? DEFAULT_MAX_FREE_ACCOUNTS,
     remaining: status?.remaining ?? 0,
     launchPath: SITE.launchPath,
     getStartedPath: promoActive ? SITE.launchPath : SITE.getStartedPath

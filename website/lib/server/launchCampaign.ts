@@ -108,21 +108,60 @@ function buildPublicStatus(campaign: LaunchCampaignRecord): PublicLaunchCampaign
   };
 }
 
+async function countPostInitLaunchCampaignProClaims(
+  baselineAccountCount: number,
+  initializedAt: Timestamp | null
+): Promise<number> {
+  const initMs = initializedAt?.toMillis?.() ?? 0;
+  const snap = await getFirebaseAdminDb()
+    .collection(USER_COLLECTION)
+    .where("launchCampaignPro", "==", true)
+    .get();
+  let postInitClaims = 0;
+  for (const doc of snap.docs) {
+    const raw = doc.data() as Record<string, unknown>;
+    if (raw.duplicateDisabled || typeof raw.mergedIntoUid === "string") {
+      continue;
+    }
+    const createdMs = userCreatedAtMs(raw);
+    if (initMs > 0 && createdMs > initMs) {
+      postInitClaims += 1;
+    }
+  }
+  return Math.max(baselineAccountCount, baselineAccountCount + postInitClaims);
+}
+
+/** Keep public/admin remaining in sync with Firestore settings and live Pro grants. */
+async function withLiveClaimedCount(campaign: LaunchCampaignRecord): Promise<LaunchCampaignRecord> {
+  const baselineAccountCount =
+    campaign.baselineAccountCount > 0 ? campaign.baselineAccountCount : campaign.claimedCount;
+  const liveClaimed = await countPostInitLaunchCampaignProClaims(
+    baselineAccountCount,
+    campaign.initializedAt
+  );
+  return {
+    ...campaign,
+    claimedCount: Math.max(campaign.claimedCount, liveClaimed)
+  };
+}
+
 export async function getPublicLaunchCampaignStatus(): Promise<PublicLaunchCampaignStatus> {
   const campaign = await ensureLaunchCampaignInitialized();
-  return buildPublicStatus(campaign);
+  const synced = await withLiveClaimedCount(campaign);
+  return buildPublicStatus(synced);
 }
 
 export async function getAdminLaunchCampaignStatus(): Promise<AdminLaunchCampaignStatus> {
   const campaign = await ensureLaunchCampaignInitialized();
-  const publicStatus = buildPublicStatus(campaign);
+  const synced = await withLiveClaimedCount(campaign);
+  const publicStatus = buildPublicStatus(synced);
   const baselineAccountCount =
-    campaign.baselineAccountCount > 0 ? campaign.baselineAccountCount : campaign.claimedCount;
-  const newClaimsSinceInit = Math.max(0, campaign.claimedCount - baselineAccountCount);
+    synced.baselineAccountCount > 0 ? synced.baselineAccountCount : synced.claimedCount;
+  const newClaimsSinceInit = Math.max(0, synced.claimedCount - baselineAccountCount);
   return {
     ...publicStatus,
-    active: campaign.active,
-    initializedAt: campaign.initializedAt?.toDate?.()?.toISOString?.() ?? null,
+    active: synced.active,
+    initializedAt: synced.initializedAt?.toDate?.()?.toISOString?.() ?? null,
     baselineAccountCount,
     newClaimsSinceInit
   };
