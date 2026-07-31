@@ -41,6 +41,15 @@ export function OnboardingTourHost() {
     return <OnboardingAwaitingTutorialGate />;
   }
 
+  if (tour.step === "open-companion" || tour.step === "account-nav") {
+    return (
+      <>
+        <OnboardingAwaitingTutorialGate />
+        <OnboardingTourOverlay step={tour.step} setup={tour.setup} pathname={pathname} />
+      </>
+    );
+  }
+
   if (
     ONBOARDING_TOUR_ACCOUNT_STEPS.includes(tour.step) &&
     !isOnboardingTourAccountPage(pathname)

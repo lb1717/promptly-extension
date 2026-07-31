@@ -48,11 +48,7 @@ export const ONBOARDING_TOUR_ACCOUNT_STEPS: OnboardingTourStep[] = [
 ];
 
 /** Steps while the Statistics tab should be visible. */
-export const ONBOARDING_TOUR_STATISTICS_STEPS: OnboardingTourStep[] = [
-  "statistics-filters",
-  "complete",
-  "open-companion"
-];
+export const ONBOARDING_TOUR_STATISTICS_STEPS: OnboardingTourStep[] = ["statistics-filters", "complete"];
 
 export function isOnboardingTourAccountPage(pathname: string): boolean {
   return pathname === "/account" || pathname === "/account/";
@@ -92,7 +88,7 @@ export function writeOnboardingTour(state: OnboardingTourState | null) {
 
 export function startOnboardingTour(setup: OnboardingTourSetup) {
   clearAwaitingTutorial();
-  writeOnboardingTour({ active: true, step: "account-nav", setup });
+  writeOnboardingTour({ active: true, step: "open-companion", setup });
 }
 
 export function setAwaitingTutorial(setup: OnboardingTourSetup) {

@@ -62,9 +62,9 @@ export function OnboardingCompanionStep({ onFinish }: { onFinish: () => void }) 
               priority
             />
           </div>
-          <p className="mt-6 text-lg font-semibold text-ink">Open Promptly Labs</p>
+          <p className="mt-6 text-lg font-semibold text-ink">Start with Promptly Labs</p>
           <p className="mt-2 text-sm leading-relaxed text-muted">
-            Draft and improve prompts in the desktop app, then paste into any AI tool.
+            Open the desktop app first. Draft and improve prompts there, then paste into any AI tool.
           </p>
           <div className="mt-6">
             {showDone ? (
@@ -73,7 +73,7 @@ export function OnboardingCompanionStep({ onFinish }: { onFinish: () => void }) 
                 onClick={onFinish}
                 className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800"
               >
-                Done
+                Continue tutorial
               </button>
             ) : (
               <button
@@ -86,7 +86,7 @@ export function OnboardingCompanionStep({ onFinish }: { onFinish: () => void }) 
             )}
           </div>
           {!showDone && opened ? (
-            <p className="mt-3 text-xs text-faint">Switch to Promptly Labs, then return here to finish.</p>
+            <p className="mt-3 text-xs text-faint">Switch to Promptly Labs, then return here to continue setup.</p>
           ) : null}
         </div>
       </div>

@@ -254,7 +254,11 @@ export function OnboardingTourOverlay({
   const waitingForTarget = !targetRect;
 
   if (step === "open-companion") {
-    return <OnboardingCompanionStep onFinish={finishTour} />;
+    return (
+      <OnboardingCompanionStep
+        onFinish={() => advanceOnboardingTour("account-nav")}
+      />
+    );
   }
 
   if (step === "complete") {
@@ -270,10 +274,10 @@ export function OnboardingTourOverlay({
         >
           <button
             type="button"
-            onClick={() => advanceOnboardingTour("open-companion")}
+            onClick={finishTour}
             className="inline-flex w-full items-center justify-center rounded-xl bg-ink px-4 py-2.5 text-sm font-semibold text-cream hover:bg-neutral-800"
           >
-            Next
+            Done
           </button>
         </TourCard>
       </>
