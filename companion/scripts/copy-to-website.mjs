@@ -36,19 +36,19 @@ const zip = files.find((n) => n.endsWith(".zip") && /mac|darwin/i.test(n) && n.i
 const exe = files.find((n) => n.endsWith(".exe") && n.includes(version));
 
 if (dmg) {
-  const dest = `Promptly-Companion-${version}-mac.dmg`;
+  const dest = `Promptly-Labs-${version}-mac.dmg`;
   copyFileSync(join(distDir, dmg), join(outDir, dest));
   console.log(`${dmg} → ${dest}`);
   copied += 1;
 }
 if (zip) {
-  const dest = `Promptly-Companion-${version}-mac.zip`;
+  const dest = `Promptly-Labs-${version}-mac.zip`;
   copyFileSync(join(distDir, zip), join(outDir, dest));
   console.log(`${zip} → ${dest}`);
   copied += 1;
 }
 if (exe) {
-  const dest = `Promptly-Companion-${version}-win.exe`;
+  const dest = `Promptly-Labs-${version}-win.exe`;
   copyFileSync(join(distDir, exe), join(outDir, dest));
   console.log(`${exe} → ${dest}`);
   copied += 1;
