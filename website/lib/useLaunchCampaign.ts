@@ -12,8 +12,7 @@ export type LaunchCampaignStatus = {
   remaining: number;
 };
 
-export function useLaunchCampaign(options: { pollMs?: number } = {}) {
-  const pollMs = options.pollMs ?? 10_000;
+export function useLaunchCampaign() {
   const [status, setStatus] = useState<LaunchCampaignStatus | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -40,18 +39,7 @@ export function useLaunchCampaign(options: { pollMs?: number } = {}) {
 
   useEffect(() => {
     void refresh();
-    const id = window.setInterval(() => void refresh(), pollMs);
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") {
-        void refresh();
-      }
-    };
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      window.clearInterval(id);
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
-  }, [pollMs, refresh]);
+  }, [refresh]);
 
   const promoActive = Boolean(status?.promoActive);
 
