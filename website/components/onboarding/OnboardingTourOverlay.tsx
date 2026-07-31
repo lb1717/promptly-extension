@@ -265,7 +265,7 @@ export function OnboardingTourOverlay({
         ) : null}
         {targetRect ? <Spotlight rect={targetRect} /> : null}
         <TourCard
-          body={`You're all set. This is your statistics home — filter by range and service anytime. Now try Promptly on ${promptTarget}.`}
+          body={`You're all set. This is your statistics home. Filter by range and service anytime. Now try Promptly on ${promptTarget}.`}
           style={cardStyle}
         >
           <button
@@ -356,7 +356,7 @@ export function OnboardingTourOverlay({
           body={
             waitingForTarget
               ? "Loading account settings…"
-              : "Your account overview — profile, plan, and integration shortcuts live here."
+              : "Your account overview includes your profile, plan, and integration shortcuts."
           }
           style={cardStyle}
         >
@@ -396,7 +396,7 @@ export function OnboardingTourOverlay({
           body={
             waitingForTarget
               ? "Loading…"
-              : "Head back to Statistics — that is where you will track AI usage day to day."
+              : "Head back to Statistics. That is where you will track AI usage day to day."
           }
           style={cardStyle}
         >
